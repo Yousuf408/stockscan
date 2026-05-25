@@ -42,7 +42,7 @@ st.markdown("""
     .ts-metric {
         height: 76px !important;
         margin-bottom: 0px !important;
-        padding: 0px 0px !important;
+        padding: 10px 14px !important;
         display: flex;
         flex-direction: column;
         justify-content: center;
