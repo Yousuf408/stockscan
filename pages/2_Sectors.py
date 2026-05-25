@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Zero trace of default button boxes or borders on row selectors
+# Global CSS Overrides — Forcing tight, compact padding & exact heights
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,14 +64,18 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── NATIVE GRID ROW CONTAINER CUSTOM STYLES ── */
+    /* ── TIGHT COMPACT MATRIX ROW CONTAINERS ── */
     .sector-row-container {
         border: 1px solid #e0e3e8;
-        border-radius: 8px;
-        padding: 10px 16px;
-        margin-bottom: 6px;
+        border-radius: 6px;
+        padding: 4px 14px !important;
+        margin-bottom: 4px !important;
         background: #ffffff;
-        transition: background-color 0.15s ease;
+        min-height: 38px !important;
+        max-height: 38px !important;
+        display: flex;
+        align-items: center;
+        transition: background-color 0.1s ease;
     }
     
     .sector-row-container:hover {
@@ -81,9 +85,27 @@ st.markdown("""
     .sector-row-container-active {
         border: 1px solid #e0e3e8;
         border-bottom: none;
-        border-radius: 8px 8px 0px 0px;
-        padding: 10px 16px;
+        border-radius: 6px 6px 0px 0px;
+        padding: 4px 14px !important;
+        margin-bottom: 0px !important;
         background: #ffffff;
+        min-height: 38px !important;
+        max-height: 38px !important;
+        display: flex;
+        align-items: center;
+    }
+
+    /* Force Streamlit's inner block containers to match the 38px grid height and center items */
+    div[data-testid="column"] {
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        height: 100% !important;
+    }
+    
+    /* Clear out extra native block gap spacing injected by Streamlit inside rows */
+    div[data-testid="stVerticalBlockBorderWrapper"] > div > div[data-testid="stVerticalBlock"] {
+        gap: 0px !important;
     }
 
     .bar-track {
@@ -91,23 +113,33 @@ st.markdown("""
         background: #f0f2f5;
         border-radius: 3px;
         overflow: hidden;
-        margin-top: 6px;
+        width: 100%;
     }
 
-    /* Target the toggle button inside the column grid to strip out its native styling completely */
+    /* Target the toggle button icon specifically to remain a sharp, borderless interactive target */
+    div[data-testid="column"] div[data-testid="stButton"] {
+        height: 24px !important;
+        display: flex !important;
+        justify-content: flex-end !important;
+        align-items: center !important;
+    }
+
     div[data-testid="column"] div[data-testid="stButton"] > button {
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
         color: #7a8394 !important;
-        font-size: 24px !important;
+        font-size: 20px !important;
         font-weight: 400 !important;
         padding: 0 !important;
         margin: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
+        width: 24px !important;
+        height: 24px !important;
         text-align: right !important;
         line-height: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
     }
 
     div[data-testid="column"] div[data-testid="stButton"] > button:hover,
@@ -124,9 +156,9 @@ st.markdown("""
         background: #fafbfc;
         border: 1px solid #e0e3e8;
         border-top: none;
-        border-radius: 0px 0px 8px 8px;
-        padding: 4px 24px 12px 24px;
-        margin-bottom: 12px;
+        border-radius: 0px 0px 6px 6px;
+        padding: 4px 20px 10px 20px;
+        margin-bottom: 6px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -226,9 +258,9 @@ with c5:
         st.cache_data.clear()
         st.rerun()
 
-st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:15px'></div>", unsafe_allow_html=True)
 
-# 5. Native Column Matrix Layout (Smooth, Clean, and Perfectly Aligned)
+# 5. Clean, Tight Row Render Engine
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
@@ -240,51 +272,50 @@ for s in sector_data:
     
     container_class = "sector-row-container-active" if is_expanded else "sector-row-container"
     
-    # Create a custom stylized HTML bounding wrapper block
+    # Outer custom stylized HTML frame wrapper
     st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
     
-    # Use standard Streamlit columns to display elements cleanly across the screen
+    # Render aligned horizontal items inside streamlined structure columns
     col_name, col_bar, col_pct, col_btn = st.columns([140, 500, 100, 40], gap="medium")
     
     with col_name:
-        st.markdown(f'<div style="font-size: 13px; font-weight: 700; color:#0f1117; padding-top: 2px;">{s["name"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size: 13px; font-weight: 700; color:#0f1117; line-height: 1.2;">{s["name"]}</div>', unsafe_allow_html=True)
         
     with col_bar:
         st.markdown(f"""
-            <div class="bar-track">
+            <div class="bar-track" style="margin-top: 2px;">
                 <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
             </div>
         """, unsafe_allow_html=True)
         
     with col_pct:
         st.markdown(f"""
-            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace; padding-top: 2px;">
+            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace; line-height: 1.2;">
                 {sign}{s['change']:.2f}%
             </div>
         """, unsafe_allow_html=True)
         
     with col_btn:
-        # Placing the cleanly customized button directly over the expandable icon position
         if st.button(icon, key=f"toggle_btn_{s['name']}"):
             st.session_state["expanded_sector"] = None if is_expanded else s['name']
             st.rerun()
             
-    st.markdown('</div>', unsafe_allow_html=True) # Close bounding wrapper cleanly
+    st.markdown('</div>', unsafe_allow_html=True) # Closes row box container cleanly
         
-    # Dropdown stock drawer segment
+    # Dropdown stock performance metrics drawer segment
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
         stocks_list = fetch_sector_stocks_live(s['name'])
         
         if not stocks_list:
-            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 12px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 10px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
         else:
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign = "+" if stk['change'] >= 0 else ""
                 
                 st.markdown(f"""
-                <div style="display: grid; grid-template-columns: 1fr 120px 100px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f2f5;">
+                <div style="display: grid; grid-template-columns: 1fr 120px 100px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5;">
                     <div style="font-size: 13px; font-weight: 600; color: #3d4452;">{stk['ticker']}</div>
                     <div style="font-size: 13px; font-weight: 600; text-align: right; color: #0f1117; font-family: 'JetBrains Mono', sans-serif;">₹{stk['ltp']:,}</div>
                     <div style="font-size: 13px; font-weight: 700; text-align: right; color: {stk_color}; font-family: 'JetBrains Mono', monospace;">{stk_sign}{stk['change']:.2f}%</div>
