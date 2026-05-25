@@ -17,86 +17,61 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
+# Global CSS Overrides to wipe out all gray tones and force a pure white layout canvas
+st.markdown("""
 <style>
-    /* 1. LOCK TOP PADDING EXACTLY TO 2REM AND CLEAR ACCUMULATED WHITESPACE */
-    div[data-testid="stAppViewBlockContainer"] {
-        padding-top: 2rem !important;
-        padding-bottom: 1rem !important;
-        min-width: 100% !important;
-    }
-    
-    /* Remove default main container header spacing blocks */
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-        height: 2rem !important;
-    }
-    
-    /* 2. Force the main app body wrapper background color to pure white */
+    /* 1. Force the main app body wrapper background color to pure white */
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
         background-color: #ffffff !important;
     }
     
-    /* 3. Style custom metric boxes (c1, c2, c3) with reduced compact heights */
-    .ts-metric {
-        height: 76px !important;
-        margin-bottom: 0px !important;
-        padding: 10px 14px !important;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-
-    .ts-metric-value {
-        margin-top: 2px !important;
-    }
-    
-    /* 4. Style column 4 (Timeframe Card) with matching compact specifications */
+    /* 2. Style column 4 to look exactly like your metrics cards */
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
         border-radius: 10px !important;
-        padding: 10px 14px !important;
+        padding: 14px 18px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        min-height: 76px !important;
-        max-height: 76px !important;
+        min-height: 65px !important;
+        max-height: 65px !important;
         display: flex;
         flex-direction: column;
         justify-content: center;
     }
 
-    /* 5. REFRESH BUTTON CONFIGURATION: Match identical 76px card heights */
+    /* 3. REFRESH BUTTON FIX: Stretch column 5 to fit text and remove the outer card background */
     div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
         padding: 0px !important;
-        min-height: 76px !important;
-        max-height: 76px !important;
-        min-width: 110px !important;
+        min-height: 65px !important;
+        max-height: 65px !important;
+        min-width: 110px !important; /* Forces the column wide enough to keep text on one line */
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
     }
 
-    /* 6. Force the native Streamlit selectbox component inner frame to be pure white */
+    /* 4. Force the native Streamlit selectbox component inner frame to be pure white */
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
         background-color: #ffffff !important;
         border: none !important;
     }
     
-    /* 7. Remove default nested spacing under inputs inside layout cards */
+    /* 5. Remove default nested padding under inputs inside the layout cards */
     div[data-testid="stHorizontalBlock"] div[data-testid="stVerticalBlock"] {
         gap: 0rem !important;
     }
 
-    /* 8. Turn the refresh button itself into a matching compact layout box container */
+    /* 6. Turn the button itself into the clean white card container */
     div[data-testid="stHorizontalBlock"] button[key="refresh_btn"] {
-        height: 36px !important;
+        height: 42px !important;
         background-color: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
         border-radius: 10px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        font-size: 13px !important;
+        font-size: 14px !important;
         color: #3d4452 !important;
         margin-bottom: 0px !important;
     }
