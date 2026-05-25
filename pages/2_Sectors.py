@@ -374,29 +374,11 @@ st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────
 # SECTION 9 — Sector Bar Chart with Inline Drill-Down
 # Purpose : Render the main sector performance chart.
 #           Each sector row has a ▶ button that expands inline to
 #           show the top 8 stocks in that sector with their % change.
-#
-# HOW THE DRILL-DOWN WORKS (Streamlit approach):
-#   - Each sector row is rendered as a 2-column Streamlit layout:
-#       col_left  → the existing bar chart HTML (unchanged look)
-#       col_right → hidden unless this sector is expanded
-#   - A small Streamlit button per row toggles session_state
-#     ["expanded_sector"] between None and the sector name
-#   - When expanded: fetch_stocks_for_sector() is called (cached),
-#     results rendered as a mini HTML table below the sector bar
-#   - Only ONE sector can be expanded at a time (clicking another
-#     collapses the previous one automatically)
-#
-# DESIGN DECISIONS:
-#   - We use Streamlit native columns + st.markdown for the rows
-#     instead of pure iframe HTML because Streamlit buttons are
-#     needed for the toggle interaction (JS can't call Python)
-#   - The sector bar visuals are kept pixel-identical to Section 5
-#     original — same colors, fonts, bar widths, padding
-#   - Stock rows inside expansion use same color vars (green/red)
 # ──────────────────────────────────────────────────────────────────
 
 # Calculate max change once — used for bar width scaling (same as original)
@@ -421,12 +403,9 @@ for s in data:
     is_expanded = st.session_state["expanded_sector"] == sector_name
 
     # ── Row layout: bar chart col + expand button col ──
-    # Ratio 0.92 : 0.08 keeps the bar visually identical to original
     row_col, btn_col = st.columns([0.92, 0.08])
 
     with row_col:
-        # Sector bar row HTML — pixel-identical to original Section 5 output
-        # Only change: border-bottom removed (handled by container now)
         st.markdown(f"""
         <div style="display:grid; grid-template-columns:110px 1fr 75px;
         align-items:center; gap:12px; padding:10px 14px;
@@ -443,44 +422,36 @@ for s in data:
         """, unsafe_allow_html=True)
 
     with btn_col:
-        # Toggle button — ▼ when collapsed, ▲ when expanded
-        # Clicking sets/clears expanded_sector in session state
         btn_label = "▲" if is_expanded else "▶"
         btn_key   = f"expand_{sector_name}"
         if st.button(btn_label, key=btn_key, use_container_width=True):
             if is_expanded:
-                # Already open → collapse it
                 st.session_state["expanded_sector"] = None
             else:
-                # Open this sector → auto-closes any previously open one
                 st.session_state["expanded_sector"] = sector_name
             st.rerun()
 
-    # ── Inline Drill-Down Panel (only renders when this sector is expanded) ──
+    # ── Inline Drill-Down Panel ──
     if is_expanded:
         with st.spinner(f"Loading {sector_name} stocks..."):
             stocks = fetch_stocks_for_sector(sector_name, limit=8)
 
         if not stocks:
-            # Graceful fallback — never crash the page
             st.markdown("""
             <div style="padding:10px 14px; font-size:12px; color:#7a8394;
-            background:#fafbfc; border-bottom:1px solid #f0f2f5;">
+            background:#fafbfc; border-bottom:1px solid #f0f2f5; border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8;">
               No stock data available for this sector right now.
             </div>
             """, unsafe_allow_html=True)
         else:
-            # ── Build the stock rows HTML for this sector ──
+            # 1. Compile all dynamic inner rows first
             stock_rows_html = ""
-            max_stock_chg   = max(abs(st['change']) for st in stocks) or 1
+            max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
 
             for st_data in stocks:
-                s_color    = "#00a854" if st_data['direction'] == 'up' else "#e53935"
-                s_sign     = "+" if st_data['change'] >= 0 else ""
-                s_bar_w    = (abs(st_data['change']) / max_stock_chg) * 70
-                # Contribution bar width relative to sector's own change
-                # Shows visually how much this stock "moved" vs the sector
-                contrib_w  = min((abs(st_data['change']) / (abs(s['change']) + 0.001)) * 60, 100)
+                s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
+                s_sign   = "+" if st_data['change'] >= 0 else ""
+                s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
 
                 stock_rows_html += f"""
                 <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
@@ -501,14 +472,13 @@ for s in data:
                 </div>
                 """
 
-            # Total stock count in this sector (from STOCK_UNIVERSE)
             total_count = len(get_stocks_by_sector(sector_name))
 
-            # ── Render the full drill-down panel ──
+            # 2. Render everything together inside a single wrapper markdown container
             st.markdown(f"""
-            <div style="border:1px solid #e0e3e8; border-top:none;
-            border-radius:0 0 8px 8px; overflow:hidden; margin-bottom:2px;
-            background:#fafffe;">
+            <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
+            border-bottom:1px solid #e0e3e8; overflow:hidden; background:#fafffe; margin-top:-2px;">
+              
               <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
               gap:10px; padding:6px 14px 6px 32px; background:#f0faf5;
               border-bottom:1px solid #e0e3e8;">
@@ -521,14 +491,15 @@ for s in data:
                 <div style="font-size:9px; font-weight:700; color:#7a8394;
                 letter-spacing:0.08em; text-transform:uppercase; text-align:right;">Chg %</div>
               </div>
+              
               {stock_rows_html}
+              
               <div style="padding:7px 14px 7px 32px; font-size:10px; color:#7a8394;
-              border-top:1px solid #f0f2f5; background:#fafbfc;">
+              background:#fafbfc;">
                 Showing top 8 of {total_count} stocks in {sector_name}
               </div>
             </div>
             """, unsafe_allow_html=True)
-
 
 # Chart bottom footer — matches original style
 st.markdown(f"""
