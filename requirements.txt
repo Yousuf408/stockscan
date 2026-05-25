@@ -1,0 +1,5 @@
+streamlit
+smartapi-python
+pyotp
+pandas
+yfinance
