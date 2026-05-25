@@ -17,6 +17,23 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
+# Inject a small CSS patch to make native Streamlit containers match your custom card styling exactly
+st.markdown("""
+<style>
+    /* Force native containers to match custom card heights and styles */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+    }
+    /* Clean up internal spacing for container inputs */
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        padding: 2px 2px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 today = datetime.date.today()
 
 TIMEFRAMES = {
@@ -105,42 +122,44 @@ bottom  = data[-1]
 updated = time.strftime("%H:%M:%S")
 
 # 4. Interactive Layout Control Grid
-# Using clean metric-driven spacing allocations
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
 
 with c1:
     st.markdown(f"""
-    <div class="ts-metric">
+    <div class="ts-metric" style="height: 90px;">
       <div class="ts-metric-label">Top Gainer</div>
-      <div class="ts-metric-value" style="color:var(--green); font-size:16px;">▲ {top['name']} {top['change']:+.2f}%</div>
+      <div class="ts-metric-value" style="color:var(--green); font-size:16px; margin-top:4px;">▲ {top['name']} {top['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c2:
     st.markdown(f"""
-    <div class="ts-metric">
+    <div class="ts-metric" style="height: 90px;">
       <div class="ts-metric-label">Top Loser</div>
-      <div class="ts-metric-value" style="color:var(--red); font-size:16px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+      <div class="ts-metric-value" style="color:var(--red); font-size:16px; margin-top:4px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c3:
     st.markdown(f"""
-    <div class="ts-metric">
+    <div class="ts-metric" style="height: 90px;">
       <div class="ts-metric-label">Breadth</div>
-      <div class="ts-metric-value" style="font-size:16px;">
+      <div class="ts-metric-value" style="font-size:16px; margin-top:4px;">
         <span style="color:var(--green);">{len(gainers)}↑</span>
         <span style="color:var(--border2);"> / </span>
         <span style="color:var(--red);">{len(losers)}↓</span>
       </div>
     </div>""", unsafe_allow_html=True)
 
-# Fixed alignment wrappers using native elements 
+# Containerized interactive controls (guarantees operational click actions)
 with c4:
-    chosen = st.selectbox(
-        "TIMEFRAME",
-        list(TIMEFRAMES.keys()),
-        index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
-        key="tf_select"
-    )
+    with st.container(border=True):
+        st.markdown("<div style='font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#7a8394; margin-bottom:2px;'>Timeframe</div>", unsafe_allow_html=True)
+        chosen = st.selectbox(
+            "TIMEFRAME",
+            list(TIMEFRAMES.keys()),
+            index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
+            label_visibility="collapsed",
+            key="tf_select"
+        )
 
     if chosen != st.session_state["selected_tf"]:
         st.session_state["selected_tf"] = chosen
@@ -148,11 +167,11 @@ with c4:
         st.rerun()
 
 with c5:
-    # Invisible spacer to precisely match selectbox label heights
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    with st.container(border=True):
+        st.markdown("<div style='font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:transparent; margin-bottom:2px;'>Refresh</div>", unsafe_allow_html=True)
+        if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
 st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
