@@ -73,9 +73,7 @@ st.markdown("""
     }
 
 
-    /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
-       The button is the actual click target. The HTML card overlays on top.
-       pointer-events: none on the card means clicks pass through to button. */
+    /* ── SECTOR TOGGLE BUTTON: invisible click target ── */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
         height: 44px !important;
@@ -86,6 +84,19 @@ st.markdown("""
         position: relative !important;
         z-index: 2 !important;
         cursor: pointer !important;
+    }
+
+    /* ── Restore Refresh button — lives inside stHorizontalBlock ── */
+    div[data-testid="stHorizontalBlock"] [data-testid="stBaseButton-secondary"] {
+        opacity: 1 !important;
+        height: 42px !important;
+        background-color: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        font-size: 14px !important;
+        color: #3d4452 !important;
+        position: static !important;
     }
 
     /* ── CARD overlays on top of the invisible button ── */
