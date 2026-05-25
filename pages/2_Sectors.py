@@ -22,10 +22,7 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill Streamlit vertical gaps — scoped carefully to not break control row */
-    div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-
-    /* Zero element-container spacing but ONLY when inside our sector list wrapper */
+    /* Kill gaps — scoped to sector list only, won't affect control row */
     .sector-list-wrap div[data-testid="element-container"],
     .sector-list-wrap div[data-testid="stButtonGroup"],
     .sector-list-wrap div[data-testid="stButton"] {
@@ -77,10 +74,10 @@ st.markdown("""
     }
 
 
-    /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
+    /* ── SECTOR TOGGLE BUTTON: scoped to sector list only ──
        The button is the actual click target. The HTML card overlays on top.
        pointer-events: none on the card means clicks pass through to button. */
-    [data-testid="stBaseButton-secondary"] {
+    .sector-list-wrap [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
         height: 38px !important;
         background: transparent !important;
