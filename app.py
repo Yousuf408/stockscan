@@ -7,7 +7,7 @@ import pandas as pd
 
 # Page Configuration
 st.set_page_config(page_title="AngelOne Live Screener", layout="wide")
-st.title("⚡ Angel One Live WebSocket Dashboard")
+
 
 st.markdown("""
 <style>
@@ -40,6 +40,7 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+st.title("⚡ Angel One Live WebSocket Dashboard")
 
 # UI Elements for Controlling the App
 start_btn = st.button("🚀 Connect To Live Market")
