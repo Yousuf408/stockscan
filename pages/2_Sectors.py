@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Zero trace of default Streamlit button boxes or layout disruptions
+# Global CSS Overrides — Zero trace of default button boxes or borders on row selectors
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,38 +64,60 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── HYPER-CLEAN CARD COMPONENTS (THE GREEN ZONE MATRIX) ── */
-    .sector-card {
-        background: #ffffff;
+    /* ── NATIVE GRID ROW CONTAINER CUSTOM STYLES ── */
+    .sector-row-container {
         border: 1px solid #e0e3e8;
         border-radius: 8px;
-        padding: 14px 18px;
-        display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
-        align-items: center;
-        gap: 16px;
-        height: 52px;
-        transition: background-color 0.1s ease;
+        padding: 10px 16px;
         margin-bottom: 6px;
-        cursor: pointer;
+        background: #ffffff;
+        transition: background-color 0.15s ease;
     }
     
-    .sector-card:hover {
+    .sector-row-container:hover {
         background-color: #fafbfc;
     }
     
-    .sector-card-active {
-        background: #ffffff;
+    .sector-row-container-active {
         border: 1px solid #e0e3e8;
         border-bottom: none;
         border-radius: 8px 8px 0px 0px;
-        padding: 14px 18px;
-        display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
-        align-items: center;
-        gap: 16px;
-        height: 52px;
-        cursor: pointer;
+        padding: 10px 16px;
+        background: #ffffff;
+    }
+
+    .bar-track {
+        height: 6px;
+        background: #f0f2f5;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 6px;
+    }
+
+    /* Target the toggle button inside the column grid to strip out its native styling completely */
+    div[data-testid="column"] div[data-testid="stButton"] > button {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #7a8394 !important;
+        font-size: 24px !important;
+        font-weight: 400 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        text-align: right !important;
+        line-height: 1 !important;
+    }
+
+    div[data-testid="column"] div[data-testid="stButton"] > button:hover,
+    div[data-testid="column"] div[data-testid="stButton"] > button:focus,
+    div[data-testid="column"] div[data-testid="stButton"] > button:active {
+        color: #00a854 !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
     }
 
     .breakdown-box {
@@ -105,22 +127,6 @@ st.markdown("""
         border-radius: 0px 0px 8px 8px;
         padding: 4px 24px 12px 24px;
         margin-bottom: 12px;
-    }
-
-    .bar-track {
-        height: 6px;
-        background: #f0f2f5;
-        border-radius: 3px;
-        overflow: hidden;
-    }
-
-    .expand-icon {
-        font-size: 20px;
-        font-weight: 500;
-        color: #7a8394;
-        text-align: right;
-        user-select: none;
-        line-height: 1;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -222,20 +228,7 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# ── HIDDEN STATE INTERACTION TUNNEL ──
-# We use a single, native text input inside an layout placeholder to handle click synchronization smoothly
-selected_click = st.text_input("Active Row Trigger", value="", label_visibility="collapsed", key="hidden_sector_input")
-
-if selected_click:
-    st.session_state["expanded_sector"] = None if st.session_state["expanded_sector"] == selected_click else selected_click
-    # Clear out value field to allow repeat toggles cleanly
-    st.markdown("""<script>
-        var inputs = window.parent.document.querySelectorAll('input[aria-label="Active Row Trigger"]');
-        if(inputs.length > 0) { inputs[0].value = ''; }
-    </script>""", unsafe_allow_html=True)
-    st.rerun()
-
-# 5. Fast, Smooth Rerendering Component Grid Layout
+# 5. Native Column Matrix Layout (Smooth, Clean, and Perfectly Aligned)
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
@@ -245,28 +238,38 @@ for s in sector_data:
     sign = "+" if s['change'] >= 0 else ""
     icon = "−" if is_expanded else "+"
     
-    card_style = "sector-card-active" if is_expanded else "sector-card"
+    container_class = "sector-row-container-active" if is_expanded else "sector-row-container"
     
-    # Render the card with a clean JavaScript dynamic event attached directly to the main div layout container.
-    # No st.button frameworks are created on screen, making it impossible for ugly gray frames to bleed through!
-    st.markdown(f"""
-        <div class="{card_style}" onclick="
-            var inputs = window.parent.document.querySelectorAll('input[aria-label=\\'Active Row Trigger\\']');
-            if (inputs.length > 0) {{
-                inputs[0].value = '{s['name']}';
-                inputs[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
-            }}
-        ">
-            <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
+    # Create a custom stylized HTML bounding wrapper block
+    st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
+    
+    # Use standard Streamlit columns to display elements cleanly across the screen
+    col_name, col_bar, col_pct, col_btn = st.columns([140, 500, 100, 40], gap="medium")
+    
+    with col_name:
+        st.markdown(f'<div style="font-size: 13px; font-weight: 700; color:#0f1117; padding-top: 2px;">{s["name"]}</div>', unsafe_allow_html=True)
+        
+    with col_bar:
+        st.markdown(f"""
             <div class="bar-track">
                 <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
             </div>
-            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
+        """, unsafe_allow_html=True)
+        
+    with col_pct:
+        st.markdown(f"""
+            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace; padding-top: 2px;">
                 {sign}{s['change']:.2f}%
             </div>
-            <div class="expand-icon">{icon}</div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        
+    with col_btn:
+        # Placing the cleanly customized button directly over the expandable icon position
+        if st.button(icon, key=f"toggle_btn_{s['name']}"):
+            st.session_state["expanded_sector"] = None if is_expanded else s['name']
+            st.rerun()
+            
+    st.markdown('</div>', unsafe_allow_html=True) # Close bounding wrapper cleanly
         
     # Dropdown stock drawer segment
     if is_expanded:
