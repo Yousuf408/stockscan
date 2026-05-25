@@ -229,42 +229,52 @@ def fetch_stocks_for_sector(sector_name: str, limit: int = 8) -> list:
         return []
 
     results = []
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-    # Step 2: Fetch each stock individually via Yahoo Finance
-    # Using NSE suffix ".NS" — same approach as existing fetch_today()
+    # Step 2: Fetch each stock via Yahoo Finance chart API
+    # Using the SAME approach as fetch_today() — regularMarketPrice avoids
+    # NaN issues that yf.Ticker.history() has during live market hours.
+    # NSE suffix ".NS" required for Yahoo Finance (e.g. HDFCBANK.NS)
     for stock in sector_stocks:
-        sym = stock['sym']
-        yf_sym = sym + ".NS"   # e.g. HDFCBANK → HDFCBANK.NS
+        sym    = stock['sym']
+        yf_sym = sym + ".NS"
 
         try:
-            # Step 3: Fetch last 5 days to ensure we always get prev close
-            # even on Mondays or post-holiday sessions
-            ticker = yf.Ticker(yf_sym)
-            hist   = ticker.history(period="5d", interval="1d", auto_adjust=True)
+            # Step 3: Hit Yahoo Finance chart endpoint — same URL pattern as fetch_today()
+            url  = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                    f"{requests.utils.quote(yf_sym)}?interval=1d&range=5d")
+            resp = requests.get(url, headers=headers, timeout=5)
 
-            if hist is None or len(hist) < 2:
-                # Not enough data — skip this stock silently
+            if not resp.ok:
                 continue
 
-            # Step 4: Calculate % change from previous close to latest close
-            prev_close   = float(hist['Close'].iloc[-2])
-            latest_close = float(hist['Close'].iloc[-1])
-
-            if prev_close == 0:
+            result = resp.json().get('chart', {}).get('result', [])
+            if not result:
                 continue
 
-            change = round(((latest_close - prev_close) / prev_close) * 100, 2)
+            meta = result[0].get('meta', {})
+
+            # Step 4: Use regularMarketPrice (live) and chartPreviousClose
+            # These are the same fields fetch_today() uses — guaranteed non-NaN
+            cp = meta.get('regularMarketPrice', 0)
+            pc = meta.get('chartPreviousClose', 0)
+
+            if not cp or not pc:
+                continue
+
+            # Step 5: % change calculation — identical formula to fetch_today()
+            change = round(((cp - pc) / pc) * 100, 2)
 
             results.append({
                 'sym':       sym,
                 'change':    change,
-                'ltp':       round(latest_close, 2),
-                'prev':      round(prev_close, 2),
+                'ltp':       round(cp, 2),
+                'prev':      round(pc, 2),
                 'direction': 'up' if change >= 0 else 'down',
             })
 
         except Exception:
-            # Bad ticker or network issue — skip silently, don't crash page
+            # Bad ticker or network error — skip silently, never crash page
             continue
 
     # Step 5: Sort by biggest absolute move — most impactful stocks first
@@ -476,18 +486,14 @@ for s in data:
                 <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
                 align-items:center; gap:10px; padding:7px 14px 7px 32px;
                 border-bottom:1px solid #f0f2f5; background:#fafffe;">
-                  <!-- Stock symbol -->
                   <div style="font-size:11px; font-weight:700; color:#3d4452;
                   font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
-                  <!-- Relative change bar -->
                   <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
                     <div style="width:{s_bar_w:.1f}%; height:100%;
                     background:{s_color}; border-radius:3px; opacity:0.8;"></div>
                   </div>
-                  <!-- LTP -->
                   <div style="font-size:11px; color:#7a8394; text-align:right;
-                  font-family:'JetBrains Mono',monospace;">₹{st_data['ltp']:,.1f}</div>
-                  <!-- % Change -->
+                  font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.1f}</div>
                   <div style="font-size:11px; font-weight:700; text-align:right;
                   color:{s_color}; font-family:'JetBrains Mono',monospace;">
                     {s_sign}{st_data['change']:.2f}%
@@ -503,8 +509,6 @@ for s in data:
             <div style="border:1px solid #e0e3e8; border-top:none;
             border-radius:0 0 8px 8px; overflow:hidden; margin-bottom:2px;
             background:#fafffe;">
-
-              <!-- Drill-down header -->
               <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
               gap:10px; padding:6px 14px 6px 32px; background:#f0faf5;
               border-bottom:1px solid #e0e3e8;">
@@ -517,16 +521,11 @@ for s in data:
                 <div style="font-size:9px; font-weight:700; color:#7a8394;
                 letter-spacing:0.08em; text-transform:uppercase; text-align:right;">Chg %</div>
               </div>
-
-              <!-- Stock rows -->
               {stock_rows_html}
-
-              <!-- Footer: stock count info -->
               <div style="padding:7px 14px 7px 32px; font-size:10px; color:#7a8394;
               border-top:1px solid #f0f2f5; background:#fafbfc;">
                 Showing top 8 of {total_count} stocks in {sector_name}
               </div>
-
             </div>
             """, unsafe_allow_html=True)
 
