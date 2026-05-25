@@ -22,25 +22,13 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* ── Aggressively kill ALL Streamlit spacing around sector rows ── */
+    /* Kill Streamlit vertical gaps between sector button+card pairs */
     div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-
-    div[data-testid="element-container"],
-    div[data-testid="stButtonGroup"],
-    div[data-testid="stButtonGroup"] > div,
-    div[data-testid="stButton"],
-    div[data-testid="stMarkdown"],
-    div[data-testid="stMarkdownContainer"] {
+    div[data-testid="element-container"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
-        line-height: 0 !important;
-    }
-
-    /* But restore line-height inside actual card content */
-    .sector-card *, .sector-card-active *, .breakdown-box * {
-        line-height: normal !important;
     }
 
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
@@ -90,7 +78,7 @@ st.markdown("""
        pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 36px !important;
+        height: 44px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -113,7 +101,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -42px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -133,7 +121,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -42px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
