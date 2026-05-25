@@ -1,0 +1,317 @@
+# ══════════════════════════════════════════
+#  TRADESENTRY — stocks.py
+#  Master data file: All stocks + sector mappings
+#  Source: Angel One Symbol Master (737 stocks, 16 sectors)
+#  Usage: from stocks import STOCK_UNIVERSE, SECTOR_YAHOO, get_stocks_by_sector
+# ══════════════════════════════════════════
+
+# ── SECTOR → YAHOO FINANCE INDEX MAPPING ──
+SECTOR_YAHOO = {
+    'BANK':      '^NSEBANK',
+    'IT':        '^CNXIT',
+    'AUTO':      '^CNXAUTO',
+    'PHARMA':    '^CNXPHARMA',
+    'FMCG':      '^CNXFMCG',
+    'METAL':     '^CNXMETAL',
+    'ENERGY':    '^CNXENERGY',
+    'INFRA':     '^CNXINFRA',
+    'REALTY':    '^CNXREALTY',
+    'MEDIA':     '^CNXMEDIA',
+    'FINSERV':   '^CNXFIN',
+    'CONSUME':   '^CNXCONSUM',
+    'CHEM':      '^CNXMETAL',
+    'TELECOM':   '^CNXMEDIA',
+    'DEFENCE':   '^CNXINFRA',
+    'LOGISTICS': '^CNXINFRA',
+}
+
+# ── ALL 737 NSE STOCKS (₹300–₹6000 range) ──
+STOCK_UNIVERSE = {
+    # AUTO (52 stocks)
+    'APLLTD': {'token': '25328', 'sector': 'AUTO'},
+    'APOLLOTYRE': {'token': '163', 'sector': 'AUTO'},
+    'ASKAUTOLTD': {'token': '20152', 'sector': 'AUTO'},
+    'ATULAUTO': {'token': '30023', 'sector': 'AUTO'},
+    'AUTOAXLES': {'token': '278', 'sector': 'AUTO'},
+    'BAJAJ-AUTO': {'token': '16669', 'sector': 'AUTO'},
+    'BALKRISIND': {'token': '335', 'sector': 'AUTO'},
+    'BALUFORGE': {'token': '23607', 'sector': 'AUTO'},
+    'BHARATFORG': {'token': '422', 'sector': 'AUTO'},
+    'BOSCHLTD': {'token': '2181', 'sector': 'AUTO'},
+    'CEATLTD': {'token': '15254', 'sector': 'AUTO'},
+    'CIEINDIA': {'token': '14937', 'sector': 'AUTO'},
+    'CRAFTSMAN': {'token': '2854', 'sector': 'AUTO'},
+    'EICHERMOT': {'token': '910', 'sector': 'AUTO'},
+    'ENDURANCE': {'token': '18822', 'sector': 'AUTO'},
+    'ESCORTS': {'token': '958', 'sector': 'AUTO'},
+    'EXIDEIND': {'token': '676', 'sector': 'AUTO'},
+    'FORCEMOT': {'token': '11573', 'sector': 'AUTO'},
+    'GABRIEL': {'token': '1085', 'sector': 'AUTO'},
+    'HEROMOTOCO': {'token': '1348', 'sector': 'AUTO'},
+    'JBMA': {'token': '11655', 'sector': 'AUTO'},
+    'JKTYRE': {'token': '14435', 'sector': 'AUTO'},
+    'LUMAXTECH': {'token': '14014', 'sector': 'AUTO'},
+    'M&M': {'token': '2031', 'sector': 'AUTO'},
+    'MARUTI': {'token': '10999', 'sector': 'AUTO'},
+    'MRF': {'token': '2277', 'sector': 'AUTO'},
+    'SANSERA': {'token': '5751', 'sector': 'AUTO'},
+    'SCHAEFFLER': {'token': '1011', 'sector': 'AUTO'},
+    'SKFINDIA': {'token': '3186', 'sector': 'AUTO'},
+    'SUNDRMFAST': {'token': '3345', 'sector': 'AUTO'},
+    'SUPRAJIT': {'token': '11689', 'sector': 'AUTO'},
+    'TIINDIA': {'token': '312', 'sector': 'AUTO'},
+    'TIMKEN': {'token': '14198', 'sector': 'AUTO'},
+    'TVSMOTOR': {'token': '8479', 'sector': 'AUTO'},
+    'UNOMINDA': {'token': '14154', 'sector': 'AUTO'},
+    # BANK (28 stocks)
+    'AUBANK': {'token': '21238', 'sector': 'BANK'},
+    'AXISBANK': {'token': '5900', 'sector': 'BANK'},
+    'BANKBARODA': {'token': '4668', 'sector': 'BANK'},
+    'CSBBANK': {'token': '14966', 'sector': 'BANK'},
+    'CUB': {'token': '5701', 'sector': 'BANK'},
+    'FEDERALBNK': {'token': '1023', 'sector': 'BANK'},
+    'HDFCBANK': {'token': '1333', 'sector': 'BANK'},
+    'ICICIBANK': {'token': '4963', 'sector': 'BANK'},
+    'INDIANB': {'token': '14309', 'sector': 'BANK'},
+    'INDUSINDBK': {'token': '5258', 'sector': 'BANK'},
+    'KARURVYSYA': {'token': '1838', 'sector': 'BANK'},
+    'KOTAKBANK': {'token': '1922', 'sector': 'BANK'},
+    'RBLBANK': {'token': '18391', 'sector': 'BANK'},
+    'SBIN': {'token': '3045', 'sector': 'BANK'},
+    'TMB': {'token': '10945', 'sector': 'BANK'},
+    # CHEM (61 stocks)
+    'AARTIIND': {'token': '7', 'sector': 'CHEM'},
+    'ADVENZYMES': {'token': '18039', 'sector': 'CHEM'},
+    'ALKYLAMINE': {'token': '4487', 'sector': 'CHEM'},
+    'ASIANPAINT': {'token': '236', 'sector': 'CHEM'},
+    'ATUL': {'token': '263', 'sector': 'CHEM'},
+    'BERGEPAINT': {'token': '404', 'sector': 'CHEM'},
+    'CHAMBLFERT': {'token': '637', 'sector': 'CHEM'},
+    'COROMANDEL': {'token': '739', 'sector': 'CHEM'},
+    'DEEPAKNTR': {'token': '19943', 'sector': 'CHEM'},
+    'FINEORG': {'token': '3744', 'sector': 'CHEM'},
+    'GALAXYSURF': {'token': '1315', 'sector': 'CHEM'},
+    'GNFC': {'token': '1174', 'sector': 'CHEM'},
+    'NAVINFLUOR': {'token': '14672', 'sector': 'CHEM'},
+    'PIDILITIND': {'token': '2664', 'sector': 'CHEM'},
+    'PIIND': {'token': '24184', 'sector': 'CHEM'},
+    'RALLIS': {'token': '2816', 'sector': 'CHEM'},
+    'SRF': {'token': '3273', 'sector': 'CHEM'},
+    'TATACHEM': {'token': '3405', 'sector': 'CHEM'},
+    'UPL': {'token': '11287', 'sector': 'CHEM'},
+    'VINATIORGA': {'token': '17364', 'sector': 'CHEM'},
+    # CONSUME (54 stocks)
+    'BAJAJELEC': {'token': '15034', 'sector': 'CONSUME'},
+    'BATAINDIA': {'token': '371', 'sector': 'CONSUME'},
+    'BLUESTARCO': {'token': '8311', 'sector': 'CONSUME'},
+    'CENTURYPLY': {'token': '13305', 'sector': 'CONSUME'},
+    'CROMPTON': {'token': '17094', 'sector': 'CONSUME'},
+    'DMART': {'token': '19913', 'sector': 'CONSUME'},
+    'HAVELLS': {'token': '9819', 'sector': 'CONSUME'},
+    'KALYANKJIL': {'token': '2955', 'sector': 'CONSUME'},
+    'MANYAVAR': {'token': '8167', 'sector': 'CONSUME'},
+    'PAGEIND': {'token': '14413', 'sector': 'CONSUME'},
+    'TITAN': {'token': '3506', 'sector': 'CONSUME'},
+    'TRENT': {'token': '1964', 'sector': 'CONSUME'},
+    'VGUARD': {'token': '15362', 'sector': 'CONSUME'},
+    'VOLTAS': {'token': '3718', 'sector': 'CONSUME'},
+    # DEFENCE (15 stocks)
+    'ASTRAMICRO': {'token': '11618', 'sector': 'DEFENCE'},
+    'BDL': {'token': '2144', 'sector': 'DEFENCE'},
+    'BEL': {'token': '383', 'sector': 'DEFENCE'},
+    'BEML': {'token': '395', 'sector': 'DEFENCE'},
+    'COCHINSHIP': {'token': '21508', 'sector': 'DEFENCE'},
+    'GRSE': {'token': '5475', 'sector': 'DEFENCE'},
+    'HAL': {'token': '2303', 'sector': 'DEFENCE'},
+    'MIDHANI': {'token': '2463', 'sector': 'DEFENCE'},
+    # ENERGY (55 stocks)
+    'ADANIENT': {'token': '25', 'sector': 'ENERGY'},
+    'ADANIGREEN': {'token': '3563', 'sector': 'ENERGY'},
+    'ATGL': {'token': '6066', 'sector': 'ENERGY'},
+    'BPCL': {'token': '526', 'sector': 'ENERGY'},
+    'CGPOWER': {'token': '760', 'sector': 'ENERGY'},
+    'GUJGASLTD': {'token': '10599', 'sector': 'ENERGY'},
+    'HINDPETRO': {'token': '1406', 'sector': 'ENERGY'},
+    'JSWENERGY': {'token': '17869', 'sector': 'ENERGY'},
+    'MGL': {'token': '17534', 'sector': 'ENERGY'},
+    'NLCINDIA': {'token': '8585', 'sector': 'ENERGY'},
+    'NTPC': {'token': '11630', 'sector': 'ENERGY'},
+    'OIL': {'token': '17438', 'sector': 'ENERGY'},
+    'ONGC': {'token': '2475', 'sector': 'ENERGY'},
+    'PETRONET': {'token': '11351', 'sector': 'ENERGY'},
+    'PFC': {'token': '14299', 'sector': 'ENERGY'},
+    'POWERGRID': {'token': '14977', 'sector': 'ENERGY'},
+    'RECLTD': {'token': '15355', 'sector': 'ENERGY'},
+    'RELIANCE': {'token': '2885', 'sector': 'ENERGY'},
+    'TATAPOWER': {'token': '3426', 'sector': 'ENERGY'},
+    'TORNTPOWER': {'token': '13786', 'sector': 'ENERGY'},
+    # FINSERV (63 stocks)
+    'AAVAS': {'token': '5385', 'sector': 'FINSERV'},
+    'ABCAPITAL': {'token': '21614', 'sector': 'FINSERV'},
+    'ANGELONE': {'token': '324', 'sector': 'FINSERV'},
+    'BAJAJFINSV': {'token': '16675', 'sector': 'FINSERV'},
+    'BAJFINANCE': {'token': '317', 'sector': 'FINSERV'},
+    'CANFINHOME': {'token': '583', 'sector': 'FINSERV'},
+    'CHOLAFIN': {'token': '685', 'sector': 'FINSERV'},
+    'HDFCAMC': {'token': '4244', 'sector': 'FINSERV'},
+    'HDFCLIFE': {'token': '467', 'sector': 'FINSERV'},
+    'ICICIGI': {'token': '21770', 'sector': 'FINSERV'},
+    'ICICIPRULI': {'token': '18652', 'sector': 'FINSERV'},
+    'LICHSGFIN': {'token': '1997', 'sector': 'FINSERV'},
+    'LICI': {'token': '9480', 'sector': 'FINSERV'},
+    'M&MFIN': {'token': '13285', 'sector': 'FINSERV'},
+    'MOTILALOFS': {'token': '14947', 'sector': 'FINSERV'},
+    'MUTHOOTFIN': {'token': '23650', 'sector': 'FINSERV'},
+    'PAYTM': {'token': '6705', 'sector': 'FINSERV'},
+    'SBICARD': {'token': '17971', 'sector': 'FINSERV'},
+    'SBILIFE': {'token': '21808', 'sector': 'FINSERV'},
+    'SHRIRAMFIN': {'token': '4306', 'sector': 'FINSERV'},
+    'SUNDARMFIN': {'token': '3339', 'sector': 'FINSERV'},
+    # FMCG (54 stocks)
+    'BRITANNIA': {'token': '547', 'sector': 'FMCG'},
+    'COLPAL': {'token': '15141', 'sector': 'FMCG'},
+    'DABUR': {'token': '772', 'sector': 'FMCG'},
+    'EMAMILTD': {'token': '13517', 'sector': 'FMCG'},
+    'GODREJCP': {'token': '10099', 'sector': 'FMCG'},
+    'HINDUNILVR': {'token': '1394', 'sector': 'FMCG'},
+    'ITC': {'token': '1660', 'sector': 'FMCG'},
+    'JUBLFOOD': {'token': '18096', 'sector': 'FMCG'},
+    'MARICO': {'token': '4067', 'sector': 'FMCG'},
+    'NESTLEIND': {'token': '17963', 'sector': 'FMCG'},
+    'TATACONSUM': {'token': '3432', 'sector': 'FMCG'},
+    'VBL': {'token': '18921', 'sector': 'FMCG'},
+    # INFRA (82 stocks)
+    'ABB': {'token': '13', 'sector': 'INFRA'},
+    'ACC': {'token': '22', 'sector': 'INFRA'},
+    'ADANIPORTS': {'token': '15083', 'sector': 'INFRA'},
+    'AMBUJACEM': {'token': '1270', 'sector': 'INFRA'},
+    'ASTRAL': {'token': '14418', 'sector': 'INFRA'},
+    'BHEL': {'token': '438', 'sector': 'INFRA'},
+    'CUMMINSIND': {'token': '1901', 'sector': 'INFRA'},
+    'GRASIM': {'token': '1232', 'sector': 'INFRA'},
+    'IRCTC': {'token': '13611', 'sector': 'INFRA'},
+    'JSWINFRA': {'token': '19020', 'sector': 'INFRA'},
+    'KEC': {'token': '13260', 'sector': 'INFRA'},
+    'LT': {'token': '11483', 'sector': 'INFRA'},
+    'POLYCAB': {'token': '9590', 'sector': 'INFRA'},
+    'RVNL': {'token': '9552', 'sector': 'INFRA'},
+    'SHREECEM': {'token': '3103', 'sector': 'INFRA'},
+    'SIEMENS': {'token': '3150', 'sector': 'INFRA'},
+    'THERMAX': {'token': '3475', 'sector': 'INFRA'},
+    'TITAGARH': {'token': '15414', 'sector': 'INFRA'},
+    'ULTRACEMCO': {'token': '11532', 'sector': 'INFRA'},
+    # IT (85 stocks)
+    'COFORGE': {'token': '11543', 'sector': 'IT'},
+    'CYIENT': {'token': '5748', 'sector': 'IT'},
+    'HCLTECH': {'token': '7229', 'sector': 'IT'},
+    'INFY': {'token': '1594', 'sector': 'IT'},
+    'KPITTECH': {'token': '9683', 'sector': 'IT'},
+    'LTTS': {'token': '18564', 'sector': 'IT'},
+    'MASTEK': {'token': '2124', 'sector': 'IT'},
+    'MCX': {'token': '31181', 'sector': 'IT'},
+    'MPHASIS': {'token': '4503', 'sector': 'IT'},
+    'NAUKRI': {'token': '13751', 'sector': 'IT'},
+    'OFSS': {'token': '10738', 'sector': 'IT'},
+    'PERSISTENT': {'token': '18365', 'sector': 'IT'},
+    'TCS': {'token': '11536', 'sector': 'IT'},
+    'TATAELXSI': {'token': '3411', 'sector': 'IT'},
+    'TATATECH': {'token': '20293', 'sector': 'IT'},
+    'TECHM': {'token': '13538', 'sector': 'IT'},
+    # LOGISTICS (14 stocks)
+    'AEGISLOG': {'token': '40', 'sector': 'LOGISTICS'},
+    'BLUEDART': {'token': '495', 'sector': 'LOGISTICS'},
+    'CONCOR': {'token': '4749', 'sector': 'LOGISTICS'},
+    'DELHIVERY': {'token': '9599', 'sector': 'LOGISTICS'},
+    'TCI': {'token': '10580', 'sector': 'LOGISTICS'},
+    'TCIEXP': {'token': '19223', 'sector': 'LOGISTICS'},
+    'VRLLOG': {'token': '8696', 'sector': 'LOGISTICS'},
+    # MEDIA (7 stocks)
+    'NAZARA': {'token': '2987', 'sector': 'MEDIA'},
+    'PVRINOX': {'token': '13147', 'sector': 'MEDIA'},
+    'SAREGAMA': {'token': '4892', 'sector': 'MEDIA'},
+    'SUNTV': {'token': '13404', 'sector': 'MEDIA'},
+    # METAL (47 stocks)
+    'APLAPOLLO': {'token': '25780', 'sector': 'METAL'},
+    'COALINDIA': {'token': '20374', 'sector': 'METAL'},
+    'GRAPHITE': {'token': '592', 'sector': 'METAL'},
+    'HEG': {'token': '1336', 'sector': 'METAL'},
+    'HINDALCO': {'token': '1363', 'sector': 'METAL'},
+    'HINDCOPPER': {'token': '17939', 'sector': 'METAL'},
+    'HINDZINC': {'token': '1424', 'sector': 'METAL'},
+    'JINDALSTEL': {'token': '6733', 'sector': 'METAL'},
+    'JSWSTEEL': {'token': '11723', 'sector': 'METAL'},
+    'JSL': {'token': '11236', 'sector': 'METAL'},
+    'NATIONALUM': {'token': '6364', 'sector': 'METAL'},
+    'RATNAMANI': {'token': '13451', 'sector': 'METAL'},
+    'VEDL': {'token': '3063', 'sector': 'METAL'},
+    'WELCORP': {'token': '11821', 'sector': 'METAL'},
+    # PHARMA (79 stocks)
+    'AJANTPHARM': {'token': '8124', 'sector': 'PHARMA'},
+    'ALKEM': {'token': '11703', 'sector': 'PHARMA'},
+    'APOLLOHOSP': {'token': '157', 'sector': 'PHARMA'},
+    'AUROPHARMA': {'token': '275', 'sector': 'PHARMA'},
+    'BIOCON': {'token': '11373', 'sector': 'PHARMA'},
+    'CIPLA': {'token': '694', 'sector': 'PHARMA'},
+    'DIVISLAB': {'token': '10940', 'sector': 'PHARMA'},
+    'DRREDDY': {'token': '881', 'sector': 'PHARMA'},
+    'FORTIS': {'token': '14592', 'sector': 'PHARMA'},
+    'GLENMARK': {'token': '7406', 'sector': 'PHARMA'},
+    'GRANULES': {'token': '11872', 'sector': 'PHARMA'},
+    'IPCALAB': {'token': '1633', 'sector': 'PHARMA'},
+    'LAURUSLABS': {'token': '19234', 'sector': 'PHARMA'},
+    'LUPIN': {'token': '10440', 'sector': 'PHARMA'},
+    'MANKIND': {'token': '15380', 'sector': 'PHARMA'},
+    'METROPOLIS': {'token': '9581', 'sector': 'PHARMA'},
+    'SUNPHARMA': {'token': '3351', 'sector': 'PHARMA'},
+    'TORNTPHARM': {'token': '3518', 'sector': 'PHARMA'},
+    'ZYDUSLIFE': {'token': '7929', 'sector': 'PHARMA'},
+    # REALTY (31 stocks)
+    'ANANTRAJ': {'token': '13620', 'sector': 'REALTY'},
+    'BRIGADE': {'token': '15184', 'sector': 'REALTY'},
+    'DLF': {'token': '14732', 'sector': 'REALTY'},
+    'GODREJPROP': {'token': '17875', 'sector': 'REALTY'},
+    'INDHOTEL': {'token': '1512', 'sector': 'REALTY'},
+    'LODHA': {'token': '3220', 'sector': 'REALTY'},
+    'OBEROIRLTY': {'token': '20242', 'sector': 'REALTY'},
+    'PHOENIXLTD': {'token': '14552', 'sector': 'REALTY'},
+    'PRESTIGE': {'token': '20302', 'sector': 'REALTY'},
+    'SOBHA': {'token': '13826', 'sector': 'REALTY'},
+    # TELECOM (10 stocks)
+    'BHARTIARTL': {'token': '10604', 'sector': 'TELECOM'},
+    'BHARTIHEXA': {'token': '23489', 'sector': 'TELECOM'},
+    'INDUSTOWER': {'token': '29135', 'sector': 'TELECOM'},
+    'RAILTEL': {'token': '2431', 'sector': 'TELECOM'},
+    'TATACOMM': {'token': '3721', 'sector': 'TELECOM'},
+}
+
+# ══════════════════════════════════════════
+#  HELPER FUNCTIONS
+# ══════════════════════════════════════════
+
+def get_stocks_by_sector(sector: str) -> list:
+    """Return list of {sym, token} dicts for a given sector."""
+    return [
+        {'sym': sym, 'token': info['token']}
+        for sym, info in STOCK_UNIVERSE.items()
+        if info['sector'] == sector
+    ]
+
+def get_stock_token(sym: str) -> str | None:
+    """Return Angel One token for a symbol."""
+    return STOCK_UNIVERSE.get(sym, {}).get('token')
+
+def get_stock_sector(sym: str) -> str | None:
+    """Return sector name for a symbol."""
+    return STOCK_UNIVERSE.get(sym, {}).get('sector')
+
+def get_all_sectors() -> list:
+    """Return sorted list of all unique sector names."""
+    return sorted(set(info['sector'] for info in STOCK_UNIVERSE.values()))
+
+def get_sector_count() -> dict:
+    """Return stock count per sector."""
+    counts = {}
+    for info in STOCK_UNIVERSE.values():
+        s = info['sector']
+        counts[s] = counts.get(s, 0) + 1
+    return counts
