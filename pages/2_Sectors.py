@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides to match your layout perfectly
+# Global CSS Overrides — Eliminating all native Streamlit button borders & wrappers
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,28 +64,42 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* Invisible Click Layer over our custom HTML Row Elements */
+    /* ── STAGE OVERLAY FOR TRANSPARENT ACTION MATRIX ── */
     div.clickable-row-wrapper {
         position: relative;
         margin-bottom: 6px;
     }
     
-    div.clickable-row-wrapper button {
-        position: absolute;
-        top: 0; left: 0; width: 100%; height: 100%;
+    /* Stripping down native button block frameworks to be fully invisible */
+    div.clickable-row-wrapper div[data-testid="stButton"] button {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 8px !important;
+        color: transparent !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        cursor: pointer !important;
+        z-index: 5 !important;
+    }
+    
+    /* Block default interactive outline glows on focus */
+    div.clickable-row-wrapper div[data-testid="stButton"] button:focus,
+    div.clickable-row-wrapper div[data-testid="stButton"] button:active,
+    div.clickable-row-wrapper div[data-testid="stButton"] button:hover {
         background: transparent !important;
         border: none !important;
         color: transparent !important;
         box-shadow: none !important;
-        cursor: pointer;
-        z-index: 2;
-    }
-    
-    div.clickable-row-wrapper button:hover {
-        background: rgba(0,0,0,0.01) !important;
+        outline: none !important;
     }
 
-    /* Clean Card Component UI Layouts */
+    /* Clean Card Component UI layouts */
     .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
@@ -95,7 +109,11 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        transition: all 0.2s;
+        transition: background-color 0.15s ease;
+    }
+    
+    .sector-card:hover {
+        background-color: #fafbfc;
     }
     
     .sector-card-active {
@@ -115,7 +133,7 @@ st.markdown("""
         border: 1px solid #e0e3e8;
         border-top: none;
         border-radius: 0px 0px 8px 8px;
-        padding: 10px 24px 16px 24px;
+        padding: 4px 24px 12px 24px;
         margin-bottom: 12px;
     }
 
@@ -127,10 +145,10 @@ st.markdown("""
     }
 
     .expand-icon {
-        font-size: 18px;
-        font-weight: 600;
+        font-size: 20px;
+        font-weight: 500;
         color: #7a8394;
-        text-align: center;
+        text-align: right;
         user-select: none;
     }
 </style>
@@ -142,7 +160,7 @@ if "selected_tf" not in st.session_state:
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
-# 2. Optimized Data Fetching Engines
+# 2. Data Fetching Engines
 @st.cache_data(ttl=30)
 def fetch_sector_indices():
     data = []
@@ -166,7 +184,6 @@ def fetch_sector_indices():
 
 @st.cache_data(ttl=30)
 def fetch_sector_stocks_live(sector_name):
-    """Fetches high-accuracy real-time metrics for sector portfolio tracking"""
     stocks = get_stocks_by_sector(sector_name)
     if not stocks:
         return []
@@ -174,7 +191,6 @@ def fetch_sector_stocks_live(sector_name):
     headers = {'User-Agent': 'Mozilla/5.0'}
     stock_results = []
     
-    # Process up to top 15 stocks from configuration for visual optimization
     for s in stocks[:15]:
         sym = f"{s['sym']}.NS"
         try:
@@ -195,7 +211,6 @@ def fetch_sector_stocks_live(sector_name):
         except:
             continue
             
-    # Sort descending to bring top performers to the absolute top of the list
     stock_results.sort(key=lambda x: x['change'], reverse=True)
     return stock_results
 
@@ -248,7 +263,7 @@ for s in sector_data:
     
     card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Render Custom Styled Row with an integrated right action icon matching your mock-up
+    # Render Custom Styled Row with an integrated right action icon matching your layout
     st.markdown(f"""
     <div class="clickable-row-wrapper">
         <div class="{card_style}">
@@ -261,13 +276,14 @@ for s in sector_data:
             </div>
             <div class="expand-icon">{icon}</div>
         </div>
-    </div>
     """, unsafe_allow_html=True)
     
-    # Overlaid Transparent Event Hub
-    if st.button("", key=f"inv_btn_{s['name']}", help=f"Toggle {s['name']} Analysis"):
+    # Overlaid 100% Invisible Event Trigger
+    if st.button("", key=f"inv_btn_{s['name']}"):
         st.session_state["expanded_sector"] = None if is_expanded else s['name']
         st.rerun()
+        
+    st.markdown("</div>", unsafe_allow_html=True) # Closes clickable-row-wrapper Safely
         
     # Render underlying stocks inline inside an accordion dropdown block
     if is_expanded:
@@ -275,9 +291,8 @@ for s in sector_data:
         stocks_list = fetch_sector_stocks_live(s['name'])
         
         if not stocks_list:
-            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 8px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 12px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
         else:
-            # Stock Breakdown Rows
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign = "+" if stk['change'] >= 0 else ""
