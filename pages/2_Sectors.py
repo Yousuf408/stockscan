@@ -109,7 +109,7 @@ st.markdown("""
         border-radius: 0px;
         padding: 10px 18px;
         display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
+        grid-template-columns: 90px 1fr 110px 30px;
         align-items: center;
         gap: 16px;
         margin-top: -50px;
@@ -129,7 +129,7 @@ st.markdown("""
         border-radius: 0px;
         padding: 10px 18px;
         display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
+        grid-template-columns: 90px 1fr 110px 30px;
         align-items: center;
         gap: 16px;
         margin-top: -50px;
@@ -356,20 +356,20 @@ for idx, s in enumerate(sector_data):
     # pointer-events: none ensures clicks pass through card to the button below
     st.markdown(f"""
     <div class="{card_class}">
-        <div style="font-size:13px; font-weight:700; color:#0f1117;">{s['name']}</div>
-        <div class="bar-track">
-            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
-        </div>
-        <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">
-            {sign}{s['change']:.2f}%
-        </div>
-        <div style="display:flex; flex-direction:column; gap:2px; min-width:140px;">
-            <div style="display:flex; height:5px; border-radius:2px; overflow:hidden; gap:0.5px;">
+        <div style="font-size:13px; font-weight:700; color:#0f1117; min-width:80px;">{s['name']}</div>
+        <div style="flex:1; display:flex; flex-direction:column; gap:4px;">
+            <div class="bar-track">
+                <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
+            </div>
+            <div style="display:flex; height:4px; border-radius:2px; overflow:hidden; gap:0.5px;">
                 <div style="width:{gap_up_w:.1f}%; height:100%; background:#00a854;"></div>
                 <div style="width:{flat_w:.1f}%; height:100%; background:#d3d1c7;"></div>
                 <div style="width:{gap_down_w:.1f}%; height:100%; background:#e53935;"></div>
             </div>
-            <div style="font-size:10px; color:#7a8394; font-family:monospace; letter-spacing:0.02em;">↑{gap_breadth['gap_up']} —{gap_breadth['flat']} ↓{gap_breadth['gap_down']}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:90px;">
+            <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
+            <div style="font-size:9px; color:#7a8394; font-family:monospace; text-align:right; letter-spacing:0.02em;">↑{gap_breadth['gap_up']} —{gap_breadth['flat']} ↓{gap_breadth['gap_down']}</div>
         </div>
         <div class="expand-icon">{icon}</div>
     </div>
