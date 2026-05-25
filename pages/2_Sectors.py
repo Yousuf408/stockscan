@@ -17,40 +17,46 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Surgical CSS patch to clean up interactive widgets and completely eliminate the gray background bug
+# Global CSS Overrides to wipe out all gray tones and force a pure white layout canvas
 st.markdown("""
 <style>
-    /* Force native selectbox container background to remain crisp white */
-    div[data-testid="stSelectbox"] > div[data-mode="normal"] > div {
+    /* 1. Force the main app body wrapper background color to pure white */
+    .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
         background-color: #ffffff !important;
     }
     
-    /* Ensure the wrapper holding the selectbox looks exactly like a metrics card */
-    div[data-testid="element-container"]:has(div[data-testid="stSelectbox"]) {
+    /* 2. Style columns 4 and 5 to look exactly like your metrics cards */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(4),
+    div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
-        border-radius: 12px !important;
-        padding: 12px 14px 14px 14px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        border-radius: 10px !important;
+        padding: 14px 18px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
         min-height: 90px !important;
-    }
-
-    /* Format the action refresh button frame to accurately match sizing models */
-    div[data-testid="element-container"]:has(button[key="refresh_btn"]) {
-        background: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 12px !important;
-        padding: 12px 14px 14px 14px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-        min-height: 90px !important;
+        max-height: 90px !important;
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
+        justify-content: center;
+    }
+
+    /* 3. Force the native Streamlit selectbox component inner frame to be pure white */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        border: none !important;
     }
     
-    /* Clean vertical spacing resets for interactive column heights */
-    div[data-testid="stColumn"] div[data-testid="stVerticalBlock"] {
+    /* 4. Remove default nested padding under inputs inside the layout cards */
+    div[data-testid="stHorizontalBlock"] div[data-testid="stVerticalBlock"] {
         gap: 0rem !important;
+    }
+
+    /* 5. Align the refresh action button cleanly within its column boundary frame */
+    div[data-testid="stHorizontalBlock"] button[key="refresh_btn"] {
+        margin-top: 18px !important;
+        height: 38px !important;
+        background-color: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -171,7 +177,7 @@ with c3:
     </div>""", unsafe_allow_html=True)
 
 with c4:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; margin-left:1px;">Timeframe</div>""", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#7a8394; margin-bottom:2px;">Timeframe</div>', unsafe_allow_html=True)
     chosen = st.selectbox(
         "TIMEFRAME",
         list(TIMEFRAMES.keys()),
@@ -179,21 +185,19 @@ with c4:
         label_visibility="collapsed",
         key="tf_select"
     )
-
     if chosen != st.session_state["selected_tf"]:
         st.session_state["selected_tf"] = chosen
         st.cache_data.clear()
         st.rerun()
 
 with c5:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; color:transparent; user-select:none;">Action</div>""", unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
 st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
-# 5. Bar Chart Generation Engine
+# 5. Native Performance Bar Chart Component (Updated chart container background to white)
 max_chg = max(abs(s['change']) for s in data) or 1
 
 rows_html = ""
@@ -203,10 +207,10 @@ for s in data:
     sign  = "+" if s['change'] >= 0 else ""
     rows_html += f"""
     <div style="display:grid;grid-template-columns:110px 1fr 75px;align-items:center;
-    gap:12px;padding:10px 14px;border-bottom:1px solid #ffffff;">
+    gap:12px;padding:10px 14px;border-bottom:1px solid #f0f2f5;">
       <div style="font-size:12px;font-weight:700;color:#3d4452;
       font-family:'JetBrains Mono',monospace;">{s['name']}</div>
-      <div style="height:8px;background:#ffffff;border-radius:4px;overflow:hidden;">
+      <div style="height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden;">
         <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
       </div>
       <div style="font-size:12px;font-weight:700;text-align:right;color:{color};
@@ -218,13 +222,13 @@ html = f"""<!DOCTYPE html><html><head>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{ background:#ffffff; font-family:'Inter',sans-serif; }}
-.chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
+.chart {{ background:#ffffff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
-  background:#fafbfc; border-bottom:1px solid #ffffff;
+  background:#fafbfc; border-bottom:1px solid #f0f2f5;
   display:flex; justify-content:space-between; align-items:center; }}
 .footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
-  border-top:1px solid #ffffff; }}
+  border-top:1px solid #f0f2f5; }}
 </style></head><body>
 <div class="chart">
   <div class="chart-header">
