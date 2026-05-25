@@ -59,9 +59,11 @@ def apply_styles():
         color: var(--text) !important;
     }
     .block-container {
-        padding: 1.5rem 2rem 2rem 2rem !important;
-        max-width: 100% !important;
-    }
+    /* Change the first value (top padding) from 1.5rem to 0rem */
+    padding: 0rem 2rem 2rem 2rem !important; 
+    margin-top: 0rem !important;
+    max-width: 100% !important;
+}
 
     /* ══════════════════════════════════════
        SIDEBAR
