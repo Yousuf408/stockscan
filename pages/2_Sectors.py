@@ -22,15 +22,15 @@ st.markdown("""
 <style>
     /* 1. LOCK TOP PADDING EXACTLY TO 2REM AND CLEAR ACCUMULATED WHITESPACE */
     div[data-testid="stAppViewBlockContainer"] {
-        padding-top: 2rem !important;
-        padding-bottom: 1rem !important;
+        padding-top: 1rem !important;
+        padding-bottom: 0rem !important;
         min-width: 100% !important;
     }
     
     /* Remove default main container header spacing blocks */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
-        height: 2rem !important;
+        height: 0rem !important;
     }
     
     /* 2. Force the main app body wrapper background color to pure white */
