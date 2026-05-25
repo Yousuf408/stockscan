@@ -54,7 +54,7 @@ st.markdown("""
         min-width: 110px !important;
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
+        justify-content: center;
     }
 
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
