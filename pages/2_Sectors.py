@@ -18,25 +18,68 @@ page_header("Sector Performance — NSE Indices")
 today = datetime.date.today()
 
 TIMEFRAMES = {
-    "1D":  ("1 Day",    1),
-    "1W":  ("1 Week",   7),
-    "1M":  ("1 Month",  30),
-    "3M":  ("3 Months", 90),
-    "6M":  ("6 Months", 180),
-    "1Y":  ("1 Year",   365),
+    "1 Day":    1,
+    "1 Week":   7,
+    "1 Month":  30,
+    "3 Months": 90,
+    "6 Months": 180,
+    "1 Year":   365,
 }
 
-# ── Read timeframe from query params (set by JS inside iframe) ─────────────────
-params   = st.query_params
-tf_key   = params.get("tf", "1D")
-if tf_key not in TIMEFRAMES:
-    tf_key = "1D"
-tf_label, days = TIMEFRAMES[tf_key]
+# ── Session state init ─────────────────────────────────────────────────────────
+if "selected_tf" not in st.session_state:
+    st.session_state["selected_tf"] = "1 Day"
 
-# ── Handle refresh flag from query params ──────────────────────────────────────
-if params.get("refresh", "0") == "1":
-    st.cache_data.clear()
-    st.query_params["refresh"] = "0"
+# ── Inject CSS to style native Streamlit controls to match cards ───────────────
+st.markdown("""
+<style>
+/* Remove default padding Streamlit adds around columns */
+div[data-testid="column"] {
+    padding: 0 4px !important;
+}
+
+/* Style the selectbox to look like a clean card control */
+div[data-testid="stSelectbox"] > div > div {
+    border: 1px solid #e0e3e8 !important;
+    border-radius: 7px !important;
+    background: #fafbfc !important;
+    font-size: 13px !important;
+    font-family: 'Inter', sans-serif !important;
+    min-height: 38px !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stSelectbox"] > div > div:focus-within {
+    border-color: #4a90e2 !important;
+    box-shadow: 0 0 0 2px rgba(74,144,226,0.15) !important;
+}
+
+/* Style the refresh button */
+div[data-testid="stButton"] > button {
+    background: #fafbfc !important;
+    border: 1px solid #e0e3e8 !important;
+    border-radius: 7px !important;
+    color: #3d4452 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    width: 100% !important;
+    height: 38px !important;
+    transition: background 0.15s, border-color 0.15s, color 0.15s !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stButton"] > button:hover {
+    background: #e8f4fd !important;
+    border-color: #4a90e2 !important;
+    color: #4a90e2 !important;
+}
+
+/* Remove label space above selectbox */
+div[data-testid="stSelectbox"] label {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Data fetchers (logic completely unchanged) ─────────────────────────────────
 @st.cache_data(ttl=30)
@@ -85,7 +128,10 @@ def fetch_range(from_date: str, to_date: str):
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-# ── Fetch data ─────────────────────────────────────────────────────────────────
+# ── Fetch data based on current session timeframe ──────────────────────────────
+tf   = st.session_state["selected_tf"]
+days = TIMEFRAMES[tf]
+
 if days == 1:
     with st.spinner("Fetching live sector data..."):
         data = fetch_today()
@@ -93,7 +139,7 @@ if days == 1:
     col_start    = "Prev Close"
 else:
     from_dt = today - datetime.timedelta(days=days)
-    with st.spinner(f"Fetching {tf_label} data..."):
+    with st.spinner(f"Fetching {tf} data..."):
         data = fetch_range(str(from_dt), str(today))
     period_label = f"{from_dt.strftime('%d %b %Y')}  →  {today.strftime('%d %b %Y')}"
     col_start    = "Start Price"
@@ -102,67 +148,31 @@ if not data:
     st.error("Could not fetch sector data. Please try again.")
     st.stop()
 
-# ── Computed values ────────────────────────────────────────────────────────────
 gainers = [s for s in data if s['direction'] == 'up']
 losers  = [s for s in data if s['direction'] == 'down']
 top     = data[0]
 bottom  = data[-1]
-max_chg = max(abs(s['change']) for s in data) or 1
 updated = time.strftime("%H:%M:%S")
 
-# ── Build sector bar rows ──────────────────────────────────────────────────────
-rows_html = ""
-for s in data:
-    bar_w = (abs(s['change']) / max_chg) * 85
-    color = "#00a854" if s['direction'] == 'up' else "#e53935"
-    sign  = "+" if s['change'] >= 0 else ""
-    rows_html += f"""
-      <div class="row">
-        <div class="row-name">{s['name']}</div>
-        <div class="row-bar-bg">
-          <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
-        </div>
-        <div class="row-pct" style="color:{color};">{sign}{s['change']}%</div>
-      </div>"""
-
-# ── Build timeframe option tags ────────────────────────────────────────────────
-tf_options = ""
-for key, (label, _) in TIMEFRAMES.items():
-    selected = 'selected' if key == tf_key else ''
-    tf_options += f'<option value="{key}" {selected}>{label}</option>'
-
-# ── Full HTML — 5 cards + chart, all in one iframe ────────────────────────────
-html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
+# ── Row 1: 3 info cards (pure HTML display, no widgets) ───────────────────────
+components.html(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{
-    background:#f0f2f5;
-    font-family:'Inter','Segoe UI',sans-serif;
-    padding:2px 0;
-  }}
-
-  /* ── 5-card top row ── */
-  .top-row {{
+  body {{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; }}
+  .row {{
     display:grid;
-    grid-template-columns: 1fr 1fr 1fr 1.4fr auto;
+    grid-template-columns:1fr 1fr 1fr;
     gap:10px;
-    margin-bottom:12px;
   }}
-
   .card {{
     background:#fff;
     border:1px solid #e0e3e8;
     border-radius:10px;
-    padding:14px 16px;
+    padding:14px 18px;
     box-shadow:0 1px 3px rgba(0,0,0,0.05);
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
-    min-height:78px;
+    min-height:72px;
   }}
-
-  .card-label {{
+  .label {{
     font-size:9.5px;
     font-weight:700;
     letter-spacing:0.09em;
@@ -170,81 +180,80 @@ html = f"""<!DOCTYPE html>
     color:#9aa3b0;
     margin-bottom:8px;
   }}
-
-  .card-value {{
-    font-size:14px;
+  .value {{
+    font-size:15px;
     font-weight:700;
     font-family:'Courier New',monospace;
-    white-space:nowrap;
   }}
+</style></head><body>
+<div class="row">
+  <div class="card">
+    <div class="label">Top Gainer</div>
+    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
+  </div>
+  <div class="card">
+    <div class="label">Top Loser</div>
+    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+  </div>
+  <div class="card">
+    <div class="label">Breadth</div>
+    <div class="value">
+      <span style="color:#00a854;">{len(gainers)}↑</span>
+      <span style="color:#cdd1d8;"> / </span>
+      <span style="color:#e53935;">{len(losers)}↓</span>
+    </div>
+  </div>
+</div>
+</body></html>""", height=90)
 
-  /* Timeframe card */
-  .tf-card {{
-    background:#fff;
-    border:1px solid #e0e3e8;
-    border-radius:10px;
-    padding:14px 16px;
-    box-shadow:0 1px 3px rgba(0,0,0,0.05);
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
-    min-height:78px;
-  }}
+# ── Row 2: Timeframe selectbox + Refresh button (native Streamlit, always works)
+col_tf, col_refresh, col_space = st.columns([2, 1, 6])
 
-  select {{
-    margin-top:6px;
-    width:100%;
-    padding:5px 8px;
-    border:1px solid #e0e3e8;
-    border-radius:6px;
-    font-size:12px;
-    font-family:'Inter',sans-serif;
-    color:#3d4452;
-    background:#fafbfc;
-    cursor:pointer;
-    outline:none;
-    appearance:auto;
-  }}
+with col_tf:
+    chosen = st.selectbox(
+        "Timeframe",
+        list(TIMEFRAMES.keys()),
+        index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
+        key="tf_select"
+    )
 
-  select:focus {{ border-color:#4a90e2; }}
+with col_refresh:
+    # Vertical align the button with the selectbox
+    st.markdown("<div style='margin-top:2px'>", unsafe_allow_html=True)
+    refresh_clicked = st.button("⟳ Refresh", key="refresh_btn")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-  /* Refresh card */
-  .refresh-card {{
-    background:#fff;
-    border:1px solid #e0e3e8;
-    border-radius:10px;
-    padding:14px 16px;
-    box-shadow:0 1px 3px rgba(0,0,0,0.05);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    min-height:78px;
-    min-width:90px;
-  }}
+# Handle interactions — rerun only when needed
+if refresh_clicked:
+    st.cache_data.clear()
+    st.rerun()
 
-  .refresh-btn {{
-    background:#f8f9fa;
-    border:1px solid #e0e3e8;
-    border-radius:7px;
-    padding:7px 14px;
-    font-size:12px;
-    font-weight:600;
-    color:#3d4452;
-    cursor:pointer;
-    display:flex;
-    align-items:center;
-    gap:5px;
-    transition:background 0.15s, border-color 0.15s;
-    white-space:nowrap;
-  }}
+if chosen != st.session_state["selected_tf"]:
+    st.session_state["selected_tf"] = chosen
+    st.cache_data.clear()
+    st.rerun()
 
-  .refresh-btn:hover {{
-    background:#e8f4fd;
-    border-color:#4a90e2;
-    color:#4a90e2;
-  }}
+# ── Row 3: Bar chart (pure HTML display) ───────────────────────────────────────
+max_chg = max(abs(s['change']) for s in data) or 1
 
-  /* ── Chart section ── */
+rows_html = ""
+for s in data:
+    bar_w = (abs(s['change']) / max_chg) * 85
+    color = "#00a854" if s['direction'] == 'up' else "#e53935"
+    sign  = "+" if s['change'] >= 0 else ""
+    rows_html += f"""
+      <div class="row">
+        <div class="name">{s['name']}</div>
+        <div class="bar-bg">
+          <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
+        </div>
+        <div class="pct" style="color:{color};">{sign}{s['change']}%</div>
+      </div>"""
+
+components.html(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; }}
   .chart {{
     background:#fff;
     border:1px solid #e0e3e8;
@@ -252,7 +261,6 @@ html = f"""<!DOCTYPE html>
     overflow:hidden;
     box-shadow:0 1px 3px rgba(0,0,0,0.05);
   }}
-
   .chart-header {{
     padding:10px 14px;
     font-size:11px;
@@ -264,91 +272,41 @@ html = f"""<!DOCTYPE html>
     justify-content:space-between;
     align-items:center;
   }}
-
   .row {{
     display:grid;
-    grid-template-columns:90px 1fr 68px;
+    grid-template-columns:90px 1fr 72px;
     align-items:center;
     gap:12px;
-    padding:8px 12px;
-    border-bottom:1px solid #f0f2f5;
+    padding:8px 14px;
+    border-bottom:1px solid #f5f6f8;
   }}
-
-  .row:last-of-type {{ border-bottom:none; }}
-
-  .row-name {{
+  .name {{
     font-size:11px;
     font-weight:700;
     color:#3d4452;
     font-family:'Courier New',monospace;
   }}
-
-  .row-bar-bg {{
+  .bar-bg {{
     height:8px;
     background:#f0f2f5;
     border-radius:4px;
     overflow:hidden;
   }}
-
-  .row-pct {{
+  .pct {{
     font-size:12px;
     font-weight:700;
     text-align:right;
     font-family:'Courier New',monospace;
   }}
-
   .footer {{
     padding:7px 14px;
     font-size:10px;
     color:#9aa3b0;
     text-align:right;
-    border-top:1px solid #f0f2f5;
     background:#fafbfc;
+    border-top:1px solid #f0f2f5;
   }}
-</style>
-</head><body>
-
-<!-- 5 cards in one row -->
-<div class="top-row">
-
-  <!-- Top Gainer -->
-  <div class="card">
-    <div class="card-label">Top Gainer</div>
-    <div class="card-value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
-  </div>
-
-  <!-- Top Loser -->
-  <div class="card">
-    <div class="card-label">Top Loser</div>
-    <div class="card-value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
-  </div>
-
-  <!-- Breadth -->
-  <div class="card">
-    <div class="card-label">Breadth</div>
-    <div class="card-value">
-      <span style="color:#00a854;">{len(gainers)}↑</span>
-      <span style="color:#cdd1d8;"> / </span>
-      <span style="color:#e53935;">{len(losers)}↓</span>
-    </div>
-  </div>
-
-  <!-- Timeframe dropdown -->
-  <div class="tf-card">
-    <div class="card-label">Timeframe</div>
-    <select id="tfSelect" onchange="applyTF(this.value)">
-      {tf_options}
-    </select>
-  </div>
-
-  <!-- Refresh button -->
-  <div class="refresh-card">
-    <button class="refresh-btn" onclick="doRefresh()">⟳ Refresh</button>
-  </div>
-
-</div>
-
-<!-- Bar chart -->
+</style></head><body>
 <div class="chart">
   <div class="chart-header">
     <span>📅 {period_label}</span>
@@ -357,27 +315,7 @@ html = f"""<!DOCTYPE html>
   {rows_html}
   <div class="footer">TradeSentry • {updated}</div>
 </div>
-
-<script>
-  // Send selected timeframe to Streamlit via query param + location reload
-  function applyTF(val) {{
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('tf', val);
-    url.searchParams.delete('refresh');
-    window.parent.location.href = url.toString();
-  }}
-
-  // Refresh: clear cache flag then reload
-  function doRefresh() {{
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('refresh', '1');
-    window.parent.location.href = url.toString();
-  }}
-</script>
-
-</body></html>"""
-
-components.html(html, height=len(data) * 40 + 175, scrolling=False)
+</body></html>""", height=len(data) * 40 + 80, scrolling=False)
 
 # ── Data Table (unchanged) ─────────────────────────────────────────────────────
 with st.expander("📋 Data Table"):
