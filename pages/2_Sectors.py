@@ -203,10 +203,10 @@ for s in data:
     sign  = "+" if s['change'] >= 0 else ""
     rows_html += f"""
     <div style="display:grid;grid-template-columns:110px 1fr 75px;align-items:center;
-    gap:12px;padding:10px 14px;border-bottom:1px solid #f0f2f5;">
+    gap:12px;padding:10px 14px;border-bottom:1px solid #ffffff;">
       <div style="font-size:12px;font-weight:700;color:#3d4452;
       font-family:'JetBrains Mono',monospace;">{s['name']}</div>
-      <div style="height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden;">
+      <div style="height:8px;background:#ffffff;border-radius:4px;overflow:hidden;">
         <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
       </div>
       <div style="font-size:12px;font-weight:700;text-align:right;color:{color};
@@ -217,14 +217,14 @@ html = f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
+body {{ background:#ffffff; font-family:'Inter',sans-serif; }}
 .chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
-  background:#fafbfc; border-bottom:1px solid #f0f2f5;
+  background:#fafbfc; border-bottom:1px solid #ffffff;
   display:flex; justify-content:space-between; align-items:center; }}
 .footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
-  border-top:1px solid #f0f2f5; }}
+  border-top:1px solid #ffffff; }}
 </style></head><body>
 <div class="chart">
   <div class="chart-header">
