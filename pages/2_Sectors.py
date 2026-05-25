@@ -132,13 +132,13 @@ st.markdown("""
     /* ── Expanded stock breakdown panel ── */
     .breakdown-box {
         background: #fafbfc;
-        border-left: 1px solid #c8e6c9;
-        border-right: 1px solid #c8e6c9;
+        border-left: 3px solid #c8e6c9;
+        border-right: 3px solid #c8e6c9;
         border-top: none;
         border-bottom: none;
         border-radius: 0px;
-        margin: 0 18px;
-        padding: 10px 16px 14px 16px;
+        margin: 0 1%;
+        padding: 10px 24px 14px 24px;
     }
 
     .bar-track {
