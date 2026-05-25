@@ -22,20 +22,13 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill gaps — scoped to not break control row */
+    /* Kill Streamlit vertical gaps between sector button+card pairs */
     div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-    div[data-testid="stVerticalBlock"] div[data-testid="element-container"] {
+    div[data-testid="element-container"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
-    }
-    /* But restore spacing inside horizontal blocks (control row) */
-    div[data-testid="stHorizontalBlock"] div[data-testid="element-container"] {
-        margin-top: revert !important;
-        margin-bottom: revert !important;
-        padding-top: revert !important;
-        padding-bottom: revert !important;
     }
 
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
@@ -80,11 +73,12 @@ st.markdown("""
     }
 
 
-    /* ── SECTOR TOGGLE BUTTON: invisible click target ──
-       Card HTML overlays on top via negative margin-top. */
+    /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
+       The button is the actual click target. The HTML card overlays on top.
+       pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 38px !important;
+        height: 44px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -92,22 +86,6 @@ st.markdown("""
         position: relative !important;
         z-index: 2 !important;
         cursor: pointer !important;
-    }
-
-    /* ── Restore Refresh button visibility specifically ── */
-    button[data-testid="stBaseButton-secondary"][kind="secondary"]:has(> div > p:only-child) {
-        opacity: 1 !important;
-    }
-    /* Fallback: target by key via aria-label or just restore all buttons NOT in sector list */
-    div[data-testid="stHorizontalBlock"] [data-testid="stBaseButton-secondary"] {
-        opacity: 1 !important;
-        height: 42px !important;
-        background-color: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 10px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        font-size: 14px !important;
-        color: #3d4452 !important;
     }
 
     /* ── CARD overlays on top of the invisible button ── */
@@ -123,7 +101,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -44px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -143,7 +121,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -44px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -186,14 +164,23 @@ if "selected_tf" not in st.session_state:
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
+# 2. Timeframe → Yahoo Finance param mapping
+TF_MAP = {
+    "1 Day":   {"interval": "1d",  "range": "1d"},
+    "1 Week":  {"interval": "1d",  "range": "5d"},
+    "1 Month": {"interval": "1d",  "range": "1mo"},
+    "1 Year":  {"interval": "1wk", "range": "1y"},
+}
+
 # 2. Data Fetchers
 @st.cache_data(ttl=30)
-def fetch_sector_indices():
+def fetch_sector_indices(tf="1 Day"):
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval=1d&range=1d"
+            params = TF_MAP.get(tf, TF_MAP["1 Day"])
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval={params['interval']}&range={params['range']}"
             resp = requests.get(url, headers=headers, timeout=5)
             if not resp.ok: continue
             meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
@@ -209,7 +196,7 @@ def fetch_sector_indices():
     return data
 
 @st.cache_data(ttl=30)
-def fetch_sector_stocks_live(sector_name):
+def fetch_sector_stocks_live(sector_name, tf="1 Day"):
     stocks = get_stocks_by_sector(sector_name)
     if not stocks:
         return []
@@ -218,7 +205,8 @@ def fetch_sector_stocks_live(sector_name):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
+            params = TF_MAP.get(tf, TF_MAP["1 Day"])
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={params['interval']}&range={params['range']}"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
             meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
@@ -234,7 +222,7 @@ def fetch_sector_stocks_live(sector_name):
 
 # 3. Fetch + derive stats
 with st.spinner("Analyzing sector feeds..."):
-    sector_data = fetch_sector_indices()
+    sector_data = fetch_sector_indices(tf=st.session_state['selected_tf'])
 
 if not sector_data:
     st.error("No real-time market indices available right now.")
@@ -315,7 +303,7 @@ for idx, s in enumerate(sector_data):
     # STEP 3: Stock drill-down panel — only renders when this sector is expanded
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
-        stocks_list = fetch_sector_stocks_live(s['name'])
+        stocks_list = fetch_sector_stocks_live(s['name'], tf=st.session_state['selected_tf'])
 
         if not stocks_list:
             st.markdown("<div style='font-size:12px; color:#7a8394; padding:12px 0;'>No constituents available.</div>", unsafe_allow_html=True)
