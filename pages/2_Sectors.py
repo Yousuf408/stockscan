@@ -22,14 +22,20 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill gaps — scoped to sector list only, won't affect control row */
-    .sector-list-wrap div[data-testid="element-container"],
-    .sector-list-wrap div[data-testid="stButtonGroup"],
-    .sector-list-wrap div[data-testid="stButton"] {
+    /* Kill gaps — scoped to not break control row */
+    div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
+    div[data-testid="stVerticalBlock"] div[data-testid="element-container"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
+    }
+    /* But restore spacing inside horizontal blocks (control row) */
+    div[data-testid="stHorizontalBlock"] div[data-testid="element-container"] {
+        margin-top: revert !important;
+        margin-bottom: revert !important;
+        padding-top: revert !important;
+        padding-bottom: revert !important;
     }
 
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
@@ -74,10 +80,9 @@ st.markdown("""
     }
 
 
-    /* ── SECTOR TOGGLE BUTTON: scoped to sector list only ──
-       The button is the actual click target. The HTML card overlays on top.
-       pointer-events: none on the card means clicks pass through to button. */
-    .sector-list-wrap [data-testid="stBaseButton-secondary"] {
+    /* ── SECTOR TOGGLE BUTTON: invisible click target ──
+       Card HTML overlays on top via negative margin-top. */
+    [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
         height: 38px !important;
         background: transparent !important;
@@ -87,6 +92,22 @@ st.markdown("""
         position: relative !important;
         z-index: 2 !important;
         cursor: pointer !important;
+    }
+
+    /* ── Restore Refresh button visibility specifically ── */
+    button[data-testid="stBaseButton-secondary"][kind="secondary"]:has(> div > p:only-child) {
+        opacity: 1 !important;
+    }
+    /* Fallback: target by key via aria-label or just restore all buttons NOT in sector list */
+    div[data-testid="stHorizontalBlock"] [data-testid="stBaseButton-secondary"] {
+        opacity: 1 !important;
+        height: 42px !important;
+        background-color: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        font-size: 14px !important;
+        color: #3d4452 !important;
     }
 
     /* ── CARD overlays on top of the invisible button ── */
@@ -255,7 +276,7 @@ def toggle_sector(sector_name):
 # 6. Sector rows — button is the click target, card HTML overlays on top
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
-st.markdown('<div class="sector-list-wrap" style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
+st.markdown('<div style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
 
 for idx, s in enumerate(sector_data):
     is_last = (idx == len(sector_data) - 1)
