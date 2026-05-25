@@ -1,19 +1,19 @@
 # ══════════════════════════════════════════════════════════════════
-#  TRADESENTRY — 2_Sectors.py
-#  Page: Sector Performance — NSE Indices
+#   TRADESENTRY — 2_Sectors.py
+#   Page: Sector Performance — NSE Indices
 #
-#  SECTIONS IN THIS FILE:
-#  ─────────────────────────────────────────────────────────────────
-#  SECTION 1  →  Imports & Path Setup
-#  SECTION 2  →  Page Config, Styles, Header  (UNCHANGED)
-#  SECTION 3  →  Page-Level CSS Overrides      (UNCHANGED)
-#  SECTION 4  →  Constants & Session State     (UNCHANGED)
-#  SECTION 5  →  Sector Data Fetchers          (UNCHANGED)
-#  SECTION 6  →  [NEW] Stock Drill-Down Fetcher
-#  SECTION 7  →  Data Calculations & Derived Stats  (UNCHANGED)
-#  SECTION 8  →  Control Row (Metrics + Timeframe + Refresh) (UNCHANGED)
-#  SECTION 9  →  Sector Bar Chart with Inline Drill-Down  (MODIFIED)
-#  SECTION 10 →  Supplementary Data Table Expander  (UNCHANGED)
+#   SECTIONS IN THIS FILE:
+#   ─────────────────────────────────────────────────────────────────
+#   SECTION 1  →  Imports & Path Setup
+#   SECTION 2  →  Page Config, Styles, Header  (UNCHANGED)
+#   SECTION 3  →  Page-Level CSS Overrides      (UNCHANGED)
+#   SECTION 4  →  Constants & Session State      (UNCHANGED)
+#   SECTION 5  →  Sector Data Fetchers          (UNCHANGED)
+#   SECTION 6  →  [NEW] Stock Drill-Down Fetcher
+#   SECTION 7  →  Data Calculations & Derived Stats  (UNCHANGED)
+#   SECTION 8  →  Control Row (Metrics + Timeframe + Refresh) (UNCHANGED)
+#   SECTION 9  →  Sector Bar Chart with Inline Drill-Down  (FULLY FIXED)
+#   SECTION 10 →  Supplementary Data Table Expander  (UNCHANGED)
 # ══════════════════════════════════════════════════════════════════
 
 
@@ -49,7 +49,7 @@ page_header("Sector Performance — NSE Indices")
 # ──────────────────────────────────────────────────────────────────
 # SECTION 3 — Page-Level CSS Overrides
 # Purpose : Fine-tune layout: white bg, card heights, button styles
-#           These are very specific to the 5-column control row
+#            These are very specific to the 5-column control row
 # NOTE    : UNCHANGED — do not modify
 # ──────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -109,10 +109,6 @@ st.markdown("""
         color: #3d4452 !important;
         margin-bottom: 0px !important;
     }
-
-    /* ── [NEW] Drill-down expand/collapse button inside the chart iframe ──
-       These styles live inside the iframe HTML (Section 9), but kept here
-       as reference so future devs know where the design tokens come from  */
 </style>
 """, unsafe_allow_html=True)
 
@@ -136,17 +132,12 @@ TIMEFRAMES = {
 if "selected_tf" not in st.session_state:
     st.session_state["selected_tf"] = "1 Day"
 
-# Track which sector row is currently expanded for drill-down
-# None means all collapsed; a sector name string means that one is open
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
 
 # ──────────────────────────────────────────────────────────────────
 # SECTION 5 — Sector Data Fetchers
-# Purpose : fetch_today()  → live 1-day % change per sector index
-#           fetch_range()  → historical % change over N days
-# Cache   : 30s for live, 5 min for historical
 # NOTE    : UNCHANGED — do not modify these functions
 # ──────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
@@ -198,96 +189,52 @@ def fetch_range(from_date: str, to_date: str):
 
 
 # ──────────────────────────────────────────────────────────────────
-# SECTION 6 — [NEW] Stock Drill-Down Fetcher
-# Purpose : Fetch individual stock % change for stocks inside a
-#           given sector. Called only when user clicks a sector row.
-#
-# How it works:
-#   1. get_stocks_by_sector(sector) → pulls stock list from stocks.py
-#   2. Appends ".NS" to each symbol → Yahoo Finance NSE format
-#   3. yf.download() fetches 2 days of data (today + prev close)
-#   4. Calculates % change = (today_close - prev_close) / prev_close
-#   5. Sorts by absolute % change → biggest movers first
-#   6. Returns top N stocks (default 8) as list of dicts
-#
-# Cache   : 60s TTL — stocks refresh every minute is sufficient
-# Safety  : try/except per stock → one bad ticker won't break page
+# SECTION 6 — Stock Drill-Down Fetcher
+# NOTE    : UNCHANGED
 # ──────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def fetch_stocks_for_sector(sector_name: str, limit: int = 8) -> list:
-    """
-    Fetch top `limit` stocks for a sector with their % change today.
-
-    Returns list of dicts:
-        [{'sym': 'HDFCBANK', 'change': 2.31, 'ltp': 1823.5, 'direction': 'up'}, ...]
-    Sorted by abs(change) descending — biggest movers at the top.
-    """
-    # Step 1: Get all stocks belonging to this sector from STOCK_UNIVERSE
-    sector_stocks = get_stocks_by_sector(sector_name)  # [{'sym': 'HDFCBANK', 'token': '1333'}, ...]
-
+    sector_stocks = get_stocks_by_sector(sector_name)
     if not sector_stocks:
         return []
 
     results = []
     headers = {'User-Agent': 'Mozilla/5.0'}
 
-    # Step 2: Fetch each stock via Yahoo Finance chart API
-    # Using the SAME approach as fetch_today() — regularMarketPrice avoids
-    # NaN issues that yf.Ticker.history() has during live market hours.
-    # NSE suffix ".NS" required for Yahoo Finance (e.g. HDFCBANK.NS)
     for stock in sector_stocks:
         sym    = stock['sym']
         yf_sym = sym + ".NS"
-
         try:
-            # Step 3: Hit Yahoo Finance chart endpoint — same URL pattern as fetch_today()
             url  = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                     f"{requests.utils.quote(yf_sym)}?interval=1d&range=5d")
             resp = requests.get(url, headers=headers, timeout=5)
-
             if not resp.ok:
                 continue
-
             result = resp.json().get('chart', {}).get('result', [])
             if not result:
                 continue
-
             meta = result[0].get('meta', {})
-
-            # Step 4: Use regularMarketPrice (live) and chartPreviousClose
-            # These are the same fields fetch_today() uses — guaranteed non-NaN
             cp = meta.get('regularMarketPrice', 0)
             pc = meta.get('chartPreviousClose', 0)
-
             if not cp or not pc:
                 continue
-
-            # Step 5: % change calculation — identical formula to fetch_today()
             change = round(((cp - pc) / pc) * 100, 2)
-
             results.append({
                 'sym':       sym,
                 'change':    change,
                 'ltp':       round(cp, 2),
                 'prev':      round(pc, 2),
                 'direction': 'up' if change >= 0 else 'down',
-            })
-
+                })
         except Exception:
-            # Bad ticker or network error — skip silently, never crash page
             continue
 
-    # Step 5: Sort by biggest absolute move — most impactful stocks first
     results.sort(key=lambda x: abs(x['change']), reverse=True)
-
-    # Step 6: Return only top N stocks
     return results[:limit]
 
 
 # ──────────────────────────────────────────────────────────────────
 # SECTION 7 — Data Calculations & Derived Stats
-# Purpose : Resolve which timeframe is active, fetch the right data,
-#           compute summary stats (gainers, losers, top, bottom)
 # NOTE    : UNCHANGED — do not modify
 # ──────────────────────────────────────────────────────────────────
 tf   = st.session_state["selected_tf"]
@@ -318,8 +265,6 @@ updated = time.strftime("%H:%M:%S")
 
 # ──────────────────────────────────────────────────────────────────
 # SECTION 8 — Control Row (Metrics + Timeframe + Refresh)
-# Purpose : Render the 5-column top bar:
-#           [Top Gainer] [Top Loser] [Breadth] [Timeframe] [Refresh]
 # NOTE    : UNCHANGED — do not modify
 # ──────────────────────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
@@ -364,7 +309,6 @@ with c4:
         st.rerun()
 
 with c5:
-    # Invisible spacer label to align button baseline with selectbox
     st.markdown('<div style="font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:transparent; margin-bottom:2px; user-select:none;">Action</div>', unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
@@ -380,10 +324,9 @@ st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 #           show the top 8 stocks in that sector with their % change.
 # ──────────────────────────────────────────────────────────────────
 
-# Calculate max change once — used for bar width scaling (same as original)
 max_chg = max(abs(s['change']) for s in data) or 1
 
-# Chart outer container header — identical to original
+# Base Chart Main Header Container
 st.markdown(f"""
 <div style="background:#fafbfc; border:1px solid #e0e3e8; border-radius:10px 10px 0 0;
 padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
@@ -393,7 +336,7 @@ display:flex; justify-content:space-between; align-items:center; border-bottom: 
 </div>
 """, unsafe_allow_html=True)
 
-# ── Render each sector row individually ──
+# ── Render each sector row cleanly ──
 for s in data:
     sector_name = s['name']
     bar_w       = (abs(s['change']) / max_chg) * 85
@@ -401,100 +344,94 @@ for s in data:
     sign        = "+" if s['change'] >= 0 else ""
     is_expanded = st.session_state["expanded_sector"] == sector_name
 
-    # Isolate each sector container block contextually
-    with st.container():
-        row_col, btn_col = st.columns([0.92, 0.08])
+    # FIX 1: Split structural columns away from child breakdown code logic execution frames
+    col_left, col_right = st.columns([0.92, 0.08])
 
-        with row_col:
+    with col_left:
+        # Render ONLY the individual structural grid header row cleanly inside this component frame
+        st.markdown(f"""
+        <div style="display:grid; grid-template-columns:110px 1fr 75px;
+        align-items:center; gap:12px; padding:10px 14px;
+        border-left: 1px solid #e0e3e8; border-right: 1px solid #e0e3e8;
+        border-bottom:1px solid #f0f2f5;
+        background:{'#f5fdf8' if is_expanded else '#ffffff'}; margin-bottom:-4px;">
+          <div style="font-size:12px; font-weight:700; color:#3d4452; font-family:'JetBrains Mono',monospace;">{sector_name}</div>
+          <div style="height:8px; background:#f0f2f5; border-radius:4px; overflow:hidden;">
+            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>
+          </div>
+          <div style="font-size:12px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_right:
+        # Native interactive toggle switches
+        btn_label = "▲" if is_expanded else "▶"
+        if st.button(btn_label, key=f"btn_{sector_name}", use_container_width=True):
+            st.session_state["expanded_sector"] = None if is_expanded else sector_name
+            st.rerun()
+
+    # FIX 2: Execute code building strings OUTSIDE nested column components. 
+    # This prevents the virtual DOM engine from escaping long layout strings.
+    if is_expanded:
+        with st.spinner(f"Loading {sector_name} stocks..."):
+            stocks = fetch_stocks_for_sector(sector_name, limit=8)
+
+        if not stocks:
             st.markdown(f"""
-            <div style="display:grid; grid-template-columns:110px 1fr 75px;
-            align-items:center; gap:12px; padding:10px 14px;
-            border-left: 1px solid #e0e3e8; border-right: 1px solid #e0e3e8;
-            border-bottom:1px solid #f0f2f5;
-            background:{'#f5fdf8' if is_expanded else '#ffffff'};">
-              <div style="font-size:12px; font-weight:700; color:#3d4452;
-              font-family:'JetBrains Mono',monospace;">{sector_name}</div>
-              <div style="height:8px; background:#f0f2f5; border-radius:4px; overflow:hidden;">
-                <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>
-              </div>
-              <div style="font-size:12px; font-weight:700; text-align:right; color:{color};
-              font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
+            <div style="padding:12px 14px; font-size:12px; color:#7a8394;
+            background:#fafbfc; border-bottom:1px solid #e0e3e8; 
+            border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; margin-top:-4px;">
+              ⚠️ No active stock components found inside the sector universe mapping.
             </div>
             """, unsafe_allow_html=True)
+        else:
+            row_list = []
+            max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
 
-        with btn_col:
-            btn_label = "▲" if is_expanded else "▶"
-            btn_key   = f"expand_{sector_name}"
-            if st.button(btn_label, key=btn_key, use_container_width=True):
-                if is_expanded:
-                    st.session_state["expanded_sector"] = None
-                else:
-                    st.session_state["expanded_sector"] = sector_name
-                st.rerun()
+            for st_data in stocks:
+                s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
+                s_sign   = "+" if st_data['change'] >= 0 else ""
+                s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
 
-        # ── Inline Drill-Down Panel ──
-        if is_expanded:
-            with st.spinner(f"Loading {sector_name} stocks..."):
-                stocks = fetch_stocks_for_sector(sector_name, limit=8)
-
-            if not stocks:
-                st.markdown(f"""
-                <div style="padding:12px 14px; font-size:12px; color:#7a8394;
-                background:#fafbfc; border-bottom:1px solid #e0e3e8; 
-                border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; margin-top:-2px;">
-                  ⚠️ No active stocks found in this universe mapping.
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                # FIX: Build array elements safely without nested f-string evaluation leaks
-                row_list = []
-                max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
-
-                for st_data in stocks:
-                    s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
-                    s_sign   = "+" if st_data['change'] >= 0 else ""
-                    s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
-                    
-                    # Safe explicit string formatting using pure variables
-                    single_row = f"""
-                    <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
-                    align-items:center; gap:12px; padding:8px 14px 8px 32px;
-                    border-bottom:1px solid #f0f2f5; background:#fafffe;">
-                      <div style="font-size:11px; font-weight:700; color:#3d4452; font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
-                      <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
-                        <div style="width:{s_bar_w:.1f}%; height:100%; background:{s_color}; border-radius:3px; opacity:0.8;"></div>
-                      </div>
-                      <div style="font-size:11px; color:#7a8394; text-align:right; font-family:'JetBrains Mono',monospace;">RS {st_data['ltp']:,.2f}</div>
-                      <div style="font-size:11px; font-weight:700; text-align:right; color:{s_color}; font-family:'JetBrains Mono',monospace;">{s_sign}{st_data['change']:.2f}%</div>
-                    </div>
-                    """
-                    row_list.append(single_row)
-
-                # Join array into one clean compiled string block
-                stock_rows_html = "".join(row_list)
-                total_count = len(get_stocks_by_sector(sector_name))
-
-                # Inject the fully joined block cleanly as a single layout unit
-                st.markdown(f"""
-                <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
-                border-bottom:1px solid #e0e3e8; background:#fafffe; margin-top:-2px; width:100%;">
-                  
-                  <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
-                  gap:12px; padding:6px 14px 6px 32px; background:#f0faf5;
-                  border-bottom:1px solid #e0e3e8;">
-                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Stock</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Move</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">LTP</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">Chg %</div>
+                # Formulate structural blocks with pure text mappings to prevent formatting leaks
+                single_row = f"""
+                <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
+                align-items:center; gap:12px; padding:8px 14px 8px 32px;
+                border-bottom:1px solid #f0f2f5; background:#fafffe;">
+                  <div style="font-size:11px; font-weight:700; color:#3d4452; font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
+                  <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
+                    <div style="width:{s_bar_w:.1f}%; height:100%; background:{s_color}; border-radius:3px; opacity:0.8;"></div>
                   </div>
-                  
-                  {stock_rows_html}
-                  
-                  <div style="padding:8px 14px 8px 32px; font-size:10px; color:#7a8394; background:#fafbfc;">
-                    📋 Showing top 8 of {total_count} stocks in {sector_name} • Sorted by Absolute Momentum
-                  </div>
+                  <div style="font-size:11px; color:#7a8394; text-align:right; font-family:'JetBrains Mono',monospace;">RS {st_data['ltp']:,.2f}</div>
+                  <div style="font-size:11px; font-weight:700; text-align:right; color:{s_color}; font-family:'JetBrains Mono',monospace;">{s_sign}{st_data['change']:.2f}%</div>
                 </div>
-                """, unsafe_allow_html=True)
+                """
+                row_list.append(single_row)
+
+            # Safe compilation frame construction step
+            stock_rows_html = "".join(row_list)
+            total_count = len(get_stocks_by_sector(sector_name))
+
+            # Render the complete child grid package natively inside its own isolated markdown cell
+            st.markdown(f"""
+            <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
+            border-bottom:1px solid #e0e3e8; background:#fafffe; margin-top:-4px; margin-bottom:4px; width: 100%;">
+              
+              <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
+              gap:12px; padding:6px 14px 6px 32px; background:#f0faf5; border-bottom:1px solid #e0e3e8;">
+                <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Stock</div>
+                <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Move</div>
+                <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">LTP</div>
+                <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">Chg %</div>
+              </div>
+              
+              {stock_rows_html}
+              
+              <div style="padding:8px 14px 8px 32px; font-size:10px; color:#7a8394; background:#fafbfc;">
+                📋 Showing top 8 of {total_count} stocks in {sector_name} • Sorted by Absolute Momentum
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # Chart bottom footer — matches original style
 st.markdown(f"""
@@ -505,10 +442,10 @@ color:#7a8394; text-align:right;">
 </div>
 """, unsafe_allow_html=True)
 
+
 # ──────────────────────────────────────────────────────────────────
 # SECTION 10 — Supplementary Data Table Expander
 # Purpose : Show raw sector data as a sortable Streamlit dataframe
-#           inside a collapsible expander at the bottom of the page
 # NOTE    : UNCHANGED — do not modify
 # ──────────────────────────────────────────────────────────────────
 with st.expander("📋 Data Table"):
