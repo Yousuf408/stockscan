@@ -17,7 +17,6 @@ page_header("Sector Performance — NSE Indices")
 
 today = datetime.date.today()
 
-# ── Timeframe state ───────────────────────────────────────────────────────────
 TIMEFRAMES = {
     "1 Day":    1,
     "1 Week":   7,
@@ -29,8 +28,6 @@ TIMEFRAMES = {
 
 if "selected_tf" not in st.session_state:
     st.session_state["selected_tf"] = "1 Day"
-if "do_refresh" not in st.session_state:
-    st.session_state["do_refresh"] = False
 
 # ── Data fetchers ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
@@ -63,8 +60,9 @@ def fetch_range(from_date: str, to_date: str):
     end = (datetime.date.fromisoformat(to_date) + datetime.timedelta(days=1)).isoformat()
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            hist = yf.Ticker(symbol).history(start=from_date, end=end,
-                                             interval="1d", auto_adjust=True)
+            hist = yf.Ticker(symbol).history(
+                start=from_date, end=end, interval="1d", auto_adjust=True
+            )
             if hist.empty:
                 continue
             s = hist['Close'].iloc[0]
@@ -78,34 +76,106 @@ def fetch_range(from_date: str, to_date: str):
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-# ── Fetch based on selected timeframe ────────────────────────────────────────
-tf = st.session_state["selected_tf"]
+# ── 5-box control row (native Streamlit so dropdown actually works) ────────────
+c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
+
+# Fetch data first so we can show live values in the cards
+tf   = st.session_state["selected_tf"]
 days = TIMEFRAMES[tf]
 
 if days == 1:
     with st.spinner("Fetching live sector data..."):
         data = fetch_today()
-    from_dt = today
     period_label = "Today's Performance"
-    col_start = "Prev Close"
+    col_start    = "Prev Close"
 else:
     from_dt = today - datetime.timedelta(days=days)
-    with st.spinner(f"Fetching {tf} sector data..."):
+    with st.spinner(f"Fetching {tf} data..."):
         data = fetch_range(str(from_dt), str(today))
     period_label = f"{from_dt.strftime('%d %b %Y')}  →  {today.strftime('%d %b %Y')}"
-    col_start = "Start Price"
+    col_start    = "Start Price"
 
 if not data:
     st.error("Could not fetch sector data. Please try again.")
     st.stop()
 
-# ── Build chart values ────────────────────────────────────────────────────────
 gainers = [s for s in data if s['direction'] == 'up']
 losers  = [s for s in data if s['direction'] == 'down']
 top     = data[0]
 bottom  = data[-1]
-max_chg = max(abs(s['change']) for s in data) or 1
 updated = time.strftime("%H:%M:%S")
+
+# ── Render the 5 native Streamlit metric/control boxes ────────────────────────
+with c1:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Gainer</div>
+      <div style="font-size:15px;font-weight:700;color:#00a854;
+      font-family:'JetBrains Mono',monospace;">▲ {top['name']} {top['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
+
+with c2:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Loser</div>
+      <div style="font-size:15px;font-weight:700;color:#e53935;
+      font-family:'JetBrains Mono',monospace;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
+
+with c3:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Breadth</div>
+      <div style="font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;">
+        <span style="color:#00a854;">{len(gainers)}↑</span>
+        <span style="color:#cdd1d8;"> / </span>
+        <span style="color:#e53935;">{len(losers)}↓</span>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+with c4:
+    st.markdown("""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:6px;">Timeframe</div>
+    """, unsafe_allow_html=True)
+
+    chosen = st.selectbox(
+        "Timeframe",
+        list(TIMEFRAMES.keys()),
+        index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
+        label_visibility="collapsed",
+        key="tf_select"
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if chosen != st.session_state["selected_tf"]:
+        st.session_state["selected_tf"] = chosen
+        st.cache_data.clear()
+        st.rerun()
+
+with c5:
+    st.markdown("""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;
+    display:flex;align-items:center;justify-content:center;">
+    """, unsafe_allow_html=True)
+    if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+
+# ── Bar chart HTML (pure display, no controls inside) ─────────────────────────
+max_chg = max(abs(s['change']) for s in data) or 1
 
 rows_html = ""
 for s in data:
@@ -124,213 +194,30 @@ for s in data:
       font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
     </div>"""
 
-# Build JS callback string for timeframe buttons
-tf_options_js = "\n".join([
-    f'<option value="{k}" {"selected" if k == tf else ""}>{k}</option>'
-    for k in TIMEFRAMES
-])
-
 html = f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
-
-.top-row {{
-  display:grid;
-  grid-template-columns:1fr 1fr 1fr;
-  gap:10px;
-  margin-bottom:14px;
-  align-items:stretch;
-}}
-
-.card {{
-  background:#fff;
-  border:1px solid #e0e3e8;
-  border-radius:10px;
-  padding:14px 18px;
-  box-shadow:0 1px 3px rgba(0,0,0,0.05);
-}}
-
-.label {{
-  font-size:10px;
-  font-weight:600;
-  letter-spacing:0.1em;
-  text-transform:uppercase;
-  color:#7a8394;
-  margin-bottom:6px;
-}}
-
-.value {{
-  font-size:15px;
-  font-weight:700;
-  font-family:'JetBrains Mono',monospace;
-}}
-
-/* Breadth card with controls inline */
-.breadth-card {{
-  background:#fff;
-  border:1px solid #e0e3e8;
-  border-radius:10px;
-  padding:14px 18px;
-  box-shadow:0 1px 3px rgba(0,0,0,0.05);
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
-}}
-
-.breadth-top {{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:8px;
-}}
-
-.controls {{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  margin-top:8px;
-}}
-
-select {{
-  flex:1;
-  padding:5px 8px;
-  border:1px solid #e0e3e8;
-  border-radius:6px;
-  font-size:12px;
-  font-family:'Inter',sans-serif;
-  color:#3d4452;
-  background:#fafbfc;
-  cursor:pointer;
-  outline:none;
-}}
-
-select:focus {{
-  border-color:#4f8ef7;
-}}
-
-.refresh-btn {{
-  padding:5px 10px;
-  background:#fff;
-  border:1px solid #e0e3e8;
-  border-radius:6px;
-  font-size:12px;
-  cursor:pointer;
-  color:#3d4452;
-  white-space:nowrap;
-  display:flex;
-  align-items:center;
-  gap:4px;
-  transition:background 0.15s;
-}}
-
-.refresh-btn:hover {{ background:#f0f2f5; }}
-
-.chart {{
-  background:#fff;
-  border:1px solid #e0e3e8;
-  border-radius:10px;
-  overflow:hidden;
-  box-shadow:0 1px 3px rgba(0,0,0,0.05);
-}}
-
-.chart-header {{
-  padding:10px 14px;
-  font-size:11px;
-  font-weight:600;
-  color:#7a8394;
-  background:#fafbfc;
-  border-bottom:1px solid #f0f2f5;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}}
-
-.footer {{
-  padding:8px 12px;
-  font-size:10px;
-  color:#7a8394;
-  text-align:right;
-  border-top:1px solid #f0f2f5;
-}}
+.chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
+  overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
+.chart-header {{ padding:10px 14px; font-size:11px; font-weight:600; color:#7a8394;
+  background:#fafbfc; border-bottom:1px solid #f0f2f5;
+  display:flex; justify-content:space-between; align-items:center; }}
+.footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
+  border-top:1px solid #f0f2f5; }}
 </style></head><body>
-
-<div class="top-row">
-  <!-- Top Gainer -->
-  <div class="card">
-    <div class="label">Top Gainer</div>
-    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
-  </div>
-
-  <!-- Top Loser -->
-  <div class="card">
-    <div class="label">Top Loser</div>
-    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
-  </div>
-
-  <!-- Breadth + Controls -->
-  <div class="breadth-card">
-    <div>
-      <div class="label">Breadth</div>
-      <div class="value">
-        <span style="color:#00a854;">{len(gainers)}↑</span>
-        <span style="color:#cdd1d8;"> / </span>
-        <span style="color:#e53935;">{len(losers)}↓</span>
-      </div>
-    </div>
-    <div class="controls">
-      <select id="tfSelect" onchange="applyTF()">
-        {tf_options_js}
-      </select>
-      <button class="refresh-btn" onclick="doRefresh()">⟳ Refresh</button>
-    </div>
-  </div>
-</div>
-
 <div class="chart">
   <div class="chart-header">
     <span>📅 {period_label}</span>
     <span style="font-weight:400;">Updated: {updated}</span>
   </div>
   {rows_html}
+  <div class="footer">TradeSentry • {updated}</div>
 </div>
-
-<script>
-  function applyTF() {{
-    const tf = document.getElementById('tfSelect').value;
-    window.parent.postMessage({{type:'streamlit:setComponentValue', value:{{action:'tf', tf:tf}}}}, '*');
-  }}
-  function doRefresh() {{
-    window.parent.postMessage({{type:'streamlit:setComponentValue', value:{{action:'refresh', tf: document.getElementById('tfSelect').value}}}}, '*');
-  }}
-</script>
 </body></html>"""
 
-# Render HTML component and capture interaction
-result = components.html(html, height=len(data) * 40 + 260)
-
-# ── Streamlit-side controls (hidden, driven by session state) ─────────────────
-# Since postMessage from iframe has Streamlit limitations, use st widgets below
-# placed invisibly — user interacts via the HTML dropdowns above.
-st.markdown("<div style='display:none'>", unsafe_allow_html=True)
-
-c1, c2 = st.columns([3, 1])
-with c1:
-    chosen = st.selectbox("TF", list(TIMEFRAMES.keys()),
-                          index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
-                          key="_tf_select_hidden",
-                          label_visibility="collapsed")
-with c2:
-    if st.button("Refresh", key="_refresh_hidden"):
-        st.cache_data.clear()
-        st.rerun()
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-if chosen != st.session_state["selected_tf"]:
-    st.session_state["selected_tf"] = chosen
-    st.rerun()
+components.html(html, height=len(data) * 40 + 100)
 
 # ── Data Table ────────────────────────────────────────────────────────────────
 with st.expander("📋 Data Table"):
