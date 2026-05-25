@@ -1,7 +1,9 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — styles.py
-#  Professional White Theme
-#  Simple Sidebar Navigation
+#  Global CSS for entire app
+#  Theme: Professional White / Light
+#  Usage: from styles import apply_styles
+#         apply_styles()  ← call on every page
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -18,20 +20,28 @@ def apply_styles():
         --bg:        #ffffff;
         --bg2:       #f8f9fb;
         --bg3:       #f0f2f5;
+        --bg4:       #e8eaed;
         --border:    #e0e3e8;
         --border2:   #cdd1d8;
         --text:      #0f1117;
         --text2:     #3d4452;
         --text3:     #7a8394;
         --green:     #00a854;
-        --green-dim: #f0faf5;
+        --green-dim: #00a85412;
+        --green-bg:  #f0faf5;
         --red:       #e53935;
+        --red-dim:   #e5393512;
         --red-bg:    #fff5f5;
+        --amber:     #f59e0b;
+        --amber-dim: #f59e0b12;
+        --blue:      #2563eb;
+        --blue-dim:  #2563eb10;
         --mono:      'JetBrains Mono', monospace;
         --sans:      'Inter', sans-serif;
         --radius:    8px;
         --radius-lg: 12px;
-        --shadow:    0 1px 3px rgba(0,0,0,0.08);
+        --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+        --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
     }
 
     /* ══════════════════════════════════════
@@ -84,18 +94,19 @@ def apply_styles():
     }
     [data-testid="stSidebar"] [aria-current="page"] {
         color: var(--green) !important;
-        background: var(--green-dim) !important;
+        background: var(--green-bg) !important;
         border-left: 3px solid var(--green) !important;
         font-weight: 600 !important;
     }
 
-    /* Sidebar toggle */
+    /* Sidebar toggle — always visible */
     [data-testid="stSidebarCollapseButton"] button {
-        background: var(--bg2) !important;
+        background: var(--bg3) !important;
         border: 1px solid var(--border2) !important;
         border-radius: var(--radius) !important;
         color: var(--text2) !important;
         visibility: visible !important;
+        opacity: 1 !important;
     }
     [data-testid="stSidebarCollapseButton"] button:hover {
         border-color: var(--green) !important;
@@ -105,6 +116,7 @@ def apply_styles():
     [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
+        opacity: 1 !important;
         background: var(--bg) !important;
         border: 1px solid var(--border2) !important;
         border-radius: var(--radius) !important;
@@ -116,7 +128,7 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       BUTTONS
+       STREAMLIT BUTTONS
     ══════════════════════════════════════ */
     div[data-testid="stButton"] button {
         font-family: var(--sans) !important;
@@ -129,18 +141,20 @@ def apply_styles():
         padding: 6px 16px !important;
         transition: all 0.15s !important;
         box-shadow: var(--shadow) !important;
+        letter-spacing: 0.01em !important;
     }
     div[data-testid="stButton"] button:hover {
         border-color: var(--green) !important;
         color: var(--green) !important;
         background: var(--green-dim) !important;
+        box-shadow: none !important;
     }
     div[data-testid="stButton"] button:active {
         transform: scale(0.98) !important;
     }
 
     /* ══════════════════════════════════════
-       INPUTS
+       STREAMLIT INPUTS / SELECTBOX
     ══════════════════════════════════════ */
     div[data-testid="stTextInput"] input,
     div[data-testid="stNumberInput"] input,
@@ -151,6 +165,7 @@ def apply_styles():
         border: 1px solid var(--border2) !important;
         border-radius: var(--radius) !important;
         color: var(--text) !important;
+        box-shadow: none !important;
     }
     div[data-testid="stTextInput"] input:focus {
         border-color: var(--green) !important;
@@ -158,7 +173,7 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       DATAFRAME
+       DATAFRAME / TABLES
     ══════════════════════════════════════ */
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--border) !important;
@@ -184,6 +199,7 @@ def apply_styles():
         letter-spacing: 0.08em !important;
         color: var(--text3) !important;
         text-transform: uppercase !important;
+        font-family: var(--sans) !important;
     }
     div[data-testid="stMetricValue"] {
         font-size: 22px !important;
@@ -203,12 +219,21 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       ALERTS
+       ALERTS (info/success/warning/error)
     ══════════════════════════════════════ */
     div[data-testid="stAlert"] {
         border-radius: var(--radius) !important;
         font-family: var(--sans) !important;
         font-size: 13px !important;
+    }
+
+    /* ══════════════════════════════════════
+       SPINNER
+    ══════════════════════════════════════ */
+    div[data-testid="stSpinner"] {
+        font-family: var(--sans) !important;
+        font-size: 13px !important;
+        color: var(--text3) !important;
     }
 
     /* ══════════════════════════════════════
@@ -222,37 +247,157 @@ def apply_styles():
     }
     ::-webkit-scrollbar-thumb:hover { background: var(--green); }
 
+    /* ══════════════════════════════════════
+       REUSABLE COMPONENT CLASSES
+       (use in st.markdown(..., unsafe_allow_html=True))
+    ══════════════════════════════════════ */
+
+    /* Page header */
+    .ts-page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 0 20px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 20px;
+    }
+    .ts-logo {
+        font-family: var(--mono);
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--text);
+        letter-spacing: 0.06em;
+    }
+    .ts-logo span { color: var(--green); }
+    .ts-page-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text3);
+        letter-spacing: 0.08em;
+        font-family: var(--sans);
+    }
+
+    /* Card */
+    .ts-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 16px 20px;
+        box-shadow: var(--shadow);
+        margin-bottom: 12px;
+    }
+    .ts-card:hover {
+        border-color: var(--border2);
+        box-shadow: var(--shadow-md);
+        transition: all 0.15s;
+    }
+
+    /* Metric card */
+    .ts-metric {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 14px 18px;
+        box-shadow: var(--shadow);
+    }
+    .ts-metric-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        color: var(--text3);
+        text-transform: uppercase;
+        font-family: var(--sans);
+        margin-bottom: 6px;
+    }
+    .ts-metric-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text);
+        font-family: var(--mono);
+    }
+
+    /* Badge */
+    .ts-badge-green {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: var(--green-bg); color: var(--green);
+        border: 1px solid #00a85430;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .ts-badge-red {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: var(--red-bg); color: var(--red);
+        border: 1px solid #e5393530;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .ts-badge-amber {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: #fffbf0; color: var(--amber);
+        border: 1px solid #f59e0b30;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+
+    /* Table row states */
+    .ts-row-up   { border-left: 3px solid var(--green) !important; background: var(--green-bg) !important; }
+    .ts-row-down { border-left: 3px solid var(--red) !important;   background: var(--red-bg) !important; }
+
+    /* Section label */
+    .ts-section-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text3);
+        font-family: var(--sans);
+        padding: 0 0 8px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+    }
+
+    /* Divider */
+    .ts-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 16px 0;
+    }
+
+    /* Status dot */
+    .ts-dot-green { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; }
+    .ts-dot-red   { width:7px; height:7px; border-radius:50%; background:var(--red);   display:inline-block; }
+    .ts-dot-amber { width:7px; height:7px; border-radius:50%; background:var(--amber); display:inline-block; }
+
     </style>
     """, unsafe_allow_html=True)
 
 
+def page_header(title: str, subtitle: str = ""):
+    """Render standard TradeSentry page header."""
+    sub_html = f'<div class="ts-page-title">{subtitle}</div>' if subtitle else ""
+    st.markdown(f"""
+    <div class="ts-page-header">
+        <div class="ts-logo">TRADE<span>SENTRY</span></div>
+        {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def sidebar_brand():
-    """Render TradeSentry branding in sidebar"""
+    """Render TradeSentry branding in sidebar."""
     with st.sidebar:
         st.markdown("""
-        <div style="padding:8px 4px 12px 4px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
+        <div style="padding:12px 8px 14px 8px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:15px;
             font-weight:700;color:#0f1117;letter-spacing:0.08em;">
                 TRADE<span style="color:#00a854;">SENTRY</span>
             </div>
             <div style="font-size:9px;color:#7a8394;font-family:'Inter',sans-serif;
             font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
-            margin-top:2px;">NSE SCREENER</div>
+            margin-top:3px;">NSE Professional Screener</div>
         </div>
-        <hr style="border:none;border-top:1px solid #e0e3e8;margin-bottom:8px;">
-        """, unsafe_allow_html=True)
-
-
-def page_header(title: str = ""):
-    """Render page header with title"""
-    if title:
-        st.markdown(f"""
-        <div style="padding:0 0 16px 0;border-bottom:1px solid #e0e3e8;margin-bottom:16px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;
-            color:#0f1117;letter-spacing:0.06em;">
-                TRADE<span style="color:#00a854;">SENTRY</span>
-                <span style="font-size:13px;color:#7a8394;margin-left:12px;font-weight:400;
-                font-family:'Inter',sans-serif;">{title}</span>
-            </div>
-        </div>
+        <hr style="border:none;border-top:1px solid #e0e3e8;margin:0 0 8px 0;">
         """, unsafe_allow_html=True)
