@@ -401,9 +401,8 @@ for s in data:
     sign        = "+" if s['change'] >= 0 else ""
     is_expanded = st.session_state["expanded_sector"] == sector_name
 
-    # FIX 1: Wrap each row and its expanded layout inside an isolated container context
+    # Isolate each sector container block contextually
     with st.container():
-        # Setup column layout for the sector header line
         row_col, btn_col = st.columns([0.92, 0.08])
 
         with row_col:
@@ -433,7 +432,7 @@ for s in data:
                     st.session_state["expanded_sector"] = sector_name
                 st.rerun()
 
-        # ── Inline Drill-Down Panel (Rendered cleanly within the structural wrapper) ──
+        # ── Inline Drill-Down Panel ──
         if is_expanded:
             with st.spinner(f"Loading {sector_name} stocks..."):
                 stocks = fetch_stocks_for_sector(sector_name, limit=8)
@@ -443,62 +442,55 @@ for s in data:
                 <div style="padding:12px 14px; font-size:12px; color:#7a8394;
                 background:#fafbfc; border-bottom:1px solid #e0e3e8; 
                 border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; margin-top:-2px;">
-                  ⚠️ No active stock components found inside the sector universe mapping.
+                  ⚠️ No active stocks found in this universe mapping.
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                # Compile individual stock element entries cleanly before parsing
-                stock_rows_html = ""
+                # FIX: Build array elements safely without nested f-string evaluation leaks
+                row_list = []
                 max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
 
                 for st_data in stocks:
                     s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
                     s_sign   = "+" if st_data['change'] >= 0 else ""
                     s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
-
-                    stock_rows_html += f"""
+                    
+                    # Safe explicit string formatting using pure variables
+                    single_row = f"""
                     <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
                     align-items:center; gap:12px; padding:8px 14px 8px 32px;
                     border-bottom:1px solid #f0f2f5; background:#fafffe;">
-                      <div style="font-size:11px; font-weight:700; color:#3d4452;
-                      font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
+                      <div style="font-size:11px; font-weight:700; color:#3d4452; font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
                       <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
-                        <div style="width:{s_bar_w:.1f}%; height:100%;
-                        background:{s_color}; border-radius:3px; opacity:0.8;"></div>
+                        <div style="width:{s_bar_w:.1f}%; height:100%; background:{s_color}; border-radius:3px; opacity:0.8;"></div>
                       </div>
-                      <div style="font-size:11px; color:#7a8394; text-align:right;
-                      font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.2f}</div>
-                      <div style="font-size:11px; font-weight:700; text-align:right;
-                      color:{s_color}; font-family:'JetBrains Mono',monospace;">
-                        {s_sign}{st_data['change']:.2f}%
-                      </div>
+                      <div style="font-size:11px; color:#7a8394; text-align:right; font-family:'JetBrains Mono',monospace;">RS {st_data['ltp']:,.2f}</div>
+                      <div style="font-size:11px; font-weight:700; text-align:right; color:{s_color}; font-family:'JetBrains Mono',monospace;">{s_sign}{st_data['change']:.2f}%</div>
                     </div>
                     """
+                    row_list.append(single_row)
 
+                # Join array into one clean compiled string block
+                stock_rows_html = "".join(row_list)
                 total_count = len(get_stocks_by_sector(sector_name))
 
-                # FIX 2: Render the complete panel in a single markdown call to ensure proper browser compilation
+                # Inject the fully joined block cleanly as a single layout unit
                 st.markdown(f"""
                 <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
-                border-bottom:1px solid #e0e3e8; background:#fafffe; margin-top:-2px; width: 100%;">
+                border-bottom:1px solid #e0e3e8; background:#fafffe; margin-top:-2px; width:100%;">
                   
                   <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
                   gap:12px; padding:6px 14px 6px 32px; background:#f0faf5;
                   border-bottom:1px solid #e0e3e8;">
-                    <div style="font-size:9px; font-weight:700; color:#7a8394;
-                    letter-spacing:0.08em; text-transform:uppercase;">Stock</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394;
-                    letter-spacing:0.08em; text-transform:uppercase;">Move</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394;
-                    letter-spacing:0.08em; text-transform:uppercase; text-align:right;">LTP</div>
-                    <div style="font-size:9px; font-weight:700; color:#7a8394;
-                    letter-spacing:0.08em; text-transform:uppercase; text-align:right;">Chg %</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Stock</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em;">Move</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">LTP</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.08em; text-align:right;">Chg %</div>
                   </div>
                   
                   {stock_rows_html}
                   
-                  <div style="padding:8px 14px 8px 32px; font-size:10px; color:#7a8394;
-                  background:#fafbfc;">
+                  <div style="padding:8px 14px 8px 32px; font-size:10px; color:#7a8394; background:#fafbfc;">
                     📋 Showing top 8 of {total_count} stocks in {sector_name} • Sorted by Absolute Momentum
                   </div>
                 </div>
