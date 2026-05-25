@@ -20,11 +20,17 @@ page_header("Sector Performance — NSE Indices")
 # Global CSS Overrides to wipe out all gray tones and force a pure white layout canvas
 st.markdown("""
 <style>
-    /* 1. Remove the huge default padding space from the top and bottom of the main dashboard canvas */
+    /* 1. LOCK TOP PADDING EXACTLY TO 2REM AND CLEAR ACCUMULATED WHITESPACE */
     div[data-testid="stAppViewBlockContainer"] {
         padding-top: 2rem !important;
         padding-bottom: 1rem !important;
         min-width: 100% !important;
+    }
+    
+    /* Remove default main container header spacing blocks */
+    header[data-testid="stHeader"] {
+        background-color: transparent !important;
+        height: 2rem !important;
     }
     
     /* 2. Force the main app body wrapper background color to pure white */
@@ -97,8 +103,6 @@ st.markdown("""
         margin-bottom: 0px !important;
     }
 </style>
-
-
 """, unsafe_allow_html=True)
 
 today = datetime.date.today()
