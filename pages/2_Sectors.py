@@ -235,26 +235,24 @@ for s in sector_data:
     bar_w = (abs(s['change']) / max_val) * 100
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign = "+" if s['change'] >= 0 else ""
-    icon = "−" if is_expanded else "+"
-    
-    card_style = "sector-card-active" if is_expanded else "sector-card"
-    
-    # We use query parameters to trigger state updates instantly when clicking anywhere on the line
-    link_url = f"?expanded={s['name']}" if not is_expanded else "?"
-    
-    # Check if a click happened via URL interaction
-    if "expanded" in st.query_params and st.query_params["expanded"] == s['name'] and not is_expanded:
-        st.session_state["expanded_sector"] = s['name']
-        st.query_params.clear()
-        st.rerun()
-    elif "expanded" in st.query_params and is_expanded:
-        st.session_state["expanded_sector"] = None
-        st.query_params.clear()
-        st.rerun()
+   # ✅ NEW CODE - Direct session state toggle
+icon = "−" if is_expanded else "+"
 
-    # HTML Card is wrapped inside a clean hyperlink. No buttons, no default borders.
-    st.markdown(f"""
-    <a href="{link_url}" target="_self" class="sector-row-link">
+card_style = "sector-card-active" if is_expanded else "sector-card"
+
+# Callback function to toggle expansion
+def toggle_sector(sector_name):
+    current = st.session_state.get("expanded_sector")
+    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
+
+# Create invisible button with callback
+if st.button("", key=f"expand_{s['name']}", use_container_width=True, 
+             on_click=toggle_sector, args=(s['name'],)):
+    pass
+
+# HTML Card (NO href, NO query params)
+st.markdown(f"""
+<div class="sector-row-link" style="cursor: pointer;">
         <div class="{card_style}">
             <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
             <div class="bar-track">
