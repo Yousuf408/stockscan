@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Eliminating all native Streamlit button borders & wrappers
+# Global CSS Overrides — Completely scrubbing native Streamlit button boxes
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,14 +64,25 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── STAGE OVERLAY FOR TRANSPARENT ACTION MATRIX ── */
+    /* ── STRIPPING STREAMLIT BUTTON WRAPPER COMPLETELY ── */
     div.clickable-row-wrapper {
         position: relative;
         margin-bottom: 6px;
     }
     
-    /* Stripping down native button block frameworks to be fully invisible */
-    div.clickable-row-wrapper div[data-testid="stButton"] button {
+    /* Target the base container block of the button to be zeroed out */
+    div.clickable-row-wrapper div[data-testid="stButton"] {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* Target the button tag specifically inside to act as a 100% transparent click canvas over our HTML */
+    div.clickable-row-wrapper div[data-testid="stButton"] > button {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
@@ -80,26 +91,27 @@ st.markdown("""
         background: transparent !important;
         border: none !important;
         border-radius: 8px !important;
-        color: transparent !important;
         box-shadow: none !important;
+        color: transparent !important;
         padding: 0 !important;
         margin: 0 !important;
         cursor: pointer !important;
         z-index: 5 !important;
+        outline: none !important;
     }
     
-    /* Block default interactive outline glows on focus */
-    div.clickable-row-wrapper div[data-testid="stButton"] button:focus,
-    div.clickable-row-wrapper div[data-testid="stButton"] button:active,
-    div.clickable-row-wrapper div[data-testid="stButton"] button:hover {
+    /* Ensure no focus outlines or border shades return on hover or click actions */
+    div.clickable-row-wrapper div[data-testid="stButton"] > button:hover,
+    div.clickable-row-wrapper div[data-testid="stButton"] > button:focus,
+    div.clickable-row-wrapper div[data-testid="stButton"] > button:active {
         background: transparent !important;
         border: none !important;
-        color: transparent !important;
         box-shadow: none !important;
+        color: transparent !important;
         outline: none !important;
     }
 
-    /* Clean Card Component UI layouts */
+    /* Clean Card Component Layouts matching your exact dashboard setup */
     .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
@@ -263,7 +275,7 @@ for s in sector_data:
     
     card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Render Custom Styled Row with an integrated right action icon matching your layout
+    # Custom Rendered Row Card (The whole green box zone)
     st.markdown(f"""
     <div class="clickable-row-wrapper">
         <div class="{card_style}">
@@ -278,14 +290,14 @@ for s in sector_data:
         </div>
     """, unsafe_allow_html=True)
     
-    # Overlaid 100% Invisible Event Trigger
+    # Completely Invisible Overlay Click Framework 
     if st.button("", key=f"inv_btn_{s['name']}"):
         st.session_state["expanded_sector"] = None if is_expanded else s['name']
         st.rerun()
         
-    st.markdown("</div>", unsafe_allow_html=True) # Closes clickable-row-wrapper Safely
+    st.markdown("</div>", unsafe_allow_html=True) # Close wrapper cleanly
         
-    # Render underlying stocks inline inside an accordion dropdown block
+    # Dropdown stock performance metrics drawer
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
         stocks_list = fetch_sector_stocks_live(s['name'])
