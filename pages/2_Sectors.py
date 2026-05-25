@@ -18,19 +18,28 @@ sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
 # Global CSS Overrides to wipe out all gray tones and force a pure white layout canvas
-st.markdown("""
 <style>
-    /* 1. LOCK TOP PADDING EXACTLY TO 2REM AND CLEAR ACCUMULATED WHITESPACE */
-    div[data-testid="stAppViewBlockContainer"] {
-        padding-top: 1rem !important;
-        padding-bottom: 0rem !important;
-        min-width: 100% !important;
+    /* 1. FORCE TOP PADDING RESET ACROSS ALL INTERNAL STREAMLIT WRAPPER LAYERS */
+    div[data-testid="stAppViewBlockContainer"],
+    .main .block-container,
+    div[data-testid="stVerticalBlock"] > div:first-child {
+        padding-top: 2rem !important;
+        padding-bottom: 1rem !important;
+        margin-top: 0px !important;
     }
     
-    /* Remove default main container header spacing blocks */
+    /* Completely collapse the empty header bar area */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
-        height: 0rem !important;
+        height: 0px !important;
+        min-height: 0px !important;
+        display: none !important;
+    }
+
+    /* Pull the very first horizontal widget row up to eliminate any lingering margin dead-zones */
+    div[data-testid="stHorizontalBlock"] {
+        margin-top: 0px !important;
+        padding-top: 0px !important;
     }
     
     /* 2. Force the main app body wrapper background color to pure white */
