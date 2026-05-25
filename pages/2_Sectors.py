@@ -218,7 +218,7 @@ html = f"""<!DOCTYPE html><html><head>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{ background:#ffffff; font-family:'Inter',sans-serif; }}
-.chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
+.chart {{ background:#ffffff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
   background:#fafbfc; border-bottom:1px solid #ffffff;
