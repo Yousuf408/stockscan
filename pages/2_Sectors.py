@@ -387,7 +387,7 @@ max_chg = max(abs(s['change']) for s in data) or 1
 st.markdown(f"""
 <div style="background:#fafbfc; border:1px solid #e0e3e8; border-radius:10px 10px 0 0;
 padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
-display:flex; justify-content:space-between; align-items:center;">
+display:flex; justify-content:space-between; align-items:center; border-bottom: none;">
   <span>📅 {period_label}</span>
   <span style="font-weight:400;">Updated: {updated}</span>
 </div>
@@ -401,17 +401,16 @@ for s in data:
     sign        = "+" if s['change'] >= 0 else ""
     is_expanded = st.session_state["expanded_sector"] == sector_name
 
-    # Create a unified structural container for this row and its potential child panel
-    row_container = st.container()
-    
-    with row_container:
-        # Layout columns inside the active container block
+    # FIX 1: Wrap each row and its expanded layout inside an isolated container context
+    with st.container():
+        # Setup column layout for the sector header line
         row_col, btn_col = st.columns([0.92, 0.08])
 
         with row_col:
             st.markdown(f"""
             <div style="display:grid; grid-template-columns:110px 1fr 75px;
             align-items:center; gap:12px; padding:10px 14px;
+            border-left: 1px solid #e0e3e8; border-right: 1px solid #e0e3e8;
             border-bottom:1px solid #f0f2f5;
             background:{'#f5fdf8' if is_expanded else '#ffffff'};">
               <div style="font-size:12px; font-weight:700; color:#3d4452;
@@ -434,20 +433,21 @@ for s in data:
                     st.session_state["expanded_sector"] = sector_name
                 st.rerun()
 
-        # ── Inline Drill-Down Panel (Scoped tightly to the container block) ──
+        # ── Inline Drill-Down Panel (Rendered cleanly within the structural wrapper) ──
         if is_expanded:
             with st.spinner(f"Loading {sector_name} stocks..."):
                 stocks = fetch_stocks_for_sector(sector_name, limit=8)
 
             if not stocks:
                 st.markdown(f"""
-                <div style="padding:10px 14px; font-size:12px; color:#7a8394;
-                background:#fafbfc; border-bottom:1px solid #f0f2f5; 
+                <div style="padding:12px 14px; font-size:12px; color:#7a8394;
+                background:#fafbfc; border-bottom:1px solid #e0e3e8; 
                 border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; margin-top:-2px;">
-                  No stock data available for {sector_name} right now.
+                  ⚠️ No active stock components found inside the sector universe mapping.
                 </div>
                 """, unsafe_allow_html=True)
             else:
+                # Compile individual stock element entries cleanly before parsing
                 stock_rows_html = ""
                 max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
 
@@ -457,8 +457,8 @@ for s in data:
                     s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
 
                     stock_rows_html += f"""
-                    <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
-                    align-items:center; gap:10px; padding:7px 14px 7px 32px;
+                    <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
+                    align-items:center; gap:12px; padding:8px 14px 8px 32px;
                     border-bottom:1px solid #f0f2f5; background:#fafffe;">
                       <div style="font-size:11px; font-weight:700; color:#3d4452;
                       font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
@@ -467,7 +467,7 @@ for s in data:
                         background:{s_color}; border-radius:3px; opacity:0.8;"></div>
                       </div>
                       <div style="font-size:11px; color:#7a8394; text-align:right;
-                      font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.1f}</div>
+                      font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.2f}</div>
                       <div style="font-size:11px; font-weight:700; text-align:right;
                       color:{s_color}; font-family:'JetBrains Mono',monospace;">
                         {s_sign}{st_data['change']:.2f}%
@@ -477,13 +477,13 @@ for s in data:
 
                 total_count = len(get_stocks_by_sector(sector_name))
 
-                # Inject directly into the explicit outer layout wrapper
+                # FIX 2: Render the complete panel in a single markdown call to ensure proper browser compilation
                 st.markdown(f"""
                 <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
-                border-bottom:1px solid #e0e3e8; overflow:hidden; background:#fafffe; margin-top:-2px;">
+                border-bottom:1px solid #e0e3e8; background:#fafffe; margin-top:-2px; width: 100%;">
                   
-                  <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
-                  gap:10px; padding:6px 14px 6px 32px; background:#f0faf5;
+                  <div style="display:grid; grid-template-columns:120px 1fr 80px 80px;
+                  gap:12px; padding:6px 14px 6px 32px; background:#f0faf5;
                   border-bottom:1px solid #e0e3e8;">
                     <div style="font-size:9px; font-weight:700; color:#7a8394;
                     letter-spacing:0.08em; text-transform:uppercase;">Stock</div>
@@ -497,9 +497,9 @@ for s in data:
                   
                   {stock_rows_html}
                   
-                  <div style="padding:7px 14px 7px 32px; font-size:10px; color:#7a8394;
+                  <div style="padding:8px 14px 8px 32px; font-size:10px; color:#7a8394;
                   background:#fafbfc;">
-                    Showing top 8 of {total_count} stocks in {sector_name}
+                    📋 Showing top 8 of {total_count} stocks in {sector_name} • Sorted by Absolute Momentum
                   </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -512,7 +512,6 @@ color:#7a8394; text-align:right;">
   TradeSentry • {updated}
 </div>
 """, unsafe_allow_html=True)
-
 
 # ──────────────────────────────────────────────────────────────────
 # SECTION 10 — Supplementary Data Table Expander
