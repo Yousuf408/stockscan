@@ -17,128 +17,89 @@ page_header("Sector Performance — NSE Indices")
 
 today = datetime.date.today()
 
-# ── Top bar: Refresh button ───────────────────────────────────────────────────
-col_title, col_refresh = st.columns([11, 1])
-with col_refresh:
-    if st.button("⟳ Refresh", key="sector_refresh"):
-        st.cache_data.clear()
-        st.rerun()
+# ── Timeframe state ───────────────────────────────────────────────────────────
+TIMEFRAMES = {
+    "1 Day":    1,
+    "1 Week":   7,
+    "1 Month":  30,
+    "3 Months": 90,
+    "6 Months": 180,
+    "1 Year":   365,
+}
 
-# ── Mode selector + single calendar ──────────────────────────────────────────
-mode_col, cal_col, spacer = st.columns([2, 2, 6])
+if "selected_tf" not in st.session_state:
+    st.session_state["selected_tf"] = "1 Day"
+if "do_refresh" not in st.session_state:
+    st.session_state["do_refresh"] = False
 
-with mode_col:
-    view_mode = st.radio(
-        "Mode",
-        ["Today", "Custom Date"],
-        label_visibility="collapsed",
-        key="view_mode"
-    )
-
-# Only show calendar when Custom Date is selected
-date_from = None
-if view_mode == "Custom Date":
-    with cal_col:
-        date_from = st.date_input(
-            "Start date",
-            value=today - datetime.timedelta(days=30),
-            min_value=datetime.date(2010, 1, 1),
-            max_value=today - datetime.timedelta(days=1),
-            label_visibility="collapsed",
-            key="date_from"
-        )
-
-st.divider()
-
-# ── TODAY mode: live fetch via Yahoo Finance chart API (original code) ────────
+# ── Data fetchers ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
-def fetch_sector_data_today():
+def fetch_today():
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            url = (
-                f"https://query1.finance.yahoo.com/v8/finance/chart/"
-                f"{requests.utils.quote(symbol)}?interval=1d&range=1d"
-            )
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                   f"{requests.utils.quote(symbol)}?interval=1d&range=1d")
             resp = requests.get(url, headers=headers, timeout=5)
             if not resp.ok:
                 continue
-            meta = (
-                resp.json()
-                .get('chart', {})
-                .get('result', [{}])[0]
-                .get('meta', {})
-            )
+            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
             if meta:
                 cp = meta.get('regularMarketPrice', 0)
                 pc = meta.get('chartPreviousClose', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
-                data.append({
-                    'name': name,
-                    'change': round(change, 2),
-                    'direction': 'up' if change >= 0 else 'down',
-                    'ltp': round(cp, 2),
-                    'prev': round(pc, 2)
-                })
+                data.append({'name': name, 'change': round(change, 2),
+                              'direction': 'up' if change >= 0 else 'down',
+                              'ltp': round(cp, 2), 'prev': round(pc, 2)})
         except:
             continue
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-
-# ── CUSTOM DATE mode: fetch via yfinance (from_date → today) ─────────────────
 @st.cache_data(ttl=300)
-def fetch_sector_data_range(from_date: str, to_date: str):
+def fetch_range(from_date: str, to_date: str):
     data = []
     end = (datetime.date.fromisoformat(to_date) + datetime.timedelta(days=1)).isoformat()
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(start=from_date, end=end, interval="1d", auto_adjust=True)
+            hist = yf.Ticker(symbol).history(start=from_date, end=end,
+                                             interval="1d", auto_adjust=True)
             if hist.empty:
                 continue
-            if len(hist) == 1:
-                open_p  = hist['Open'].iloc[0]
-                close_p = hist['Close'].iloc[0]
-                change  = ((close_p - open_p) / open_p * 100) if open_p else 0.0
-                data.append({
-                    'name': name, 'change': round(change, 2),
-                    'direction': 'up' if change >= 0 else 'down',
-                    'ltp': round(close_p, 2), 'prev': round(open_p, 2)
-                })
-                continue
-            start_close = hist['Close'].iloc[0]
-            end_close   = hist['Close'].iloc[-1]
-            change = ((end_close - start_close) / start_close * 100) if start_close else 0.0
-            data.append({
-                'name': name, 'change': round(change, 2),
-                'direction': 'up' if change >= 0 else 'down',
-                'ltp': round(end_close, 2), 'prev': round(start_close, 2)
-            })
+            s = hist['Close'].iloc[0]
+            e = hist['Close'].iloc[-1]
+            change = ((e - s) / s * 100) if s else 0.0
+            data.append({'name': name, 'change': round(change, 2),
+                         'direction': 'up' if change >= 0 else 'down',
+                         'ltp': round(e, 2), 'prev': round(s, 2)})
         except:
             continue
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
+# ── Fetch based on selected timeframe ────────────────────────────────────────
+tf = st.session_state["selected_tf"]
+days = TIMEFRAMES[tf]
 
-# ── Fetch ─────────────────────────────────────────────────────────────────────
-if view_mode == "Today":
+if days == 1:
     with st.spinner("Fetching live sector data..."):
-        data = fetch_sector_data_today()
+        data = fetch_today()
+    from_dt = today
     period_label = "Today's Performance"
-    table_cols   = ['Sector', 'LTP', 'Prev Close', 'Change %']
+    col_start = "Prev Close"
 else:
-    with st.spinner(f"Fetching data from {date_from} to {today}..."):
-        data = fetch_sector_data_range(str(date_from), str(today))
-    period_label = f"Performance: {date_from.strftime('%d %b %Y')} → {today.strftime('%d %b %Y')}"
-    table_cols   = ['Sector', 'End Price', 'Start Price', 'Change %']
+    from_dt = today - datetime.timedelta(days=days)
+    with st.spinner(f"Fetching {tf} sector data..."):
+        data = fetch_range(str(from_dt), str(today))
+    period_label = f"{from_dt.strftime('%d %b %Y')}  →  {today.strftime('%d %b %Y')}"
+    col_start = "Start Price"
 
 if not data:
-    st.error("Could not fetch sector data. Try a different date or check your connection.")
+    st.error("Could not fetch sector data. Please try again.")
     st.stop()
 
-# ── Build HTML chart (original rendering logic, untouched) ────────────────────
+# ── Build chart values ────────────────────────────────────────────────────────
 gainers = [s for s in data if s['direction'] == 'up']
 losers  = [s for s in data if s['direction'] == 'down']
 top     = data[0]
@@ -157,53 +118,223 @@ for s in data:
       <div style="font-size:11px;font-weight:700;color:#3d4452;
       font-family:'JetBrains Mono',monospace;">{s['name']}</div>
       <div style="height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden;">
-        <div style="width:{bar_w:.1f}%;height:100%;background:{color};
-        border-radius:4px;"></div>
+        <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
       </div>
-      <div style="font-size:12px;font-weight:700;text-align:right;
-      color:{color};font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
+      <div style="font-size:12px;font-weight:700;text-align:right;color:{color};
+      font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
     </div>"""
+
+# Build JS callback string for timeframe buttons
+tf_options_js = "\n".join([
+    f'<option value="{k}" {"selected" if k == tf else ""}>{k}</option>'
+    for k in TIMEFRAMES
+])
 
 html = f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
 body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
-.metrics {{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }}
-.card {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
-  padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
-.label {{ font-size:10px; font-weight:600; letter-spacing:0.1em;
-  text-transform:uppercase; color:#7a8394; margin-bottom:6px; }}
-.value {{ font-size:15px; font-weight:700; font-family:'JetBrains Mono',monospace; }}
-.chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
-  overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
-.chart-header {{ padding:10px 14px; font-size:11px; font-weight:600;
-  color:#7a8394; background:#fafbfc; border-bottom:1px solid #f0f2f5; }}
-.footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
-  border-top:1px solid #f0f2f5; }}
+
+.top-row {{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:10px;
+  margin-bottom:14px;
+  align-items:stretch;
+}}
+
+.card {{
+  background:#fff;
+  border:1px solid #e0e3e8;
+  border-radius:10px;
+  padding:14px 18px;
+  box-shadow:0 1px 3px rgba(0,0,0,0.05);
+}}
+
+.label {{
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  color:#7a8394;
+  margin-bottom:6px;
+}}
+
+.value {{
+  font-size:15px;
+  font-weight:700;
+  font-family:'JetBrains Mono',monospace;
+}}
+
+/* Breadth card with controls inline */
+.breadth-card {{
+  background:#fff;
+  border:1px solid #e0e3e8;
+  border-radius:10px;
+  padding:14px 18px;
+  box-shadow:0 1px 3px rgba(0,0,0,0.05);
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}}
+
+.breadth-top {{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}}
+
+.controls {{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+}}
+
+select {{
+  flex:1;
+  padding:5px 8px;
+  border:1px solid #e0e3e8;
+  border-radius:6px;
+  font-size:12px;
+  font-family:'Inter',sans-serif;
+  color:#3d4452;
+  background:#fafbfc;
+  cursor:pointer;
+  outline:none;
+}}
+
+select:focus {{
+  border-color:#4f8ef7;
+}}
+
+.refresh-btn {{
+  padding:5px 10px;
+  background:#fff;
+  border:1px solid #e0e3e8;
+  border-radius:6px;
+  font-size:12px;
+  cursor:pointer;
+  color:#3d4452;
+  white-space:nowrap;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  transition:background 0.15s;
+}}
+
+.refresh-btn:hover {{ background:#f0f2f5; }}
+
+.chart {{
+  background:#fff;
+  border:1px solid #e0e3e8;
+  border-radius:10px;
+  overflow:hidden;
+  box-shadow:0 1px 3px rgba(0,0,0,0.05);
+}}
+
+.chart-header {{
+  padding:10px 14px;
+  font-size:11px;
+  font-weight:600;
+  color:#7a8394;
+  background:#fafbfc;
+  border-bottom:1px solid #f0f2f5;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}}
+
+.footer {{
+  padding:8px 12px;
+  font-size:10px;
+  color:#7a8394;
+  text-align:right;
+  border-top:1px solid #f0f2f5;
+}}
 </style></head><body>
-<div class="metrics">
-  <div class="card"><div class="label">Top Gainer</div>
-    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div></div>
-  <div class="card"><div class="label">Top Loser</div>
-    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div></div>
-  <div class="card"><div class="label">Breadth</div>
-    <div class="value"><span style="color:#00a854;">{len(gainers)}↑</span>
-    <span style="color:#cdd1d8;"> / </span>
-    <span style="color:#e53935;">{len(losers)}↓</span></div></div>
+
+<div class="top-row">
+  <!-- Top Gainer -->
+  <div class="card">
+    <div class="label">Top Gainer</div>
+    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
+  </div>
+
+  <!-- Top Loser -->
+  <div class="card">
+    <div class="label">Top Loser</div>
+    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+  </div>
+
+  <!-- Breadth + Controls -->
+  <div class="breadth-card">
+    <div>
+      <div class="label">Breadth</div>
+      <div class="value">
+        <span style="color:#00a854;">{len(gainers)}↑</span>
+        <span style="color:#cdd1d8;"> / </span>
+        <span style="color:#e53935;">{len(losers)}↓</span>
+      </div>
+    </div>
+    <div class="controls">
+      <select id="tfSelect" onchange="applyTF()">
+        {tf_options_js}
+      </select>
+      <button class="refresh-btn" onclick="doRefresh()">⟳ Refresh</button>
+    </div>
+  </div>
 </div>
+
 <div class="chart">
-  <div class="chart-header">📅 {period_label}</div>
+  <div class="chart-header">
+    <span>📅 {period_label}</span>
+    <span style="font-weight:400;">Updated: {updated}</span>
+  </div>
   {rows_html}
-  <div class="footer">Updated: {updated}</div>
 </div>
+
+<script>
+  function applyTF() {{
+    const tf = document.getElementById('tfSelect').value;
+    window.parent.postMessage({{type:'streamlit:setComponentValue', value:{{action:'tf', tf:tf}}}}, '*');
+  }}
+  function doRefresh() {{
+    window.parent.postMessage({{type:'streamlit:setComponentValue', value:{{action:'refresh', tf: document.getElementById('tfSelect').value}}}}, '*');
+  }}
+</script>
 </body></html>"""
 
-components.html(html, height=len(data) * 40 + 220)
+# Render HTML component and capture interaction
+result = components.html(html, height=len(data) * 40 + 260)
 
-# ── Data Table (original expander, unchanged) ─────────────────────────────────
+# ── Streamlit-side controls (hidden, driven by session state) ─────────────────
+# Since postMessage from iframe has Streamlit limitations, use st widgets below
+# placed invisibly — user interacts via the HTML dropdowns above.
+st.markdown("<div style='display:none'>", unsafe_allow_html=True)
+
+c1, c2 = st.columns([3, 1])
+with c1:
+    chosen = st.selectbox("TF", list(TIMEFRAMES.keys()),
+                          index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
+                          key="_tf_select_hidden",
+                          label_visibility="collapsed")
+with c2:
+    if st.button("Refresh", key="_refresh_hidden"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+if chosen != st.session_state["selected_tf"]:
+    st.session_state["selected_tf"] = chosen
+    st.rerun()
+
+# ── Data Table ────────────────────────────────────────────────────────────────
 with st.expander("📋 Data Table"):
     df = pd.DataFrame(data)[['name', 'ltp', 'prev', 'change']]
-    df.columns = table_cols
+    df.columns = ['Sector', 'LTP', col_start, 'Change %']
     df['Change %'] = df['Change %'].apply(lambda x: f"{x:+.2f}%")
     st.dataframe(df, use_container_width=True, hide_index=True)
