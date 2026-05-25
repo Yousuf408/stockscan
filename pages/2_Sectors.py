@@ -6,10 +6,12 @@ import yfinance as yf
 import time
 import datetime
 import sys, os
+
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from styles import apply_styles, sidebar_brand, page_header
 from stocks import SECTOR_YAHOO
 
+# 1. Page Configuration
 st.set_page_config(page_title="TradeSentry — Sectors", layout="wide", page_icon="📊")
 apply_styles()
 sidebar_brand()
@@ -29,7 +31,7 @@ TIMEFRAMES = {
 if "selected_tf" not in st.session_state:
     st.session_state["selected_tf"] = "1 Day"
 
-# ── Data fetchers ─────────────────────────────────────────────────────────────
+# 2. Data Fetchers
 @st.cache_data(ttl=30)
 def fetch_today():
     data = []
@@ -47,8 +49,8 @@ def fetch_today():
                 pc = meta.get('chartPreviousClose', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
                 data.append({'name': name, 'change': round(change, 2),
-                              'direction': 'up' if change >= 0 else 'down',
-                              'ltp': round(cp, 2), 'prev': round(pc, 2)})
+                             'direction': 'up' if change >= 0 else 'down',
+                             'ltp': round(cp, 2), 'prev': round(pc, 2)})
         except:
             continue
     data.sort(key=lambda x: x['change'], reverse=True)
@@ -76,10 +78,7 @@ def fetch_range(from_date: str, to_date: str):
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-# ── 5-box control row (native Streamlit so dropdown actually works) ────────────
-c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
-
-# Fetch data first so we can show live values in the cards
+# 3. Handle Data Calculations
 tf   = st.session_state["selected_tf"]
 days = TIMEFRAMES[tf]
 
@@ -105,56 +104,43 @@ top     = data[0]
 bottom  = data[-1]
 updated = time.strftime("%H:%M:%S")
 
-# ── Render the 5 native Streamlit metric/control boxes ────────────────────────
+# 4. Interactive Layout Control Grid
+# Using clean metric-driven spacing allocations
+c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
+
 with c1:
     st.markdown(f"""
-    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
-    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
-      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Gainer</div>
-      <div style="font-size:15px;font-weight:700;color:#00a854;
-      font-family:'JetBrains Mono',monospace;">▲ {top['name']} {top['change']:+.2f}%</div>
+    <div class="ts-metric">
+      <div class="ts-metric-label">Top Gainer</div>
+      <div class="ts-metric-value" style="color:var(--green); font-size:16px;">▲ {top['name']} {top['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c2:
     st.markdown(f"""
-    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
-    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
-      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Loser</div>
-      <div style="font-size:15px;font-weight:700;color:#e53935;
-      font-family:'JetBrains Mono',monospace;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+    <div class="ts-metric">
+      <div class="ts-metric-label">Top Loser</div>
+      <div class="ts-metric-value" style="color:var(--red); font-size:16px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c3:
     st.markdown(f"""
-    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
-    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
-      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Breadth</div>
-      <div style="font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;">
-        <span style="color:#00a854;">{len(gainers)}↑</span>
-        <span style="color:#cdd1d8;"> / </span>
-        <span style="color:#e53935;">{len(losers)}↓</span>
+    <div class="ts-metric">
+      <div class="ts-metric-label">Breadth</div>
+      <div class="ts-metric-value" style="font-size:16px;">
+        <span style="color:var(--green);">{len(gainers)}↑</span>
+        <span style="color:var(--border2);"> / </span>
+        <span style="color:var(--red);">{len(losers)}↓</span>
       </div>
     </div>""", unsafe_allow_html=True)
 
+# Fixed alignment wrappers using native elements 
 with c4:
-    st.markdown("""
-    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
-    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
-      text-transform:uppercase;color:#7a8394;margin-bottom:6px;">Timeframe</div>
-    """, unsafe_allow_html=True)
-
     chosen = st.selectbox(
-        "Timeframe",
+        "TIMEFRAME",
         list(TIMEFRAMES.keys()),
         index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
-        label_visibility="collapsed",
         key="tf_select"
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if chosen != st.session_state["selected_tf"]:
         st.session_state["selected_tf"] = chosen
@@ -162,19 +148,15 @@ with c4:
         st.rerun()
 
 with c5:
-    st.markdown("""
-    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
-    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;
-    display:flex;align-items:center;justify-content:center;">
-    """, unsafe_allow_html=True)
+    # Invisible spacer to precisely match selectbox label heights
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
-# ── Bar chart HTML (pure display, no controls inside) ─────────────────────────
+# 5. Native Bar Chart Generation Engine
 max_chg = max(abs(s['change']) for s in data) or 1
 
 rows_html = ""
@@ -183,15 +165,15 @@ for s in data:
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign  = "+" if s['change'] >= 0 else ""
     rows_html += f"""
-    <div style="display:grid;grid-template-columns:90px 1fr 68px;align-items:center;
-    gap:12px;padding:8px 12px;border-bottom:1px solid #f0f2f5;">
-      <div style="font-size:11px;font-weight:700;color:#3d4452;
+    <div style="display:grid;grid-template-columns:110px 1fr 75px;align-items:center;
+    gap:12px;padding:10px 14px;border-bottom:1px solid #f0f2f5;">
+      <div style="font-size:12px;font-weight:700;color:#3d4452;
       font-family:'JetBrains Mono',monospace;">{s['name']}</div>
       <div style="height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden;">
         <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
       </div>
       <div style="font-size:12px;font-weight:700;text-align:right;color:{color};
-      font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
+      font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
     </div>"""
 
 html = f"""<!DOCTYPE html><html><head>
@@ -201,7 +183,7 @@ html = f"""<!DOCTYPE html><html><head>
 body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
 .chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
-.chart-header {{ padding:10px 14px; font-size:11px; font-weight:600; color:#7a8394;
+.chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
   background:#fafbfc; border-bottom:1px solid #f0f2f5;
   display:flex; justify-content:space-between; align-items:center; }}
 .footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
@@ -217,9 +199,9 @@ body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
 </div>
 </body></html>"""
 
-components.html(html, height=len(data) * 40 + 100)
+components.html(html, height=len(data) * 44 + 100)
 
-# ── Data Table ────────────────────────────────────────────────────────────────
+# 6. Supplementary Data Segment
 with st.expander("📋 Data Table"):
     df = pd.DataFrame(data)[['name', 'ltp', 'prev', 'change']]
     df.columns = ['Sector', 'LTP', col_start, 'Change %']
