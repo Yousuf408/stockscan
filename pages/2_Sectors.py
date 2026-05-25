@@ -25,9 +25,8 @@ st.markdown("""
         background-color: #ffffff !important;
     }
     
-    /* 2. Style columns 4 and 5 to look exactly like your metrics cards */
-    div[data-testid="stHorizontalBlock"] > div:nth-child(4),
-    div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
+    /* 2. Style column 4 to look exactly like your metrics cards */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
         border-radius: 10px !important;
@@ -40,23 +39,41 @@ st.markdown("""
         justify-content: center;
     }
 
-    /* 3. Force the native Streamlit selectbox component inner frame to be pure white */
+    /* 3. REFRESH BUTTON FIX: Stretch column 5 to fit text and remove the outer card background */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0px !important;
+        min-height: 90px !important;
+        max-height: 90px !important;
+        min-width: 110px !important; /* Forces the column wide enough to keep text on one line */
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+
+    /* 4. Force the native Streamlit selectbox component inner frame to be pure white */
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
         background-color: #ffffff !important;
         border: none !important;
     }
     
-    /* 4. Remove default nested padding under inputs inside the layout cards */
+    /* 5. Remove default nested padding under inputs inside the layout cards */
     div[data-testid="stHorizontalBlock"] div[data-testid="stVerticalBlock"] {
         gap: 0rem !important;
     }
 
-    /* 5. Align the refresh action button cleanly within its column boundary frame */
+    /* 6. Turn the button itself into the clean white card container */
     div[data-testid="stHorizontalBlock"] button[key="refresh_btn"] {
-        margin-top: 18px !important;
-        height: 38px !important;
+        height: 42px !important;
         background-color: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        font-size: 14px !important;
+        color: #3d4452 !important;
+        margin-bottom: 0px !important;
     }
 </style>
 """, unsafe_allow_html=True)
