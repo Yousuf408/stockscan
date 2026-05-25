@@ -58,10 +58,10 @@ if start_btn:
     
     try:
         # 1. Streamlit Secrets se credentials securely call karna
-        api_key = st.secrets["QFectj5C"]
-        username = st.secrets["IIRA29771"]
-        password = st.secrets["1993"]
-        totp_secret = st.secrets["JFTG3DYADWLYSW6FC6RVV4THWM"] # Google Authenticator ka Secret Key
+        api_key = st.secrets["API_KEY"]
+        username = st.secrets["CLIENT_CODE"]
+        password = st.secrets["PASSWORD"]
+        totp_secret = st.secrets["TOTP_SECRET"] # Google Authenticator ka Secret Key
 
         # 2. SmartConnect Session Initialize karna
         smartApi = SmartConnect(api_key=api_key)
