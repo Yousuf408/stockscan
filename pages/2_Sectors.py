@@ -191,6 +191,8 @@ with c4:
         st.rerun()
 
 with c5:
+    # Invisible header label layout spacer to push the refresh button down to the exact baseline of the selectbox input
+    st.markdown('<div style="font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:transparent; margin-bottom:2px; user-select:none;">Action</div>', unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
