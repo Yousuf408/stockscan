@@ -22,6 +22,15 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
+    /* Kill Streamlit vertical gaps between sector button+card pairs */
+    div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
+    div[data-testid="element-container"] {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
@@ -63,12 +72,13 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
+
     /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
        The button is the actual click target. The HTML card overlays on top.
        pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 52px !important;
+        height: 44px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -81,46 +91,54 @@ st.markdown("""
     /* ── CARD overlays on top of the invisible button ── */
     .sector-card {
         background: #ffffff;
-        border: 1px solid #e0e3e8;
-        border-radius: 8px;
-        padding: 14px 18px;
+        border-left: 1px solid #e0e3e8;
+        border-right: 1px solid #e0e3e8;
+        border-top: 1px solid #e0e3e8;
+        border-bottom: none;
+        border-radius: 0px;
+        padding: 10px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -58px;
-        margin-bottom: 8px;
+        margin-top: -50px;
+        margin-bottom: 0px;
         pointer-events: none;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: none;
         position: relative;
         z-index: 1;
     }
 
     .sector-card-active {
         background: #f5fdf8;
-        border: 1px solid #c8e6c9;
+        border-left: 1px solid #c8e6c9;
+        border-right: 1px solid #c8e6c9;
+        border-top: 1px solid #c8e6c9;
         border-bottom: none;
-        border-radius: 8px 8px 0 0;
-        padding: 14px 18px;
+        border-radius: 0px;
+        padding: 10px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -58px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        box-shadow: none;
         position: relative;
         z-index: 1;
     }
 
+    /* ── Expanded stock breakdown panel ── */
     .breakdown-box {
         background: #fafbfc;
-        border: 1px solid #e0e3e8;
+        border-left: 3px solid #c8e6c9;
+        border-right: 3px solid #c8e6c9;
         border-top: none;
-        border-radius: 0 0 8px 8px;
-        padding: 12px 24px;
-        margin-bottom: 8px;
+        border-bottom: none;
+        border-radius: 0px;
+        margin: 0 1%;
+        padding: 10px 16px 14px 16px;
     }
 
     .bar-track {
@@ -131,7 +149,7 @@ st.markdown("""
     }
 
     .expand-icon {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 400;
         color: #7a8394;
         text-align: right;
@@ -175,7 +193,7 @@ def fetch_sector_stocks_live(sector_name):
         return []
     headers = {'User-Agent': 'Mozilla/5.0'}
     results = []
-    for s in stocks[:15]:
+    for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
@@ -236,7 +254,10 @@ def toggle_sector(sector_name):
 # 6. Sector rows — button is the click target, card HTML overlays on top
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
-for s in sector_data:
+st.markdown('<div style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
+
+for idx, s in enumerate(sector_data):
+    is_last = (idx == len(sector_data) - 1)
     is_expanded = (st.session_state["expanded_sector"] == s['name'])
     bar_w  = (abs(s['change']) / max_val) * 100
     color  = "#00a854" if s['direction'] == 'up' else "#e53935"
@@ -277,25 +298,36 @@ for s in sector_data:
         if not stocks_list:
             st.markdown("<div style='font-size:12px; color:#7a8394; padding:12px 0;'>No constituents available.</div>", unsafe_allow_html=True)
         else:
+            # Header row
             st.markdown("""
-            <div style="display:grid; grid-template-columns:1fr 120px 100px;
-            padding:6px 0; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
+            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+            gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
             </div>
             """, unsafe_allow_html=True)
 
+            # Scale bars relative to max change among top 5 stocks
+            max_stk_chg = max((abs(stk['change']) for stk in stocks_list), default=1) or 1
+
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign  = "+" if stk['change'] >= 0 else ""
+                stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
                 st.markdown(f"""
-                <div style="display:grid; grid-template-columns:1fr 120px 100px;
-                align-items:center; padding:9px 0; border-bottom:1px solid #f0f2f5;">
+                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+                gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
+                    <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
+                        <div style="width:{stk_bar_w:.1f}%; height:100%; background:{stk_color}; border-radius:3px;"></div>
+                    </div>
                     <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
                     <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
                 </div>
                 """, unsafe_allow_html=True)
 
         st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
