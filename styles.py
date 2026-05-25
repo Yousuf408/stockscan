@@ -1,397 +1,254 @@
-# ══════════════════════════════════════════
-#  TRADESENTRY — styles.py
-#  Global CSS for entire app
-#  Theme: Professional White / Light
-#  Usage: from styles import apply_styles
-#         apply_styles()  ← call on every page
-# ══════════════════════════════════════════
-
 import streamlit as st
+import streamlit.components.v1 as components
+
+# ══════════════════════════════════════════
+#  TRADESENTRY — styles.py v2.0
+#  Professional White Theme
+#  Global CSS + Header component
+# ══════════════════════════════════════════
 
 def apply_styles():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
-    /* ══════════════════════════════════════
-       ROOT VARIABLES
-    ══════════════════════════════════════ */
-    :root {
-        --bg:        #ffffff;
-        --bg2:       #f8f9fb;
-        --bg3:       #f0f2f5;
-        --bg4:       #e8eaed;
-        --border:    #e0e3e8;
-        --border2:   #cdd1d8;
-        --text:      #0f1117;
-        --text2:     #3d4452;
-        --text3:     #7a8394;
-        --green:     #00a854;
-        --green-dim: #00a85412;
-        --green-bg:  #f0faf5;
-        --red:       #e53935;
-        --red-dim:   #e5393512;
-        --red-bg:    #fff5f5;
-        --amber:     #f59e0b;
-        --amber-dim: #f59e0b12;
-        --blue:      #2563eb;
-        --blue-dim:  #2563eb10;
-        --mono:      'JetBrains Mono', monospace;
-        --sans:      'Inter', sans-serif;
-        --radius:    8px;
-        --radius-lg: 12px;
-        --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-        --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-    }
-
-    /* ══════════════════════════════════════
-       GLOBAL RESET
-    ══════════════════════════════════════ */
-    * { box-sizing: border-box; }
-    #MainMenu, footer { visibility: hidden; }
-
-    /* ══════════════════════════════════════
-       APP BACKGROUND
-    ══════════════════════════════════════ */
-    .stApp {
-        background: var(--bg3) !important;
-        font-family: var(--sans) !important;
-        color: var(--text) !important;
-    }
+    /* ── KILL ALL STREAMLIT DEFAULT SPACING ── */
+    #root > div:first-child { padding-top: 0 !important; }
+    .stApp > header { display: none !important; height: 0 !important; }
+    header[data-testid="stHeader"] { display: none !important; height: 0 !important; }
+    #MainMenu { display: none !important; }
+    footer { display: none !important; }
     .block-container {
-        padding: 1.5rem 2rem 2rem 2rem !important;
+        padding: 0 !important;
+        margin: 0 !important;
         max-width: 100% !important;
     }
+    .stApp {
+        background: #f0f2f5 !important;
+        font-family: 'Inter', sans-serif !important;
+    }
 
-    /* ══════════════════════════════════════
-       SIDEBAR
-    ══════════════════════════════════════ */
+    /* ── SIDEBAR ── */
     [data-testid="stSidebar"] {
-        background: var(--bg) !important;
-        border-right: 1px solid var(--border) !important;
+        background: #ffffff !important;
+        border-right: 1px solid #e0e3e8 !important;
         box-shadow: 2px 0 8px rgba(0,0,0,0.04) !important;
+        top: 0 !important;
     }
     [data-testid="stSidebarHeader"] {
-        background: var(--bg) !important;
-        padding: 16px 16px 0 16px !important;
-        border-bottom: 1px solid var(--border) !important;
+        display: none !important;
+        height: 0 !important;
+        padding: 0 !important;
     }
-
-    /* Sidebar nav links */
     [data-testid="stSidebar"] a {
-        font-family: var(--sans) !important;
+        font-family: 'Inter', sans-serif !important;
         font-size: 13px !important;
         font-weight: 500 !important;
-        color: var(--text2) !important;
-        border-radius: var(--radius) !important;
+        color: #3d4452 !important;
+        border-radius: 7px !important;
         padding: 8px 12px !important;
         transition: all 0.15s !important;
-        letter-spacing: 0.01em !important;
     }
     [data-testid="stSidebar"] a:hover {
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
+        color: #00a854 !important;
+        background: #f0faf5 !important;
     }
     [data-testid="stSidebar"] [aria-current="page"] {
-        color: var(--green) !important;
-        background: var(--green-bg) !important;
-        border-left: 3px solid var(--green) !important;
+        color: #00a854 !important;
+        background: #f0faf5 !important;
+        border-left: 3px solid #00a854 !important;
         font-weight: 600 !important;
     }
 
-    /* Sidebar toggle — always visible */
-    [data-testid="stSidebarCollapseButton"] button {
-        background: var(--bg3) !important;
-        border: 1px solid var(--border2) !important;
-        border-radius: var(--radius) !important;
-        color: var(--text2) !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-    }
-    [data-testid="stSidebarCollapseButton"] button:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
-    }
+    /* ── SIDEBAR TOGGLE — always visible ── */
     [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
-        background: var(--bg) !important;
-        border: 1px solid var(--border2) !important;
-        border-radius: var(--radius) !important;
-        box-shadow: var(--shadow) !important;
+        top: 12px !important;
+        background: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 7px !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+        z-index: 999999 !important;
     }
     [data-testid="collapsedControl"]:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
+        border-color: #00a854 !important;
+        color: #00a854 !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button {
+        background: #f8f9fb !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 7px !important;
+        color: #3d4452 !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button:hover {
+        border-color: #00a854 !important;
+        color: #00a854 !important;
+        background: #f0faf5 !important;
     }
 
-    /* ══════════════════════════════════════
-       STREAMLIT BUTTONS
-    ══════════════════════════════════════ */
+    /* ── PAGE CONTENT WRAPPER ── */
+    .ts-page-content {
+        padding: 16px 24px;
+        background: #f0f2f5;
+        min-height: calc(100vh - 52px);
+    }
+
+    /* ── BUTTONS ── */
     div[data-testid="stButton"] button {
-        font-family: var(--sans) !important;
+        font-family: 'Inter', sans-serif !important;
         font-size: 13px !important;
         font-weight: 600 !important;
-        border-radius: var(--radius) !important;
-        border: 1px solid var(--border2) !important;
-        background: var(--bg) !important;
-        color: var(--text) !important;
-        padding: 6px 16px !important;
+        border-radius: 7px !important;
+        border: 1px solid #e0e3e8 !important;
+        background: #ffffff !important;
+        color: #3d4452 !important;
+        padding: 5px 14px !important;
         transition: all 0.15s !important;
-        box-shadow: var(--shadow) !important;
-        letter-spacing: 0.01em !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
     }
     div[data-testid="stButton"] button:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
-        box-shadow: none !important;
-    }
-    div[data-testid="stButton"] button:active {
-        transform: scale(0.98) !important;
+        border-color: #00a854 !important;
+        color: #00a854 !important;
+        background: #f0faf5 !important;
     }
 
-    /* ══════════════════════════════════════
-       STREAMLIT INPUTS / SELECTBOX
-    ══════════════════════════════════════ */
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stNumberInput"] input,
-    div[data-testid="stSelectbox"] select {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        background: var(--bg) !important;
-        border: 1px solid var(--border2) !important;
-        border-radius: var(--radius) !important;
-        color: var(--text) !important;
-        box-shadow: none !important;
-    }
-    div[data-testid="stTextInput"] input:focus {
-        border-color: var(--green) !important;
-        box-shadow: 0 0 0 3px var(--green-dim) !important;
-    }
-
-    /* ══════════════════════════════════════
-       DATAFRAME / TABLES
-    ══════════════════════════════════════ */
+    /* ── DATAFRAME ── */
     div[data-testid="stDataFrame"] {
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-lg) !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
         overflow: hidden !important;
-        box-shadow: var(--shadow) !important;
-        background: var(--bg) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
     }
 
-    /* ══════════════════════════════════════
-       METRICS
-    ══════════════════════════════════════ */
-    div[data-testid="stMetric"] {
-        background: var(--bg) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-lg) !important;
-        padding: 16px 20px !important;
-        box-shadow: var(--shadow) !important;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 11px !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.08em !important;
-        color: var(--text3) !important;
-        text-transform: uppercase !important;
-        font-family: var(--sans) !important;
-    }
-    div[data-testid="stMetricValue"] {
-        font-size: 22px !important;
-        font-weight: 700 !important;
-        color: var(--text) !important;
-        font-family: var(--mono) !important;
-    }
-
-    /* ══════════════════════════════════════
-       EXPANDER
-    ══════════════════════════════════════ */
+    /* ── EXPANDER ── */
     div[data-testid="stExpander"] {
-        background: var(--bg) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-lg) !important;
-        box-shadow: var(--shadow) !important;
+        background: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+        margin-top: 12px !important;
     }
 
-    /* ══════════════════════════════════════
-       ALERTS (info/success/warning/error)
-    ══════════════════════════════════════ */
-    div[data-testid="stAlert"] {
-        border-radius: var(--radius) !important;
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-    }
-
-    /* ══════════════════════════════════════
-       SPINNER
-    ══════════════════════════════════════ */
-    div[data-testid="stSpinner"] {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        color: var(--text3) !important;
-    }
-
-    /* ══════════════════════════════════════
-       SCROLLBAR
-    ══════════════════════════════════════ */
+    /* ── SCROLLBAR ── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: var(--bg3); }
-    ::-webkit-scrollbar-thumb {
-        background: var(--border2);
-        border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover { background: var(--green); }
-
-    /* ══════════════════════════════════════
-       REUSABLE COMPONENT CLASSES
-       (use in st.markdown(..., unsafe_allow_html=True))
-    ══════════════════════════════════════ */
-
-    /* Page header */
-    .ts-page-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 0 20px 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 20px;
-    }
-    .ts-logo {
-        font-family: var(--mono);
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text);
-        letter-spacing: 0.06em;
-    }
-    .ts-logo span { color: var(--green); }
-    .ts-page-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text3);
-        letter-spacing: 0.08em;
-        font-family: var(--sans);
-    }
-
-    /* Card */
-    .ts-card {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 16px 20px;
-        box-shadow: var(--shadow);
-        margin-bottom: 12px;
-    }
-    .ts-card:hover {
-        border-color: var(--border2);
-        box-shadow: var(--shadow-md);
-        transition: all 0.15s;
-    }
-
-    /* Metric card */
-    .ts-metric {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 14px 18px;
-        box-shadow: var(--shadow);
-    }
-    .ts-metric-label {
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.1em;
-        color: var(--text3);
-        text-transform: uppercase;
-        font-family: var(--sans);
-        margin-bottom: 6px;
-    }
-    .ts-metric-value {
-        font-size: 20px;
-        font-weight: 700;
-        color: var(--text);
-        font-family: var(--mono);
-    }
-
-    /* Badge */
-    .ts-badge-green {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: var(--green-bg); color: var(--green);
-        border: 1px solid #00a85430;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-    .ts-badge-red {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: var(--red-bg); color: var(--red);
-        border: 1px solid #e5393530;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-    .ts-badge-amber {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: #fffbf0; color: var(--amber);
-        border: 1px solid #f59e0b30;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-
-    /* Table row states */
-    .ts-row-up   { border-left: 3px solid var(--green) !important; background: var(--green-bg) !important; }
-    .ts-row-down { border-left: 3px solid var(--red) !important;   background: var(--red-bg) !important; }
-
-    /* Section label */
-    .ts-section-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--text3);
-        font-family: var(--sans);
-        padding: 0 0 8px 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 12px;
-    }
-
-    /* Divider */
-    .ts-divider {
-        border: none;
-        border-top: 1px solid var(--border);
-        margin: 16px 0;
-    }
-
-    /* Status dot */
-    .ts-dot-green { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; }
-    .ts-dot-red   { width:7px; height:7px; border-radius:50%; background:var(--red);   display:inline-block; }
-    .ts-dot-amber { width:7px; height:7px; border-radius:50%; background:var(--amber); display:inline-block; }
-
+    ::-webkit-scrollbar-track { background: #f0f2f5; }
+    ::-webkit-scrollbar-thumb { background: #cdd1d8; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #00a854; }
     </style>
     """, unsafe_allow_html=True)
 
 
-def page_header(title: str, subtitle: str = ""):
-    """Render standard TradeSentry page header."""
-    sub_html = f'<div class="ts-page-title">{subtitle}</div>' if subtitle else ""
+def page_header(page_title: str, page_icon: str = "", refresh_key: str = None):
+    """
+    Renders the full TradeSentry header bar.
+    Logo left | Page title center-left | Refresh button right
+    Returns True if refresh was clicked.
+    """
+    # Inject header CSS + HTML
     st.markdown(f"""
-    <div class="ts-page-header">
-        <div class="ts-logo">TRADE<span>SENTRY</span></div>
-        {sub_html}
+    <style>
+    .ts-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 20px;
+        height: 52px;
+        background: #ffffff;
+        border-bottom: 1px solid #e0e3e8;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        position: sticky;
+        top: 0;
+        z-index: 9999;
+        margin-bottom: 0;
+    }}
+    .ts-header-left {{
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }}
+    .ts-logo {{
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #0f1117;
+        text-decoration: none;
+        white-space: nowrap;
+    }}
+    .ts-logo span {{ color: #00a854; }}
+    .ts-divider-v {{
+        width: 1px;
+        height: 20px;
+        background: #e0e3e8;
+    }}
+    .ts-page-label {{
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        color: #3d4452;
+        letter-spacing: 0.01em;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }}
+    .ts-header-right {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }}
+    .ts-nifty-chip {{
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 600;
+        color: #7a8394;
+        background: #f0f2f5;
+        border: 1px solid #e0e3e8;
+        border-radius: 20px;
+        padding: 3px 10px;
+        letter-spacing: 0.04em;
+    }}
+    </style>
+    <div class="ts-header">
+        <div class="ts-header-left">
+            <div class="ts-logo">TRADE<span>SENTRY</span></div>
+            <div class="ts-divider-v"></div>
+            <div class="ts-page-label">{page_icon} {page_title}</div>
+        </div>
+        <div class="ts-header-right">
+            <div class="ts-nifty-chip" id="ts-time">--:--:--</div>
+        </div>
     </div>
+    <script>
+    function updateTime() {{
+        var now = new Date();
+        var h = String(now.getHours()).padStart(2,'0');
+        var m = String(now.getMinutes()).padStart(2,'0');
+        var s = String(now.getSeconds()).padStart(2,'0');
+        var el = document.getElementById('ts-time');
+        if(el) el.textContent = h+':'+m+':'+s;
+    }}
+    setInterval(updateTime, 1000);
+    updateTime();
+    </script>
     """, unsafe_allow_html=True)
+
+    # Refresh button — Streamlit native (so it works)
+    if refresh_key:
+        col_spacer, col_btn = st.columns([20, 1])
+        with col_btn:
+            if st.button("⟳", key=refresh_key, help="Refresh data"):
+                st.cache_data.clear()
+                st.rerun()
 
 
 def sidebar_brand():
-    """Render TradeSentry branding in sidebar."""
+    """TradeSentry branding in sidebar."""
     with st.sidebar:
         st.markdown("""
-        <div style="padding:12px 8px 14px 8px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:15px;
+        <div style="padding:16px 12px 14px 12px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:14px;
             font-weight:700;color:#0f1117;letter-spacing:0.08em;">
                 TRADE<span style="color:#00a854;">SENTRY</span>
             </div>
@@ -399,5 +256,15 @@ def sidebar_brand():
             font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
             margin-top:3px;">NSE Professional Screener</div>
         </div>
-        <hr style="border:none;border-top:1px solid #e0e3e8;margin:0 0 8px 0;">
+        <hr style="border:none;border-top:1px solid #e0e3e8;margin:0 0 6px 0;">
         """, unsafe_allow_html=True)
+
+
+def content_wrap_start():
+    """Opens the page content wrapper div."""
+    st.markdown('<div class="ts-page-content">', unsafe_allow_html=True)
+
+
+def content_wrap_end():
+    """Closes the page content wrapper div."""
+    st.markdown('</div>', unsafe_allow_html=True)
