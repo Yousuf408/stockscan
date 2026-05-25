@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Rendering hidden interactive overlays with no visual artifacts
+# Global CSS Overrides — Zero trace of default Streamlit button boxes or layout disruptions
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,50 +64,7 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── ULTRACLEAN INTERACTIVE CONTAINER OVERLAY ── */
-    .clickable-row-container {
-        position: relative;
-        margin-bottom: 6px;
-    }
-
-    /* Make the base Streamlit button layout span perfectly over our card container */
-    .clickable-row-container div[data-testid="stButton"] {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 52px !important; /* Matches height of the card precisely */
-        margin: 0 !important;
-        padding: 0 !important;
-        z-index: 10 !important;
-    }
-
-    /* Wipe out every trace of background, frame outlines, margins and border shadows */
-    .clickable-row-container div[data-testid="stButton"] > button {
-        width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
-        border: none !important;
-        border-radius: 8px !important;
-        box-shadow: none !important;
-        color: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        cursor: pointer !important;
-    }
-
-    /* Guarding against default focus border glows when selected */
-    .clickable-row-container div[data-testid="stButton"] > button:hover,
-    .clickable-row-container div[data-testid="stButton"] > button:focus,
-    .clickable-row-container div[data-testid="stButton"] > button:active {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: transparent !important;
-        outline: none !important;
-    }
-
-    /* Clean Card Component Layouts matching your dashboard setup */
+    /* ── HYPER-CLEAN CARD COMPONENTS (THE GREEN ZONE MATRIX) ── */
     .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
@@ -119,9 +76,11 @@ st.markdown("""
         gap: 16px;
         height: 52px;
         transition: background-color 0.1s ease;
+        margin-bottom: 6px;
+        cursor: pointer;
     }
     
-    .clickable-row-container:hover .sector-card {
+    .sector-card:hover {
         background-color: #fafbfc;
     }
     
@@ -136,6 +95,7 @@ st.markdown("""
         align-items: center;
         gap: 16px;
         height: 52px;
+        cursor: pointer;
     }
 
     .breakdown-box {
@@ -262,6 +222,19 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
+# ── HIDDEN STATE INTERACTION TUNNEL ──
+# We use a single, native text input inside an layout placeholder to handle click synchronization smoothly
+selected_click = st.text_input("Active Row Trigger", value="", label_visibility="collapsed", key="hidden_sector_input")
+
+if selected_click:
+    st.session_state["expanded_sector"] = None if st.session_state["expanded_sector"] == selected_click else selected_click
+    # Clear out value field to allow repeat toggles cleanly
+    st.markdown("""<script>
+        var inputs = window.parent.document.querySelectorAll('input[aria-label="Active Row Trigger"]');
+        if(inputs.length > 0) { inputs[0].value = ''; }
+    </script>""", unsafe_allow_html=True)
+    st.rerun()
+
 # 5. Fast, Smooth Rerendering Component Grid Layout
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
@@ -274,12 +247,16 @@ for s in sector_data:
     
     card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Wrap our content block inside a relative wrapper
-    st.markdown(f'<div class="clickable-row-container">', unsafe_allow_html=True)
-    
-    # 1. Render the clean visual row layout canvas
+    # Render the card with a clean JavaScript dynamic event attached directly to the main div layout container.
+    # No st.button frameworks are created on screen, making it impossible for ugly gray frames to bleed through!
     st.markdown(f"""
-        <div class="{card_style}">
+        <div class="{card_style}" onclick="
+            var inputs = window.parent.document.querySelectorAll('input[aria-label=\\'Active Row Trigger\\']');
+            if (inputs.length > 0) {{
+                inputs[0].value = '{s['name']}';
+                inputs[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+        ">
             <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
             <div class="bar-track">
                 <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
@@ -290,14 +267,6 @@ for s in sector_data:
             <div class="expand-icon">{icon}</div>
         </div>
     """, unsafe_allow_html=True)
-    
-    # 2. Inject the 100% transparent click receiver over it.
-    # No extra visual box can be seen, but clicking triggers an instantaneous soft rerun.
-    if st.button("", key=f"smooth_btn_{s['name']}"):
-        st.session_state["expanded_sector"] = None if is_expanded else s['name']
-        st.rerun()
-        
-    st.markdown("</div>", unsafe_allow_html=True) # Closes row wrapper cleanly
         
     # Dropdown stock drawer segment
     if is_expanded:
