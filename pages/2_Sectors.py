@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Forcing tight, compact padding & exact heights
+# Global CSS Overrides — Zero trace of standard Streamlit button boxes or outlines
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,48 +64,88 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── TIGHT COMPACT MATRIX ROW CONTAINERS ── */
-    .sector-row-container {
-        border: 1px solid #e0e3e8;
-        border-radius: 6px;
-        padding: 4px 14px !important;
-        margin-bottom: 4px !important;
+    /* ── DYNAMIC ABSOLUTE TRANSPARENT CLICK OVERLAY LAYER ── */
+    .smooth-row-block {
+        position: relative !important;
+        margin-bottom: 6px !important;
+    }
+
+    /* Force the Streamlit button wrapper to overlay 100% over our custom HTML block grid */
+    .smooth-row-block div[data-testid="stButton"] {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 44px !important;  /* Matches precise thickness of your compact row design */
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 5 !important;
+    }
+
+    /* Strip away all default borders, outlines, grays, and shadows from the overlay target */
+    .smooth-row-block div[data-testid="stButton"] > button {
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 8px !important;
+        box-shadow: none !important;
+        color: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        cursor: pointer !important;
+    }
+
+    /* Protect card states against default active/focus border shadows */
+    .smooth-row-block div[data-testid="stButton"] > button:hover,
+    .smooth-row-block div[data-testid="stButton"] > button:focus,
+    .smooth-row-block div[data-testid="stButton"] > button:active {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: transparent !important;
+        outline: none !important;
+    }
+
+    /* ── HYPER-CLEAN DYNAMIC CARDS FROM YOUR ORIGINAL DESIGN ── */
+    .sector-card {
         background: #ffffff;
-        min-height: 38px !important;
-        max-height: 38px !important;
-        display: flex;
+        border: 1px solid #e0e3e8;
+        border-radius: 8px;
+        padding: 12px 18px;
+        display: grid;
+        grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
-        transition: background-color 0.1s ease;
+        gap: 16px;
+        height: 44px;
+        transition: background-color 0.15s ease;
     }
     
-    .sector-row-container:hover {
+    /* Hover activation links directly tied onto container row blocks */
+    .smooth-row-block:hover .sector-card {
         background-color: #fafbfc;
     }
     
-    .sector-row-container-active {
+    .sector-card-active {
+        background: #ffffff;
         border: 1px solid #e0e3e8;
         border-bottom: none;
-        border-radius: 6px 6px 0px 0px;
-        padding: 4px 14px !important;
-        margin-bottom: 0px !important;
-        background: #ffffff;
-        min-height: 38px !important;
-        max-height: 38px !important;
-        display: flex;
+        border-radius: 8px 8px 0px 0px;
+        padding: 12px 18px;
+        display: grid;
+        grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
+        gap: 16px;
+        height: 44px;
     }
 
-    /* Force Streamlit's inner block containers to match the 38px grid height and center items */
-    div[data-testid="column"] {
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
-        height: 100% !important;
-    }
-    
-    /* Clear out extra native block gap spacing injected by Streamlit inside rows */
-    div[data-testid="stVerticalBlockBorderWrapper"] > div > div[data-testid="stVerticalBlock"] {
-        gap: 0px !important;
+    .breakdown-box {
+        background: #fafbfc;
+        border: 1px solid #e0e3e8;
+        border-top: none;
+        border-radius: 0px 0px 8px 8px;
+        padding: 4px 24px 12px 24px;
+        margin-bottom: 12px;
     }
 
     .bar-track {
@@ -113,52 +153,15 @@ st.markdown("""
         background: #f0f2f5;
         border-radius: 3px;
         overflow: hidden;
-        width: 100%;
     }
 
-    /* Target the toggle button icon specifically to remain a sharp, borderless interactive target */
-    div[data-testid="column"] div[data-testid="stButton"] {
-        height: 24px !important;
-        display: flex !important;
-        justify-content: flex-end !important;
-        align-items: center !important;
-    }
-
-    div[data-testid="column"] div[data-testid="stButton"] > button {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: #7a8394 !important;
-        font-size: 20px !important;
-        font-weight: 400 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        width: 24px !important;
-        height: 24px !important;
-        text-align: right !important;
-        line-height: 1 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-    }
-
-    div[data-testid="column"] div[data-testid="stButton"] > button:hover,
-    div[data-testid="column"] div[data-testid="stButton"] > button:focus,
-    div[data-testid="column"] div[data-testid="stButton"] > button:active {
-        color: #00a854 !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        outline: none !important;
-    }
-
-    .breakdown-box {
-        background: #fafbfc;
-        border: 1px solid #e0e3e8;
-        border-top: none;
-        border-radius: 0px 0px 6px 6px;
-        padding: 4px 20px 10px 20px;
-        margin-bottom: 6px;
+    .expand-icon {
+        font-size: 20px;
+        font-weight: 500;
+        color: #7a8394;
+        text-align: right;
+        user-select: none;
+        line-height: 1;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -258,9 +261,9 @@ with c5:
         st.cache_data.clear()
         st.rerun()
 
-st.markdown("<div style='margin-top:15px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Clean, Tight Row Render Engine
+# 5. Clean, Smooth Custom Canvas Renderer
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
@@ -270,52 +273,47 @@ for s in sector_data:
     sign = "+" if s['change'] >= 0 else ""
     icon = "−" if is_expanded else "+"
     
-    container_class = "sector-row-container-active" if is_expanded else "sector-row-container"
+    card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Outer custom stylized HTML frame wrapper
-    st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
+    # Outer Relative layout row node
+    st.markdown(f'<div class="smooth-row-block">', unsafe_allow_html=True)
     
-    # Render aligned horizontal items inside streamlined structure columns
-    col_name, col_bar, col_pct, col_btn = st.columns([140, 500, 100, 40], gap="medium")
-    
-    with col_name:
-        st.markdown(f'<div style="font-size: 13px; font-weight: 700; color:#0f1117; line-height: 1.2;">{s["name"]}</div>', unsafe_allow_html=True)
-        
-    with col_bar:
-        st.markdown(f"""
-            <div class="bar-track" style="margin-top: 2px;">
+    # 1. Render your beautiful, sleek HTML card exactly like before
+    st.markdown(f"""
+        <div class="{card_style}">
+            <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
+            <div class="bar-track">
                 <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
             </div>
-        """, unsafe_allow_html=True)
-        
-    with col_pct:
-        st.markdown(f"""
-            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace; line-height: 1.2;">
+            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
                 {sign}{s['change']:.2f}%
             </div>
-        """, unsafe_allow_html=True)
+            <div class="expand-icon">{icon}</div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # 2. Render a 100% transparent active button overlay right on top of it.
+    # This captures clicks smoothly without creating any visual elements on screen.
+    if st.button("", key=f"overlay_click_{s['name']}"):
+        st.session_state["expanded_sector"] = None if is_expanded else s['name']
+        st.rerun()
         
-    with col_btn:
-        if st.button(icon, key=f"toggle_btn_{s['name']}"):
-            st.session_state["expanded_sector"] = None if is_expanded else s['name']
-            st.rerun()
-            
-    st.markdown('</div>', unsafe_allow_html=True) # Closes row box container cleanly
+    st.markdown('</div>', unsafe_allow_html=True) # Closes row node cleanly
         
-    # Dropdown stock performance metrics drawer segment
+    # Dropdown stock drawer segment
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
         stocks_list = fetch_sector_stocks_live(s['name'])
         
         if not stocks_list:
-            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 10px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 12px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
         else:
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign = "+" if stk['change'] >= 0 else ""
                 
                 st.markdown(f"""
-                <div style="display: grid; grid-template-columns: 1fr 120px 100px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5;">
+                <div style="display: grid; grid-template-columns: 1fr 120px 100px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f2f5;">
                     <div style="font-size: 13px; font-weight: 600; color: #3d4452;">{stk['ticker']}</div>
                     <div style="font-size: 13px; font-weight: 600; text-align: right; color: #0f1117; font-family: 'JetBrains Mono', sans-serif;">₹{stk['ltp']:,}</div>
                     <div style="font-size: 13px; font-weight: 700; text-align: right; color: {stk_color}; font-family: 'JetBrains Mono', monospace;">{stk_sign}{stk['change']:.2f}%</div>
