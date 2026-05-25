@@ -2,7 +2,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 import requests
 import pandas as pd
+import yfinance as yf
 import time
+import datetime
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from styles import apply_styles, sidebar_brand, page_header
@@ -13,40 +15,164 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-col1, col2 = st.columns([8, 1])
-with col2:
+# ── Top bar: Refresh + View Mode toggle ──────────────────────────────────────
+col1, col2, col3 = st.columns([6, 2, 1])
+with col3:
     if st.button("⟳ Refresh", key="sector_refresh"):
         st.cache_data.clear()
         st.rerun()
+with col2:
+    view_mode = st.radio(
+        "View",
+        ["Today", "Date Range"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="view_mode"
+    )
 
+# ── Date range controls (only shown when Date Range is selected) ──────────────
+date_from = date_to = None
+
+if view_mode == "Date Range":
+    today = datetime.date.today()
+    dcol1, dcol2, dcol3 = st.columns([2, 2, 4])
+    with dcol1:
+        date_from = st.date_input(
+            "From",
+            value=today - datetime.timedelta(days=30),
+            max_value=today - datetime.timedelta(days=1),
+            key="date_from"
+        )
+    with dcol2:
+        date_to = st.date_input(
+            "To",
+            value=today,
+            min_value=date_from + datetime.timedelta(days=1) if date_from else today,
+            max_value=today,
+            key="date_to"
+        )
+    with dcol3:
+        # Quick-select preset buttons
+        st.write("")  # spacer
+        bcol1, bcol2, bcol3, bcol4, bcol5 = st.columns(5)
+        presets = {
+            "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365
+        }
+        for col, (label, days) in zip([bcol1, bcol2, bcol3, bcol4, bcol5], presets.items()):
+            with col:
+                if st.button(label, key=f"preset_{label}"):
+                    st.session_state["date_from"] = today - datetime.timedelta(days=days)
+                    st.session_state["date_to"] = today
+                    st.rerun()
+
+    # Validate
+    if date_from and date_to and date_from >= date_to:
+        st.warning("⚠️ 'From' date must be before 'To' date.")
+        st.stop()
+
+st.divider()
+
+# ── TODAY mode: existing live fetch via Yahoo Finance chart API ───────────────
 @st.cache_data(ttl=30)
-def fetch_sector_data():
+def fetch_sector_data_today():
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval=1d&range=1d"
+            url = (
+                f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                f"{requests.utils.quote(symbol)}?interval=1d&range=1d"
+            )
             resp = requests.get(url, headers=headers, timeout=5)
-            if not resp.ok: continue
-            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+            if not resp.ok:
+                continue
+            meta = (
+                resp.json()
+                .get('chart', {})
+                .get('result', [{}])[0]
+                .get('meta', {})
+            )
             if meta:
                 cp = meta.get('regularMarketPrice', 0)
                 pc = meta.get('chartPreviousClose', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
-                data.append({'name': name, 'change': round(change, 2),
-                              'direction': 'up' if change >= 0 else 'down',
-                              'ltp': round(cp, 2), 'prev': round(pc, 2)})
-        except: continue
+                data.append({
+                    'name': name,
+                    'change': round(change, 2),
+                    'direction': 'up' if change >= 0 else 'down',
+                    'ltp': round(cp, 2),
+                    'prev': round(pc, 2)
+                })
+        except:
+            continue
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-with st.spinner("Fetching sector data..."):
-    data = fetch_sector_data()
+
+# ── DATE RANGE mode: fetch via yfinance ──────────────────────────────────────
+@st.cache_data(ttl=300)
+def fetch_sector_data_range(from_date: str, to_date: str):
+    """
+    Returns sector % change between from_date and to_date using yfinance.
+    from_date / to_date are ISO strings (YYYY-MM-DD).
+    """
+    data = []
+    # yfinance needs end date +1 day to include the to_date candle
+    end = (datetime.date.fromisoformat(to_date) + datetime.timedelta(days=1)).isoformat()
+
+    for name, symbol in SECTOR_YAHOO.items():
+        try:
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(start=from_date, end=end, interval="1d", auto_adjust=True)
+            if hist.empty or len(hist) < 2:
+                # fallback: single-candle open→close
+                if not hist.empty:
+                    open_p = hist['Open'].iloc[0]
+                    close_p = hist['Close'].iloc[-1]
+                    change = ((close_p - open_p) / open_p * 100) if open_p else 0.0
+                    data.append({
+                        'name': name,
+                        'change': round(change, 2),
+                        'direction': 'up' if change >= 0 else 'down',
+                        'ltp': round(close_p, 2),
+                        'prev': round(open_p, 2)
+                    })
+                continue
+
+            start_close = hist['Close'].iloc[0]   # closing price on first day
+            end_close   = hist['Close'].iloc[-1]   # closing price on last day
+            change = ((end_close - start_close) / start_close * 100) if start_close else 0.0
+            data.append({
+                'name': name,
+                'change': round(change, 2),
+                'direction': 'up' if change >= 0 else 'down',
+                'ltp': round(end_close, 2),
+                'prev': round(start_close, 2)
+            })
+        except:
+            continue
+
+    data.sort(key=lambda x: x['change'], reverse=True)
+    return data
+
+
+# ── Fetch data based on mode ──────────────────────────────────────────────────
+if view_mode == "Today":
+    with st.spinner("Fetching live sector data..."):
+        data = fetch_sector_data_today()
+    period_label = "Today's Performance"
+    updated = time.strftime("%H:%M:%S")
+else:
+    with st.spinner(f"Fetching sector data from {date_from} to {date_to}..."):
+        data = fetch_sector_data_range(str(date_from), str(date_to))
+    period_label = f"Performance: {date_from.strftime('%d %b %Y')} → {date_to.strftime('%d %b %Y')}"
+    updated = time.strftime("%H:%M:%S")
 
 if not data:
-    st.error("Could not fetch sector data")
+    st.error("Could not fetch sector data. Please try again or adjust the date range.")
     st.stop()
 
+# ── Build HTML chart (identical to your original logic) ──────────────────────
 gainers = [s for s in data if s['direction'] == 'up']
 losers  = [s for s in data if s['direction'] == 'down']
 top     = data[0]
@@ -71,8 +197,6 @@ for s in data:
       color:{color};font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
     </div>"""
 
-updated = time.strftime("%H:%M:%S")
-
 html = f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
 <style>
@@ -83,28 +207,48 @@ body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
   padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .label {{ font-size:10px; font-weight:600; letter-spacing:0.1em;
   text-transform:uppercase; color:#7a8394; margin-bottom:6px; }}
+.period {{ font-size:10px; color:#7a8394; margin-bottom:6px; font-style:italic; }}
 .value {{ font-size:15px; font-weight:700; font-family:'JetBrains Mono',monospace; }}
 .chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
+.chart-header {{ padding:10px 14px; font-size:11px; font-weight:600;
+  color:#7a8394; background:#fafbfc; border-bottom:1px solid #f0f2f5; }}
 .footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
   border-top:1px solid #f0f2f5; }}
 </style></head><body>
 <div class="metrics">
-  <div class="card"><div class="label">Top Gainer</div>
-    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div></div>
-  <div class="card"><div class="label">Top Loser</div>
-    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div></div>
-  <div class="card"><div class="label">Breadth</div>
-    <div class="value"><span style="color:#00a854;">{len(gainers)}↑</span>
-    <span style="color:#cdd1d8;"> / </span><span style="color:#e53935;">{len(losers)}↓</span></div></div>
+  <div class="card">
+    <div class="label">Top Gainer</div>
+    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
+  </div>
+  <div class="card">
+    <div class="label">Top Loser</div>
+    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+  </div>
+  <div class="card">
+    <div class="label">Breadth</div>
+    <div class="value">
+      <span style="color:#00a854;">{len(gainers)}↑</span>
+      <span style="color:#cdd1d8;"> / </span>
+      <span style="color:#e53935;">{len(losers)}↓</span>
+    </div>
+  </div>
 </div>
-<div class="chart">{rows_html}<div class="footer">Updated: {updated}</div></div>
+<div class="chart">
+  <div class="chart-header">📅 {period_label}</div>
+  {rows_html}
+  <div class="footer">Updated: {updated}</div>
+</div>
 </body></html>"""
 
-components.html(html, height=len(data) * 40 + 180)
+components.html(html, height=len(data) * 40 + 220)
 
+# ── Data Table (your original expander, unchanged) ────────────────────────────
 with st.expander("📋 Data Table"):
-    df = pd.DataFrame(data)[['name','ltp','prev','change']]
-    df.columns = ['Sector','LTP','Prev Close','Change %']
+    df = pd.DataFrame(data)[['name', 'ltp', 'prev', 'change']]
+    if view_mode == "Today":
+        df.columns = ['Sector', 'LTP', 'Prev Close', 'Change %']
+    else:
+        df.columns = ['Sector', 'End Price', 'Start Price', 'Change %']
     df['Change %'] = df['Change %'].apply(lambda x: f"{x:+.2f}%")
     st.dataframe(df, use_container_width=True, hide_index=True)
