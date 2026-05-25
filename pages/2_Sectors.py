@@ -374,7 +374,6 @@ st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────────
-# ──────────────────────────────────────────────────────────────────
 # SECTION 9 — Sector Bar Chart with Inline Drill-Down
 # Purpose : Render the main sector performance chart.
 #           Each sector row has a ▶ button that expands inline to
@@ -402,104 +401,108 @@ for s in data:
     sign        = "+" if s['change'] >= 0 else ""
     is_expanded = st.session_state["expanded_sector"] == sector_name
 
-    # ── Row layout: bar chart col + expand button col ──
-    row_col, btn_col = st.columns([0.92, 0.08])
+    # Create a unified structural container for this row and its potential child panel
+    row_container = st.container()
+    
+    with row_container:
+        # Layout columns inside the active container block
+        row_col, btn_col = st.columns([0.92, 0.08])
 
-    with row_col:
-        st.markdown(f"""
-        <div style="display:grid; grid-template-columns:110px 1fr 75px;
-        align-items:center; gap:12px; padding:10px 14px;
-        border-bottom:1px solid #f0f2f5;
-        background:{'#f5fdf8' if is_expanded else '#ffffff'};">
-          <div style="font-size:12px; font-weight:700; color:#3d4452;
-          font-family:'JetBrains Mono',monospace;">{sector_name}</div>
-          <div style="height:8px; background:#f0f2f5; border-radius:4px; overflow:hidden;">
-            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>
-          </div>
-          <div style="font-size:12px; font-weight:700; text-align:right; color:{color};
-          font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with btn_col:
-        btn_label = "▲" if is_expanded else "▶"
-        btn_key   = f"expand_{sector_name}"
-        if st.button(btn_label, key=btn_key, use_container_width=True):
-            if is_expanded:
-                st.session_state["expanded_sector"] = None
-            else:
-                st.session_state["expanded_sector"] = sector_name
-            st.rerun()
-
-    # ── Inline Drill-Down Panel ──
-    if is_expanded:
-        with st.spinner(f"Loading {sector_name} stocks..."):
-            stocks = fetch_stocks_for_sector(sector_name, limit=8)
-
-        if not stocks:
-            st.markdown("""
-            <div style="padding:10px 14px; font-size:12px; color:#7a8394;
-            background:#fafbfc; border-bottom:1px solid #f0f2f5; border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8;">
-              No stock data available for this sector right now.
+        with row_col:
+            st.markdown(f"""
+            <div style="display:grid; grid-template-columns:110px 1fr 75px;
+            align-items:center; gap:12px; padding:10px 14px;
+            border-bottom:1px solid #f0f2f5;
+            background:{'#f5fdf8' if is_expanded else '#ffffff'};">
+              <div style="font-size:12px; font-weight:700; color:#3d4452;
+              font-family:'JetBrains Mono',monospace;">{sector_name}</div>
+              <div style="height:8px; background:#f0f2f5; border-radius:4px; overflow:hidden;">
+                <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:4px;"></div>
+              </div>
+              <div style="font-size:12px; font-weight:700; text-align:right; color:{color};
+              font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
             </div>
             """, unsafe_allow_html=True)
-        else:
-            # 1. Compile all dynamic inner rows first
-            stock_rows_html = ""
-            max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
 
-            for st_data in stocks:
-                s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
-                s_sign   = "+" if st_data['change'] >= 0 else ""
-                s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
+        with btn_col:
+            btn_label = "▲" if is_expanded else "▶"
+            btn_key   = f"expand_{sector_name}"
+            if st.button(btn_label, key=btn_key, use_container_width=True):
+                if is_expanded:
+                    st.session_state["expanded_sector"] = None
+                else:
+                    st.session_state["expanded_sector"] = sector_name
+                st.rerun()
 
-                stock_rows_html += f"""
-                <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
-                align-items:center; gap:10px; padding:7px 14px 7px 32px;
-                border-bottom:1px solid #f0f2f5; background:#fafffe;">
-                  <div style="font-size:11px; font-weight:700; color:#3d4452;
-                  font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
-                  <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
-                    <div style="width:{s_bar_w:.1f}%; height:100%;
-                    background:{s_color}; border-radius:3px; opacity:0.8;"></div>
+        # ── Inline Drill-Down Panel (Scoped tightly to the container block) ──
+        if is_expanded:
+            with st.spinner(f"Loading {sector_name} stocks..."):
+                stocks = fetch_stocks_for_sector(sector_name, limit=8)
+
+            if not stocks:
+                st.markdown(f"""
+                <div style="padding:10px 14px; font-size:12px; color:#7a8394;
+                background:#fafbfc; border-bottom:1px solid #f0f2f5; 
+                border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; margin-top:-2px;">
+                  No stock data available for {sector_name} right now.
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                stock_rows_html = ""
+                max_stock_chg = max(abs(st_data['change']) for st_data in stocks) or 1
+
+                for st_data in stocks:
+                    s_color  = "#00a854" if st_data['direction'] == 'up' else "#e53935"
+                    s_sign   = "+" if st_data['change'] >= 0 else ""
+                    s_bar_w  = (abs(st_data['change']) / max_stock_chg) * 70
+
+                    stock_rows_html += f"""
+                    <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
+                    align-items:center; gap:10px; padding:7px 14px 7px 32px;
+                    border-bottom:1px solid #f0f2f5; background:#fafffe;">
+                      <div style="font-size:11px; font-weight:700; color:#3d4452;
+                      font-family:'JetBrains Mono',monospace;">{st_data['sym']}</div>
+                      <div style="height:5px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
+                        <div style="width:{s_bar_w:.1f}%; height:100%;
+                        background:{s_color}; border-radius:3px; opacity:0.8;"></div>
+                      </div>
+                      <div style="font-size:11px; color:#7a8394; text-align:right;
+                      font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.1f}</div>
+                      <div style="font-size:11px; font-weight:700; text-align:right;
+                      color:{s_color}; font-family:'JetBrains Mono',monospace;">
+                        {s_sign}{st_data['change']:.2f}%
+                      </div>
+                    </div>
+                    """
+
+                total_count = len(get_stocks_by_sector(sector_name))
+
+                # Inject directly into the explicit outer layout wrapper
+                st.markdown(f"""
+                <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
+                border-bottom:1px solid #e0e3e8; overflow:hidden; background:#fafffe; margin-top:-2px;">
+                  
+                  <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
+                  gap:10px; padding:6px 14px 6px 32px; background:#f0faf5;
+                  border-bottom:1px solid #e0e3e8;">
+                    <div style="font-size:9px; font-weight:700; color:#7a8394;
+                    letter-spacing:0.08em; text-transform:uppercase;">Stock</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394;
+                    letter-spacing:0.08em; text-transform:uppercase;">Move</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394;
+                    letter-spacing:0.08em; text-transform:uppercase; text-align:right;">LTP</div>
+                    <div style="font-size:9px; font-weight:700; color:#7a8394;
+                    letter-spacing:0.08em; text-transform:uppercase; text-align:right;">Chg %</div>
                   </div>
-                  <div style="font-size:11px; color:#7a8394; text-align:right;
-                  font-family:'JetBrains Mono',monospace;">&#8377;{st_data['ltp']:,.1f}</div>
-                  <div style="font-size:11px; font-weight:700; text-align:right;
-                  color:{s_color}; font-family:'JetBrains Mono',monospace;">
-                    {s_sign}{st_data['change']:.2f}%
+                  
+                  {stock_rows_html}
+                  
+                  <div style="padding:7px 14px 7px 32px; font-size:10px; color:#7a8394;
+                  background:#fafbfc;">
+                    Showing top 8 of {total_count} stocks in {sector_name}
                   </div>
                 </div>
-                """
-
-            total_count = len(get_stocks_by_sector(sector_name))
-
-            # 2. Render everything together inside a single wrapper markdown container
-            st.markdown(f"""
-            <div style="border-left:1px solid #e0e3e8; border-right:1px solid #e0e3e8; 
-            border-bottom:1px solid #e0e3e8; overflow:hidden; background:#fafffe; margin-top:-2px;">
-              
-              <div style="display:grid; grid-template-columns:100px 1fr 70px 70px;
-              gap:10px; padding:6px 14px 6px 32px; background:#f0faf5;
-              border-bottom:1px solid #e0e3e8;">
-                <div style="font-size:9px; font-weight:700; color:#7a8394;
-                letter-spacing:0.08em; text-transform:uppercase;">Stock</div>
-                <div style="font-size:9px; font-weight:700; color:#7a8394;
-                letter-spacing:0.08em; text-transform:uppercase;">Move</div>
-                <div style="font-size:9px; font-weight:700; color:#7a8394;
-                letter-spacing:0.08em; text-transform:uppercase; text-align:right;">LTP</div>
-                <div style="font-size:9px; font-weight:700; color:#7a8394;
-                letter-spacing:0.08em; text-transform:uppercase; text-align:right;">Chg %</div>
-              </div>
-              
-              {stock_rows_html}
-              
-              <div style="padding:7px 14px 7px 32px; font-size:10px; color:#7a8394;
-              background:#fafbfc;">
-                Showing top 8 of {total_count} stocks in {sector_name}
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
 # Chart bottom footer — matches original style
 st.markdown(f"""
