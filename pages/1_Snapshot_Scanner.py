@@ -1,71 +1,82 @@
 import streamlit as st
-import pyotp
 import pandas as pd
-from SmartApi import SmartConnect
 
-# Page Setup
-st.set_page_config(page_title="EOD Stock Scanner", layout="wide")
-st.title("📊 Market-Close Snapshot Scanner (LTP Fetcher)")
+# Page Configuration
+st.set_page_config(page_title="Trading Dashboard - Sector Analysis", layout="wide")
 
-# Credentials directly from Streamlit Secrets
-api_key = st.secrets["API_KEY"]
-username = st.secrets["CLIENT_CODE"]
-password = st.secrets["PASSWORD"]
-totp_secret = st.secrets["TOTP_SECRET"]
+# Sidebar Configuration (Jaise Extension ka side panel tha)
+st.sidebar.title("🎛️ Control Panel")
+selected_market = st.sidebar.selectbox("Market Type", ["NIFTY 50", "NIFTY NEXT 50", "ALL NSE STOCKS"])
+st.sidebar.markdown("---")
+st.sidebar.info("💡 Yeh aapka UI layout hai. Backend logic iske baad integrate hoga.")
 
-# List of Stocks to Scan (Token details for Angel One)
-# Format: {"Stock_Name": {"token": "XYZ", "exchange": "NSE"}}
-STOCKS_LIST = {
-    "RELIANCE": {"token": "2885", "exchange": "NSE"},
-    "GAIL": {"token": "4717", "exchange": "NSE"},
-    "GMDC": {"token": "14299", "exchange": "NSE"},
-    "SBIN": {"token": "3045", "exchange": "NSE"},
-    "HEROMOTOCO": {"token": "1348", "exchange": "NSE"}
-}
+# Main Dashboard Header
+st.title("⚡ Dynamic Trading Web App")
+st.markdown("---")
 
-def fetch_closing_prices():
-    try:
-        # 1. Initialize & Login
-        smartApi = SmartConnect(api_key=api_key)
-        current_totp = pyotp.TOTP(totp_secret).now()
-        data = smartApi.generateSession(username, password, current_totp)
+# Creating Tabs (Jaise extension mein alal-alag tabs hote hain)
+tab_sector, tab_volume, tab_watchlist = st.tabs(["📊 Sector Tab", "📈 Volume Screen", "📋 Watchlist"])
+
+# ==========================================
+# 📊 MODULE 1: SECTOR TAB UI
+# ==========================================
+with tab_sector:
+    st.header("Sector-wise Performance & Accumulation")
+    
+    # Top Metrics Bar (Quick Summary)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(label="Top Gainer Sector", value="NIFTY AUTO", delta="+1.85%")
+    with col2:
+        st.metric(label="Top Loser Sector", value="NIFTY IT", delta="-0.92%")
+    with col3:
+        st.metric(label="Highest Delivery Sector", value="NIFTY CAPITAL GOODS", delta="68% Avg")
+    with col4:
+        st.metric(label="Total Tracked Sectors", value="11 Sectors")
         
-        if data.get('status') == False:
-            st.error(f"Login Failed: {data.get('message')}")
-            return
-            
-        st.success("🔒 Secure Connection Established with Angel One!")
-        
-        # 2. Fetch LTP for each stock from the database
-        rows = []
-        with st.spinner("Fetching last traded prices from server..."):
-            for name, info in STOCKS_LIST.items():
-                response = smartApi.getLTP(info["exchange"], name, info["token"])
-                
-                if response.get("status") and response.get("data"):
-                    stock_data = response["data"]
-                    rows.append({
-                        "Stock Symbol": stock_data.get("symbol"),
-                        "Last Traded Price (LTP)": f"₹{stock_data.get('ltp'):,.2f}",
-                        "Exchange": stock_data.get("exchange"),
-                        "Token ID": stock_data.get("token")
-                    })
-                else:
-                    rows.append({
-                        "Stock Symbol": name,
-                        "Last Traded Price (LTP)": "Fetch Error",
-                        "Exchange": info["exchange"],
-                        "Token ID": info["token"]
-                    })
-                    
-        # 3. Render into a beautiful clean Table
-        df = pd.DataFrame(rows)
-        st.subheader("📋 Stock Snapshot Table (Last Available Prices)")
-        st.dataframe(df, use_container_width=True)
-        
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
+    st.markdown("---")
+    
+    # Sector Selection Dropdown
+    selected_sector = st.selectbox(
+        "🔎 Select Sector to View Under-lying Stocks", 
+        ["NIFTY AUTO", "NIFTY CAPITAL GOODS", "NIFTY BANK", "NIFTY FMCG", "NIFTY PHARMA"]
+    )
+    
+    st.subheader(f"📋 Stocks Under {selected_sector}")
+    
+    # Dummy Data Structure for UI Preview (Jaise extension mein stocks render hote the)
+    dummy_stocks_data = {
+        "Stock Symbol": ["M&M", "HEROMOTOCO", "TATAMOTORS", "BAJAJ-AUTO", "TIINDIA"],
+        "LTP (₹)": [2450.00, 5120.50, 960.30, 8950.00, 3620.10],
+        "Change (%)": ["+3.20%", "+2.15%", "+1.10%", "-0.45%", "+0.80%"],
+        "Volume (RVOL)": ["2.1x", "1.5x", "0.9x", "1.2x", "0.7x"],
+        "Delivery %": ["65.4%", "58.2%", "42.1%", "61.9%", "55.0%"],
+        "Footprint Status": ["Institutional Accumulation", "Strong Buying", "Neutral", "Distribution", "Neutral"]
+    }
+    
+    df_preview = pd.DataFrame(dummy_stocks_data)
+    
+    # Rendering beautiful interactive table
+    st.dataframe(
+        df_preview.style.applymap(
+            lambda x: 'color: green;' if 'Accumulation' in str(x) or 'Buying' in str(x) 
+            else ('color: red;' if 'Distribution' in str(x) else ''), 
+            subset=['Footprint Status']
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
 
-# UI Button to trigger fetch
-if st.button("🔄 Fetch Last Closing Prices"):
-    fetch_closing_prices()
+# ==========================================
+# 📈 MODULE 2: VOLUME SCREEN UI (Placeholder)
+# ==========================================
+with tab_volume:
+    st.header("🚀 Volume Breakout Screen")
+    st.warning("Volume Scanner UI & Logic abhi build hona baki hai. Pehle Sector Tab complete karenge.")
+
+# ==========================================
+# 📋 MODULE 3: WATCHLIST UI (Placeholder)
+# ==========================================
+with tab_watchlist:
+    st.header("⭐ My Watchlist")
+    st.warning("Watchlist Module UI abhi build hona baki hai.")
