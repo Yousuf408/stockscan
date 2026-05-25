@@ -183,6 +183,21 @@ TF_MAP = {
     "1 Year":  {"interval": "1wk", "range": "1y"},
 }
 
+
+# Gap classification helper
+def calculate_gap(open_price, prev_close):
+    """Calculate gap % and classify: gap_up, gap_down, or flat"""
+    if not open_price or not prev_close or prev_close == 0:
+        return {"gap_pct": 0, "category": "flat"}
+    gap_pct = ((open_price - prev_close) / prev_close) * 100
+    if gap_pct > 0.30:
+        category = "gap_up"
+    elif gap_pct < -0.30:
+        category = "gap_down"
+    else:
+        category = "flat"
+    return {"gap_pct": round(gap_pct, 2), "category": category}
+
 # 2. Data Fetchers
 @st.cache_data(ttl=30)
 def fetch_sector_indices(tf="1 Day"):
@@ -198,9 +213,12 @@ def fetch_sector_indices(tf="1 Day"):
             if meta:
                 cp = meta.get('regularMarketPrice', 0)
                 pc = meta.get('chartPreviousClose', 0)
+                op = meta.get('regularMarketOpen', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
+                gap_info = calculate_gap(op, pc)
                 data.append({'name': name, 'symbol': symbol, 'change': round(change, 2),
-                             'direction': 'up' if change >= 0 else 'down', 'ltp': cp})
+                             'direction': 'up' if change >= 0 else 'down', 'ltp': cp,
+                             'open': op, 'gap_pct': gap_info['gap_pct'], 'gap_category': gap_info['category']})
         except:
             continue
     data.sort(key=lambda x: x['change'], reverse=True)
@@ -224,8 +242,11 @@ def fetch_sector_stocks_live(sector_name, tf="1 Day"):
             if meta:
                 ltp = meta.get('regularMarketPrice', 0)
                 pc  = meta.get('chartPreviousClose', 0)
+                op  = meta.get('regularMarketOpen', 0)
                 chg = ((ltp - pc) / pc * 100) if pc else 0.0
-                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2)})
+                gap_info = calculate_gap(op, pc)
+                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2),
+                                'gap_pct': gap_info['gap_pct'], 'gap_category': gap_info['category']})
         except:
             continue
     results.sort(key=lambda x: x['change'], reverse=True)
@@ -243,6 +264,34 @@ gainers = [s for s in sector_data if s['direction'] == 'up']
 losers  = [s for s in sector_data if s['direction'] == 'down']
 top     = sector_data[0]
 bottom  = sector_data[-1]
+
+# Pre-calculate gap breadth for sectors (will be used when displaying)
+def get_sector_gap_breadth(sector_name, selected_tf):
+    stocks = get_stocks_by_sector(sector_name)
+    if not stocks:
+        return {"gap_up": 0, "flat": 0, "gap_down": 0, "total": 0}
+    
+    gap_counts = {"gap_up": 0, "flat": 0, "gap_down": 0}
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    for s in stocks[:5]:
+        sym = f"{s['sym']}.NS"
+        try:
+            params = TF_MAP.get(selected_tf, TF_MAP["1 Day"])
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={params['interval']}&range={params['range']}"
+            resp = requests.get(url, headers=headers, timeout=3)
+            if not resp.ok: continue
+            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+            if meta:
+                op = meta.get('regularMarketOpen', 0)
+                pc = meta.get('chartPreviousClose', 0)
+                gap_info = calculate_gap(op, pc)
+                gap_counts[gap_info['category']] += 1
+        except:
+            continue
+    
+    total = sum(gap_counts.values())
+    return {**gap_counts, "total": total}
 
 # 4. Control Row
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
@@ -297,6 +346,13 @@ for idx, s in enumerate(sector_data):
     )
 
     # STEP 2: Card HTML overlays on top of the button via negative margin-top
+    # Get gap breadth for this sector
+    gap_breadth = get_sector_gap_breadth(s['name'], st.session_state['selected_tf'])
+    total_gap = gap_breadth['total'] if gap_breadth['total'] > 0 else 1
+    gap_up_w = (gap_breadth['gap_up'] / total_gap) * 100
+    flat_w = (gap_breadth['flat'] / total_gap) * 100
+    gap_down_w = (gap_breadth['gap_down'] / total_gap) * 100
+    
     # pointer-events: none ensures clicks pass through card to the button below
     st.markdown(f"""
     <div class="{card_class}">
@@ -306,6 +362,14 @@ for idx, s in enumerate(sector_data):
         </div>
         <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">
             {sign}{s['change']:.2f}%
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; min-width:140px;">
+            <div style="display:flex; height:5px; border-radius:2px; overflow:hidden; gap:0.5px;">
+                <div style="width:{gap_up_w:.1f}%; height:100%; background:#00a854;"></div>
+                <div style="width:{flat_w:.1f}%; height:100%; background:#d3d1c7;"></div>
+                <div style="width:{gap_down_w:.1f}%; height:100%; background:#e53935;"></div>
+            </div>
+            <div style="font-size:10px; color:#7a8394; font-family:monospace; letter-spacing:0.02em;">↑{gap_breadth['gap_up']} —{gap_breadth['flat']} ↓{gap_breadth['gap_down']}</div>
         </div>
         <div class="expand-icon">{icon}</div>
     </div>
@@ -321,12 +385,13 @@ for idx, s in enumerate(sector_data):
         else:
             # Header row
             st.markdown("""
-            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+            <div style="display:grid; grid-template-columns:110px 1fr 90px 70px 70px;
             gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Gap</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -337,8 +402,22 @@ for idx, s in enumerate(sector_data):
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign  = "+" if stk['change'] >= 0 else ""
                 stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
+                
+                # Gap display
+                gap_val = stk.get('gap_pct', 0)
+                gap_cat = stk.get('gap_category', 'flat')
+                if gap_cat == 'gap_up':
+                    gap_color = "#00a854"
+                    gap_text = f"↑ +{abs(gap_val):.2f}%"
+                elif gap_cat == 'gap_down':
+                    gap_color = "#e53935"
+                    gap_text = f"↓ {gap_val:.2f}%"
+                else:
+                    gap_color = "#7a8394"
+                    gap_text = "—"
+                
                 st.markdown(f"""
-                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+                <div style="display:grid; grid-template-columns:110px 1fr 90px 70px 70px;
                 gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
                     <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
@@ -346,6 +425,7 @@ for idx, s in enumerate(sector_data):
                     </div>
                     <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
                     <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
+                    <div style="font-size:12px; font-weight:600; text-align:right; color:{gap_color}; font-family:'JetBrains Mono',monospace;">{gap_text}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
