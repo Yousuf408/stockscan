@@ -1,9 +1,7 @@
 # ══════════════════════════════════════════
-#  TRADESENTRY — styles.py
-#  Global CSS for entire app
-#  Theme: Professional White / Light
-#  Usage: from styles import apply_styles
-#         apply_styles()  ← call on every page
+#  TRADESENTRY — styles.py v4.0
+#  Professional White Theme + Top Navbar
+#  Mobile Responsive
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -45,10 +43,16 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       GLOBAL RESET
+       KILL STREAMLIT DEFAULTS + SIDEBAR
     ══════════════════════════════════════ */
     * { box-sizing: border-box; }
     #MainMenu, footer { visibility: hidden; }
+    
+    /* Hide sidebar completely */
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarHeader"] { display: none !important; }
+    [data-testid="stSidebarCollapseButton"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
 
     /* ══════════════════════════════════════
        APP BACKGROUND
@@ -58,73 +62,111 @@ def apply_styles():
         font-family: var(--sans) !important;
         color: var(--text) !important;
     }
+    
     .block-container {
-        padding: 1.5rem 2rem 2rem 2rem !important;
+        padding: 0 !important;
+        margin: 0 !important;
         max-width: 100% !important;
     }
 
     /* ══════════════════════════════════════
-       SIDEBAR
+       TOP NAVBAR
     ══════════════════════════════════════ */
-    [data-testid="stSidebar"] {
-        background: var(--bg) !important;
-        border-right: 1px solid var(--border) !important;
-        box-shadow: 2px 0 8px rgba(0,0,0,0.04) !important;
-    }
-    [data-testid="stSidebarHeader"] {
-        background: var(--bg) !important;
-        padding: 16px 16px 0 16px !important;
-        border-bottom: 1px solid var(--border) !important;
-    }
-
-    /* Sidebar nav links */
-    [data-testid="stSidebar"] a {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        font-weight: 500 !important;
-        color: var(--text2) !important;
-        border-radius: var(--radius) !important;
-        padding: 8px 12px !important;
-        transition: all 0.15s !important;
-        letter-spacing: 0.01em !important;
-    }
-    [data-testid="stSidebar"] a:hover {
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
-    }
-    [data-testid="stSidebar"] [aria-current="page"] {
-        color: var(--green) !important;
-        background: var(--green-bg) !important;
-        border-left: 3px solid var(--green) !important;
-        font-weight: 600 !important;
+    .ts-navbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        padding: 0 20px;
+        height: 52px;
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        gap: 20px;
     }
 
-    /* Sidebar toggle — always visible */
-    [data-testid="stSidebarCollapseButton"] button {
-        background: var(--bg3) !important;
-        border: 1px solid var(--border2) !important;
-        border-radius: var(--radius) !important;
-        color: var(--text2) !important;
-        visibility: visible !important;
-        opacity: 1 !important;
+    .ts-navbar-left {
+        display: flex;
+        align-items: center;
+        gap: 20px;
     }
-    [data-testid="stSidebarCollapseButton"] button:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
+
+    .ts-navbar-logo {
+        font-family: var(--mono);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: var(--text);
+        white-space: nowrap;
     }
-    [data-testid="collapsedControl"] {
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        background: var(--bg) !important;
-        border: 1px solid var(--border2) !important;
-        border-radius: var(--radius) !important;
-        box-shadow: var(--shadow) !important;
+
+    .ts-navbar-logo span {
+        color: var(--green);
     }
-    [data-testid="collapsedControl"]:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
+
+    .ts-navbar-divider {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+    }
+
+    .ts-navbar-links {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .ts-navbar-link {
+        font-family: var(--sans);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text2);
+        text-decoration: none;
+        transition: all 0.15s;
+        padding-bottom: 2px;
+        border-bottom: 2px solid transparent;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+    }
+
+    .ts-navbar-link:hover {
+        color: var(--green);
+    }
+
+    .ts-navbar-link.active {
+        color: var(--green);
+        border-bottom-color: var(--green);
+    }
+
+    .ts-navbar-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .ts-navbar-time {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text3);
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 4px 10px;
+        letter-spacing: 0.04em;
+    }
+
+    /* ══════════════════════════════════════
+       PAGE CONTENT
+    ══════════════════════════════════════ */
+    .ts-page-content {
+        padding: 20px;
+        background: var(--bg3);
+        min-height: calc(100vh - 52px);
+        width: 100%;
     }
 
     /* ══════════════════════════════════════
@@ -154,7 +196,7 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       STREAMLIT INPUTS / SELECTBOX
+       STREAMLIT INPUTS
     ══════════════════════════════════════ */
     div[data-testid="stTextInput"] input,
     div[data-testid="stNumberInput"] input,
@@ -173,7 +215,7 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       DATAFRAME / TABLES
+       DATAFRAME
     ══════════════════════════════════════ */
     div[data-testid="stDataFrame"] {
         border: 1px solid var(--border) !important;
@@ -219,21 +261,12 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       ALERTS (info/success/warning/error)
+       ALERTS
     ══════════════════════════════════════ */
     div[data-testid="stAlert"] {
         border-radius: var(--radius) !important;
         font-family: var(--sans) !important;
         font-size: 13px !important;
-    }
-
-    /* ══════════════════════════════════════
-       SPINNER
-    ══════════════════════════════════════ */
-    div[data-testid="stSpinner"] {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        color: var(--text3) !important;
     }
 
     /* ══════════════════════════════════════
@@ -248,156 +281,121 @@ def apply_styles():
     ::-webkit-scrollbar-thumb:hover { background: var(--green); }
 
     /* ══════════════════════════════════════
-       REUSABLE COMPONENT CLASSES
-       (use in st.markdown(..., unsafe_allow_html=True))
+       MOBILE RESPONSIVE
     ══════════════════════════════════════ */
+    @media (max-width: 768px) {
+        .ts-navbar {
+            padding: 0 12px;
+            height: 48px;
+            gap: 12px;
+        }
 
-    /* Page header */
-    .ts-page-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 0 20px 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 20px;
-    }
-    .ts-logo {
-        font-family: var(--mono);
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text);
-        letter-spacing: 0.06em;
-    }
-    .ts-logo span { color: var(--green); }
-    .ts-page-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text3);
-        letter-spacing: 0.08em;
-        font-family: var(--sans);
-    }
+        .ts-navbar-logo {
+            font-size: 12px;
+        }
 
-    /* Card */
-    .ts-card {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 16px 20px;
-        box-shadow: var(--shadow);
-        margin-bottom: 12px;
-    }
-    .ts-card:hover {
-        border-color: var(--border2);
-        box-shadow: var(--shadow-md);
-        transition: all 0.15s;
+        .ts-navbar-divider {
+            display: none;
+        }
+
+        .ts-navbar-links {
+            gap: 12px;
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            padding-bottom: 4px;
+        }
+
+        .ts-navbar-link {
+            font-size: 11px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .ts-navbar-time {
+            display: none;
+        }
+
+        .ts-page-content {
+            padding: 12px;
+        }
     }
 
-    /* Metric card */
-    .ts-metric {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 14px 18px;
-        box-shadow: var(--shadow);
-    }
-    .ts-metric-label {
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.1em;
-        color: var(--text3);
-        text-transform: uppercase;
-        font-family: var(--sans);
-        margin-bottom: 6px;
-    }
-    .ts-metric-value {
-        font-size: 20px;
-        font-weight: 700;
-        color: var(--text);
-        font-family: var(--mono);
-    }
+    @media (max-width: 480px) {
+        .ts-navbar-left {
+            gap: 10px;
+        }
 
-    /* Badge */
-    .ts-badge-green {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: var(--green-bg); color: var(--green);
-        border: 1px solid #00a85430;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-    .ts-badge-red {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: var(--red-bg); color: var(--red);
-        border: 1px solid #e5393530;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-    .ts-badge-amber {
-        display: inline-flex; align-items: center; gap: 4px;
-        background: #fffbf0; color: var(--amber);
-        border: 1px solid #f59e0b30;
-        font-size: 11px; font-weight: 600;
-        padding: 2px 8px; border-radius: 20px;
-        font-family: var(--mono);
-    }
+        .ts-navbar-links {
+            gap: 8px;
+        }
 
-    /* Table row states */
-    .ts-row-up   { border-left: 3px solid var(--green) !important; background: var(--green-bg) !important; }
-    .ts-row-down { border-left: 3px solid var(--red) !important;   background: var(--red-bg) !important; }
-
-    /* Section label */
-    .ts-section-label {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--text3);
-        font-family: var(--sans);
-        padding: 0 0 8px 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 12px;
+        .ts-navbar-link {
+            font-size: 10px;
+            padding-bottom: 1px;
+        }
     }
-
-    /* Divider */
-    .ts-divider {
-        border: none;
-        border-top: 1px solid var(--border);
-        margin: 16px 0;
-    }
-
-    /* Status dot */
-    .ts-dot-green { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; }
-    .ts-dot-red   { width:7px; height:7px; border-radius:50%; background:var(--red);   display:inline-block; }
-    .ts-dot-amber { width:7px; height:7px; border-radius:50%; background:var(--amber); display:inline-block; }
 
     </style>
     """, unsafe_allow_html=True)
 
 
-def page_header(title: str, subtitle: str = ""):
-    """Render standard TradeSentry page header."""
-    sub_html = f'<div class="ts-page-title">{subtitle}</div>' if subtitle else ""
+def render_navbar(current_page: str, pages: list):
+    """
+    Render top navbar with page links.
+    
+    Usage:
+        pages = [
+            ("Sectors", "2_Sectors"),
+            ("Watchlist", "3_Watchlist"),
+            ("Scan", "4_Scan")
+        ]
+        render_navbar(st.session_state.page or "Sectors", pages)
+    """
     st.markdown(f"""
-    <div class="ts-page-header">
-        <div class="ts-logo">TRADE<span>SENTRY</span></div>
-        {sub_html}
+    <div class="ts-navbar">
+        <div class="ts-navbar-left">
+            <div class="ts-navbar-logo">TRADE<span>SENTRY</span></div>
+            <div class="ts-navbar-divider"></div>
+            <div class="ts-navbar-links">
+    """, unsafe_allow_html=True)
+
+    for page_name, page_key in pages:
+        is_active = current_page == page_name
+        active_class = "active" if is_active else ""
+        st.markdown(f"""
+                <a href="#{page_key}" class="ts-navbar-link {active_class}" 
+                   onclick="window.location.hash='{page_key}'">{page_name}</a>
+        """, unsafe_allow_html=True)
+
+    st.markdown("""
+            </div>
+        </div>
+        <div class="ts-navbar-right">
+            <div class="ts-navbar-time" id="ts-time">--:--:--</div>
+        </div>
     </div>
+    <script>
+    function updateTime() {
+        var now = new Date();
+        var h = String(now.getHours()).padStart(2,'0');
+        var m = String(now.getMinutes()).padStart(2,'0');
+        var s = String(now.getSeconds()).padStart(2,'0');
+        var el = document.getElementById('ts-time');
+        if(el) el.textContent = h+':'+m+':'+s;
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+    </script>
     """, unsafe_allow_html=True)
 
 
-def sidebar_brand():
-    """Render TradeSentry branding in sidebar."""
-    with st.sidebar:
-        st.markdown("""
-        <div style="padding:12px 8px 14px 8px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:15px;
-            font-weight:700;color:#0f1117;letter-spacing:0.08em;">
-                TRADE<span style="color:#00a854;">SENTRY</span>
-            </div>
-            <div style="font-size:9px;color:#7a8394;font-family:'Inter',sans-serif;
-            font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
-            margin-top:3px;">NSE Professional Screener</div>
+def page_content(title: str = ""):
+    """Wrap page content in proper styling."""
+    st.markdown(f'<div class="ts-page-content">', unsafe_allow_html=True)
+    if title:
+        st.markdown(f"""
+        <div style="padding:0 0 16px 0;border-bottom:1px solid var(--border);margin-bottom:16px;">
+            <div style="font-family:var(--mono);font-size:16px;font-weight:700;
+            color:var(--text);letter-spacing:0.06em;">{title}</div>
         </div>
-        <hr style="border:none;border-top:1px solid #e0e3e8;margin:0 0 8px 0;">
         """, unsafe_allow_html=True)
