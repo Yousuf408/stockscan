@@ -78,7 +78,7 @@ st.markdown("""
        pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 44px !important;
+        height: 36px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -101,7 +101,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -42px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -121,7 +121,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -42px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
