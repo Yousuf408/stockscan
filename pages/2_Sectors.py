@@ -218,15 +218,37 @@ def fetch_sector_stocks_live(sector_name):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
+            # Fetch 2 days to get previous close + today's open for gap calculation
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
-            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+            result = resp.json().get('chart', {}).get('result', [{}])[0]
+            meta   = result.get('meta', {})
+            quotes = result.get('indicators', {}).get('quote', [{}])[0]
             if meta:
-                ltp = meta.get('regularMarketPrice', 0)
-                pc  = meta.get('chartPreviousClose', 0)
-                chg = ((ltp - pc) / pc * 100) if pc else 0.0
-                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2)})
+                ltp  = meta.get('regularMarketPrice', 0)
+                pc   = meta.get('chartPreviousClose', 0)
+                chg  = ((ltp - pc) / pc * 100) if pc else 0.0
+
+                # Gap = today's open vs yesterday's close
+                opens  = quotes.get('open', [])
+                closes = quotes.get('close', [])
+                # Filter out None values
+                opens_clean  = [o for o in opens  if o is not None]
+                closes_clean = [c for c in closes if c is not None]
+                today_open   = opens_clean[-1]  if opens_clean  else None
+                prev_close   = closes_clean[-2] if len(closes_clean) >= 2 else pc
+                if today_open and prev_close:
+                    gap_pct = ((today_open - prev_close) / prev_close) * 100
+                else:
+                    gap_pct = None
+
+                results.append({
+                    'ticker': s['sym'],
+                    'ltp': round(ltp, 2),
+                    'change': round(chg, 2),
+                    'gap': round(gap_pct, 2) if gap_pct is not None else None,
+                })
         except:
             continue
     results.sort(key=lambda x: x['change'], reverse=True)
@@ -322,12 +344,13 @@ for idx, s in enumerate(sector_data):
         else:
             # Header row
             st.markdown("""
-            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px 80px;
             gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Gap</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -338,8 +361,20 @@ for idx, s in enumerate(sector_data):
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign  = "+" if stk['change'] >= 0 else ""
                 stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
+
+                # Gap display
+                gap = stk.get('gap')
+                if gap is not None:
+                    gap_color = "#00a854" if gap >= 0 else "#e53935"
+                    gap_sign  = "+" if gap >= 0 else ""
+                    gap_label = f"{gap_sign}{gap:.2f}%"
+                    gap_badge_bg = "#e8f5e9" if gap >= 0 else "#fdecea"
+                    gap_html = f'<div style="font-size:11px; font-weight:700; text-align:right; color:{gap_color}; font-family:\'JetBrains Mono\',monospace; background:{gap_badge_bg}; border-radius:4px; padding:2px 6px;">{gap_label}</div>'
+                else:
+                    gap_html = '<div style="font-size:11px; text-align:right; color:#c0c4cc;">—</div>'
+
                 st.markdown(f"""
-                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
+                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px 80px;
                 gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
                     <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
@@ -347,6 +382,7 @@ for idx, s in enumerate(sector_data):
                     </div>
                     <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
                     <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
+                    {gap_html}
                 </div>
                 """, unsafe_allow_html=True)
 
