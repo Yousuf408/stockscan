@@ -15,64 +15,42 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# ── Top bar: Refresh + View Mode toggle ──────────────────────────────────────
-col1, col2, col3 = st.columns([6, 2, 1])
-with col3:
+today = datetime.date.today()
+
+# ── Top bar: Refresh button ───────────────────────────────────────────────────
+col_title, col_refresh = st.columns([11, 1])
+with col_refresh:
     if st.button("⟳ Refresh", key="sector_refresh"):
         st.cache_data.clear()
         st.rerun()
-with col2:
+
+# ── Mode selector + single calendar ──────────────────────────────────────────
+mode_col, cal_col, spacer = st.columns([2, 2, 6])
+
+with mode_col:
     view_mode = st.radio(
-        "View",
-        ["Today", "Date Range"],
-        horizontal=True,
+        "Mode",
+        ["Today", "Custom Date"],
         label_visibility="collapsed",
         key="view_mode"
     )
 
-# ── Date range controls (only shown when Date Range is selected) ──────────────
-date_from = date_to = None
-
-if view_mode == "Date Range":
-    today = datetime.date.today()
-    dcol1, dcol2, dcol3 = st.columns([2, 2, 4])
-    with dcol1:
+# Only show calendar when Custom Date is selected
+date_from = None
+if view_mode == "Custom Date":
+    with cal_col:
         date_from = st.date_input(
-            "From",
+            "Start date",
             value=today - datetime.timedelta(days=30),
+            min_value=datetime.date(2010, 1, 1),
             max_value=today - datetime.timedelta(days=1),
+            label_visibility="collapsed",
             key="date_from"
         )
-    with dcol2:
-        date_to = st.date_input(
-            "To",
-            value=today,
-            min_value=date_from + datetime.timedelta(days=1) if date_from else today,
-            max_value=today,
-            key="date_to"
-        )
-    with dcol3:
-        # Quick-select preset buttons
-        st.write("")  # spacer
-        bcol1, bcol2, bcol3, bcol4, bcol5 = st.columns(5)
-        presets = {
-            "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365
-        }
-        for col, (label, days) in zip([bcol1, bcol2, bcol3, bcol4, bcol5], presets.items()):
-            with col:
-                if st.button(label, key=f"preset_{label}"):
-                    st.session_state["date_from"] = today - datetime.timedelta(days=days)
-                    st.session_state["date_to"] = today
-                    st.rerun()
-
-    # Validate
-    if date_from and date_to and date_from >= date_to:
-        st.warning("⚠️ 'From' date must be before 'To' date.")
-        st.stop()
 
 st.divider()
 
-# ── TODAY mode: existing live fetch via Yahoo Finance chart API ───────────────
+# ── TODAY mode: live fetch via Yahoo Finance chart API (original code) ────────
 @st.cache_data(ttl=30)
 def fetch_sector_data_today():
     data = []
@@ -109,75 +87,64 @@ def fetch_sector_data_today():
     return data
 
 
-# ── DATE RANGE mode: fetch via yfinance ──────────────────────────────────────
+# ── CUSTOM DATE mode: fetch via yfinance (from_date → today) ─────────────────
 @st.cache_data(ttl=300)
 def fetch_sector_data_range(from_date: str, to_date: str):
-    """
-    Returns sector % change between from_date and to_date using yfinance.
-    from_date / to_date are ISO strings (YYYY-MM-DD).
-    """
     data = []
-    # yfinance needs end date +1 day to include the to_date candle
     end = (datetime.date.fromisoformat(to_date) + datetime.timedelta(days=1)).isoformat()
-
     for name, symbol in SECTOR_YAHOO.items():
         try:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(start=from_date, end=end, interval="1d", auto_adjust=True)
-            if hist.empty or len(hist) < 2:
-                # fallback: single-candle open→close
-                if not hist.empty:
-                    open_p = hist['Open'].iloc[0]
-                    close_p = hist['Close'].iloc[-1]
-                    change = ((close_p - open_p) / open_p * 100) if open_p else 0.0
-                    data.append({
-                        'name': name,
-                        'change': round(change, 2),
-                        'direction': 'up' if change >= 0 else 'down',
-                        'ltp': round(close_p, 2),
-                        'prev': round(open_p, 2)
-                    })
+            if hist.empty:
                 continue
-
-            start_close = hist['Close'].iloc[0]   # closing price on first day
-            end_close   = hist['Close'].iloc[-1]   # closing price on last day
+            if len(hist) == 1:
+                open_p  = hist['Open'].iloc[0]
+                close_p = hist['Close'].iloc[0]
+                change  = ((close_p - open_p) / open_p * 100) if open_p else 0.0
+                data.append({
+                    'name': name, 'change': round(change, 2),
+                    'direction': 'up' if change >= 0 else 'down',
+                    'ltp': round(close_p, 2), 'prev': round(open_p, 2)
+                })
+                continue
+            start_close = hist['Close'].iloc[0]
+            end_close   = hist['Close'].iloc[-1]
             change = ((end_close - start_close) / start_close * 100) if start_close else 0.0
             data.append({
-                'name': name,
-                'change': round(change, 2),
+                'name': name, 'change': round(change, 2),
                 'direction': 'up' if change >= 0 else 'down',
-                'ltp': round(end_close, 2),
-                'prev': round(start_close, 2)
+                'ltp': round(end_close, 2), 'prev': round(start_close, 2)
             })
         except:
             continue
-
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
 
-# ── Fetch data based on mode ──────────────────────────────────────────────────
+# ── Fetch ─────────────────────────────────────────────────────────────────────
 if view_mode == "Today":
     with st.spinner("Fetching live sector data..."):
         data = fetch_sector_data_today()
     period_label = "Today's Performance"
-    updated = time.strftime("%H:%M:%S")
+    table_cols   = ['Sector', 'LTP', 'Prev Close', 'Change %']
 else:
-    with st.spinner(f"Fetching sector data from {date_from} to {date_to}..."):
-        data = fetch_sector_data_range(str(date_from), str(date_to))
-    period_label = f"Performance: {date_from.strftime('%d %b %Y')} → {date_to.strftime('%d %b %Y')}"
-    updated = time.strftime("%H:%M:%S")
+    with st.spinner(f"Fetching data from {date_from} to {today}..."):
+        data = fetch_sector_data_range(str(date_from), str(today))
+    period_label = f"Performance: {date_from.strftime('%d %b %Y')} → {today.strftime('%d %b %Y')}"
+    table_cols   = ['Sector', 'End Price', 'Start Price', 'Change %']
 
 if not data:
-    st.error("Could not fetch sector data. Please try again or adjust the date range.")
+    st.error("Could not fetch sector data. Try a different date or check your connection.")
     st.stop()
 
-# ── Build HTML chart (identical to your original logic) ──────────────────────
+# ── Build HTML chart (original rendering logic, untouched) ────────────────────
 gainers = [s for s in data if s['direction'] == 'up']
 losers  = [s for s in data if s['direction'] == 'down']
 top     = data[0]
 bottom  = data[-1]
 max_chg = max(abs(s['change']) for s in data) or 1
+updated = time.strftime("%H:%M:%S")
 
 rows_html = ""
 for s in data:
@@ -207,7 +174,6 @@ body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
   padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .label {{ font-size:10px; font-weight:600; letter-spacing:0.1em;
   text-transform:uppercase; color:#7a8394; margin-bottom:6px; }}
-.period {{ font-size:10px; color:#7a8394; margin-bottom:6px; font-style:italic; }}
 .value {{ font-size:15px; font-weight:700; font-family:'JetBrains Mono',monospace; }}
 .chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
@@ -217,22 +183,14 @@ body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
   border-top:1px solid #f0f2f5; }}
 </style></head><body>
 <div class="metrics">
-  <div class="card">
-    <div class="label">Top Gainer</div>
-    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
-  </div>
-  <div class="card">
-    <div class="label">Top Loser</div>
-    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
-  </div>
-  <div class="card">
-    <div class="label">Breadth</div>
-    <div class="value">
-      <span style="color:#00a854;">{len(gainers)}↑</span>
-      <span style="color:#cdd1d8;"> / </span>
-      <span style="color:#e53935;">{len(losers)}↓</span>
-    </div>
-  </div>
+  <div class="card"><div class="label">Top Gainer</div>
+    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div></div>
+  <div class="card"><div class="label">Top Loser</div>
+    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div></div>
+  <div class="card"><div class="label">Breadth</div>
+    <div class="value"><span style="color:#00a854;">{len(gainers)}↑</span>
+    <span style="color:#cdd1d8;"> / </span>
+    <span style="color:#e53935;">{len(losers)}↓</span></div></div>
 </div>
 <div class="chart">
   <div class="chart-header">📅 {period_label}</div>
@@ -243,12 +201,9 @@ body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
 
 components.html(html, height=len(data) * 40 + 220)
 
-# ── Data Table (your original expander, unchanged) ────────────────────────────
+# ── Data Table (original expander, unchanged) ─────────────────────────────────
 with st.expander("📋 Data Table"):
     df = pd.DataFrame(data)[['name', 'ltp', 'prev', 'change']]
-    if view_mode == "Today":
-        df.columns = ['Sector', 'LTP', 'Prev Close', 'Change %']
-    else:
-        df.columns = ['Sector', 'End Price', 'Start Price', 'Change %']
+    df.columns = table_cols
     df['Change %'] = df['Change %'].apply(lambda x: f"{x:+.2f}%")
     st.dataframe(df, use_container_width=True, hide_index=True)
