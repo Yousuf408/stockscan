@@ -3,3 +3,5 @@ smartapi-python
 pyotp
 pandas
 yfinance
+logzero
+websocket-client
