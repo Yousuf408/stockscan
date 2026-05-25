@@ -20,37 +20,36 @@ page_header("Sector Performance — NSE Indices")
 # Surgical CSS patch to clean up interactive widgets and completely eliminate the gray background bug
 st.markdown("""
 <style>
-    /* Force native selectbox container background to remain crisp white */
-    div[data-testid="stSelectbox"] > div[data-mode="normal"] > div {
-        background-color: #ffffff !important;
-    }
-    
-    /* Ensure the wrapper holding the selectbox looks exactly like a metrics card */
-    div[data-testid="element-container"]:has(div[data-testid="stSelectbox"]) {
+    /* Turn columns c4 and c5 into identical physical cards matching your metrics */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(4),
+    div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
-        border-radius: 12px !important;
-        padding: 12px 14px 14px 14px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        border-radius: 10px !important;
+        padding: 14px 18px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
         min-height: 90px !important;
-    }
-
-    /* Format the action refresh button frame to accurately match sizing models */
-    div[data-testid="element-container"]:has(button[key="refresh_btn"]) {
-        background: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 12px !important;
-        padding: 12px 14px 14px 14px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-        min-height: 90px !important;
+        max-height: 90px !important;
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
+        justify-content: center;
+    }
+
+    /* Force the native Streamlit selectbox inner frame background to be pure white */
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        border: none !important;
     }
     
-    /* Clean vertical spacing resets for interactive column heights */
-    div[data-testid="stColumn"] div[data-testid="stVerticalBlock"] {
+    /* Remove default nested padding under the inputs inside the cards */
+    div[data-testid="stHorizontalBlock"] div[data-testid="stVerticalBlock"] {
         gap: 0rem !important;
+    }
+
+    /* Align the refresh button to fill out its card space evenly */
+    div[data-testid="stHorizontalBlock"] button[key="refresh_btn"] {
+        margin-top: 18px !important;
+        height: 38px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -147,21 +146,21 @@ c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
 
 with c1:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px; border: none; box-shadow: none; padding: 0;">
       <div class="ts-metric-label">Top Gainer</div>
       <div class="ts-metric-value" style="color:var(--green); font-size:15px; margin-top:4px;">▲ {top['name']} {top['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c2:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px; border: none; box-shadow: none; padding: 0;">
       <div class="ts-metric-label">Top Loser</div>
       <div class="ts-metric-value" style="color:var(--red); font-size:15px; margin-top:4px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c3:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px; border: none; box-shadow: none; padding: 0;">
       <div class="ts-metric-label">Breadth</div>
       <div class="ts-metric-value" style="font-size:15px; margin-top:4px;">
         <span style="color:var(--green);">{len(gainers)}↑</span>
@@ -171,7 +170,7 @@ with c3:
     </div>""", unsafe_allow_html=True)
 
 with c4:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; margin-left:1px;">Timeframe</div>""", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:10px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:#7a8394; margin-bottom:2px;">Timeframe</div>', unsafe_allow_html=True)
     chosen = st.selectbox(
         "TIMEFRAME",
         list(TIMEFRAMES.keys()),
@@ -179,14 +178,12 @@ with c4:
         label_visibility="collapsed",
         key="tf_select"
     )
-
     if chosen != st.session_state["selected_tf"]:
         st.session_state["selected_tf"] = chosen
         st.cache_data.clear()
         st.rerun()
 
 with c5:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; color:transparent; user-select:none;">Action</div>""", unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
