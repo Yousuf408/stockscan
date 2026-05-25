@@ -220,10 +220,10 @@ html = f"""<!DOCTYPE html><html><head>
 body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
 .chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
-.chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#7a8394;
+.chart-header {{ padding:12px 14px; font-size:11px; font-weight:600; color:#ffffff;
   background:#fafbfc; border-bottom:1px solid #f0f2f5;
   display:flex; justify-content:space-between; align-items:center; }}
-.footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
+.footer {{ padding:8px 12px; font-size:10px; color:#ffffff; text-align:right;
   border-top:1px solid #f0f2f5; }}
 </style></head><body>
 <div class="chart">
