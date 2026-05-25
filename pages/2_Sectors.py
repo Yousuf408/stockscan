@@ -22,6 +22,15 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
+    /* Kill Streamlit vertical gaps between sector button+card pairs */
+    div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
+    div[data-testid="element-container"] {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
@@ -63,12 +72,13 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
+
     /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
        The button is the actual click target. The HTML card overlays on top.
        pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 52px !important;
+        height: 44px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -81,15 +91,17 @@ st.markdown("""
     /* ── CARD overlays on top of the invisible button ── */
     .sector-card {
         background: #ffffff;
-        border: 1px solid #e0e3e8;
+        border-left: 1px solid #e0e3e8;
+        border-right: 1px solid #e0e3e8;
+        border-top: 1px solid #e0e3e8;
         border-bottom: none;
         border-radius: 0px;
-        padding: 14px 18px;
+        padding: 10px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -58px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -99,15 +111,17 @@ st.markdown("""
 
     .sector-card-active {
         background: #f5fdf8;
-        border: 1px solid #c8e6c9;
+        border-left: 1px solid #c8e6c9;
+        border-right: 1px solid #c8e6c9;
+        border-top: 1px solid #c8e6c9;
         border-bottom: none;
         border-radius: 0px;
-        padding: 14px 18px;
+        padding: 10px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -58px;
+        margin-top: -50px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -115,14 +129,16 @@ st.markdown("""
         z-index: 1;
     }
 
+    /* ── Expanded stock breakdown panel ── */
     .breakdown-box {
         background: #fafbfc;
-        border: 1px solid #e0e3e8;
+        border-left: 1px solid #c8e6c9;
+        border-right: 1px solid #c8e6c9;
         border-top: none;
         border-bottom: none;
         border-radius: 0px;
-        padding: 12px 24px;
-        margin-bottom: 0px;
+        margin: 0 18px;
+        padding: 10px 16px 14px 16px;
     }
 
     .bar-track {
@@ -133,7 +149,7 @@ st.markdown("""
     }
 
     .expand-icon {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 400;
         color: #7a8394;
         text-align: right;
