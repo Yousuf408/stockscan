@@ -385,23 +385,19 @@ for idx, s in enumerate(sector_data):
         else:
             # Header row
             st.markdown("""
-            <div style="display:grid; grid-template-columns:110px 1fr 90px 70px 70px;
+            <div style="display:grid; grid-template-columns:110px 90px 100px 70px 70px;
             gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Gap</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Vol</div>
             </div>
             """, unsafe_allow_html=True)
-
-            # Scale bars relative to max change among top 5 stocks
-            max_stk_chg = max((abs(stk['change']) for stk in stocks_list), default=1) or 1
 
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign  = "+" if stk['change'] >= 0 else ""
-                stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
                 
                 # Gap display
                 gap_val = stk.get('gap_pct', 0)
@@ -417,15 +413,13 @@ for idx, s in enumerate(sector_data):
                     gap_text = "—"
                 
                 st.markdown(f"""
-                <div style="display:grid; grid-template-columns:110px 1fr 90px 70px 70px;
+                <div style="display:grid; grid-template-columns:110px 90px 100px 70px 70px;
                 gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
-                    <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
-                        <div style="width:{stk_bar_w:.1f}%; height:100%; background:{stk_color}; border-radius:3px;"></div>
-                    </div>
                     <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
                     <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
                     <div style="font-size:12px; font-weight:600; text-align:right; color:{gap_color}; font-family:'JetBrains Mono',monospace;">{gap_text}</div>
+                    <div style="font-size:11px; font-weight:500; background:var(--color-background-secondary); color:var(--color-text-secondary); border-radius:4px; padding:3px 8px; text-align:center;">Vol</div>
                 </div>
                 """, unsafe_allow_html=True)
 
