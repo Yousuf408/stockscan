@@ -218,24 +218,35 @@ def fetch_sector_stocks_live(sector_name):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            # Only meta fields needed — range=1d is sufficient
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
+            # Changed range=1d to range=2d to ensure we capture the explicit yesterday vs today candle arrays
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
+            
             result = resp.json().get('chart', {}).get('result', [{}])[0]
             meta   = result.get('meta', {})
+            indicators = result.get('indicators', {}).get('quote', [{}])[0]
+            
+            # Safely extract historical open and close arrays
+            opens = indicators.get('open', [])
+            closes = indicators.get('close', [])
+            
             if meta:
-                ltp        = meta.get('regularMarketPrice', 0)
-                prev_close = meta.get('chartPreviousClose', 0)   # yesterday's official close
-                today_open = meta.get('regularMarketOpen', 0)    # today's actual open from meta
-                chg        = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
+                ltp = meta.get('regularMarketPrice', 0)
+                prev_close = meta.get('chartPreviousClose', 0)
+                chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-                # Gap = (today's open - yesterday's close) / yesterday's close * 100
-                # Both values come directly from meta — no array indexing, no candle ambiguity
-                if today_open and prev_close:
-                    gap_pct = ((today_open - prev_close) / prev_close) * 100
-                else:
-                    gap_pct = None
+                # Robust Gap Calculation using sequence arrays
+                gap_pct = None
+                if len(opens) >= 2 and closes[0] is not None and opens[1] is not None:
+                    # Case A: We have at least 2 distinct days of data (Yesterday Close -> Today Open)
+                    gap_pct = ((opens[1] - closes[0]) / closes[0]) * 100
+                elif len(opens) == 1 and opens[0] is not None and prev_close:
+                    # Case B: Only 1 day returned, fallback using metadata previous close
+                    gap_pct = ((opens[0] - prev_close) / prev_close) * 100
+                elif meta.get('regularMarketOpen') and prev_close:
+                    # Case C: Hard fallback to metadata parameters
+                    gap_pct = ((meta.get('regularMarketOpen') - prev_close) / prev_close) * 100
 
                 results.append({
                     'ticker': s['sym'],
