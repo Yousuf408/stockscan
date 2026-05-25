@@ -16,13 +16,12 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides with Clickable Card Design
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
         background-color: #ffffff !important;
     }
-    
+
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
@@ -64,7 +63,22 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── SECTOR CARD STYLING ── */
+    /* ── SECTOR TOGGLE BUTTON: Full width, transparent, no visible styling ──
+       The button is the actual click target. The HTML card overlays on top.
+       pointer-events: none on the card means clicks pass through to button. */
+    [data-testid="stBaseButton-secondary"] {
+        width: 100% !important;
+        height: 52px !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        opacity: 0 !important;
+        position: relative !important;
+        z-index: 2 !important;
+        cursor: pointer !important;
+    }
+
+    /* ── CARD overlays on top of the invisible button ── */
     .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
@@ -74,40 +88,39 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        cursor: pointer;
-        transition: all 0.2s ease;
+        margin-top: -58px;
         margin-bottom: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        pointer-events: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        position: relative;
+        z-index: 1;
     }
-    
-    .sector-card:hover {
-        background-color: #fafbfc;
-        border-color: #cdd1d8;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-    }
-    
+
     .sector-card-active {
-        background: #ffffff;
-        border: 1px solid #e0e3e8;
+        background: #f5fdf8;
+        border: 1px solid #c8e6c9;
         border-bottom: none;
-        border-radius: 8px 8px 0px 0px;
+        border-radius: 8px 8px 0 0;
         padding: 14px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
+        margin-top: -58px;
         margin-bottom: 0px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        pointer-events: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        position: relative;
+        z-index: 1;
     }
 
     .breakdown-box {
         background: #fafbfc;
         border: 1px solid #e0e3e8;
         border-top: none;
-        border-radius: 0px 0px 8px 8px;
+        border-radius: 0 0 8px 8px;
         padding: 12px 24px;
         margin-bottom: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
 
     .bar-track {
@@ -118,62 +131,22 @@ st.markdown("""
     }
 
     .expand-icon {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 400;
         color: #7a8394;
         text-align: right;
         user-select: none;
-        line-height: 1;
-    }
-
-    .stock-row {
-        display: grid;
-        grid-template-columns: 1fr 120px 100px;
-        align-items: center;
-        padding: 10px 0;
-        border-bottom: 1px solid #f0f2f5;
-        font-size: 13px;
-    }
-
-    .stock-row:last-child {
-        border-bottom: none;
-    }
-
-    .stock-ticker {
-        font-weight: 600;
-        color: #3d4452;
-    }
-
-    .stock-ltp {
-        font-weight: 600;
-        text-align: right;
-        color: #0f1117;
-        font-family: 'JetBrains Mono', monospace;
-    }
-
-    .stock-change {
-        font-weight: 700;
-        text-align: right;
-        font-family: 'JetBrains Mono', monospace;
     }
 </style>
-
-<script>
-function toggleSector(sectorName) {
-    // Send custom event to Streamlit
-    const event = new CustomEvent('sectorToggle', { detail: { sector: sectorName } });
-    window.dispatchEvent(event);
-}
-</script>
 """, unsafe_allow_html=True)
 
-# Session state initializations
+# Session state
 if "selected_tf" not in st.session_state:
     st.session_state["selected_tf"] = "1 Day"
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
-# 2. Data Fetching Engines
+# 2. Data Fetchers
 @st.cache_data(ttl=30)
 def fetch_sector_indices():
     data = []
@@ -200,10 +173,8 @@ def fetch_sector_stocks_live(sector_name):
     stocks = get_stocks_by_sector(sector_name)
     if not stocks:
         return []
-    
     headers = {'User-Agent': 'Mozilla/5.0'}
-    stock_results = []
-    
+    results = []
     for s in stocks[:15]:
         sym = f"{s['sym']}.NS"
         try:
@@ -213,22 +184,15 @@ def fetch_sector_stocks_live(sector_name):
             meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
             if meta:
                 ltp = meta.get('regularMarketPrice', 0)
-                prev_close = meta.get('chartPreviousClose', 0)
-                chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
-                
-                stock_results.append({
-                    'ticker': s['sym'],
-                    'ltp': round(ltp, 2),
-                    'change': round(chg, 2)
-                })
+                pc  = meta.get('chartPreviousClose', 0)
+                chg = ((ltp - pc) / pc * 100) if pc else 0.0
+                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2)})
         except:
             continue
-            
-    stock_results.sort(key=lambda x: x['change'], reverse=True)
-    return stock_results
+    results.sort(key=lambda x: x['change'], reverse=True)
+    return results
 
-# 3. Calculate Performance Metrics Block
-tf = st.session_state["selected_tf"]
+# 3. Fetch + derive stats
 with st.spinner("Analyzing sector feeds..."):
     sector_data = fetch_sector_indices()
 
@@ -241,7 +205,7 @@ losers  = [s for s in sector_data if s['direction'] == 'down']
 top     = sector_data[0]
 bottom  = sector_data[-1]
 
-# 4. Filter Control Row Layout
+# 4. Control Row
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
 with c1:
     st.markdown(f'<div class="ts-metric" style="height:65px;"><div class="ts-metric-label">Top Gainer</div><div class="ts-metric-value" style="color:var(--green); font-size:15px; margin-top:4px;">▲ {top["name"]} {top["change"]:+.2f}%</div></div>', unsafe_allow_html=True)
@@ -257,88 +221,81 @@ with c4:
         st.cache_data.clear()
         st.rerun()
 with c5:
-    st.markdown('<div style="font-size:10px; margin-bottom:2px; color:transparent; user-select:none;">Reset</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:10px; margin-bottom:2px; color:transparent; user-select:none;">x</div>', unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Pure HTML Card Renderer with Click Handler
+# 5. Toggle callback — keeps toggle logic clean and separate
+def toggle_sector(sector_name):
+    current = st.session_state.get("expanded_sector")
+    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
+
+# 6. Sector rows — button is the click target, card HTML overlays on top
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
     is_expanded = (st.session_state["expanded_sector"] == s['name'])
-    bar_w = (abs(s['change']) / max_val) * 100
-    color = "#00a854" if s['direction'] == 'up' else "#e53935"
-    sign = "+" if s['change'] >= 0 else ""
-    icon = "−" if is_expanded else "+"
-    
+    bar_w  = (abs(s['change']) / max_val) * 100
+    color  = "#00a854" if s['direction'] == 'up' else "#e53935"
+    sign   = "+" if s['change'] >= 0 else ""
+    icon   = "−" if is_expanded else "+"
     card_class = "sector-card-active" if is_expanded else "sector-card"
-    
-    # Render clickable card as pure HTML (no Streamlit button interference)
+
+    # STEP 1: Real Streamlit button — invisible (opacity:0 via CSS), full width
+    # This is the actual click target Streamlit responds to
+    st.button(
+        label=s['name'],
+        key=f"toggle_{s['name']}",
+        on_click=toggle_sector,
+        args=(s['name'],),
+        use_container_width=True,
+    )
+
+    # STEP 2: Card HTML overlays on top of the button via negative margin-top
+    # pointer-events: none ensures clicks pass through card to the button below
     st.markdown(f"""
-    <div class="{card_class}" onclick="toggleSectorClick('{s['name']}')">
-        <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
+    <div class="{card_class}">
+        <div style="font-size:13px; font-weight:700; color:#0f1117;">{s['name']}</div>
         <div class="bar-track">
-            <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
+            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
         </div>
-        <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
+        <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">
             {sign}{s['change']:.2f}%
         </div>
         <div class="expand-icon">{icon}</div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Hidden button that handles state toggle (Streamlit callback)
-    if st.button(f"Toggle {s['name']}", key=f"toggle_{s['name']}", visible=False):
-        current = st.session_state.get("expanded_sector")
-        st.session_state["expanded_sector"] = None if current == s['name'] else s['name']
-        st.rerun()
-    
-    # Dropdown stock performance metrics drawer
+
+    # STEP 3: Stock drill-down panel — only renders when this sector is expanded
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
         stocks_list = fetch_sector_stocks_live(s['name'])
-        
+
         if not stocks_list:
-            st.markdown("<div style='font-size:12px; color:#7a8394; padding: 12px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
+            st.markdown("<div style='font-size:12px; color:#7a8394; padding:12px 0;'>No constituents available.</div>", unsafe_allow_html=True)
         else:
-            # Render header
             st.markdown("""
-            <div class="stock-row" style="font-weight: 600; color: #7a8394; text-transform: uppercase; font-size: 10px; margin-bottom: 8px;">
-                <div>Stock</div>
-                <div style="text-align: right;">LTP</div>
-                <div style="text-align: right;">Change %</div>
+            <div style="display:grid; grid-template-columns:1fr 120px 100px;
+            padding:6px 0; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
             </div>
             """, unsafe_allow_html=True)
-            
+
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
-                stk_sign = "+" if stk['change'] >= 0 else ""
-                
+                stk_sign  = "+" if stk['change'] >= 0 else ""
                 st.markdown(f"""
-                <div class="stock-row">
-                    <div class="stock-ticker">{stk['ticker']}</div>
-                    <div class="stock-ltp">₹{stk['ltp']:,.1f}</div>
-                    <div class="stock-change" style="color: {stk_color};">{stk_sign}{stk['change']:.2f}%</div>
+                <div style="display:grid; grid-template-columns:1fr 120px 100px;
+                align-items:center; padding:9px 0; border-bottom:1px solid #f0f2f5;">
+                    <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
+                    <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
+                    <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
                 </div>
                 """, unsafe_allow_html=True)
-                
-        st.markdown('</div>', unsafe_allow_html=True)
 
-# Add JavaScript to handle card clicks
-st.markdown("""
-<script>
-function toggleSectorClick(sectorName) {
-    // Find and click the hidden button for this sector
-    const buttons = document.querySelectorAll('button');
-    for (let btn of buttons) {
-        if (btn.textContent.includes(`Toggle ${sectorName}`)) {
-            btn.click();
-            break;
-        }
-    }
-}
-</script>
-""", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
