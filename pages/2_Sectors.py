@@ -32,8 +32,8 @@ st.markdown("""
         border-radius: 10px !important;
         padding: 14px 18px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        min-height: 60px !important;
-        max-height: 60px !important;
+        min-height: 65px !important;
+        max-height: 65px !important;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -45,8 +45,8 @@ st.markdown("""
         border: none !important;
         box-shadow: none !important;
         padding: 0px !important;
-        min-height: 60px !important;
-        max-height: 60px !important;
+        min-height: 65px !important;
+        max-height: 65px !important;
         min-width: 110px !important; /* Forces the column wide enough to keep text on one line */
         display: flex;
         flex-direction: column;
@@ -170,21 +170,21 @@ c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
 
 with c1:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 60px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 65px; margin-bottom: 0px;">
       <div class="ts-metric-label">Top Gainer</div>
       <div class="ts-metric-value" style="color:var(--green); font-size:15px; margin-top:4px;">▲ {top['name']} {top['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c2:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 60px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 65px; margin-bottom: 0px;">
       <div class="ts-metric-label">Top Loser</div>
       <div class="ts-metric-value" style="color:var(--red); font-size:15px; margin-top:4px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
     </div>""", unsafe_allow_html=True)
 
 with c3:
     st.markdown(f"""
-    <div class="ts-metric" style="height: 60px; margin-bottom: 0px;">
+    <div class="ts-metric" style="height: 65px; margin-bottom: 0px;">
       <div class="ts-metric-label">Breadth</div>
       <div class="ts-metric-value" style="font-size:15px; margin-top:4px;">
         <span style="color:var(--green);">{len(gainers)}↑</span>
