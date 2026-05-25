@@ -22,13 +22,20 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill Streamlit vertical gaps between sector button+card pairs */
+    /* Kill gaps — scoped to not break control row */
     div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-    div[data-testid="element-container"] {
+    div[data-testid="stVerticalBlock"] div[data-testid="element-container"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
+    }
+    /* But restore spacing inside horizontal blocks (control row) */
+    div[data-testid="stHorizontalBlock"] div[data-testid="element-container"] {
+        margin-top: revert !important;
+        margin-bottom: revert !important;
+        padding-top: revert !important;
+        padding-bottom: revert !important;
     }
 
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
@@ -54,7 +61,7 @@ st.markdown("""
         min-width: 110px !important;
         display: flex;
         flex-direction: column;
-        justify-content: center;
+        justify-content: flex-end;
     }
 
     div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
@@ -73,10 +80,11 @@ st.markdown("""
     }
 
 
-    /* ── SECTOR TOGGLE BUTTON: invisible click target ── */
+    /* ── SECTOR TOGGLE BUTTON: invisible click target ──
+       Card HTML overlays on top via negative margin-top. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 44px !important;
+        height: 38px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -86,7 +94,11 @@ st.markdown("""
         cursor: pointer !important;
     }
 
-    /* ── Restore Refresh button — lives inside stHorizontalBlock ── */
+    /* ── Restore Refresh button visibility specifically ── */
+    button[data-testid="stBaseButton-secondary"][kind="secondary"]:has(> div > p:only-child) {
+        opacity: 1 !important;
+    }
+    /* Fallback: target by key via aria-label or just restore all buttons NOT in sector list */
     div[data-testid="stHorizontalBlock"] [data-testid="stBaseButton-secondary"] {
         opacity: 1 !important;
         height: 42px !important;
@@ -96,7 +108,6 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
         font-size: 14px !important;
         color: #3d4452 !important;
-        position: static !important;
     }
 
     /* ── CARD overlays on top of the invisible button ── */
@@ -109,10 +120,10 @@ st.markdown("""
         border-radius: 0px;
         padding: 10px 18px;
         display: grid;
-        grid-template-columns: 90px 1fr 110px 30px;
+        grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -44px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -129,10 +140,10 @@ st.markdown("""
         border-radius: 0px;
         padding: 10px 18px;
         display: grid;
-        grid-template-columns: 90px 1fr 110px 30px;
+        grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -44px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -175,57 +186,30 @@ if "selected_tf" not in st.session_state:
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
-# 2. Timeframe → Yahoo Finance param mapping
-TF_MAP = {
-    "1 Day":   {"interval": "1d",  "range": "1d"},
-    "1 Week":  {"interval": "1d",  "range": "5d"},
-    "1 Month": {"interval": "1d",  "range": "1mo"},
-    "1 Year":  {"interval": "1wk", "range": "1y"},
-}
-
-
-# Gap classification helper
-def calculate_gap(open_price, prev_close):
-    """Calculate gap % and classify: gap_up, gap_down, or flat"""
-    if not open_price or not prev_close or prev_close == 0:
-        return {"gap_pct": 0, "category": "flat"}
-    gap_pct = ((open_price - prev_close) / prev_close) * 100
-    if gap_pct > 0.30:
-        category = "gap_up"
-    elif gap_pct < -0.30:
-        category = "gap_down"
-    else:
-        category = "flat"
-    return {"gap_pct": round(gap_pct, 2), "category": category}
-
 # 2. Data Fetchers
 @st.cache_data(ttl=30)
-def fetch_sector_indices(tf="1 Day"):
+def fetch_sector_indices():
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            params = TF_MAP.get(tf, TF_MAP["1 Day"])
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval={params['interval']}&range={params['range']}"
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval=1d&range=1d"
             resp = requests.get(url, headers=headers, timeout=5)
             if not resp.ok: continue
             meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
             if meta:
                 cp = meta.get('regularMarketPrice', 0)
                 pc = meta.get('chartPreviousClose', 0)
-                op = meta.get('regularMarketOpen', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
-                gap_info = calculate_gap(op, pc)
                 data.append({'name': name, 'symbol': symbol, 'change': round(change, 2),
-                             'direction': 'up' if change >= 0 else 'down', 'ltp': cp,
-                             'open': op, 'gap_pct': gap_info['gap_pct'], 'gap_category': gap_info['category']})
+                             'direction': 'up' if change >= 0 else 'down', 'ltp': cp})
         except:
             continue
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
 @st.cache_data(ttl=30)
-def fetch_sector_stocks_live(sector_name, tf="1 Day"):
+def fetch_sector_stocks_live(sector_name):
     stocks = get_stocks_by_sector(sector_name)
     if not stocks:
         return []
@@ -234,19 +218,15 @@ def fetch_sector_stocks_live(sector_name, tf="1 Day"):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            params = TF_MAP.get(tf, TF_MAP["1 Day"])
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={params['interval']}&range={params['range']}"
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
             meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
             if meta:
                 ltp = meta.get('regularMarketPrice', 0)
                 pc  = meta.get('chartPreviousClose', 0)
-                op  = meta.get('regularMarketOpen', 0)
                 chg = ((ltp - pc) / pc * 100) if pc else 0.0
-                gap_info = calculate_gap(op, pc)
-                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2),
-                                'gap_pct': gap_info['gap_pct'], 'gap_category': gap_info['category']})
+                results.append({'ticker': s['sym'], 'ltp': round(ltp, 2), 'change': round(chg, 2)})
         except:
             continue
     results.sort(key=lambda x: x['change'], reverse=True)
@@ -254,7 +234,7 @@ def fetch_sector_stocks_live(sector_name, tf="1 Day"):
 
 # 3. Fetch + derive stats
 with st.spinner("Analyzing sector feeds..."):
-    sector_data = fetch_sector_indices(tf=st.session_state['selected_tf'])
+    sector_data = fetch_sector_indices()
 
 if not sector_data:
     st.error("No real-time market indices available right now.")
@@ -264,34 +244,6 @@ gainers = [s for s in sector_data if s['direction'] == 'up']
 losers  = [s for s in sector_data if s['direction'] == 'down']
 top     = sector_data[0]
 bottom  = sector_data[-1]
-
-# Pre-calculate gap breadth for sectors (will be used when displaying)
-def get_sector_gap_breadth(sector_name, selected_tf):
-    stocks = get_stocks_by_sector(sector_name)
-    if not stocks:
-        return {"gap_up": 0, "flat": 0, "gap_down": 0, "total": 0}
-    
-    gap_counts = {"gap_up": 0, "flat": 0, "gap_down": 0}
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    for s in stocks[:5]:
-        sym = f"{s['sym']}.NS"
-        try:
-            params = TF_MAP.get(selected_tf, TF_MAP["1 Day"])
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={params['interval']}&range={params['range']}"
-            resp = requests.get(url, headers=headers, timeout=3)
-            if not resp.ok: continue
-            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
-            if meta:
-                op = meta.get('regularMarketOpen', 0)
-                pc = meta.get('chartPreviousClose', 0)
-                gap_info = calculate_gap(op, pc)
-                gap_counts[gap_info['category']] += 1
-        except:
-            continue
-    
-    total = sum(gap_counts.values())
-    return {**gap_counts, "total": total}
 
 # 4. Control Row
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
@@ -346,30 +298,15 @@ for idx, s in enumerate(sector_data):
     )
 
     # STEP 2: Card HTML overlays on top of the button via negative margin-top
-    # Get gap breadth for this sector
-    gap_breadth = get_sector_gap_breadth(s['name'], st.session_state['selected_tf'])
-    total_gap = gap_breadth['total'] if gap_breadth['total'] > 0 else 1
-    gap_up_w = (gap_breadth['gap_up'] / total_gap) * 100
-    flat_w = (gap_breadth['flat'] / total_gap) * 100
-    gap_down_w = (gap_breadth['gap_down'] / total_gap) * 100
-    
     # pointer-events: none ensures clicks pass through card to the button below
     st.markdown(f"""
     <div class="{card_class}">
-        <div style="font-size:13px; font-weight:700; color:#0f1117; min-width:80px;">{s['name']}</div>
-        <div style="flex:1; display:flex; flex-direction:column; gap:4px;">
-            <div class="bar-track">
-                <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
-            </div>
-            <div style="display:flex; height:4px; border-radius:2px; overflow:hidden; gap:0.5px;">
-                <div style="width:{gap_up_w:.1f}%; height:100%; background:#00a854;"></div>
-                <div style="width:{flat_w:.1f}%; height:100%; background:#d3d1c7;"></div>
-                <div style="width:{gap_down_w:.1f}%; height:100%; background:#e53935;"></div>
-            </div>
+        <div style="font-size:13px; font-weight:700; color:#0f1117;">{s['name']}</div>
+        <div class="bar-track">
+            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
         </div>
-        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:90px;">
-            <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">{sign}{s['change']:.2f}%</div>
-            <div style="font-size:9px; color:#7a8394; font-family:monospace; text-align:right; letter-spacing:0.02em;">↑{gap_breadth['gap_up']} —{gap_breadth['flat']} ↓{gap_breadth['gap_down']}</div>
+        <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">
+            {sign}{s['change']:.2f}%
         </div>
         <div class="expand-icon">{icon}</div>
     </div>
@@ -378,48 +315,38 @@ for idx, s in enumerate(sector_data):
     # STEP 3: Stock drill-down panel — only renders when this sector is expanded
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
-        stocks_list = fetch_sector_stocks_live(s['name'], tf=st.session_state['selected_tf'])
+        stocks_list = fetch_sector_stocks_live(s['name'])
 
         if not stocks_list:
             st.markdown("<div style='font-size:12px; color:#7a8394; padding:12px 0;'>No constituents available.</div>", unsafe_allow_html=True)
         else:
             # Header row
             st.markdown("""
-            <div style="display:grid; grid-template-columns:110px 90px 100px 70px 70px;
+            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
             gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
+                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Gap</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Vol</div>
             </div>
             """, unsafe_allow_html=True)
+
+            # Scale bars relative to max change among top 5 stocks
+            max_stk_chg = max((abs(stk['change']) for stk in stocks_list), default=1) or 1
 
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign  = "+" if stk['change'] >= 0 else ""
-                
-                # Gap display
-                gap_val = stk.get('gap_pct', 0)
-                gap_cat = stk.get('gap_category', 'flat')
-                if gap_cat == 'gap_up':
-                    gap_color = "#00a854"
-                    gap_text = f"↑ +{abs(gap_val):.2f}%"
-                elif gap_cat == 'gap_down':
-                    gap_color = "#e53935"
-                    gap_text = f"↓ {gap_val:.2f}%"
-                else:
-                    gap_color = "#7a8394"
-                    gap_text = "—"
-                
+                stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
                 st.markdown(f"""
-                <div style="display:grid; grid-template-columns:110px 90px 100px 70px 70px;
+                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
                 gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
+                    <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
+                        <div style="width:{stk_bar_w:.1f}%; height:100%; background:{stk_color}; border-radius:3px;"></div>
+                    </div>
                     <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
                     <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
-                    <div style="font-size:12px; font-weight:600; text-align:right; color:{gap_color}; font-family:'JetBrains Mono',monospace;">{gap_text}</div>
-                    <div style="font-size:11px; font-weight:500; background:var(--color-background-secondary); color:var(--color-text-secondary); border-radius:4px; padding:3px 8px; text-align:center;">Vol</div>
                 </div>
                 """, unsafe_allow_html=True)
 
