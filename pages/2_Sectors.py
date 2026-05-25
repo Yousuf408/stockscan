@@ -22,13 +22,25 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill Streamlit vertical gaps between sector button+card pairs */
+    /* ── Aggressively kill ALL Streamlit spacing around sector rows ── */
     div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-    div[data-testid="element-container"] {
+
+    div[data-testid="element-container"],
+    div[data-testid="stButtonGroup"],
+    div[data-testid="stButtonGroup"] > div,
+    div[data-testid="stButton"],
+    div[data-testid="stMarkdown"],
+    div[data-testid="stMarkdownContainer"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
         padding-bottom: 0 !important;
+        line-height: 0 !important;
+    }
+
+    /* But restore line-height inside actual card content */
+    .sector-card *, .sector-card-active *, .breakdown-box * {
+        line-height: normal !important;
     }
 
     div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
