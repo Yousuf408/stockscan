@@ -4,38 +4,20 @@ from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 import sys, os
 sys.path.append(os.path.dirname(__file__))
-from styles import apply_styles, render_navbar, page_content
+from styles import apply_styles, sidebar_brand, page_header
 
 st.set_page_config(
     page_title="TradeSentry",
     layout="wide",
     page_icon="⚡",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 apply_styles()
+sidebar_brand()
+page_header("Live Market Dashboard")
 
-# Define all pages
-PAGES = [
-    ("Dashboard", "app"),
-    ("Sectors", "2_Sectors"),
-    ("Watchlist", "3_Watchlist"),
-    ("Pre-Watch", "4_PreWatch"),
-    ("Scan", "5_Scan"),
-    ("History", "6_History"),
-    ("API", "7_API"),
-    ("Settings", "8_Settings"),
-]
-
-# Render navbar
-render_navbar("Dashboard", PAGES)
-
-# Page content
-page_content("Live Market Dashboard")
-
-st.markdown("### 🚀 AngelOne WebSocket Connection")
-
-start_btn = st.button("Connect To Live Market", key="connect_btn")
+start_btn = st.button("🚀 Connect To Live Market")
 data_placeholder = st.empty()
 
 def on_data(wsapp, message):
@@ -69,5 +51,3 @@ if start_btn:
             st.error(f"❌ Login Failed: {session_data['message']}")
     except Exception as e:
         st.error(f"⚠️ Error: {str(e)}")
-
-st.markdown("</div>", unsafe_allow_html=True)
