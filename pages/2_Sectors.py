@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Zero trace of standard Streamlit button boxes or outlines
+# Global CSS Overrides — Rendering hidden interactive overlays with no visual artifacts
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,72 +64,78 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── SECTOR CARD WITH OVERLAY BUTTON ── */
-    .sector-container {
+    /* ── ULTRACLEAN INTERACTIVE CONTAINER OVERLAY ── */
+    .clickable-row-container {
         position: relative;
         margin-bottom: 6px;
+    }
+
+    /* Make the base Streamlit button layout span perfectly over our card container */
+    .clickable-row-container div[data-testid="stButton"] {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 52px !important; /* Matches height of the card precisely */
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 10 !important;
+    }
+
+    /* Wipe out every trace of background, frame outlines, margins and border shadows */
+    .clickable-row-container div[data-testid="stButton"] > button {
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 8px !important;
+        box-shadow: none !important;
+        color: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        cursor: pointer !important;
+    }
+
+    /* Guarding against default focus border glows when selected */
+    .clickable-row-container div[data-testid="stButton"] > button:hover,
+    .clickable-row-container div[data-testid="stButton"] > button:focus,
+    .clickable-row-container div[data-testid="stButton"] > button:active {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: transparent !important;
+        outline: none !important;
+    }
+
+    /* Clean Card Component Layouts matching your dashboard setup */
+    .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
         border-radius: 8px;
-        padding: 12px 18px;
+        padding: 14px 18px;
         display: grid;
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        height: 44px;
-        transition: all 0.15s ease;
+        height: 52px;
+        transition: background-color 0.1s ease;
     }
-
-    .sector-container:hover {
+    
+    .clickable-row-container:hover .sector-card {
         background-color: #fafbfc;
-        border-color: #d9dce1;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-
-    .sector-container.expanded {
+    
+    .sector-card-active {
         background: #ffffff;
         border: 1px solid #e0e3e8;
         border-bottom: none;
         border-radius: 8px 8px 0px 0px;
-        height: 44px;
-    }
-
-    /* ── INVISIBLE BUTTON OVERLAY - POSITIONED CORRECTLY ── */
-    .sector-button-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        height: 100%;
-        cursor: pointer;
-        z-index: 10;
-    }
-
-    /* Hide the default Streamlit button styling */
-    .sector-button-overlay button {
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        top: 0;
-        left: 0;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        cursor: pointer !important;
-        color: transparent !important;
-    }
-
-    .sector-button-overlay button:hover,
-    .sector-button-overlay button:focus,
-    .sector-button-overlay button:active {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        outline: none !important;
+        padding: 14px 18px;
+        display: grid;
+        grid-template-columns: 140px 1fr 100px 30px;
+        align-items: center;
+        gap: 16px;
+        height: 52px;
     }
 
     .breakdown-box {
@@ -139,20 +145,6 @@ st.markdown("""
         border-radius: 0px 0px 8px 8px;
         padding: 4px 24px 12px 24px;
         margin-bottom: 12px;
-        animation: slideDown 0.3s ease-out;
-    }
-
-    @keyframes slideDown {
-        from {
-            opacity: 0;
-            max-height: 0;
-            overflow: hidden;
-        }
-        to {
-            opacity: 1;
-            max-height: 1000px;
-            overflow: visible;
-        }
     }
 
     .bar-track {
@@ -169,12 +161,6 @@ st.markdown("""
         text-align: right;
         user-select: none;
         line-height: 1;
-        transition: transform 0.3s ease;
-        pointer-events: none;
-    }
-
-    .expand-icon.open {
-        transform: rotate(180deg);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -276,44 +262,42 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Clean, Smooth Custom Canvas Renderer with PROPER OVERLAY
+# 5. Fast, Smooth Rerendering Component Grid Layout
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
-for idx, s in enumerate(sector_data):
+for s in sector_data:
     is_expanded = (st.session_state["expanded_sector"] == s['name'])
     bar_w = (abs(s['change']) / max_val) * 100
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign = "+" if s['change'] >= 0 else ""
     icon = "−" if is_expanded else "+"
-    icon_class = "expand-icon open" if is_expanded else "expand-icon"
     
-    container_class = "sector-container expanded" if is_expanded else "sector-container"
+    card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Create a unique container for this sector
+    # Wrap our content block inside a relative wrapper
+    st.markdown(f'<div class="clickable-row-container">', unsafe_allow_html=True)
+    
+    # 1. Render the clean visual row layout canvas
     st.markdown(f"""
-    <div class="{container_class}" id="sector_{idx}">
-        <div style="font-size: 13px; font-weight: 700; color:#0f1117; position: relative; z-index: 1;">{s['name']}</div>
-        <div class="bar-track" style="position: relative; z-index: 1;">
-            <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
+        <div class="{card_style}">
+            <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
+            <div class="bar-track">
+                <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
+                {sign}{s['change']:.2f}%
+            </div>
+            <div class="expand-icon">{icon}</div>
         </div>
-        <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace; position: relative; z-index: 1;">
-            {sign}{s['change']:.2f}%
-        </div>
-        <div class="{icon_class}" style="position: relative; z-index: 1;">{icon}</div>
-    </div>
     """, unsafe_allow_html=True)
     
-    # Button overlay - positioned absolutely over the card
-    st.markdown(f"""
-    <div class="sector-button-overlay" id="overlay_{idx}">
-    """, unsafe_allow_html=True)
-    
-    # The actual button - invisible but clickable
-    if st.button("", key=f"sector_click_{s['name']}_{idx}", help=f"Click to expand/collapse {s['name']} stocks"):
+    # 2. Inject the 100% transparent click receiver over it.
+    # No extra visual box can be seen, but clicking triggers an instantaneous soft rerun.
+    if st.button("", key=f"smooth_btn_{s['name']}"):
         st.session_state["expanded_sector"] = None if is_expanded else s['name']
         st.rerun()
-    
-    st.markdown("</div>", unsafe_allow_html=True)
+        
+    st.markdown("</div>", unsafe_allow_html=True) # Closes row wrapper cleanly
         
     # Dropdown stock drawer segment
     if is_expanded:
