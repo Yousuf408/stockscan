@@ -218,24 +218,20 @@ def fetch_sector_stocks_live(sector_name):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            # range=5d gives us OHLC quotes array; meta.chartPreviousClose is the reliable prev close
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
+            # Only meta fields needed — range=1d is sufficient
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
             result = resp.json().get('chart', {}).get('result', [{}])[0]
             meta   = result.get('meta', {})
-            quotes = result.get('indicators', {}).get('quote', [{}])[0]
             if meta:
-                ltp  = meta.get('regularMarketPrice', 0)
-                pc   = meta.get('chartPreviousClose', 0)
-                chg  = ((ltp - pc) / pc * 100) if pc else 0.0
+                ltp        = meta.get('regularMarketPrice', 0)
+                prev_close = meta.get('chartPreviousClose', 0)   # yesterday's official close
+                today_open = meta.get('regularMarketOpen', 0)    # today's actual open from meta
+                chg        = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-                # Gap = today's open vs previous day's official close
-                # Use meta.chartPreviousClose (Yahoo's explicit prev close) — most reliable
-                opens       = quotes.get('open', [])
-                opens_clean = [o for o in opens if o is not None]
-                today_open  = opens_clean[-1] if opens_clean else None
-                prev_close  = meta.get('chartPreviousClose') or pc  # pc is same field, fallback
+                # Gap = (today's open - yesterday's close) / yesterday's close * 100
+                # Both values come directly from meta — no array indexing, no candle ambiguity
                 if today_open and prev_close:
                     gap_pct = ((today_open - prev_close) / prev_close) * 100
                 else:
