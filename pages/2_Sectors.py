@@ -138,7 +138,7 @@ st.markdown("""
         border-bottom: none;
         border-radius: 0px;
         margin: 0 1%;
-        padding: 10px 24px 14px 24px;
+        padding: 10px 16px 14px 16px;
     }
 
     .bar-track {
@@ -301,7 +301,7 @@ for idx, s in enumerate(sector_data):
             # Header row
             st.markdown("""
             <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
-            gap:12px; padding:6px 0; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
+            gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
                 <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
@@ -318,7 +318,7 @@ for idx, s in enumerate(sector_data):
                 stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
                 st.markdown(f"""
                 <div style="display:grid; grid-template-columns:120px 1fr 100px 72px;
-                gap:12px; align-items:center; padding:9px 0; border-bottom:1px solid #f0f2f5;">
+                gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
                     <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
                     <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
                         <div style="width:{stk_bar_w:.1f}%; height:100%; background:{stk_color}; border-radius:3px;"></div>
