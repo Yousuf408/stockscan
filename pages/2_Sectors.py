@@ -218,7 +218,7 @@ def fetch_sector_stocks_live(sector_name):
     for s in stocks[:5]:
         sym = f"{s['sym']}.NS"
         try:
-            # Fetch 2 days to get previous close + today's open for gap calculation
+            # range=5d gives us OHLC quotes array; meta.chartPreviousClose is the reliable prev close
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
             resp = requests.get(url, headers=headers, timeout=3)
             if not resp.ok: continue
@@ -230,14 +230,12 @@ def fetch_sector_stocks_live(sector_name):
                 pc   = meta.get('chartPreviousClose', 0)
                 chg  = ((ltp - pc) / pc * 100) if pc else 0.0
 
-                # Gap = today's open vs yesterday's close
-                opens  = quotes.get('open', [])
-                closes = quotes.get('close', [])
-                # Filter out None values
-                opens_clean  = [o for o in opens  if o is not None]
-                closes_clean = [c for c in closes if c is not None]
-                today_open   = opens_clean[-1]  if opens_clean  else None
-                prev_close   = closes_clean[-2] if len(closes_clean) >= 2 else pc
+                # Gap = today's open vs previous day's official close
+                # Use meta.chartPreviousClose (Yahoo's explicit prev close) — most reliable
+                opens       = quotes.get('open', [])
+                opens_clean = [o for o in opens if o is not None]
+                today_open  = opens_clean[-1] if opens_clean else None
+                prev_close  = meta.get('chartPreviousClose') or pc  # pc is same field, fallback
                 if today_open and prev_close:
                     gap_pct = ((today_open - prev_close) / prev_close) * 100
                 else:
@@ -365,11 +363,19 @@ for idx, s in enumerate(sector_data):
                 # Gap display
                 gap = stk.get('gap')
                 if gap is not None:
-                    gap_color = "#00a854" if gap >= 0 else "#e53935"
-                    gap_sign  = "+" if gap >= 0 else ""
-                    gap_label = f"{gap_sign}{gap:.2f}%"
-                    gap_badge_bg = "#e8f5e9" if gap >= 0 else "#fdecea"
-                    gap_html = f'<div style="font-size:11px; font-weight:700; text-align:right; color:{gap_color}; font-family:\'JetBrains Mono\',monospace; background:{gap_badge_bg}; border-radius:4px; padding:2px 6px;">{gap_label}</div>'
+                    is_gap_up   = gap >= 0
+                    gap_color   = "#00a854" if is_gap_up else "#e53935"
+                    gap_bg      = "#d4f0de" if is_gap_up else "#fcd9d7"
+                    gap_border  = "#a8d5b5" if is_gap_up else "#f5a9a5"
+                    gap_sign    = "▲ +" if is_gap_up else "▼ "
+                    gap_label   = f"{gap_sign}{gap:.2f}%"
+                    gap_html = (
+                        f'<div style="font-size:11px; font-weight:700; text-align:center; '
+                        f'color:{gap_color}; font-family:\'JetBrains Mono\',monospace; '
+                        f'background:{gap_bg}; border:1px solid {gap_border}; '
+                        f'border-radius:5px; padding:3px 7px; white-space:nowrap;">'
+                        f'{gap_label}</div>'
+                    )
                 else:
                     gap_html = '<div style="font-size:11px; text-align:right; color:#c0c4cc;">—</div>'
 
