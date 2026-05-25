@@ -17,38 +17,40 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Inject targeted CSS overrides to standardize control card layouts perfectly across elements
+# Surgical CSS patch to clean up interactive widgets and completely eliminate the gray background bug
 st.markdown("""
 <style>
-    /* 1. Reset and style structural layout columns to look identical */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+    /* Force native selectbox container background to remain crisp white */
+    div[data-testid="stSelectbox"] > div[data-mode="normal"] > div {
+        background-color: #ffffff !important;
+    }
+    
+    /* Ensure the wrapper holding the selectbox looks exactly like a metrics card */
+    div[data-testid="element-container"]:has(div[data-testid="stSelectbox"]) {
         background: #ffffff !important;
         border: 1px solid #e0e3e8 !important;
         border-radius: 12px !important;
-        padding: 14px 16px !important;
-        min-height: 94px !important;
-        max-height: 94px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04) !important;
+        padding: 12px 14px 14px 14px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        min-height: 90px !important;
+    }
+
+    /* Format the action refresh button frame to accurately match sizing models */
+    div[data-testid="element-container"]:has(button[key="refresh_btn"]) {
+        background: #ffffff !important;
+        border: 1px solid #e0e3e8 !important;
+        border-radius: 12px !important;
+        padding: 12px 14px 14px 14px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        min-height: 90px !important;
         display: flex;
         flex-direction: column;
-        justify-content: center;
+        justify-content: flex-end;
     }
-
-    /* 2. Remove standard padding defaults inside interactive widget rows */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] div[data-testid="stVerticalBlock"] {
+    
+    /* Clean vertical spacing resets for interactive column heights */
+    div[data-testid="stColumn"] div[data-testid="stVerticalBlock"] {
         gap: 0rem !important;
-    }
-
-    /* 3. Force clean input widget baseline tracking and eliminate extra bottom spacing */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] div[data-testid="stSelectbox"] {
-        margin-top: -2px !important;
-    }
-
-    /* 4. Fix Button sizing to fill the container block neatly */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] div[data-testid="stButton"] button {
-        width: 100% !important;
-        margin-top: 2px !important;
-        padding: 8px 16px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -140,28 +142,36 @@ top     = data[0]
 bottom  = data[-1]
 updated = time.strftime("%H:%M:%S")
 
-# 4. Interactive Layout Control Grid (All 5 blocks share identical container structures natively)
+# 4. Interactive Control Row Layout Configuration
 c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
 
 with c1:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:6px;">Top Gainer</div>""", unsafe_allow_html=True)
-    st.markdown(f"""<div class="ts-metric-value" style="color:var(--green); font-size:15px;">▲ {top['name']} {top['change']:+.2f}%</div>""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+      <div class="ts-metric-label">Top Gainer</div>
+      <div class="ts-metric-value" style="color:var(--green); font-size:15px; margin-top:4px;">▲ {top['name']} {top['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
 
 with c2:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:6px;">Top Loser</div>""", unsafe_allow_html=True)
-    st.markdown(f"""<div class="ts-metric-value" style="color:var(--red); font-size:15px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+      <div class="ts-metric-label">Top Loser</div>
+      <div class="ts-metric-value" style="color:var(--red); font-size:15px; margin-top:4px;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
 
 with c3:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:6px;">Breadth</div>""", unsafe_allow_html=True)
     st.markdown(f"""
-    <div class="ts-metric-value" style="font-size:15px;">
+    <div class="ts-metric" style="height: 90px; margin-bottom: 0px;">
+      <div class="ts-metric-label">Breadth</div>
+      <div class="ts-metric-value" style="font-size:15px; margin-top:4px;">
         <span style="color:var(--green);">{len(gainers)}↑</span>
-        <span style="color:var(--border2);">/</span>
+        <span style="color:var(--border2);"> / </span>
         <span style="color:var(--red);">{len(losers)}↓</span>
+      </div>
     </div>""", unsafe_allow_html=True)
 
 with c4:
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px;">Timeframe</div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; margin-left:1px;">Timeframe</div>""", unsafe_allow_html=True)
     chosen = st.selectbox(
         "TIMEFRAME",
         list(TIMEFRAMES.keys()),
@@ -176,15 +186,14 @@ with c4:
         st.rerun()
 
 with c5:
-    # Invisible layout sync spacer to align exactly with input rows
-    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; color:transparent; select:none;">Control</div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="ts-metric-label" style="margin-bottom:4px; color:transparent; user-select:none;">Action</div>""", unsafe_allow_html=True)
     if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
 st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
 
-# 5. Native Bar Chart Generation Engine
+# 5. Bar Chart Generation Engine
 max_chg = max(abs(s['change']) for s in data) or 1
 
 rows_html = ""
