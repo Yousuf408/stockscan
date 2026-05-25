@@ -22,9 +22,13 @@ st.markdown("""
         background-color: #ffffff !important;
     }
 
-    /* Kill Streamlit vertical gaps between sector button+card pairs */
+    /* Kill Streamlit vertical gaps — scoped carefully to not break control row */
     div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-    div[data-testid="element-container"] {
+
+    /* Zero element-container spacing but ONLY when inside our sector list wrapper */
+    .sector-list-wrap div[data-testid="element-container"],
+    .sector-list-wrap div[data-testid="stButtonGroup"],
+    .sector-list-wrap div[data-testid="stButton"] {
         margin-top: 0 !important;
         margin-bottom: 0 !important;
         padding-top: 0 !important;
@@ -78,7 +82,7 @@ st.markdown("""
        pointer-events: none on the card means clicks pass through to button. */
     [data-testid="stBaseButton-secondary"] {
         width: 100% !important;
-        height: 44px !important;
+        height: 38px !important;
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
@@ -101,7 +105,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -44px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -121,7 +125,7 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        margin-top: -50px;
+        margin-top: -44px;
         margin-bottom: 0px;
         pointer-events: none;
         box-shadow: none;
@@ -254,7 +258,7 @@ def toggle_sector(sector_name):
 # 6. Sector rows — button is the click target, card HTML overlays on top
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
-st.markdown('<div style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
+st.markdown('<div class="sector-list-wrap" style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
 
 for idx, s in enumerate(sector_data):
     is_last = (idx == len(sector_data) - 1)
