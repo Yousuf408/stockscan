@@ -5,26 +5,13 @@ import pandas as pd
 import time
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from styles import apply_styles, render_navbar, page_content
+from styles import apply_styles, sidebar_brand, page_header
 from stocks import SECTOR_YAHOO
 
 st.set_page_config(page_title="TradeSentry — Sectors", layout="wide", page_icon="📊")
 apply_styles()
-
-# Pages list
-PAGES = [
-    ("Dashboard", "app"),
-    ("Sectors", "2_Sectors"),
-    ("Watchlist", "3_Watchlist"),
-    ("Pre-Watch", "4_PreWatch"),
-    ("Scan", "5_Scan"),
-    ("History", "6_History"),
-    ("API", "7_API"),
-    ("Settings", "8_Settings"),
-]
-
-render_navbar("Sectors", PAGES)
-page_content("Sector Performance — NSE Indices")
+sidebar_brand()
+page_header("Sector Performance — NSE Indices")
 
 col1, col2 = st.columns([8, 1])
 with col2:
@@ -90,8 +77,8 @@ html = f"""<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ background:transparent; font-family:'Inter',sans-serif; }}
-.metrics {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:14px; }}
+body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
+.metrics {{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }}
 .card {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
   padding:14px 18px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
 .label {{ font-size:10px; font-weight:600; letter-spacing:0.1em;
@@ -121,5 +108,3 @@ with st.expander("📋 Data Table"):
     df.columns = ['Sector','LTP','Prev Close','Change %']
     df['Change %'] = df['Change %'].apply(lambda x: f"{x:+.2f}%")
     st.dataframe(df, use_container_width=True, hide_index=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
