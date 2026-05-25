@@ -227,7 +227,12 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Pure Custom HTML Row Renderer — No extra Streamlit Button markup generated
+# 5. Callback function to toggle sector expansion
+def toggle_sector(sector_name):
+    current = st.session_state.get("expanded_sector")
+    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
+
+# 6. Pure Custom HTML Row Renderer — No extra Streamlit Button markup generated
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
@@ -235,24 +240,20 @@ for s in sector_data:
     bar_w = (abs(s['change']) / max_val) * 100
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign = "+" if s['change'] >= 0 else ""
-   # ✅ NEW CODE - Direct session state toggle
-icon = "−" if is_expanded else "+"
-
-card_style = "sector-card-active" if is_expanded else "sector-card"
-
-# Callback function to toggle expansion
-def toggle_sector(sector_name):
-    current = st.session_state.get("expanded_sector")
-    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
-
-# Create invisible button with callback
-if st.button("", key=f"expand_{s['name']}", use_container_width=True, 
-             on_click=toggle_sector, args=(s['name'],)):
-    pass
-
-# HTML Card (NO href, NO query params)
-st.markdown(f"""
-<div class="sector-row-link" style="cursor: pointer;">
+    icon = "−" if is_expanded else "+"
+    
+    card_style = "sector-card-active" if is_expanded else "sector-card"
+    
+    # ✅ FIXED: Use direct session state toggle via button callback (NO query params)
+    col1, col2 = st.columns([0.99, 0.01])
+    with col1:
+        if st.button(f"Toggle {s['name']}", key=f"expand_{s['name']}", use_container_width=True,
+                     on_click=toggle_sector, args=(s['name'],), help="Click to expand/collapse"):
+            pass
+    
+    # Custom HTML Card rendered separately
+    st.markdown(f"""
+    <div class="sector-row-link" style="margin-top: -52px; margin-bottom: 6px; pointer-events: none;">
         <div class="{card_style}">
             <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
             <div class="bar-track">
@@ -263,7 +264,7 @@ st.markdown(f"""
             </div>
             <div class="expand-icon">{icon}</div>
         </div>
-    </a>
+    </div>
     """, unsafe_allow_html=True)
         
     # Dropdown stock performance metrics drawer
