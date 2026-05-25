@@ -9,6 +9,38 @@ import pandas as pd
 st.set_page_config(page_title="AngelOne Live Screener", layout="wide")
 st.title("⚡ Angel One Live WebSocket Dashboard")
 
+st.markdown("""
+<style>
+/* ── Always show sidebar toggle button ── */
+[data-testid="collapsedControl"] {
+    display: block !important;
+    visibility: visible !important;
+    background: #111118 !important;
+    border: 1px solid #00e676 !important;
+    border-radius: 6px !important;
+    color: #00e676 !important;
+}
+
+/* ── Sidebar dark theme ── */
+[data-testid="stSidebar"] {
+    background: #111118 !important;
+    border-right: 1px solid #ffffff12 !important;
+}
+
+/* ── Sidebar nav links ── */
+[data-testid="stSidebar"] a {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 12px !important;
+    color: #c8c8d8 !important;
+    letter-spacing: 0.06em !important;
+}
+
+[data-testid="stSidebar"] a:hover {
+    color: #00e676 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # UI Elements for Controlling the App
 start_btn = st.button("🚀 Connect To Live Market")
 data_placeholder = st.empty()
