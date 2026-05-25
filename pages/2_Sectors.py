@@ -32,8 +32,8 @@ st.markdown("""
         border-radius: 10px !important;
         padding: 14px 18px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        min-height: 90px !important;
-        max-height: 90px !important;
+        min-height: 75px !important;
+        max-height: 75px !important;
         display: flex;
         flex-direction: column;
         justify-content: center;
