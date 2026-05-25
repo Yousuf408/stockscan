@@ -26,62 +26,10 @@ TIMEFRAMES = {
     "1 Year":   365,
 }
 
-# ── Session state init ─────────────────────────────────────────────────────────
 if "selected_tf" not in st.session_state:
     st.session_state["selected_tf"] = "1 Day"
 
-# ── Inject CSS to style native Streamlit controls to match cards ───────────────
-st.markdown("""
-<style>
-/* Remove default padding Streamlit adds around columns */
-div[data-testid="column"] {
-    padding: 0 4px !important;
-}
-
-/* Style the selectbox to look like a clean card control */
-div[data-testid="stSelectbox"] > div > div {
-    border: 1px solid #e0e3e8 !important;
-    border-radius: 7px !important;
-    background: #fafbfc !important;
-    font-size: 13px !important;
-    font-family: 'Inter', sans-serif !important;
-    min-height: 38px !important;
-    box-shadow: none !important;
-}
-
-div[data-testid="stSelectbox"] > div > div:focus-within {
-    border-color: #4a90e2 !important;
-    box-shadow: 0 0 0 2px rgba(74,144,226,0.15) !important;
-}
-
-/* Style the refresh button */
-div[data-testid="stButton"] > button {
-    background: #fafbfc !important;
-    border: 1px solid #e0e3e8 !important;
-    border-radius: 7px !important;
-    color: #3d4452 !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    width: 100% !important;
-    height: 38px !important;
-    transition: background 0.15s, border-color 0.15s, color 0.15s !important;
-    box-shadow: none !important;
-}
-
-div[data-testid="stButton"] > button:hover {
-    background: #e8f4fd !important;
-    border-color: #4a90e2 !important;
-    color: #4a90e2 !important;
-}
-
-/* Remove label space above selectbox */
-div[data-testid="stSelectbox"] label {
-    display: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ── Data fetchers (logic completely unchanged) ─────────────────────────────────
+# ── Data fetchers ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def fetch_today():
     data = []
@@ -128,7 +76,10 @@ def fetch_range(from_date: str, to_date: str):
     data.sort(key=lambda x: x['change'], reverse=True)
     return data
 
-# ── Fetch data based on current session timeframe ──────────────────────────────
+# ── 5-box control row (native Streamlit so dropdown actually works) ────────────
+c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
+
+# Fetch data first so we can show live values in the cards
 tf   = st.session_state["selected_tf"]
 days = TIMEFRAMES[tf]
 
@@ -154,86 +105,76 @@ top     = data[0]
 bottom  = data[-1]
 updated = time.strftime("%H:%M:%S")
 
-# ── Row 1: 3 info cards (pure HTML display, no widgets) ───────────────────────
-components.html(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; }}
-  .row {{
-    display:grid;
-    grid-template-columns:1fr 1fr 1fr;
-    gap:10px;
-  }}
-  .card {{
-    background:#fff;
-    border:1px solid #e0e3e8;
-    border-radius:10px;
-    padding:14px 18px;
-    box-shadow:0 1px 3px rgba(0,0,0,0.05);
-    min-height:72px;
-  }}
-  .label {{
-    font-size:9.5px;
-    font-weight:700;
-    letter-spacing:0.09em;
-    text-transform:uppercase;
-    color:#9aa3b0;
-    margin-bottom:8px;
-  }}
-  .value {{
-    font-size:15px;
-    font-weight:700;
-    font-family:'Courier New',monospace;
-  }}
-</style></head><body>
-<div class="row">
-  <div class="card">
-    <div class="label">Top Gainer</div>
-    <div class="value" style="color:#00a854;">▲ {top['name']} {top['change']:+.2f}%</div>
-  </div>
-  <div class="card">
-    <div class="label">Top Loser</div>
-    <div class="value" style="color:#e53935;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
-  </div>
-  <div class="card">
-    <div class="label">Breadth</div>
-    <div class="value">
-      <span style="color:#00a854;">{len(gainers)}↑</span>
-      <span style="color:#cdd1d8;"> / </span>
-      <span style="color:#e53935;">{len(losers)}↓</span>
-    </div>
-  </div>
-</div>
-</body></html>""", height=90)
+# ── Render the 5 native Streamlit metric/control boxes ────────────────────────
+with c1:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Gainer</div>
+      <div style="font-size:15px;font-weight:700;color:#00a854;
+      font-family:'JetBrains Mono',monospace;">▲ {top['name']} {top['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
 
-# ── Row 2: Timeframe selectbox + Refresh button (native Streamlit, always works)
-col_tf, col_refresh, col_space = st.columns([2, 1, 6])
+with c2:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Top Loser</div>
+      <div style="font-size:15px;font-weight:700;color:#e53935;
+      font-family:'JetBrains Mono',monospace;">▼ {bottom['name']} {bottom['change']:+.2f}%</div>
+    </div>""", unsafe_allow_html=True)
 
-with col_tf:
+with c3:
+    st.markdown(f"""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:8px;">Breadth</div>
+      <div style="font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;">
+        <span style="color:#00a854;">{len(gainers)}↑</span>
+        <span style="color:#cdd1d8;"> / </span>
+        <span style="color:#e53935;">{len(losers)}↓</span>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+with c4:
+    st.markdown("""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;">
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.1em;
+      text-transform:uppercase;color:#7a8394;margin-bottom:6px;">Timeframe</div>
+    """, unsafe_allow_html=True)
+
     chosen = st.selectbox(
         "Timeframe",
         list(TIMEFRAMES.keys()),
         index=list(TIMEFRAMES.keys()).index(st.session_state["selected_tf"]),
+        label_visibility="collapsed",
         key="tf_select"
     )
-
-with col_refresh:
-    # Vertical align the button with the selectbox
-    st.markdown("<div style='margin-top:2px'>", unsafe_allow_html=True)
-    refresh_clicked = st.button("⟳ Refresh", key="refresh_btn")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Handle interactions — rerun only when needed
-if refresh_clicked:
-    st.cache_data.clear()
-    st.rerun()
+    if chosen != st.session_state["selected_tf"]:
+        st.session_state["selected_tf"] = chosen
+        st.cache_data.clear()
+        st.rerun()
 
-if chosen != st.session_state["selected_tf"]:
-    st.session_state["selected_tf"] = chosen
-    st.cache_data.clear()
-    st.rerun()
+with c5:
+    st.markdown("""
+    <div style="background:#fff;border:1px solid #e0e3e8;border-radius:10px;
+    padding:10px 14px;box-shadow:0 1px 3px rgba(0,0,0,0.05);min-height:90px;
+    display:flex;align-items:center;justify-content:center;">
+    """, unsafe_allow_html=True)
+    if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# ── Row 3: Bar chart (pure HTML display) ───────────────────────────────────────
+st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+
+# ── Bar chart HTML (pure display, no controls inside) ─────────────────────────
 max_chg = max(abs(s['change']) for s in data) or 1
 
 rows_html = ""
@@ -242,82 +183,43 @@ for s in data:
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign  = "+" if s['change'] >= 0 else ""
     rows_html += f"""
-      <div class="row">
-        <div class="name">{s['name']}</div>
-        <div class="bar-bg">
-          <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
-        </div>
-        <div class="pct" style="color:{color};">{sign}{s['change']}%</div>
-      </div>"""
+    <div style="display:grid;grid-template-columns:90px 1fr 68px;align-items:center;
+    gap:12px;padding:8px 12px;border-bottom:1px solid #f0f2f5;">
+      <div style="font-size:11px;font-weight:700;color:#3d4452;
+      font-family:'JetBrains Mono',monospace;">{s['name']}</div>
+      <div style="height:8px;background:#f0f2f5;border-radius:4px;overflow:hidden;">
+        <div style="width:{bar_w:.1f}%;height:100%;background:{color};border-radius:4px;"></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;text-align:right;color:{color};
+      font-family:'JetBrains Mono',monospace;">{sign}{s['change']}%</div>
+    </div>"""
 
-components.html(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+html = f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8">
 <style>
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; }}
-  .chart {{
-    background:#fff;
-    border:1px solid #e0e3e8;
-    border-radius:10px;
-    overflow:hidden;
-    box-shadow:0 1px 3px rgba(0,0,0,0.05);
-  }}
-  .chart-header {{
-    padding:10px 14px;
-    font-size:11px;
-    font-weight:600;
-    color:#7a8394;
-    background:#fafbfc;
-    border-bottom:1px solid #f0f2f5;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-  }}
-  .row {{
-    display:grid;
-    grid-template-columns:90px 1fr 72px;
-    align-items:center;
-    gap:12px;
-    padding:8px 14px;
-    border-bottom:1px solid #f5f6f8;
-  }}
-  .name {{
-    font-size:11px;
-    font-weight:700;
-    color:#3d4452;
-    font-family:'Courier New',monospace;
-  }}
-  .bar-bg {{
-    height:8px;
-    background:#f0f2f5;
-    border-radius:4px;
-    overflow:hidden;
-  }}
-  .pct {{
-    font-size:12px;
-    font-weight:700;
-    text-align:right;
-    font-family:'Courier New',monospace;
-  }}
-  .footer {{
-    padding:7px 14px;
-    font-size:10px;
-    color:#9aa3b0;
-    text-align:right;
-    background:#fafbfc;
-    border-top:1px solid #f0f2f5;
-  }}
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ background:#f0f2f5; font-family:'Inter',sans-serif; }}
+.chart {{ background:#fff; border:1px solid #e0e3e8; border-radius:10px;
+  overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05); }}
+.chart-header {{ padding:10px 14px; font-size:11px; font-weight:600; color:#7a8394;
+  background:#fafbfc; border-bottom:1px solid #f0f2f5;
+  display:flex; justify-content:space-between; align-items:center; }}
+.footer {{ padding:8px 12px; font-size:10px; color:#7a8394; text-align:right;
+  border-top:1px solid #f0f2f5; }}
 </style></head><body>
 <div class="chart">
   <div class="chart-header">
     <span>📅 {period_label}</span>
-    <span style="font-weight:400;font-size:10px;">Updated: {updated}</span>
+    <span style="font-weight:400;">Updated: {updated}</span>
   </div>
   {rows_html}
   <div class="footer">TradeSentry • {updated}</div>
 </div>
-</body></html>""", height=len(data) * 40 + 80, scrolling=False)
+</body></html>"""
 
-# ── Data Table (unchanged) ─────────────────────────────────────────────────────
+components.html(html, height=len(data) * 40 + 100)
+
+# ── Data Table ────────────────────────────────────────────────────────────────
 with st.expander("📋 Data Table"):
     df = pd.DataFrame(data)[['name', 'ltp', 'prev', 'change']]
     df.columns = ['Sector', 'LTP', col_start, 'Change %']
