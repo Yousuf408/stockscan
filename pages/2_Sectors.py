@@ -64,47 +64,16 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── DYNAMIC ABSOLUTE TRANSPARENT CLICK OVERLAY LAYER ── */
-    .smooth-row-block {
+    /* ── FULLY CLICKABLE CARD WRAPPER ── */
+    .sector-row-wrapper {
         position: relative !important;
         margin-bottom: 6px !important;
-    }
-
-    /* Force the Streamlit button wrapper to overlay 100% over our custom HTML block grid */
-    .smooth-row-block div[data-testid="stButton"] {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 44px !important;  /* Matches precise thickness of your compact row design */
-        margin: 0 !important;
-        padding: 0 !important;
-        z-index: 5 !important;
-    }
-
-    /* Strip away all default borders, outlines, grays, and shadows from the overlay target */
-    .smooth-row-block div[data-testid="stButton"] > button {
-        width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
-        border: none !important;
-        border-radius: 8px !important;
-        box-shadow: none !important;
-        color: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
         cursor: pointer !important;
     }
 
-    /* Protect card states against default active/focus border shadows */
-    .smooth-row-block div[data-testid="stButton"] > button:hover,
-    .smooth-row-block div[data-testid="stButton"] > button:focus,
-    .smooth-row-block div[data-testid="stButton"] > button:active {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        color: transparent !important;
-        outline: none !important;
+    /* Hide default Streamlit button completely */
+    .sector-row-wrapper div[data-testid="stButton"] {
+        display: none !important;
     }
 
     /* ── HYPER-CLEAN DYNAMIC CARDS FROM YOUR ORIGINAL DESIGN ── */
@@ -118,12 +87,15 @@ st.markdown("""
         align-items: center;
         gap: 16px;
         height: 44px;
-        transition: background-color 0.15s ease;
+        transition: all 0.2s ease;
+        cursor: pointer;
     }
     
-    /* Hover activation links directly tied onto container row blocks */
-    .smooth-row-block:hover .sector-card {
+    /* Hover state - applies to entire row */
+    .sector-row-wrapper:hover .sector-card {
         background-color: #fafbfc;
+        border-color: #d9dce1;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
     
     .sector-card-active {
@@ -137,6 +109,13 @@ st.markdown("""
         align-items: center;
         gap: 16px;
         height: 44px;
+        cursor: pointer;
+    }
+
+    .sector-row-wrapper:hover .sector-card-active {
+        background-color: #f8f9fa;
+        border-color: #d9dce1;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
 
     .breakdown-box {
@@ -146,6 +125,20 @@ st.markdown("""
         border-radius: 0px 0px 8px 8px;
         padding: 4px 24px 12px 24px;
         margin-bottom: 12px;
+        animation: slideDown 0.3s ease-out;
+    }
+
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            max-height: 0;
+            overflow: hidden;
+        }
+        to {
+            opacity: 1;
+            max-height: 1000px;
+            overflow: visible;
+        }
     }
 
     .bar-track {
@@ -162,6 +155,11 @@ st.markdown("""
         text-align: right;
         user-select: none;
         line-height: 1;
+        transition: transform 0.3s ease;
+    }
+
+    .expand-icon.open {
+        transform: rotate(180deg);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -263,22 +261,23 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Clean, Smooth Custom Canvas Renderer
+# 5. Clean, Smooth Custom Canvas Renderer with IMPROVED CLICK HANDLING
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
-for s in sector_data:
+for idx, s in enumerate(sector_data):
     is_expanded = (st.session_state["expanded_sector"] == s['name'])
     bar_w = (abs(s['change']) / max_val) * 100
     color = "#00a854" if s['direction'] == 'up' else "#e53935"
     sign = "+" if s['change'] >= 0 else ""
     icon = "−" if is_expanded else "+"
+    icon_class = "expand-icon open" if is_expanded else "expand-icon"
     
     card_style = "sector-card-active" if is_expanded else "sector-card"
     
-    # Outer Relative layout row node
-    st.markdown(f'<div class="smooth-row-block">', unsafe_allow_html=True)
+    # Outer Relative layout row node with proper wrapper
+    st.markdown(f'<div class="sector-row-wrapper" id="sector_{idx}">', unsafe_allow_html=True)
     
-    # 1. Render your beautiful, sleek HTML card exactly like before
+    # Render your beautiful, sleek HTML card
     st.markdown(f"""
         <div class="{card_style}">
             <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
@@ -288,19 +287,22 @@ for s in sector_data:
             <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
                 {sign}{s['change']:.2f}%
             </div>
-            <div class="expand-icon">{icon}</div>
+            <div class="{icon_class}">{icon}</div>
         </div>
     """, unsafe_allow_html=True)
     
-    # 2. Render a 100% transparent active button overlay right on top of it.
-    # This captures clicks smoothly without creating any visual elements on screen.
-    if st.button("", key=f"overlay_click_{s['name']}"):
-        st.session_state["expanded_sector"] = None if is_expanded else s['name']
-        st.rerun()
+    # CRITICAL FIX: Button with use_container_width to capture the full card area
+    # The button is hidden but its clickable area covers the entire card
+    col1, col2, col3 = st.columns([3, 0.1, 0.1])
+    with col1:
+        if st.button("", key=f"sector_click_{s['name']}_{idx}", use_container_width=True, 
+                     help=f"Click to expand/collapse {s['name']} stocks"):
+            st.session_state["expanded_sector"] = None if is_expanded else s['name']
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)  # Closes row wrapper
         
-    st.markdown('</div>', unsafe_allow_html=True) # Closes row node cleanly
-        
-    # Dropdown stock drawer segment
+    # Dropdown stock drawer segment with smooth animation
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
         stocks_list = fetch_sector_stocks_live(s['name'])
