@@ -186,20 +186,36 @@ if "selected_tf" not in st.session_state:
 if "expanded_sector" not in st.session_state:
     st.session_state["expanded_sector"] = None
 
+# Timeframe → Yahoo (interval, range) mapping
+TF_MAP = {
+    "1 Day":   ("1d",  "1d"),
+    "1 Week":  ("1d",  "5d"),
+    "1 Month": ("1d",  "1mo"),
+    "1 Year":  ("1wk", "1y"),
+}
+
 # 2. Data Fetchers
 @st.cache_data(ttl=30)
-def fetch_sector_indices():
+def fetch_sector_indices(tf: str = "1 Day"):
+    interval, range_ = TF_MAP.get(tf, ("1d", "1d"))
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
     for name, symbol in SECTOR_YAHOO.items():
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval=1d&range=1d"
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval={interval}&range={range_}"
             resp = requests.get(url, headers=headers, timeout=5)
             if not resp.ok: continue
-            meta = resp.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+            result = resp.json().get('chart', {}).get('result', [{}])[0]
+            meta   = result.get('meta', {})
             if meta:
                 cp = meta.get('regularMarketPrice', 0)
-                pc = meta.get('chartPreviousClose', 0)
+                # For multi-day timeframes, compare vs first candle's open for period % change
+                if tf == "1 Day":
+                    pc = meta.get('chartPreviousClose', 0)
+                else:
+                    quotes = result.get('indicators', {}).get('quote', [{}])[0]
+                    opens  = [o for o in quotes.get('open', []) if o is not None]
+                    pc     = opens[0] if opens else meta.get('chartPreviousClose', 0)
                 change = ((cp - pc) / pc * 100) if pc else 0.0
                 data.append({'name': name, 'symbol': symbol, 'change': round(change, 2),
                              'direction': 'up' if change >= 0 else 'down', 'ltp': cp})
@@ -261,7 +277,7 @@ def fetch_sector_stocks_live(sector_name):
 
 # 3. Fetch + derive stats
 with st.spinner("Analyzing sector feeds..."):
-    sector_data = fetch_sector_indices()
+    sector_data = fetch_sector_indices(st.session_state["selected_tf"])
 
 if not sector_data:
     st.error("No real-time market indices available right now.")
