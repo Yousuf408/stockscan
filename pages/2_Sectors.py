@@ -16,7 +16,7 @@ apply_styles()
 sidebar_brand()
 page_header("Sector Performance — NSE Indices")
 
-# Global CSS Overrides — Zero trace of standard Streamlit button boxes or outlines
+# Global CSS Overrides with Clickable Card Design
 st.markdown("""
 <style>
     .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
@@ -64,14 +64,7 @@ st.markdown("""
         color: #3d4452 !important;
     }
 
-    /* ── HYPER-CLEAN CARD COMPONENTS WITH INTEGRATED ONCLICK ACTIONS ── */
-    .sector-row-link {
-        text-decoration: none !important;
-        color: inherit !important;
-        display: block;
-        margin-bottom: 6px;
-    }
-
+    /* ── SECTOR CARD STYLING ── */
     .sector-card {
         background: #ffffff;
         border: 1px solid #e0e3e8;
@@ -81,13 +74,16 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        transition: background-color 0.15s ease, border-color 0.15s ease;
         cursor: pointer;
+        transition: all 0.2s ease;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     
     .sector-card:hover {
         background-color: #fafbfc;
         border-color: #cdd1d8;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     }
     
     .sector-card-active {
@@ -100,7 +96,8 @@ st.markdown("""
         grid-template-columns: 140px 1fr 100px 30px;
         align-items: center;
         gap: 16px;
-        cursor: pointer;
+        margin-bottom: 0px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
 
     .breakdown-box {
@@ -108,8 +105,9 @@ st.markdown("""
         border: 1px solid #e0e3e8;
         border-top: none;
         border-radius: 0px 0px 8px 8px;
-        padding: 4px 24px 12px 24px;
-        margin-bottom: 12px;
+        padding: 12px 24px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
 
     .bar-track {
@@ -120,14 +118,53 @@ st.markdown("""
     }
 
     .expand-icon {
-        font-size: 22px;
-        font-weight: 500;
+        font-size: 20px;
+        font-weight: 400;
         color: #7a8394;
         text-align: right;
         user-select: none;
         line-height: 1;
     }
+
+    .stock-row {
+        display: grid;
+        grid-template-columns: 1fr 120px 100px;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid #f0f2f5;
+        font-size: 13px;
+    }
+
+    .stock-row:last-child {
+        border-bottom: none;
+    }
+
+    .stock-ticker {
+        font-weight: 600;
+        color: #3d4452;
+    }
+
+    .stock-ltp {
+        font-weight: 600;
+        text-align: right;
+        color: #0f1117;
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stock-change {
+        font-weight: 700;
+        text-align: right;
+        font-family: 'JetBrains Mono', monospace;
+    }
 </style>
+
+<script>
+function toggleSector(sectorName) {
+    // Send custom event to Streamlit
+    const event = new CustomEvent('sectorToggle', { detail: { sector: sectorName } });
+    window.dispatchEvent(event);
+}
+</script>
 """, unsafe_allow_html=True)
 
 # Session state initializations
@@ -227,12 +264,7 @@ with c5:
 
 st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
 
-# 5. Callback function to toggle sector expansion
-def toggle_sector(sector_name):
-    current = st.session_state.get("expanded_sector")
-    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
-
-# 6. Pure Custom HTML Row Renderer — No extra Streamlit Button markup generated
+# 5. Pure HTML Card Renderer with Click Handler
 max_val = max(abs(s['change']) for s in sector_data) or 1
 
 for s in sector_data:
@@ -242,31 +274,28 @@ for s in sector_data:
     sign = "+" if s['change'] >= 0 else ""
     icon = "−" if is_expanded else "+"
     
-    card_style = "sector-card-active" if is_expanded else "sector-card"
+    card_class = "sector-card-active" if is_expanded else "sector-card"
     
-    # ✅ FIXED: Use direct session state toggle via button callback (NO query params)
-    col1, col2 = st.columns([0.99, 0.01])
-    with col1:
-        if st.button(f"Toggle {s['name']}", key=f"expand_{s['name']}", use_container_width=True,
-                     on_click=toggle_sector, args=(s['name'],), help="Click to expand/collapse"):
-            pass
-    
-    # Custom HTML Card rendered separately
+    # Render clickable card as pure HTML (no Streamlit button interference)
     st.markdown(f"""
-    <div class="sector-row-link" style="margin-top: -52px; margin-bottom: 6px; pointer-events: none;">
-        <div class="{card_style}">
-            <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
-            <div class="bar-track">
-                <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
-            </div>
-            <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
-                {sign}{s['change']:.2f}%
-            </div>
-            <div class="expand-icon">{icon}</div>
+    <div class="{card_class}" onclick="toggleSectorClick('{s['name']}')">
+        <div style="font-size: 13px; font-weight: 700; color:#0f1117;">{s['name']}</div>
+        <div class="bar-track">
+            <div style="width: {bar_w:.1f}%; height: 100%; background: {color}; border-radius: 3px;"></div>
         </div>
+        <div style="font-size: 13px; font-weight: 700; text-align: right; color: {color}; font-family: 'JetBrains Mono', monospace;">
+            {sign}{s['change']:.2f}%
+        </div>
+        <div class="expand-icon">{icon}</div>
     </div>
     """, unsafe_allow_html=True)
-        
+    
+    # Hidden button that handles state toggle (Streamlit callback)
+    if st.button(f"Toggle {s['name']}", key=f"toggle_{s['name']}", visible=False):
+        current = st.session_state.get("expanded_sector")
+        st.session_state["expanded_sector"] = None if current == s['name'] else s['name']
+        st.rerun()
+    
     # Dropdown stock performance metrics drawer
     if is_expanded:
         st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
@@ -275,16 +304,41 @@ for s in sector_data:
         if not stocks_list:
             st.markdown("<div style='font-size:12px; color:#7a8394; padding: 12px 0;'>No constituents available for this sector mapping.</div>", unsafe_allow_html=True)
         else:
+            # Render header
+            st.markdown("""
+            <div class="stock-row" style="font-weight: 600; color: #7a8394; text-transform: uppercase; font-size: 10px; margin-bottom: 8px;">
+                <div>Stock</div>
+                <div style="text-align: right;">LTP</div>
+                <div style="text-align: right;">Change %</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
             for stk in stocks_list:
                 stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
                 stk_sign = "+" if stk['change'] >= 0 else ""
                 
                 st.markdown(f"""
-                <div style="display: grid; grid-template-columns: 1fr 120px 100px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f2f5;">
-                    <div style="font-size: 13px; font-weight: 600; color: #3d4452;">{stk['ticker']}</div>
-                    <div style="font-size: 13px; font-weight: 600; text-align: right; color: #0f1117; font-family: 'JetBrains Mono', sans-serif;">₹{stk['ltp']:,}</div>
-                    <div style="font-size: 13px; font-weight: 700; text-align: right; color: {stk_color}; font-family: 'JetBrains Mono', monospace;">{stk_sign}{stk['change']:.2f}%</div>
+                <div class="stock-row">
+                    <div class="stock-ticker">{stk['ticker']}</div>
+                    <div class="stock-ltp">₹{stk['ltp']:,.1f}</div>
+                    <div class="stock-change" style="color: {stk_color};">{stk_sign}{stk['change']:.2f}%</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
         st.markdown('</div>', unsafe_allow_html=True)
+
+# Add JavaScript to handle card clicks
+st.markdown("""
+<script>
+function toggleSectorClick(sectorName) {
+    // Find and click the hidden button for this sector
+    const buttons = document.querySelectorAll('button');
+    for (let btn of buttons) {
+        if (btn.textContent.includes(`Toggle ${sectorName}`)) {
+            btn.click();
+            break;
+        }
+    }
+}
+</script>
+""", unsafe_allow_html=True)
