@@ -36,6 +36,7 @@ def apply_styles():
         --amber-dim: #f59e0b12;
         --blue:      #2563eb;
         --blue-dim:  #2563eb10;
+        --purple:    #7c3aed;
         --mono:      'JetBrains Mono', monospace;
         --sans:      'Inter', sans-serif;
         --radius:    8px;
@@ -59,11 +60,10 @@ def apply_styles():
         color: var(--text) !important;
     }
     .block-container {
-    /* Change the first value (top padding) from 1.5rem to 0rem */
-    padding: 0rem 2rem 2rem 2rem !important; 
-    margin-top: 0rem !important;
-    max-width: 100% !important;
-}
+        padding: 0rem 2rem 2rem 2rem !important;
+        margin-top: 0rem !important;
+        max-width: 100% !important;
+    }
 
     /* ══════════════════════════════════════
        SIDEBAR
@@ -78,8 +78,6 @@ def apply_styles():
         padding: 16px 16px 0 16px !important;
         border-bottom: 1px solid var(--border) !important;
     }
-
-    /* Sidebar nav links */
     [data-testid="stSidebar"] a {
         font-family: var(--sans) !important;
         font-size: 13px !important;
@@ -100,8 +98,6 @@ def apply_styles():
         border-left: 3px solid var(--green) !important;
         font-weight: 600 !important;
     }
-
-    /* Sidebar toggle — always visible */
     [data-testid="stSidebarCollapseButton"] button {
         background: var(--bg3) !important;
         border: 1px solid var(--border2) !important;
@@ -221,7 +217,7 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       ALERTS (info/success/warning/error)
+       ALERTS
     ══════════════════════════════════════ */
     div[data-testid="stAlert"] {
         border-radius: var(--radius) !important;
@@ -243,15 +239,11 @@ def apply_styles():
     ══════════════════════════════════════ */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg3); }
-    ::-webkit-scrollbar-thumb {
-        background: var(--border2);
-        border-radius: 3px;
-    }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--green); }
 
     /* ══════════════════════════════════════
        REUSABLE COMPONENT CLASSES
-       (use in st.markdown(..., unsafe_allow_html=True))
     ══════════════════════════════════════ */
 
     /* Page header */
@@ -318,7 +310,7 @@ def apply_styles():
         font-family: var(--mono);
     }
 
-    /* Badge */
+    /* Badges */
     .ts-badge-green {
         display: inline-flex; align-items: center; gap: 4px;
         background: var(--green-bg); color: var(--green);
@@ -339,6 +331,22 @@ def apply_styles():
         display: inline-flex; align-items: center; gap: 4px;
         background: #fffbf0; color: var(--amber);
         border: 1px solid #f59e0b30;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .ts-badge-blue {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: var(--blue-dim); color: var(--blue);
+        border: 1px solid #2563eb30;
+        font-size: 11px; font-weight: 600;
+        padding: 2px 8px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .ts-badge-purple {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: #f5f3ff; color: var(--purple);
+        border: 1px solid #7c3aed30;
         font-size: 11px; font-weight: 600;
         padding: 2px 8px; border-radius: 20px;
         font-family: var(--mono);
@@ -373,12 +381,138 @@ def apply_styles():
     .ts-dot-red   { width:7px; height:7px; border-radius:50%; background:var(--red);   display:inline-block; }
     .ts-dot-amber { width:7px; height:7px; border-radius:50%; background:var(--amber); display:inline-block; }
 
+    /* ══════════════════════════════════════
+       WATCHLIST PAGE CLASSES
+       Used by pages/3_Watchlist.py
+    ══════════════════════════════════════ */
+
+    /* Stock card with status left-border */
+    .wl-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--border2);
+        border-radius: var(--radius-lg);
+        padding: 16px 18px 12px 18px;
+        margin-bottom: 12px;
+        box-shadow: var(--shadow);
+        transition: all 0.15s;
+    }
+    .wl-card:hover { box-shadow: var(--shadow-md); }
+
+    .wl-watching  { border-left-color: var(--border2); }
+    .wl-near      { border-left-color: var(--amber); }
+    .wl-triggered { border-left-color: var(--green); background: var(--green-bg); }
+    .wl-sl_hit    { border-left-color: var(--red);   background: var(--red-bg); }
+    .wl-target1   { border-left-color: var(--blue); }
+    .wl-target2   { border-left-color: var(--purple); }
+
+    /* Symbol */
+    .wl-symbol {
+        font-family: var(--mono);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text);
+        letter-spacing: 0.04em;
+    }
+
+    /* Side pills */
+    .wl-pill-buy {
+        font-size: 10px; font-weight: 700;
+        background: var(--green-bg); color: var(--green);
+        border: 1px solid #00a85430;
+        padding: 1px 7px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .wl-pill-sell {
+        font-size: 10px; font-weight: 700;
+        background: var(--red-bg); color: var(--red);
+        border: 1px solid #e5393530;
+        padding: 1px 7px; border-radius: 20px;
+        font-family: var(--mono);
+    }
+    .wl-pill-exch {
+        font-size: 10px; font-weight: 600;
+        background: var(--bg3); color: var(--text3);
+        border: 1px solid var(--border);
+        padding: 1px 6px; border-radius: 4px;
+        font-family: var(--sans);
+    }
+
+    /* LTP */
+    .wl-ltp {
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text);
+    }
+    .wl-ltp-none {
+        font-family: var(--mono);
+        font-size: 18px;
+        color: var(--text3);
+    }
+    .wl-pct-pos { font-size:12px; color:var(--green); font-family:var(--mono); font-weight:600; }
+    .wl-pct-neg { font-size:12px; color:var(--red);   font-family:var(--mono); font-weight:600; }
+
+    /* Price source badge */
+    .wl-src-angel    { font-size:10px; color:var(--amber);  font-family:var(--mono); }
+    .wl-src-yfinance { font-size:10px; color:var(--text3);  font-family:var(--sans); }
+
+    /* Level boxes */
+    .wl-levels {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin: 10px 0 8px 0;
+    }
+    .wl-level {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 8px;
+        text-align: center;
+    }
+    .wl-level-lbl {
+        font-size: 9px; font-weight: 700;
+        letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--text3); font-family: var(--sans);
+        margin-bottom: 2px;
+    }
+    .wl-level-val {
+        font-size: 13px; font-weight: 700;
+        color: var(--text); font-family: var(--mono);
+    }
+    .wl-level-entry { border-top: 2px solid var(--text3); }
+    .wl-level-sl    { border-top: 2px solid var(--red); }
+    .wl-level-t1    { border-top: 2px solid var(--blue); }
+    .wl-level-t2    { border-top: 2px solid var(--purple); }
+
+    /* Sector % */
+    .wl-sector-pos  { font-size:11px; color:var(--green);  font-family:var(--mono); font-weight:600; }
+    .wl-sector-neg  { font-size:11px; color:var(--red);    font-family:var(--mono); font-weight:600; }
+    .wl-sector-flat { font-size:11px; color:var(--text3);  font-family:var(--mono); }
+
+    /* Note */
+    .wl-note {
+        font-size: 11px; color: var(--text3);
+        font-family: var(--sans);
+        background: var(--bg3);
+        border-radius: 4px;
+        padding: 4px 8px;
+        margin-top: 4px;
+    }
+
+    /* Exit signal */
+    .wl-exit-signal {
+        font-size: 11px; color: var(--red);
+        font-family: var(--sans);
+        margin-top: 6px;
+    }
+
     </style>
     """, unsafe_allow_html=True)
 
 
 def page_header(title: str, subtitle: str = ""):
-    """Render standard TradeSentry page header."""
     sub_html = f'<div class="ts-page-title">{subtitle}</div>' if subtitle else ""
     st.markdown(f"""
     <div class="ts-page-header">
@@ -389,7 +523,6 @@ def page_header(title: str, subtitle: str = ""):
 
 
 def sidebar_brand():
-    """Render TradeSentry branding in sidebar."""
     with st.sidebar:
         st.markdown("""
         <div style="padding:12px 8px 14px 8px;">
