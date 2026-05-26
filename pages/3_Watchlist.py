@@ -480,7 +480,11 @@ for stock_idx, stock in enumerate(watchlist):
                     st.rerun()
     else:
         # ── DISPLAY MODE ──
-        st.markdown(f"""
+        # Build HTML properly
+        ltp_display = f"<span class='wl-ltp'>{fmt(ltp)}</span>" if ltp else "---"
+        note_html = f'<div class="wl-note">📝 {stock.get("note")}</div>' if stock.get("note") else ""
+        
+        card_html = f"""
 <div class="wl-card {card_class}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;gap:12px">
     <div style="flex:1;min-width:0">
@@ -491,31 +495,20 @@ for stock_idx, stock in enumerate(watchlist):
         <span class="wl-pill-{'buy' if dirn=='BUY' else 'sell'}">{'▲ BUY' if dirn=='BUY' else '▼ SELL'}</span>
       </div>
       
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-        <div>
-          <span class="wl-ltp">{'<span class="wl-ltp">' + fmt(ltp) + '</span>' if ltp else '---'}</span>
-          <span class="{pct_cls}" style="margin-left:6px">{pct_val}</span>
-          <span style="color:var(--text3);font-size:10px;margin-left:6px">{src_badge}</span>
-        </div>
-        <span style="color:var(--border);font-size:10px">·</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
-          Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span>
-        </span>
-        <span style="color:var(--border);font-size:10px">·</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
-          SL: <span style="color:var(--red);font-weight:600">{fmt(sl)}</span>
-        </span>
-        <span style="color:var(--border);font-size:10px">·</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
-          T1: <span style="color:var(--blue);font-weight:600">{fmt(t1)}</span>
-        </span>
-        <span style="color:var(--border);font-size:10px">·</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
-          T2: <span style="color:var(--purple);font-weight:600">{fmt(t2)}</span>
-        </span>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px">
+        {ltp_display}
+        <span class="{pct_cls}" style="margin-left:4px">{pct_val}</span>
+        <span style="color:var(--text3);font-size:9px;margin-left:4px">{src_badge}</span>
+        <span style="color:var(--border)">·</span>
+        <span style="color:var(--text3);font-family:var(--mono)">Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span></span>
+        <span style="color:var(--border)">·</span>
+        <span style="color:var(--text3);font-family:var(--mono)">SL: <span style="color:var(--red);font-weight:600">{fmt(sl)}</span></span>
+        <span style="color:var(--border)">·</span>
+        <span style="color:var(--text3);font-family:var(--mono)">T1: <span style="color:var(--blue);font-weight:600">{fmt(t1)}</span></span>
+        <span style="color:var(--border)">·</span>
+        <span style="color:var(--text3);font-family:var(--mono)">T2: <span style="color:var(--purple);font-weight:600">{fmt(t2)}</span></span>
       </div>
-      
-      {f'<div class="wl-note">📝 {stock.get("note")}</div>' if stock.get("note") else ''}
+      {note_html}
     </div>
     
     <div style="display:flex;flex-direction:column;gap:6px;min-width:60px">
@@ -523,7 +516,8 @@ for stock_idx, stock in enumerate(watchlist):
     </div>
   </div>
 </div>
-""", unsafe_allow_html=True)
+"""
+        st.markdown(card_html, unsafe_allow_html=True)
 
         # Action buttons
         a1, a2, a3 = st.columns(3, gap="small")
