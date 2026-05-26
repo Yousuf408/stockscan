@@ -460,49 +460,61 @@ for stock_idx, stock in enumerate(watchlist):
                     st.rerun()
     else:
         # ── DISPLAY MODE — SINGLE ROW ──
-        # Build HTML with proper escaping
         buy_bg = "#f0faf5" if dirn == "BUY" else "#fff5f5"
         buy_color = "#00a854" if dirn == "BUY" else "#e53935"
         buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
         ltp_display = fmt(ltp) if ltp else "---"
+        sector_display = sector if sector else ""
         
         card_html = (
-            '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#fff;'
+            '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:#fff;'
             'border:1px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
             'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
-            '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;min-width:80px;">' + sym + '</span>'
+            # Symbol + Sector
+            '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;">' + sym + '</span>'
+            '<span style="font-size:9px;color:#7a8394;">' + sector_display + '</span>'
+            # Time
             '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
+            # Direction
             '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + buy_bg + ';color:' + buy_color + ';">' + buy_text + '</span>'
-            '<span style="color:#e0e3e8;">|</span>'
+            # Separator
+            '<span style="color:#e0e3e8;margin:0 4px;">|</span>'
+            # Price + %
             '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
             '<span style="color:' + pct_color + ';font-family:monospace;font-weight:600;font-size:11px;">' + pct_val + '</span>'
             '<span style="font-size:9px;color:#7a8394;">' + src_badge + '</span>'
-            '<span style="color:#e0e3e8;">|</span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">Entry: <span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">SL: <span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T1: <span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T2: <span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
+            # Separator
+            '<span style="color:#e0e3e8;margin:0 4px;">|</span>'
+            # Entry Box
+            '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">Entry</span><br/><span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
+            # SL Box
+            '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">SL</span><br/><span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
+            # T1 Box
+            '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">T1</span><br/><span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
+            # T2 Box
+            '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">T2</span><br/><span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
+            # Status Badge
             '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;'
             'background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
             '</div>'
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Action buttons - below card
-        a1, a2, a3, a_empty = st.columns([0.5, 0.5, 0.5, 3], gap="small")
-        with a1:
+        # Action buttons - inline in a compact row
+        b1, b2, b3, b_empty = st.columns([0.5, 0.5, 0.5, 3], gap="small")
+        with b1:
             if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
                 lst = get_list(current_tab)
                 lst[stock_idx]["status"] = "WATCHING"
                 lst[stock_idx]["lastPrice"] = None
                 set_list(current_tab, lst)
                 st.rerun()
-        with a2:
+        with b2:
             if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
                 st.session_state.edit_idx = stock_idx
                 st.session_state.edit_tab = current_tab
                 st.rerun()
-        with a3:
+        with b3:
             if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
                 lst = get_list(current_tab)
                 lst.pop(stock_idx)
