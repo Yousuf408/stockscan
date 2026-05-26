@@ -465,13 +465,20 @@ for stock_idx, stock in enumerate(watchlist):
         buy_color = "#00a854" if dirn == "BUY" else "#e53935"
         buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
         ltp_display = fmt(ltp) if ltp else "---"
-        sector_name = stock.get("sector") or "NSE Stock"
+        
+        # Pull official sector tags assigned to stock mapping list
+        sector_name = stock.get("sector") or "NIFTY INDEX"
 
-        # Unified Clean Layout Row using pure CSS Flex alignment
+        # Separate hex colors cleanly to avoid nested f-string curly-brace conflicts
+        badge_bg_style = f"background: {status_color}12;"
+        badge_border_style = f"border: 1px solid {status_color}25;"
+        card_border_left = f"border-left: 4px solid {status_color};"
+
+        # Unified Clean Display Card
         card_html = f"""
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; 
-                    background: #ffffff; border: 1px solid #e0e3e8; border-left: 4px solid {status_color}; 
-                    border-radius: 8px; margin-bottom: 4px; flex-wrap: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.01);">
+                    background: #ffffff; border: 1px solid #e0e3e8; {card_border_left} 
+                    border-radius: 8px; margin-bottom: 6px; flex-wrap: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,0.01);">
             
             <div style="display: flex; align-items: center; gap: 14px;">
                 <div style="display: flex; flex-direction: column; min-width: 110px;">
@@ -506,7 +513,7 @@ for stock_idx, stock in enumerate(watchlist):
 
             <div style="display: flex; align-items: center; margin-left: auto;">
                 <span style="font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
-                             background: {status_color}12; color: {status_color}; border: 1px solid {status_color}25; white-space: nowrap;">
+                             {badge_bg_style} color: {status_color}; {badge_border_style} white-space: nowrap;">
                     {status_text}
                 </span>
             </div>
@@ -514,8 +521,8 @@ for stock_idx, stock in enumerate(watchlist):
         """
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Bottom Action Control Toolbar mapped cleanly under each line item
-        ctrl_cols = st.columns([9.1, 0.3, 0.3, 0.3])
+        # Bottom Sub-Column Layout Grid for Action controls
+        ctrl_cols = st.columns([10.2, 0.6, 0.6, 0.6])
         with ctrl_cols[1]:
             if st.button("⟳", key=f"rst_{stock_idx}", use_container_width=True, help="Reset Status"):
                 lst = get_list(current_tab)
@@ -535,11 +542,11 @@ for stock_idx, stock in enumerate(watchlist):
                 set_list(current_tab, lst)
                 st.rerun()
 
-        # Contextual notes anchor
+        # Render explicit notes block right under card context
         if note:
-            st.markdown(f'<div style="font-size: 11px; color: #7a8394; margin-left: 16px; margin-top: -6px; margin-bottom: 12px;">📝 {note}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size: 11px; color: #7a8394; margin-left: 16px; margin-top: -2px; margin-bottom: 14px;">📝 {note}</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div style="margin-bottom: 8px;"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="margin-bottom: 10px;"></div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
