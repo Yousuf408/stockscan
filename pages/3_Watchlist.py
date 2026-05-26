@@ -200,66 +200,143 @@ for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
 
 
 # ══════════════════════════════════════════
-#  SIDEBAR — Add Stock Form
+#  ADD TRADE — Expandable form (top of page)
 # ══════════════════════════════════════════
 
-with st.sidebar:
-    st.markdown('<div class="ts-section-label">Add Stock</div>', unsafe_allow_html=True)
+# Session state for form fields (smart paste fills these)
+for k, v in [("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0)]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("▲ BUY", use_container_width=True,
-                     type="primary" if st.session_state.direction == "BUY" else "secondary"):
-            st.session_state.direction = "BUY"; st.rerun()
-    with c2:
-        if st.button("▼ SELL", use_container_width=True,
-                     type="primary" if st.session_state.direction == "SELL" else "secondary"):
-            st.session_state.direction = "SELL"; st.rerun()
+with st.expander("➕ ADD TRADE", expanded=st.session_state.get("add_open", False)):
 
-    d = st.session_state.direction
-    color = "var(--green)" if d == "BUY" else "var(--red)"
-    hint  = "🟢 Long — triggers above entry" if d == "BUY" else "🔴 Short — triggers below entry"
+    # ── Smart Paste hint ──
     st.markdown(
-        f'<div style="font-size:11px;color:{color};font-family:var(--sans);margin:4px 0 10px 0">{hint}</div>',
+        '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);'
+        'background:var(--bg3);border-radius:6px;padding:7px 12px;margin-bottom:12px">'
+        '⚡ Smart paste: type or paste <b>RELIANCE 2800 2750 2900 2950</b> in Symbol — '
+        'values auto-fill into Entry · SL · T1 · T2</div>',
         unsafe_allow_html=True
     )
 
-    e1, e2 = st.columns(2)
-    with e1:
-        if st.button("NSE", use_container_width=True,
+    # ── TRADE DIRECTION ──
+    st.markdown('<div class="ts-section-label">Trade Direction</div>', unsafe_allow_html=True)
+    d1, d2 = st.columns(2)
+    with d1:
+        if st.button("▲ BUY / LONG", use_container_width=True, key="add_buy",
+                     type="primary" if st.session_state.direction == "BUY" else "secondary"):
+            st.session_state.direction = "BUY"; st.rerun()
+    with d2:
+        if st.button("▼ SELL / SHORT", use_container_width=True, key="add_sell",
+                     type="primary" if st.session_state.direction == "SELL" else "secondary"):
+            st.session_state.direction = "SELL"; st.rerun()
+
+    d     = st.session_state.direction
+    color = "var(--green)" if d == "BUY" else "var(--red)"
+    hint  = "Triggers when price rises ABOVE entry. SL below, targets above." if d == "BUY" \
+            else "Triggers when price falls BELOW entry. SL above, targets below."
+    st.markdown(
+        f'<div style="font-size:12px;color:{color};font-family:var(--mono);'
+        f'background:var(--{"green" if d=="BUY" else "red"}-dim);'
+        f'border:1px solid {color}30;border-radius:6px;padding:8px 12px;margin:8px 0 14px 0">'
+        f'{hint}</div>',
+        unsafe_allow_html=True
+    )
+
+    # ── SYMBOL (with smart paste) ──
+    st.markdown('<div class="ts-section-label">Symbol</div>', unsafe_allow_html=True)
+    raw_input = st.text_input(
+        "",
+        value=st.session_state.f_symbol,
+        placeholder="e.g. RELIANCE  2800  2750  2900  2950",
+        key="raw_symbol_input",
+        label_visibility="collapsed"
+    )
+
+    # Smart paste parser — space-separated values auto-fill fields
+    if raw_input:
+        parts = raw_input.strip().upper().split()
+        if len(parts) >= 2:
+            nums = []
+            for p in parts[1:]:
+                try: nums.append(float(p))
+                except: pass
+            if len(nums) >= 1:
+                st.session_state.f_symbol = parts[0]
+                if len(nums) >= 1: st.session_state.f_entry = nums[0]
+                if len(nums) >= 2: st.session_state.f_sl    = nums[1]
+                if len(nums) >= 3: st.session_state.f_t1    = nums[2]
+                if len(nums) >= 4: st.session_state.f_t2    = nums[3]
+                st.rerun()
+        else:
+            st.session_state.f_symbol = parts[0] if parts else ""
+
+    symbol = st.session_state.f_symbol.replace(".NS","").replace(".BO","").upper().strip()
+
+    # ── EXCHANGE ──
+    st.markdown('<div class="ts-section-label" style="margin-top:10px">Exchange</div>',
+                unsafe_allow_html=True)
+    ex1, ex2 = st.columns(2)
+    with ex1:
+        if st.button("NSE (.NS)", use_container_width=True, key="add_nse",
                      type="primary" if st.session_state.exchange == "NS" else "secondary"):
             st.session_state.exchange = "NS"; st.rerun()
-    with e2:
-        if st.button("BSE", use_container_width=True,
+    with ex2:
+        if st.button("BSE (.BO)", use_container_width=True, key="add_bse",
                      type="primary" if st.session_state.exchange == "BO" else "secondary"):
             st.session_state.exchange = "BO"; st.rerun()
 
-    st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+    # ── PRICE LEVELS ──
+    st.markdown('<div class="ts-section-label" style="margin-top:14px">Price Levels</div>',
+                unsafe_allow_html=True)
 
-    symbol = st.text_input("Symbol", placeholder="e.g. RELIANCE").upper().strip()
-    entry  = st.number_input("Entry ₹",     min_value=0.0, format="%.2f")
-    sl     = st.number_input("Stop Loss ₹", min_value=0.0, format="%.2f")
-    t1     = st.number_input("Target 1 ₹",  min_value=0.0, format="%.2f")
-    t2     = st.number_input("Target 2 ₹",  min_value=0.0, format="%.2f")
-    note   = st.text_input("Note (optional)")
+    st.markdown("**Entry Price**")
+    entry = st.number_input("", value=st.session_state.f_entry,
+                            min_value=0.0, format="%.2f",
+                            key="add_entry", label_visibility="collapsed")
 
+    sl_col, t1_col = st.columns(2)
+    with sl_col:
+        st.markdown("**Stop Loss**")
+        sl = st.number_input("", value=st.session_state.f_sl,
+                             min_value=0.0, format="%.2f",
+                             key="add_sl", label_visibility="collapsed")
+    with t1_col:
+        st.markdown("**Target 1**")
+        t1 = st.number_input("", value=st.session_state.f_t1,
+                             min_value=0.0, format="%.2f",
+                             key="add_t1", label_visibility="collapsed")
+
+    st.markdown("**Target 2** (optional)")
+    t2 = st.number_input("", value=st.session_state.f_t2,
+                         min_value=0.0, format="%.2f",
+                         key="add_t2", label_visibility="collapsed")
+
+    # ── NOTES ──
+    st.markdown("**Notes** (optional)")
+    note = st.text_input("", placeholder="e.g. Breakout trade, sector strength",
+                         key="add_note", label_visibility="collapsed")
+
+    st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
+
+    # ── SUBMIT ──
     add_tab   = st.session_state.current_tab
-    btn_label = f"{'+ ADD LONG' if d == 'BUY' else '+ ADD SHORT'} → {add_tab}"
+    btn_color = "primary"
+    btn_label = f"{'▲ ADD LONG TRADE' if d=='BUY' else '▼ ADD SHORT TRADE'} → {add_tab}"
 
-    if st.button(btn_label, use_container_width=True, type="primary"):
+    if st.button(btn_label, use_container_width=True, type=btn_color, key="add_submit"):
         if not symbol:
-            st.error("Symbol is required")
+            st.error("⚠ Symbol is required")
         elif entry <= 0:
-            st.error("Entry price is required")
+            st.error("⚠ Entry price is required")
         else:
             lst       = get_list(add_tab)
             dir_count = sum(1 for s in lst if s.get("direction") == d)
             if dir_count >= 3:
                 st.warning(f"⛔ Max 3 {d} positions in {add_tab}. Remove one first.")
             else:
-                clean = symbol.replace(".NS","").replace(".BO","")
                 lst.append({
-                    "symbol":    clean,
+                    "symbol":    symbol,
                     "exchange":  st.session_state.exchange,
                     "direction": d,
                     "entry":     entry,
@@ -267,16 +344,25 @@ with st.sidebar:
                     "target1":   t1  if t1  > 0 else None,
                     "target2":   t2  if t2  > 0 else None,
                     "note":      note.strip() or None,
-                    "sector":    get_stock_sector(clean),
+                    "sector":    get_stock_sector(symbol),
                     "status":    "WATCHING",
                     "lastPrice": None,
                     "added_at":  datetime.now().isoformat(),
                 })
                 set_list(add_tab, lst)
-                st.success(f"✅ {clean} added to {add_tab}")
+                # Reset form fields
+                for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
+                    st.session_state[k] = "" if k == "f_symbol" else 0.0
+                st.success(f"✅ {symbol} added to {add_tab}!")
                 st.rerun()
 
-    st.divider()
+st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════
+#  SIDEBAR — Sort only
+# ══════════════════════════════════════════
+
+with st.sidebar:
     st.markdown('<div class="ts-section-label">Sort</div>', unsafe_allow_html=True)
     sort_by = st.selectbox("", ["Default","Status","Symbol","Distance to Entry"],
                            label_visibility="collapsed")
@@ -359,7 +445,7 @@ if not watchlist:
         '<div class="ts-card" style="text-align:center;padding:40px">'
         '<div style="font-size:32px;margin-bottom:8px">📭</div>'
         f'<div style="color:var(--text2);font-family:var(--sans)">No stocks in <b>{current_tab}</b> yet.</div>'
-        '<div style="color:var(--text3);font-size:12px;margin-top:4px">Use the sidebar to add your first trade.</div>'
+        '<div style="color:var(--text3);font-size:12px;margin-top:4px">Click ➕ ADD TRADE above to begin.</div>'
         '</div>',
         unsafe_allow_html=True
     )
