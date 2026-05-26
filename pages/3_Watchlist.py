@@ -464,7 +464,7 @@ for stock_idx, stock in enumerate(watchlist):
         buy_color = "#00a854" if dirn == "BUY" else "#e53935"
         buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
         ltp_display = fmt(ltp) if ltp else "---"
-        sector_display = sector if sector else ""
+        sector_text = sector if sector else ""
         
         card_html = (
             '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:#fff;'
@@ -472,7 +472,7 @@ for stock_idx, stock in enumerate(watchlist):
             'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
             # Symbol + Sector
             '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;">' + sym + '</span>'
-            '<span style="font-size:9px;color:#7a8394;">' + sector_display + '</span>'
+            '<span style="font-size:9px;color:#7a8394;">' + sector_text + '</span>'
             # Time
             '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
             # Direction
