@@ -200,7 +200,7 @@ def fmt(v) -> str:
 for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
              ("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0),
              ("edit_idx",None), ("edit_tab",None), ("price_source",{}), ("sort_by","default"),
-             ("sort_open",False), ("last_status",{}), ("sound_enabled",True)]:
+             ("sort_open",False), ("sound_enabled",True)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -417,7 +417,7 @@ if not watchlist:
 
 
 # ══════════════════════════════════════════
-#  HORIZONTAL CARD DISPLAY WITH LEVELS
+#  CARD DISPLAY (Properly Formatted)
 # ══════════════════════════════════════════
 
 for stock_idx, stock in enumerate(watchlist):
@@ -432,14 +432,15 @@ for stock_idx, stock in enumerate(watchlist):
     t2 = stock.get("target2")
     sector = stock.get("sector")
     src = st.session_state.price_source.get(sym,"")
+    note = stock.get("note", "")
 
     # Compute pct
     pct_val = ""
-    pct_cls = ""
+    pct_color = "color: #7a8394"
     if ltp and entry:
         p = (ltp - entry) / entry * 100
         pct_val = f"{'+' if p >= 0 else ''}{p:.2f}%"
-        pct_cls = "wl-pct-pos" if p >= 0 else "wl-pct-neg"
+        pct_color = "color: #00a854" if p >= 0 else "color: #e53935"
 
     # Source
     src_badge = "⚡" if src == "angel" else ("yf" if src == "yfinance" else "")
@@ -480,65 +481,88 @@ for stock_idx, stock in enumerate(watchlist):
                     st.rerun()
     else:
         # ── DISPLAY MODE ──
-        # Build HTML properly
-        ltp_display = f"<span class='wl-ltp'>{fmt(ltp)}</span>" if ltp else "---"
-        note_html = f'<div class="wl-note">📝 {stock.get("note")}</div>' if stock.get("note") else ""
-        
-        card_html = f"""
-<div class="wl-card {card_class}">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;gap:12px">
-    <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-        <span class="wl-symbol">{sym}</span>
-        <span style="font-size:10px;color:var(--text3)">{sector or ''}</span>
-        <span style="color:var(--text3);font-size:10px">3m ago</span>
-        <span class="wl-pill-{'buy' if dirn=='BUY' else 'sell'}">{'▲ BUY' if dirn=='BUY' else '▼ SELL'}</span>
-      </div>
-      
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px">
-        {ltp_display}
-        <span class="{pct_cls}" style="margin-left:4px">{pct_val}</span>
-        <span style="color:var(--text3);font-size:9px;margin-left:4px">{src_badge}</span>
-        <span style="color:var(--border)">·</span>
-        <span style="color:var(--text3);font-family:var(--mono)">Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span></span>
-        <span style="color:var(--border)">·</span>
-        <span style="color:var(--text3);font-family:var(--mono)">SL: <span style="color:var(--red);font-weight:600">{fmt(sl)}</span></span>
-        <span style="color:var(--border)">·</span>
-        <span style="color:var(--text3);font-family:var(--mono)">T1: <span style="color:var(--blue);font-weight:600">{fmt(t1)}</span></span>
-        <span style="color:var(--border)">·</span>
-        <span style="color:var(--text3);font-family:var(--mono)">T2: <span style="color:var(--purple);font-weight:600">{fmt(t2)}</span></span>
-      </div>
-      {note_html}
-    </div>
-    
-    <div style="display:flex;flex-direction:column;gap:6px;min-width:60px">
-      <span class="{STATUS_BADGE.get(status,'ts-badge-amber')}">{STATUS_LABEL.get(status,'')}</span>
-    </div>
-  </div>
-</div>
-"""
-        st.markdown(card_html, unsafe_allow_html=True)
-
-        # Action buttons
-        a1, a2, a3 = st.columns(3, gap="small")
-        with a1:
-            if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
-                lst = get_list(current_tab)
-                lst[stock_idx]["status"] = "WATCHING"
-                lst[stock_idx]["lastPrice"] = None
-                set_list(current_tab, lst)
-                st.rerun()
-        with a2:
-            if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
-                st.session_state.edit_idx = stock_idx
-                st.session_state.edit_tab = current_tab
-                st.rerun()
-        with a3:
-            if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
-                lst = get_list(current_tab)
-                lst.pop(stock_idx)
-                set_list(current_tab, lst)
-                st.rerun()
+        # Use st.container for better layout
+        with st.container(border=True):
+            # Header row
+            col_hdr1, col_hdr2 = st.columns([5, 1])
+            with col_hdr1:
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--text)">{sym}</span>
+                    <span style="font-size:10px;color:var(--text3)">{sector or ''}</span>
+                    <span style="font-size:10px;color:var(--text3)">3m ago</span>
+                    <span style="font-size:10px;font-weight:700;background:{'#f0faf5' if dirn=='BUY' else '#fff5f5'};color:{'#00a854' if dirn=='BUY' else '#e53935'};border:1px solid {'#00a85430' if dirn=='BUY' else '#e5393530'};padding:2px 8px;border-radius:12px;font-family:var(--mono)">
+                        {'▲ BUY' if dirn=='BUY' else '▼ SELL'}
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_hdr2:
+                badge_bg = {"WATCHING":"background:#fffbf0","NEAR":"background:#fffbf0","TRIGGERED":"background:#f0faf5",
+                           "SL_HIT":"background:#fff5f5","TARGET1":"background:#eff6ff","TARGET2":"background:#f5f3ff"}
+                badge_color = {"WATCHING":"color:#f59e0b","NEAR":"color:#f59e0b","TRIGGERED":"color:#00a854",
+                              "SL_HIT":"color:#e53935","TARGET1":"color:#2563eb","TARGET2":"color:#7c3aed"}
+                st.markdown(f"""
+                <div style="{badge_bg.get(status,'background:#fffbf0')};{badge_color.get(status,'color:#f59e0b')};
+                font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid;display:inline-block;text-align:center;">
+                    {STATUS_LABEL.get(status,'')}
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Data row
+            st.markdown(f"""
+            <div style="font-size:11px;margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--text)">
+                    {fmt(ltp) if ltp else '---'}
+                </span>
+                <span style="{pct_color};font-family:var(--mono);font-weight:600;">
+                    {pct_val}
+                </span>
+                <span style="color:var(--text3);font-size:9px;">{src_badge}</span>
+                <span style="color:#e0e3e8">·</span>
+                <span style="color:var(--text3);font-family:var(--mono);">
+                    Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span>
+                </span>
+                <span style="color:#e0e3e8">·</span>
+                <span style="color:var(--text3);font-family:var(--mono);">
+                    SL: <span style="color:#e53935;font-weight:600">{fmt(sl)}</span>
+                </span>
+                <span style="color:#e0e3e8">·</span>
+                <span style="color:var(--text3);font-family:var(--mono);">
+                    T1: <span style="color:#2563eb;font-weight:600">{fmt(t1)}</span>
+                </span>
+                <span style="color:#e0e3e8">·</span>
+                <span style="color:var(--text3);font-family:var(--mono);">
+                    T2: <span style="color:#7c3aed;font-weight:600">{fmt(t2)}</span>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Note
+            if note:
+                st.markdown(f'<div style="font-size:11px;color:var(--text3);margin-top:6px;">📝 {note}</div>', 
+                           unsafe_allow_html=True)
+            
+            # Action buttons
+            a1, a2, a3 = st.columns(3, gap="small")
+            with a1:
+                if st.button("↺ Reset", use_container_width=True, key=f"rst_{stock_idx}"):
+                    lst = get_list(current_tab)
+                    lst[stock_idx]["status"] = "WATCHING"
+                    lst[stock_idx]["lastPrice"] = None
+                    set_list(current_tab, lst)
+                    st.rerun()
+            with a2:
+                if st.button("✏ Edit", use_container_width=True, key=f"edt_{stock_idx}"):
+                    st.session_state.edit_idx = stock_idx
+                    st.session_state.edit_tab = current_tab
+                    st.rerun()
+            with a3:
+                if st.button("✕ Delete", use_container_width=True, key=f"del_{stock_idx}"):
+                    lst = get_list(current_tab)
+                    lst.pop(stock_idx)
+                    set_list(current_tab, lst)
+                    st.rerun()
 
 # Footer
 st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
