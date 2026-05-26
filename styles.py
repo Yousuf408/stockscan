@@ -383,21 +383,21 @@ def apply_styles():
 
     /* ══════════════════════════════════════
        WATCHLIST PAGE CLASSES
-       Used by pages/3_Watchlist.py
+       Horizontal card design
     ══════════════════════════════════════ */
 
-    /* Stock card with status left-border */
+    /* Horizontal stock card */
     .wl-card {
         background: var(--bg);
         border: 1px solid var(--border);
         border-left: 4px solid var(--border2);
         border-radius: var(--radius-lg);
-        padding: 16px 18px 12px 18px;
-        margin-bottom: 12px;
+        padding: 12px 16px;
+        margin-bottom: 8px;
         box-shadow: var(--shadow);
         transition: all 0.15s;
     }
-    .wl-card:hover { box-shadow: var(--shadow-md); }
+    .wl-card:hover { box-shadow: var(--shadow-md); border-color: var(--border2); }
 
     .wl-watching  { border-left-color: var(--border2); }
     .wl-near      { border-left-color: var(--amber); }
@@ -409,104 +409,39 @@ def apply_styles():
     /* Symbol */
     .wl-symbol {
         font-family: var(--mono);
-        font-size: 16px;
+        font-size: 18px;
         font-weight: 700;
         color: var(--text);
         letter-spacing: 0.04em;
     }
 
-    /* Side pills */
+    /* Pill badges */
     .wl-pill-buy {
         font-size: 10px; font-weight: 700;
         background: var(--green-bg); color: var(--green);
         border: 1px solid #00a85430;
-        padding: 1px 7px; border-radius: 20px;
-        font-family: var(--mono);
+        padding: 2px 8px; border-radius: 12px;
+        font-family: var(--mono); display: inline-block;
     }
     .wl-pill-sell {
         font-size: 10px; font-weight: 700;
         background: var(--red-bg); color: var(--red);
         border: 1px solid #e5393530;
-        padding: 1px 7px; border-radius: 20px;
-        font-family: var(--mono);
-    }
-    .wl-pill-exch {
-        font-size: 10px; font-weight: 600;
-        background: var(--bg3); color: var(--text3);
-        border: 1px solid var(--border);
-        padding: 1px 6px; border-radius: 4px;
-        font-family: var(--sans);
+        padding: 2px 8px; border-radius: 12px;
+        font-family: var(--mono); display: inline-block;
     }
 
     /* LTP */
     .wl-ltp {
         font-family: var(--mono);
-        font-size: 22px;
+        font-size: 18px;
         font-weight: 700;
         color: var(--text);
     }
-    .wl-ltp-none {
-        font-family: var(--mono);
-        font-size: 18px;
-        color: var(--text3);
-    }
+
+    /* Percentage color */
     .wl-pct-pos { font-size:12px; color:var(--green); font-family:var(--mono); font-weight:600; }
     .wl-pct-neg { font-size:12px; color:var(--red);   font-family:var(--mono); font-weight:600; }
-
-    /* Price source badge */
-    .wl-src-angel    { font-size:10px; color:var(--amber);  font-family:var(--mono); }
-    .wl-src-yfinance { font-size:10px; color:var(--text3);  font-family:var(--sans); }
-
-    /* Level boxes */
-    .wl-levels {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        margin: 10px 0 8px 0;
-    }
-    .wl-level {
-        background: var(--bg2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 6px 8px;
-        text-align: center;
-    }
-    .wl-level-lbl {
-        font-size: 9px; font-weight: 700;
-        letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--text3); font-family: var(--sans);
-        margin-bottom: 2px;
-    }
-    .wl-level-val {
-        font-size: 13px; font-weight: 700;
-        color: var(--text); font-family: var(--mono);
-    }
-    .wl-level-entry { border-top: 2px solid var(--text3); }
-    .wl-level-sl    { border-top: 2px solid var(--red); }
-    .wl-level-t1    { border-top: 2px solid var(--blue); }
-    .wl-level-t2    { border-top: 2px solid var(--purple); }
-
-    /* Sector % */
-    .wl-sector-pos  { font-size:11px; color:var(--green);  font-family:var(--mono); font-weight:600; }
-    .wl-sector-neg  { font-size:11px; color:var(--red);    font-family:var(--mono); font-weight:600; }
-    .wl-sector-flat { font-size:11px; color:var(--text3);  font-family:var(--mono); }
-
-    /* Note */
-    .wl-note {
-        font-size: 11px; color: var(--text3);
-        font-family: var(--sans);
-        background: var(--bg3);
-        border-radius: 4px;
-        padding: 4px 8px;
-        margin-top: 4px;
-    }
-
-    /* Exit signal */
-    .wl-exit-signal {
-        font-size: 11px; color: var(--red);
-        font-family: var(--sans);
-        margin-top: 6px;
-    }
 
     </style>
     """, unsafe_allow_html=True)
