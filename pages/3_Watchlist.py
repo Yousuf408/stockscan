@@ -2,20 +2,18 @@
 #  TRADESENTRY — pages/3_Watchlist.py
 #  Multi-watchlist: Today / Yesterday / New
 #  Price: Angel One (primary) → yfinance (fallback)
-#  Storage: watchlist.json (local file)
+#  Storage: watchlist.json (auto-created)
+#  Styling: all classes live in styles.py
 # ══════════════════════════════════════════
 
 import streamlit as st
-import json
-import os
-import pyotp
-import yfinance as yf
+import json, os, pyotp, yfinance as yf
 from datetime import datetime
 from SmartApi import SmartConnect
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from stocks import STOCK_UNIVERSE, SECTOR_YAHOO, get_stock_token, get_stock_sector
+from stocks import SECTOR_YAHOO, get_stock_token, get_stock_sector
 from styles import apply_styles, sidebar_brand, page_header
 
 # ── PAGE CONFIG ──
@@ -25,20 +23,19 @@ st.set_page_config(
     page_icon="👁",
     initial_sidebar_state="expanded"
 )
-apply_styles()
+apply_styles()        # ← single call — loads ALL styles including watchlist classes
 sidebar_brand()
-page_header("Watchlist")
+page_header("Watchlist", "Track your trades")
+
 
 # ══════════════════════════════════════════
-#  STORAGE — JSON file (mirrors chrome.storage keys)
+#  STORAGE
 # ══════════════════════════════════════════
 
-WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
-
 def load_all() -> dict:
-    """Load entire watchlist.json. Returns dict with all 3 lists."""
     if not os.path.exists(WATCHLIST_FILE):
         return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
     try:
@@ -50,19 +47,15 @@ def load_all() -> dict:
     except Exception:
         return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
 
-
 def save_all(data: dict):
-    """Save entire watchlist.json atomically."""
     try:
         with open(WATCHLIST_FILE, "w") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
         st.error(f"Save error: {e}")
 
-
 def get_list(tab: str) -> list:
     return load_all().get(f"watchlist_{tab}", [])
-
 
 def set_list(tab: str, lst: list):
     data = load_all()
@@ -71,148 +64,94 @@ def set_list(tab: str, lst: list):
 
 
 # ══════════════════════════════════════════
-#  ANGEL ONE SESSION (shared from app.py pattern)
+#  ANGEL ONE SESSION
 # ══════════════════════════════════════════
 
 @st.cache_resource(ttl=3600)
 def get_angel_session():
-    """
-    Login to Angel One once per hour. Cached so all pages share the session.
-    Returns SmartConnect object or None if login fails.
-    """
     try:
-        api_key     = st.secrets["API_KEY"]
-        username    = st.secrets["CLIENT_CODE"]
-        password    = st.secrets["PASSWORD"]
-        totp_secret = st.secrets["TOTP_SECRET"]
-        obj = SmartConnect(api_key=api_key)
-        totp = pyotp.TOTP(totp_secret).now()
-        session = obj.generateSession(username, password, totp)
-        if session.get("status"):
-            return obj
-        return None
+        obj  = SmartConnect(api_key=st.secrets["API_KEY"])
+        totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
+        sess = obj.generateSession(st.secrets["CLIENT_CODE"], st.secrets["PASSWORD"], totp)
+        return obj if sess.get("status") else None
     except Exception:
         return None
 
 
 # ══════════════════════════════════════════
-#  PRICE FETCHING — Angel One → yfinance fallback
+#  PRICE FETCHING
 # ══════════════════════════════════════════
 
 def fetch_ltp_angel(symbol: str, exchange: str) -> float | None:
-    """
-    Fetch live LTP from Angel One using token from STOCK_UNIVERSE.
-    exchange: 'NS' → exchangeType 1 (NSE), 'BO' → exchangeType 3 (BSE)
-    """
     try:
-        obj = get_angel_session()
-        if obj is None:
-            return None
-        clean = symbol.replace(".NS", "").replace(".BO", "")
-        token = get_stock_token(clean)
-        if not token:
-            return None
-        exch_map = {"NS": "NSE", "BO": "BSE"}
-        exch_str = exch_map.get(exchange, "NSE")
-        resp = obj.ltpData(exch_str, clean, token)
+        obj   = get_angel_session()
+        if not obj: return None
+        token = get_stock_token(symbol)
+        if not token: return None
+        exch  = "NSE" if exchange == "NS" else "BSE"
+        resp  = obj.ltpData(exch, symbol, token)
         if resp and resp.get("status"):
             return float(resp["data"]["ltp"])
-        return None
     except Exception:
-        return None
+        pass
+    return None
 
-
-def fetch_ltp_yfinance(symbol: str) -> float | None:
-    """
-    Fallback: fetch last price via yfinance.
-    symbol should already have .NS or .BO suffix.
-    """
+def fetch_ltp_yfinance(symbol: str, exchange: str) -> float | None:
     try:
-        ticker = yf.Ticker(symbol)
-        price = ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice")
-        return float(price) if price else None
+        suffix = ".NS" if exchange == "NS" else ".BO"
+        t = yf.Ticker(f"{symbol}{suffix}")
+        p = t.fast_info.get("last_price") or t.fast_info.get("regularMarketPrice")
+        return float(p) if p else None
     except Exception:
         return None
-
 
 def fetch_ltp(symbol: str, exchange: str) -> tuple[float | None, str]:
-    """
-    Priority: Angel One → yfinance.
-    Returns (price, source) where source is 'angel' or 'yfinance' or 'none'.
-    """
-    # Ensure symbol has exchange suffix for yfinance
-    clean = symbol.replace(".NS", "").replace(".BO", "")
-    yf_symbol = f"{clean}.{exchange}" if exchange in ("NS", "BO") else symbol
-
-    price = fetch_ltp_angel(clean, exchange)
-    if price is not None:
-        return price, "angel"
-
-    price = fetch_ltp_yfinance(yf_symbol)
-    if price is not None:
-        return price, "yfinance"
-
+    p = fetch_ltp_angel(symbol, exchange)
+    if p: return p, "angel"
+    p = fetch_ltp_yfinance(symbol, exchange)
+    if p: return p, "yfinance"
     return None, "none"
-
 
 @st.cache_data(ttl=60)
 def fetch_sector_pct(yahoo_sym: str) -> float | None:
-    """Cache sector index % change for 60s."""
     try:
-        t = yf.Ticker(yahoo_sym)
-        info = t.fast_info
-        prev  = info.get("previousClose") or info.get("regularMarketPreviousClose")
-        price = info.get("last_price") or info.get("regularMarketPrice")
+        t     = yf.Ticker(yahoo_sym)
+        prev  = t.fast_info.get("previousClose") or t.fast_info.get("regularMarketPreviousClose")
+        price = t.fast_info.get("last_price") or t.fast_info.get("regularMarketPrice")
         if prev and price and prev != 0:
             return round((price - prev) / prev * 100, 2)
-        return None
     except Exception:
-        return None
+        pass
+    return None
 
 
 # ══════════════════════════════════════════
-#  STATUS LOGIC (mirrors watchlist.js)
+#  STATUS LOGIC
 # ══════════════════════════════════════════
 
 def compute_status(stock: dict, ltp: float) -> str:
-    entry   = stock.get("entry")
-    sl      = stock.get("sl")
-    target1 = stock.get("target1")
-    target2 = stock.get("target2")
-    direction = stock.get("direction", "BUY")
-
-    if not entry:
-        return "WATCHING"
-
-    if direction == "BUY":
-        if sl and ltp <= sl:
-            return "SL_HIT"
-        if target2 and ltp >= target2:
-            return "TARGET2"
-        if target1 and ltp >= target1:
-            return "TARGET1"
-        if ltp >= entry:
-            return "TRIGGERED"
-        near_pct = abs(ltp - entry) / entry
-        if near_pct <= 0.01:
-            return "NEAR"
-    else:  # SELL
-        if sl and ltp >= sl:
-            return "SL_HIT"
-        if target2 and ltp <= target2:
-            return "TARGET2"
-        if target1 and ltp <= target1:
-            return "TARGET1"
-        if ltp <= entry:
-            return "TRIGGERED"
-        near_pct = abs(ltp - entry) / entry
-        if near_pct <= 0.01:
-            return "NEAR"
-
+    entry = stock.get("entry")
+    sl    = stock.get("sl")
+    t1    = stock.get("target1")
+    t2    = stock.get("target2")
+    d     = stock.get("direction", "BUY")
+    if not entry: return "WATCHING"
+    if d == "BUY":
+        if sl and ltp <= sl:                   return "SL_HIT"
+        if t2 and ltp >= t2:                   return "TARGET2"
+        if t1 and ltp >= t1:                   return "TARGET1"
+        if ltp >= entry:                        return "TRIGGERED"
+        if abs(ltp - entry) / entry <= 0.01:   return "NEAR"
+    else:
+        if sl and ltp >= sl:                   return "SL_HIT"
+        if t2 and ltp <= t2:                   return "TARGET2"
+        if t1 and ltp <= t1:                   return "TARGET1"
+        if ltp <= entry:                        return "TRIGGERED"
+        if abs(ltp - entry) / entry <= 0.01:   return "NEAR"
     return "WATCHING"
 
-
-STATUS_LABELS = {
+# All badge classes come from styles.py
+STATUS_LABEL = {
     "WATCHING":  "👁 Watching",
     "NEAR":      "⚠ Near Entry",
     "TRIGGERED": "✓ Triggered",
@@ -220,41 +159,44 @@ STATUS_LABELS = {
     "TARGET1":   "🎯 T1 Hit",
     "TARGET2":   "🏆 T2 Hit",
 }
-
-STATUS_COLORS = {
-    "WATCHING":  "#888",
-    "NEAR":      "#EF9F27",
-    "TRIGGERED": "#1D9E75",
-    "SL_HIT":    "#E24B4A",
-    "TARGET1":   "#378ADD",
-    "TARGET2":   "#7F77DD",
+STATUS_BADGE = {
+    "WATCHING":  "ts-badge-amber",
+    "NEAR":      "ts-badge-amber",
+    "TRIGGERED": "ts-badge-green",
+    "SL_HIT":    "ts-badge-red",
+    "TARGET1":   "ts-badge-blue",
+    "TARGET2":   "ts-badge-purple",
+}
+STATUS_CARD = {
+    "WATCHING":  "wl-watching",
+    "NEAR":      "wl-near",
+    "TRIGGERED": "wl-triggered",
+    "SL_HIT":    "wl-sl_hit",
+    "TARGET1":   "wl-target1",
+    "TARGET2":   "wl-target2",
 }
 
+def fmt(v) -> str:
+    if v is None: return "---"
+    try: return f"₹{float(v):,.2f}"
+    except: return "---"
 
-def fmt_price(v) -> str:
-    if v is None or v != v:
-        return "---"
-    return f"₹{float(v):,.2f}"
-
-
-def pct_from_entry(ltp: float, entry: float) -> str:
-    if not ltp or not entry:
-        return ""
-    pct = (ltp - entry) / entry * 100
-    sign = "+" if pct >= 0 else ""
-    return f"{sign}{pct:.2f}%"
+def pct_html(ltp, entry) -> str:
+    if not ltp or not entry: return ""
+    p   = (ltp - entry) / entry * 100
+    cls = "wl-pct-pos" if p >= 0 else "wl-pct-neg"
+    s   = "+" if p >= 0 else ""
+    return f'<span class="{cls}">{s}{p:.2f}% from entry</span>'
 
 
 # ══════════════════════════════════════════
-#  SESSION STATE INIT
+#  SESSION STATE
 # ══════════════════════════════════════════
 
-if "current_tab" not in st.session_state:
-    st.session_state.current_tab = "Today"
-if "edit_index" not in st.session_state:
-    st.session_state.edit_index = None
-if "price_source" not in st.session_state:
-    st.session_state.price_source = {}
+for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
+             ("edit_index",None), ("edit_tab","Today"), ("price_source",{})]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 
 # ══════════════════════════════════════════
@@ -262,88 +204,86 @@ if "price_source" not in st.session_state:
 # ══════════════════════════════════════════
 
 with st.sidebar:
-    st.markdown("### ➕ Add Stock")
+    st.markdown('<div class="ts-section-label">Add Stock</div>', unsafe_allow_html=True)
 
-    col_dir1, col_dir2 = st.columns(2)
-    with col_dir1:
-        buy_btn  = st.button("▲ BUY",  use_container_width=True,
-                             type="primary" if st.session_state.get("direction","BUY")=="BUY" else "secondary")
-    with col_dir2:
-        sell_btn = st.button("▼ SELL", use_container_width=True,
-                             type="primary" if st.session_state.get("direction","BUY")=="SELL" else "secondary")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("▲ BUY", use_container_width=True,
+                     type="primary" if st.session_state.direction == "BUY" else "secondary"):
+            st.session_state.direction = "BUY"; st.rerun()
+    with c2:
+        if st.button("▼ SELL", use_container_width=True,
+                     type="primary" if st.session_state.direction == "SELL" else "secondary"):
+            st.session_state.direction = "SELL"; st.rerun()
 
-    if buy_btn:
-        st.session_state.direction = "BUY"
-    if sell_btn:
-        st.session_state.direction = "SELL"
+    d = st.session_state.direction
+    color = "var(--green)" if d == "BUY" else "var(--red)"
+    hint  = "🟢 Long — triggers above entry" if d == "BUY" else "🔴 Short — triggers below entry"
+    st.markdown(
+        f'<div style="font-size:11px;color:{color};font-family:var(--sans);margin:4px 0 10px 0">{hint}</div>',
+        unsafe_allow_html=True
+    )
 
-    direction = st.session_state.get("direction", "BUY")
-    st.caption(f"{'🟢 Long — triggers above entry' if direction == 'BUY' else '🔴 Short — triggers below entry'}")
+    e1, e2 = st.columns(2)
+    with e1:
+        if st.button("NSE", use_container_width=True,
+                     type="primary" if st.session_state.exchange == "NS" else "secondary"):
+            st.session_state.exchange = "NS"; st.rerun()
+    with e2:
+        if st.button("BSE", use_container_width=True,
+                     type="primary" if st.session_state.exchange == "BO" else "secondary"):
+            st.session_state.exchange = "BO"; st.rerun()
 
-    col_ex1, col_ex2 = st.columns(2)
-    with col_ex1:
-        nse_btn = st.button("NSE", use_container_width=True)
-    with col_ex2:
-        bse_btn = st.button("BSE", use_container_width=True)
-
-    if nse_btn:
-        st.session_state.exchange = "NS"
-    if bse_btn:
-        st.session_state.exchange = "BO"
-    exchange = st.session_state.get("exchange", "NS")
-    st.caption(f"Exchange: {'NSE' if exchange == 'NS' else 'BSE'}")
+    st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
 
     symbol = st.text_input("Symbol", placeholder="e.g. RELIANCE").upper().strip()
-    entry  = st.number_input("Entry Price ₹", min_value=0.0, format="%.2f")
-    sl     = st.number_input("Stop Loss ₹",  min_value=0.0, format="%.2f")
-    t1     = st.number_input("Target 1 ₹",   min_value=0.0, format="%.2f")
-    t2     = st.number_input("Target 2 ₹",   min_value=0.0, format="%.2f")
+    entry  = st.number_input("Entry ₹",     min_value=0.0, format="%.2f")
+    sl     = st.number_input("Stop Loss ₹", min_value=0.0, format="%.2f")
+    t1     = st.number_input("Target 1 ₹",  min_value=0.0, format="%.2f")
+    t2     = st.number_input("Target 2 ₹",  min_value=0.0, format="%.2f")
     note   = st.text_input("Note (optional)")
 
-    pos_limit_warn = ""
-    add_tab = st.session_state.current_tab
+    add_tab   = st.session_state.current_tab
+    btn_label = f"{'+ ADD LONG' if d == 'BUY' else '+ ADD SHORT'} → {add_tab}"
 
-    if st.button(f"{'+ ADD LONG' if direction=='BUY' else '+ ADD SHORT'} → {add_tab}",
-                 use_container_width=True, type="primary"):
+    if st.button(btn_label, use_container_width=True, type="primary"):
         if not symbol:
             st.error("Symbol is required")
         elif entry <= 0:
             st.error("Entry price is required")
         else:
-            lst = get_list(add_tab)
-            # Position limit: max 3 per direction
-            dir_count = sum(1 for s in lst if s.get("direction") == direction)
+            lst       = get_list(add_tab)
+            dir_count = sum(1 for s in lst if s.get("direction") == d)
             if dir_count >= 3:
-                st.warning(f"⛔ Max 3 {direction} positions in {add_tab}. Remove one first.")
+                st.warning(f"⛔ Max 3 {d} positions in {add_tab}. Remove one first.")
             else:
-                clean_sym = symbol.replace(".NS", "").replace(".BO", "")
-                sector = get_stock_sector(clean_sym)
-                stock = {
-                    "symbol":    clean_sym,
-                    "exchange":  exchange,
-                    "direction": direction,
+                clean = symbol.replace(".NS","").replace(".BO","")
+                lst.append({
+                    "symbol":    clean,
+                    "exchange":  st.session_state.exchange,
+                    "direction": d,
                     "entry":     entry,
-                    "sl":        sl if sl > 0 else None,
-                    "target1":   t1 if t1 > 0 else None,
-                    "target2":   t2 if t2 > 0 else None,
+                    "sl":        sl  if sl  > 0 else None,
+                    "target1":   t1  if t1  > 0 else None,
+                    "target2":   t2  if t2  > 0 else None,
                     "note":      note.strip() or None,
-                    "sector":    sector,
+                    "sector":    get_stock_sector(clean),
                     "status":    "WATCHING",
                     "lastPrice": None,
                     "added_at":  datetime.now().isoformat(),
-                }
-                lst.append(stock)
+                })
                 set_list(add_tab, lst)
-                st.success(f"✅ {clean_sym} added to {add_tab}")
+                st.success(f"✅ {clean} added to {add_tab}")
                 st.rerun()
 
     st.divider()
-    st.markdown("### ⚙ Sort")
-    sort_by = st.selectbox("Sort by", ["Default", "Status", "Symbol", "Distance to Entry"])
+    st.markdown('<div class="ts-section-label">Sort</div>', unsafe_allow_html=True)
+    sort_by = st.selectbox("", ["Default","Status","Symbol","Distance to Entry"],
+                           label_visibility="collapsed")
 
 
 # ══════════════════════════════════════════
-#  MAIN — Watchlist Tabs
+#  MAIN — Tab Bar
 # ══════════════════════════════════════════
 
 tab_cols = st.columns(len(WATCHLIST_NAMES))
@@ -351,69 +291,78 @@ for i, name in enumerate(WATCHLIST_NAMES):
     with tab_cols[i]:
         cnt = len(get_list(name))
         is_active = st.session_state.current_tab == name
-        label = f"**{name}** ({cnt})" if is_active else f"{name} ({cnt})"
-        if st.button(label, key=f"tab_{name}", use_container_width=True,
-                     type="primary" if is_active else "secondary"):
+        if st.button(
+            f"{'● ' if is_active else ''}{name}  ({cnt})",
+            key=f"tab_{name}",
+            use_container_width=True,
+            type="primary" if is_active else "secondary"
+        ):
             st.session_state.current_tab = name
             st.rerun()
 
-st.divider()
+st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
 
 current_tab = st.session_state.current_tab
 watchlist   = get_list(current_tab)
 
-# Refresh button
-col_head1, col_head2, col_head3 = st.columns([4, 1, 1])
-with col_head1:
-    st.markdown(f"#### {current_tab} · {len(watchlist)} stock{'s' if len(watchlist) != 1 else ''}")
-with col_head2:
+# ── Header ──
+h1, h2, h3 = st.columns([5, 1, 1])
+with h1:
+    st.markdown(
+        f'<div class="ts-section-label">{current_tab} · '
+        f'{len(watchlist)} stock{"s" if len(watchlist)!=1 else ""}</div>',
+        unsafe_allow_html=True
+    )
+with h2:
     refresh = st.button("↺ Refresh", use_container_width=True)
-with col_head3:
-    if st.button("🗑 Clear All", use_container_width=True):
-        if watchlist:
-            set_list(current_tab, [])
-            st.rerun()
+with h3:
+    if st.button("🗑 Clear", use_container_width=True) and watchlist:
+        set_list(current_tab, [])
+        st.rerun()
 
-# ── FETCH PRICES & UPDATE STATUS ──
+# ── Fetch prices on refresh ──
 if watchlist and refresh:
-    updated = []
+    updated  = []
     progress = st.progress(0, text="Fetching prices...")
     for i, stock in enumerate(watchlist):
-        ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange", "NS"))
-        stock = stock.copy()
-        stock["lastPrice"] = ltp
+        ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange","NS"))
+        s = stock.copy()
+        s["lastPrice"] = ltp
         if ltp:
-            stock["status"] = compute_status(stock, ltp)
-            st.session_state.price_source[stock["symbol"]] = source
-        updated.append(stock)
-        progress.progress((i + 1) / len(watchlist),
-                          text=f"Fetching {stock['symbol']}... ({source})")
+            s["status"] = compute_status(s, ltp)
+            st.session_state.price_source[s["symbol"]] = source
+        updated.append(s)
+        progress.progress((i+1)/len(watchlist), text=f"Fetching {stock['symbol']}...")
     progress.empty()
     set_list(current_tab, updated)
     watchlist = updated
 
-# ── SORT ──
-def sort_watchlist(lst, sort_by):
-    order = {"SL_HIT": 0, "TRIGGERED": 1, "NEAR": 2, "TARGET1": 3, "TARGET2": 4, "WATCHING": 5}
-    if sort_by == "Status":
-        return sorted(lst, key=lambda s: order.get(s.get("status", "WATCHING"), 9))
-    if sort_by == "Symbol":
-        return sorted(lst, key=lambda s: s.get("symbol", ""))
-    if sort_by == "Distance to Entry":
+# ── Sort ──
+def sort_watchlist(lst, by):
+    order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
+    if by == "Status":
+        return sorted(lst, key=lambda s: order.get(s.get("status","WATCHING"), 9))
+    if by == "Symbol":
+        return sorted(lst, key=lambda s: s.get("symbol",""))
+    if by == "Distance to Entry":
         def dist(s):
-            ltp   = s.get("lastPrice")
-            entry = s.get("entry")
-            if ltp and entry:
-                return abs(ltp - entry) / entry
-            return 999
+            ltp = s.get("lastPrice"); e = s.get("entry")
+            return abs(ltp-e)/e if ltp and e else 999
         return sorted(lst, key=dist)
     return lst
 
 watchlist_sorted = sort_watchlist(watchlist, sort_by)
 
-# ── EMPTY STATE ──
+# ── Empty state ──
 if not watchlist:
-    st.info(f"📭 No stocks in {current_tab} yet. Use the sidebar to add one.")
+    st.markdown(
+        '<div class="ts-card" style="text-align:center;padding:40px">'
+        '<div style="font-size:32px;margin-bottom:8px">📭</div>'
+        f'<div style="color:var(--text2);font-family:var(--sans)">No stocks in <b>{current_tab}</b> yet.</div>'
+        '<div style="color:var(--text3);font-size:12px;margin-top:4px">Use the sidebar to add your first trade.</div>'
+        '</div>',
+        unsafe_allow_html=True
+    )
     st.stop()
 
 
@@ -421,181 +370,160 @@ if not watchlist:
 #  RENDER CARDS
 # ══════════════════════════════════════════
 
-# Find original index for edit/delete by matching symbol+entry+direction
 def orig_idx(stock):
-    raw = get_list(current_tab)
-    for i, s in enumerate(raw):
-        if (s.get("symbol") == stock.get("symbol") and
-                s.get("entry") == stock.get("entry") and
-                s.get("direction") == stock.get("direction")):
+    for i, s in enumerate(get_list(current_tab)):
+        if (s.get("symbol")==stock.get("symbol") and
+            s.get("entry")==stock.get("entry") and
+            s.get("direction")==stock.get("direction")):
             return i
     return None
 
-
-CARDS_PER_ROW = 3
-rows = [watchlist_sorted[i:i+CARDS_PER_ROW] for i in range(0, len(watchlist_sorted), CARDS_PER_ROW)]
+COLS = 3
+rows = [watchlist_sorted[i:i+COLS] for i in range(0, len(watchlist_sorted), COLS)]
 
 for row in rows:
-    cols = st.columns(CARDS_PER_ROW)
+    cols = st.columns(COLS)
     for col, stock in zip(cols, row):
         with col:
-            sym       = stock.get("symbol", "")
-            direction = stock.get("direction", "BUY")
-            exchange  = stock.get("exchange", "NS")
-            status    = stock.get("status", "WATCHING")
-            ltp       = stock.get("lastPrice")
-            entry     = stock.get("entry")
-            sl        = stock.get("sl")
-            t1        = stock.get("target1")
-            t2        = stock.get("target2")
-            note      = stock.get("note")
-            sector    = stock.get("sector")
-            color     = STATUS_COLORS.get(status, "#888")
-            src       = st.session_state.price_source.get(sym, "")
+            sym    = stock.get("symbol","")
+            dirn   = stock.get("direction","BUY")
+            exch   = stock.get("exchange","NS")
+            status = stock.get("status","WATCHING")
+            ltp    = stock.get("lastPrice")
+            entry  = stock.get("entry")
+            sector = stock.get("sector")
+            src    = st.session_state.price_source.get(sym,"")
 
             # Sector %
-            sect_pct_str = ""
+            sect_html = ""
             if sector and sector in SECTOR_YAHOO:
-                pct = fetch_sector_pct(SECTOR_YAHOO[sector])
-                if pct is not None:
-                    sign = "+" if pct >= 0 else ""
-                    sect_pct_str = f"{sector} {sign}{pct}%"
+                sp = fetch_sector_pct(SECTOR_YAHOO[sector])
+                if sp is not None:
+                    sign = "+" if sp >= 0 else ""
+                    cls  = "wl-sector-pos" if sp > 0 else ("wl-sector-neg" if sp < 0 else "wl-sector-flat")
+                    sect_html = f'<div style="margin-bottom:4px"><span class="{cls}">{sector} {sign}{sp}%</span></div>'
 
-            # % from entry
-            pct_str = pct_from_entry(ltp, entry) if ltp else ""
-            pct_color = "green" if pct_str.startswith("+") else "red" if pct_str.startswith("-") else "gray"
+            # Price source
+            src_html = ""
+            if src == "angel":
+                src_html = '&nbsp;<span class="wl-src-angel">⚡ Angel</span>'
+            elif src == "yfinance":
+                src_html = '&nbsp;<span class="wl-src-yfinance">yf</span>'
 
-            # Smart exit signals (after TRIGGERED)
-            exit_signals = []
+            # Exit signal
+            exit_html = ""
             if status == "TRIGGERED" and ltp and entry:
-                if direction == "BUY" and ltp < entry:
-                    exit_signals.append("⚠ Price below entry — consider exit")
+                if dirn == "BUY" and ltp < entry:
+                    exit_html = '<div class="wl-exit-signal">⚠ Price below entry — consider exit</div>'
 
-            with st.container(border=True):
-                # Header row
-                h1, h2 = st.columns([3, 1])
-                with h1:
-                    side_icon = "▲" if direction == "BUY" else "▼"
-                    side_color = "green" if direction == "BUY" else "red"
-                    exch_label = "NSE" if exchange == "NS" else "BSE"
-                    st.markdown(
-                        f"**{sym}** "
-                        f"<span style='color:{side_color};font-size:12px'>{side_icon} {direction}</span> "
-                        f"<span style='background:#333;color:#aaa;font-size:10px;padding:1px 5px;border-radius:3px'>{exch_label}</span>",
-                        unsafe_allow_html=True
-                    )
-                with h2:
-                    st.markdown(
-                        f"<span style='color:{color};font-size:11px;font-weight:600'>{STATUS_LABELS.get(status,'')}</span>",
-                        unsafe_allow_html=True
-                    )
+            st.markdown(f"""
+<div class="wl-card {STATUS_CARD.get(status,'wl-watching')}">
 
-                # LTP
-                if ltp:
-                    ltp_src = f" <span style='font-size:9px;color:#888'>via {src}</span>" if src else ""
-                    st.markdown(
-                        f"<span style='font-size:22px;font-weight:700'>{fmt_price(ltp)}</span>"
-                        f" <span style='color:{pct_color};font-size:12px'>{pct_str} from entry</span>"
-                        f"{ltp_src}",
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.markdown("<span style='color:#888;font-size:18px'>--- no price</span>",
-                                unsafe_allow_html=True)
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+    <div>
+      <span class="wl-symbol">{sym}</span>&nbsp;
+      <span class="wl-pill-{'buy' if dirn=='BUY' else 'sell'}">{'▲ BUY' if dirn=='BUY' else '▼ SELL'}</span>&nbsp;
+      <span class="wl-pill-exch">{'NSE' if exch=='NS' else 'BSE'}</span>
+    </div>
+    <span class="{STATUS_BADGE.get(status,'ts-badge-amber')}">{STATUS_LABEL.get(status,'')}</span>
+  </div>
 
-                # Levels
-                lv1, lv2, lv3, lv4 = st.columns(4)
-                with lv1:
-                    st.metric("Entry", fmt_price(entry))
-                with lv2:
-                    st.metric("SL", fmt_price(sl))
-                with lv3:
-                    st.metric("T1", fmt_price(t1))
-                with lv4:
-                    st.metric("T2", fmt_price(t2))
+  <div style="margin-bottom:6px">
+    {'<span class="wl-ltp">' + fmt(ltp) + '</span>' if ltp else '<span class="wl-ltp-none">--- no price</span>'}
+    {pct_html(ltp, entry)}
+    {src_html}
+  </div>
 
-                # Sector tag
-                if sect_pct_str:
-                    s_color = "green" if "+" in sect_pct_str else "red"
-                    st.markdown(
-                        f"<span style='font-size:11px;color:{s_color}'>{sect_pct_str}</span>",
-                        unsafe_allow_html=True
-                    )
+  <div class="wl-levels">
+    <div class="wl-level wl-level-entry">
+      <div class="wl-level-lbl">Entry</div>
+      <div class="wl-level-val">{fmt(entry)}</div>
+    </div>
+    <div class="wl-level wl-level-sl">
+      <div class="wl-level-lbl">SL</div>
+      <div class="wl-level-val">{fmt(stock.get('sl'))}</div>
+    </div>
+    <div class="wl-level wl-level-t1">
+      <div class="wl-level-lbl">T1</div>
+      <div class="wl-level-val">{fmt(stock.get('target1'))}</div>
+    </div>
+    <div class="wl-level wl-level-t2">
+      <div class="wl-level-lbl">T2</div>
+      <div class="wl-level-val">{fmt(stock.get('target2'))}</div>
+    </div>
+  </div>
 
-                # Note
-                if note:
-                    st.caption(f"📝 {note}")
+  {sect_html}
+  {f'<div class="wl-note">📝 {stock.get("note")}</div>' if stock.get("note") else ''}
+  {exit_html}
 
-                # Exit signals
-                for sig in exit_signals:
-                    st.warning(sig)
+</div>
+""", unsafe_allow_html=True)
 
-                # Action buttons
-                a1, a2, a3 = st.columns(3)
-                idx = orig_idx(stock)
-
-                with a1:
-                    if st.button("↺ Reset", key=f"reset_{sym}_{idx}_{current_tab}",
-                                 use_container_width=True):
-                        lst = get_list(current_tab)
-                        if idx is not None:
-                            lst[idx]["status"] = "WATCHING"
-                            lst[idx]["lastPrice"] = None
-                            set_list(current_tab, lst)
-                            st.rerun()
-                with a2:
-                    if st.button("✏ Edit", key=f"edit_{sym}_{idx}_{current_tab}",
-                                 use_container_width=True):
-                        st.session_state.edit_index = idx
-                        st.session_state.edit_tab   = current_tab
-                with a3:
-                    if st.button("✕ Del", key=f"del_{sym}_{idx}_{current_tab}",
-                                 use_container_width=True):
-                        lst = get_list(current_tab)
-                        if idx is not None:
-                            lst.pop(idx)
-                            set_list(current_tab, lst)
-                            st.rerun()
+            # Action buttons — below each card
+            idx = orig_idx(stock)
+            a1, a2, a3 = st.columns(3)
+            with a1:
+                if st.button("↺ Reset", key=f"rst_{sym}_{idx}", use_container_width=True):
+                    lst = get_list(current_tab)
+                    if idx is not None:
+                        lst[idx]["status"]    = "WATCHING"
+                        lst[idx]["lastPrice"] = None
+                        set_list(current_tab, lst)
+                        st.rerun()
+            with a2:
+                if st.button("✏ Edit", key=f"edt_{sym}_{idx}", use_container_width=True):
+                    st.session_state.edit_index = idx
+                    st.session_state.edit_tab   = current_tab
+            with a3:
+                if st.button("✕ Del", key=f"del_{sym}_{idx}", use_container_width=True):
+                    lst = get_list(current_tab)
+                    if idx is not None:
+                        lst.pop(idx)
+                        set_list(current_tab, lst)
+                        st.rerun()
 
 
 # ══════════════════════════════════════════
-#  EDIT MODAL (inline expander)
+#  EDIT PANEL
 # ══════════════════════════════════════════
 
 if st.session_state.edit_index is not None:
-    idx     = st.session_state.edit_index
-    tab     = st.session_state.get("edit_tab", current_tab)
-    lst     = get_list(tab)
-
+    idx = st.session_state.edit_index
+    tab = st.session_state.edit_tab
+    lst = get_list(tab)
     if idx < len(lst):
         s = lst[idx]
-        st.divider()
-        with st.expander(f"✏ Edit — {s.get('symbol', '')}", expanded=True):
+        st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="ts-section-label">Edit — {s.get("symbol","")}</div>',
+            unsafe_allow_html=True
+        )
+        with st.container(border=True):
             ec1, ec2 = st.columns(2)
             with ec1:
-                new_entry = st.number_input("Entry ₹",   value=float(s.get("entry") or 0), format="%.2f", key="e_entry")
-                new_sl    = st.number_input("SL ₹",      value=float(s.get("sl") or 0),    format="%.2f", key="e_sl")
+                ne  = st.number_input("Entry ₹",     value=float(s.get("entry")   or 0), format="%.2f", key="e_en")
+                ns  = st.number_input("Stop Loss ₹",  value=float(s.get("sl")      or 0), format="%.2f", key="e_sl")
             with ec2:
-                new_t1    = st.number_input("Target 1 ₹", value=float(s.get("target1") or 0), format="%.2f", key="e_t1")
-                new_t2    = st.number_input("Target 2 ₹", value=float(s.get("target2") or 0), format="%.2f", key="e_t2")
-            new_note = st.text_input("Note", value=s.get("note") or "", key="e_note")
+                nt1 = st.number_input("Target 1 ₹",  value=float(s.get("target1") or 0), format="%.2f", key="e_t1")
+                nt2 = st.number_input("Target 2 ₹",  value=float(s.get("target2") or 0), format="%.2f", key="e_t2")
+            nn = st.text_input("Note", value=s.get("note") or "", key="e_note")
 
             sv1, sv2 = st.columns(2)
             with sv1:
-                if st.button("💾 Save", use_container_width=True, type="primary"):
+                if st.button("💾 Save", use_container_width=True, type="primary", key="save_edit"):
                     lst[idx].update({
-                        "entry":   new_entry if new_entry > 0 else s.get("entry"),
-                        "sl":      new_sl    if new_sl > 0 else None,
-                        "target1": new_t1    if new_t1 > 0 else None,
-                        "target2": new_t2    if new_t2 > 0 else None,
-                        "note":    new_note.strip() or None,
+                        "entry":   ne  if ne  > 0 else s.get("entry"),
+                        "sl":      ns  if ns  > 0 else None,
+                        "target1": nt1 if nt1 > 0 else None,
+                        "target2": nt2 if nt2 > 0 else None,
+                        "note":    nn.strip() or None,
                     })
                     set_list(tab, lst)
                     st.session_state.edit_index = None
-                    st.success("Saved!")
                     st.rerun()
             with sv2:
-                if st.button("Cancel", use_container_width=True):
+                if st.button("Cancel", use_container_width=True, key="cancel_edit"):
                     st.session_state.edit_index = None
                     st.rerun()
 
@@ -604,6 +532,12 @@ if st.session_state.edit_index is not None:
 #  FOOTER
 # ══════════════════════════════════════════
 
-st.divider()
-angel_status = "🟢 Angel One connected" if get_angel_session() else "🟡 Angel One offline — using yfinance"
-st.caption(f"{angel_status}  ·  Data refreshes on ↺ Refresh  ·  Stored in watchlist.json")
+st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
+angel_ok = get_angel_session() is not None
+st.markdown(
+    f'<div style="font-size:11px;color:var(--text3);font-family:var(--sans)">'
+    f'{"🟢 Angel One connected" if angel_ok else "🟡 Angel One offline — using yfinance"}'
+    f'&nbsp;·&nbsp;Stored in watchlist.json'
+    f'&nbsp;·&nbsp;Press ↺ Refresh to update prices</div>',
+    unsafe_allow_html=True
+)
