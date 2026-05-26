@@ -459,31 +459,78 @@ for stock_idx, stock in enumerate(watchlist):
                     st.session_state.edit_tab = None
                     st.rerun()
     else:
-        # ── DISPLAY MODE — SINGLE ROW ──
-        # Build HTML with proper escaping
+        # ── DISPLAY MODE — SINGLE ROW WITH BOX-STYLE LEVELS ──
         buy_bg = "#f0faf5" if dirn == "BUY" else "#fff5f5"
         buy_color = "#00a854" if dirn == "BUY" else "#e53935"
         buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
         ltp_display = fmt(ltp) if ltp else "---"
-        
+
+        # ── ONLY CHANGE: Entry/SL/T1/T2 are now colored pill boxes instead of plain text spans ──
         card_html = (
-            '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#fff;'
-            'border:1px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
+            '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;'
+            'border:0.5px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
             'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
+
+            # Symbol
             '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;min-width:80px;">' + sym + '</span>'
+
+            # Time ago
             '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
+
+            # Direction badge
             '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + buy_bg + ';color:' + buy_color + ';">' + buy_text + '</span>'
+
             '<span style="color:#e0e3e8;">|</span>'
+
+            # LTP
             '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
+
+            # % change
             '<span style="color:' + pct_color + ';font-family:monospace;font-weight:600;font-size:11px;">' + pct_val + '</span>'
+
+            # Source badge
             '<span style="font-size:9px;color:#7a8394;">' + src_badge + '</span>'
+
             '<span style="color:#e0e3e8;">|</span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">Entry: <span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">SL: <span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T1: <span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T2: <span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
+
+            # ── BOX-STYLE PRICE LEVELS (only this section changed) ──
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+
+            # Entry box — gray
+            '<div style="display:flex;flex-direction:column;align-items:center;padding:4px 10px;'
+            'border-radius:6px;border:0.5px solid #b4b2a9;background:#f1efe8;min-width:58px;">'
+            '<span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:#5f5e5a;text-transform:uppercase;">Entry</span>'
+            '<span style="font-family:monospace;font-size:13px;font-weight:600;color:#2c2c2a;">' + fmt(entry) + '</span>'
+            '</div>'
+
+            # SL box — red
+            '<div style="display:flex;flex-direction:column;align-items:center;padding:4px 10px;'
+            'border-radius:6px;border:0.5px solid #f09595;background:#fcebeb;min-width:58px;">'
+            '<span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:#a32d2d;text-transform:uppercase;">SL</span>'
+            '<span style="font-family:monospace;font-size:13px;font-weight:600;color:#a32d2d;">' + fmt(sl) + '</span>'
+            '</div>'
+
+            # T1 box — blue
+            '<div style="display:flex;flex-direction:column;align-items:center;padding:4px 10px;'
+            'border-radius:6px;border:0.5px solid #85b7eb;background:#e6f1fb;min-width:58px;">'
+            '<span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:#185fa5;text-transform:uppercase;">T1</span>'
+            '<span style="font-family:monospace;font-size:13px;font-weight:600;color:#185fa5;">' + fmt(t1) + '</span>'
+            '</div>'
+
+            # T2 box — purple
+            '<div style="display:flex;flex-direction:column;align-items:center;padding:4px 10px;'
+            'border-radius:6px;border:0.5px solid #afa9ec;background:#eeedfe;min-width:58px;">'
+            '<span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:#534ab7;text-transform:uppercase;">T2</span>'
+            '<span style="font-family:monospace;font-size:13px;font-weight:600;color:' + ('#534ab7' if t2 else '#aaa') + ';">' + fmt(t2) + '</span>'
+            '</div>'
+
+            '</div>'
+            # ── END BOX-STYLE PRICE LEVELS ──
+
+            # Status badge
             '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;'
             'background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
+
             '</div>'
         )
         st.markdown(card_html, unsafe_allow_html=True)
