@@ -458,61 +458,95 @@ for stock_idx, stock in enumerate(watchlist):
                     st.session_state.edit_idx = None
                     st.session_state.edit_tab = None
                     st.rerun()
-    else:
+   else:
         # ── DISPLAY MODE — SINGLE ROW ──
-        # Build HTML with proper escaping
         buy_bg = "#f0faf5" if dirn == "BUY" else "#fff5f5"
         buy_color = "#00a854" if dirn == "BUY" else "#e53935"
         buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
         ltp_display = fmt(ltp) if ltp else "---"
-        
-        card_html = (
-            '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#fff;'
-            'border:1px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
-            'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
-            '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;min-width:80px;">' + sym + '</span>'
-            '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
-            '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + buy_bg + ';color:' + buy_color + ';">' + buy_text + '</span>'
-            '<span style="color:#e0e3e8;">|</span>'
-            '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
-            '<span style="color:' + pct_color + ';font-family:monospace;font-weight:600;font-size:11px;">' + pct_val + '</span>'
-            '<span style="font-size:9px;color:#7a8394;">' + src_badge + '</span>'
-            '<span style="color:#e0e3e8;">|</span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">Entry: <span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">SL: <span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T1: <span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
-            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T2: <span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
-            '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;'
-            'background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
-            '</div>'
-        )
-        st.markdown(card_html, unsafe_allow_html=True)
 
-        # Action buttons - below card
-        a1, a2, a3, a_empty = st.columns([0.5, 0.5, 0.5, 3], gap="small")
-        with a1:
-            if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
-                lst = get_list(current_tab)
-                lst[stock_idx]["status"] = "WATCHING"
-                lst[stock_idx]["lastPrice"] = None
-                set_list(current_tab, lst)
-                st.rerun()
-        with a2:
-            if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
-                st.session_state.edit_idx = stock_idx
-                st.session_state.edit_tab = current_tab
-                st.rerun()
-        with a3:
-            if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
-                lst = get_list(current_tab)
-                lst.pop(stock_idx)
-                set_list(current_tab, lst)
-                st.rerun()
+        # Fetch underlying sector name if available
+        sector_name = stock.get("sector") or "NSE Stock"
+
+        # 1. Parent Layout Wrapper using structural columns 
+        # Left (7.5 parts): Symbol, LTP, & Boxed Parameters | Right (4.5 parts): Status Badge & Action Controls
+        card_cols = st.columns([7.5, 4.5])
+
+        with card_cols[0]:
+            # Clean inline group containing Symbol, Sector, Strategy Tag, LTP, and Boxed Levels
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; gap:14px; padding: 6px 0 0 4px; flex-wrap:nowrap;">
+                <div style="display:flex; flex-direction:column; min-width:110px;">
+                    <span style="font-family:monospace; font-weight:800; font-size:16px; color:#0f1117; letter-spacing:0.3px;">{sym}</span>
+                    <span style="font-size:11px; color:#7a8394; margin-top:1px;">{sector_name}</span>
+                </div>
+                
+                <span style="font-size:10px; font-weight:700; padding:3px 8px; border-radius:4px; background:{buy_bg}; color:{buy_color}; height:fit-content; white-space:nowrap;">
+                    {buy_text}
+                </span>
+                
+                <div style="display:flex; align-items:baseline; gap:6px; min-width:90px;">
+                    <span style="font-family:monospace; font-weight:700; font-size:16px; color:#0f1117;">{ltp_display}</span>
+                    <span style="color:{pct_color}; font-family:monospace; font-weight:600; font-size:11px;">{pct_val}</span>
+                </div>
+
+                <span style="color:#e0e3e8; font-size:16px;">|</span>
+
+                <div style="display:flex; align-items:center; gap:6px; font-family:monospace; font-size:11px;">
+                    <div style="border:1px solid #e0e3e8; background:#fafbfc; padding:3px 8px; border-radius:5px; white-space:nowrap;">
+                        <span style="color:#7a8394; font-weight:600;">Entry:</span> <span style="color:#0f1117; font-weight:700;">{fmt(entry)}</span>
+                    </div>
+                    <div style="border:1px solid #fcd9d7; background:#fff5f5; padding:3px 8px; border-radius:5px; white-space:nowrap;">
+                        <span style="color:#e53935; font-weight:600;">SL:</span> <span style="color:#e53935; font-weight:700;">{fmt(sl)}</span>
+                    </div>
+                    <div style="border:1px solid #d4f0de; background:#f5fdf8; padding:3px 8px; border-radius:5px; white-space:nowrap;">
+                        <span style="color:#00a854; font-weight:600;">T1:</span> <span style="color:#00a854; font-weight:700;">{fmt(t1)}</span>
+                    </div>
+                    <div style="border:1px solid #d4f0de; background:#f5fdf8; padding:3px 8px; border-radius:5px; white-space:nowrap;">
+                        <span style="color:#00a854; font-weight:600;">T2:</span> <span style="color:#00a854; font-weight:700;">{fmt(t2)}</span>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with card_cols[1]:
+            # Flex container pushed completely to the right edge housing Status Badge alongside Action Buttons
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; padding-top:8px;">
+                <span style="font-size:11px; font-weight:700; padding:5px 12px; border-radius:20px;
+                             background:{status_color}15; color:{status_color}; border:1px solid {status_color}30; white-space:nowrap; margin-right:4px;">
+                    {status_text}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Sub-columns inside the right block keep the interactive Streamlit buttons cleanly grouped
+            btn_cols = st.columns([5, 2, 2, 2])
+            with btn_cols[1]:
+                if st.button("⟳", key=f"rst_{stock_idx}", use_container_width=True, help="Reset Status"):
+                    lst = get_list(current_tab)
+                    lst[stock_idx]["status"] = "WATCHING"
+                    lst[stock_idx]["lastPrice"] = None
+                    set_list(current_tab, lst)
+                    st.rerun()
+            with btn_cols[2]:
+                if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit Levels"):
+                    st.session_state.edit_idx = stock_idx
+                    st.session_state.edit_tab = current_tab
+                    st.rerun()
+            with btn_cols[3]:
+                if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete Item"):
+                    lst = get_list(current_tab)
+                    lst.pop(stock_idx)
+                    set_list(current_tab, lst)
+                    st.rerun()
         
-        # Note below
+        # Bottom Note Line anchoring securely under the row border 
         if note:
-            st.markdown(f'<div style="font-size:10px;color:#7a8394;margin-left:12px;margin-top:-8px;">📝 {note}</div>', 
-                       unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:11px; color:#7a8394; margin-left:4px; margin-top:-4px; margin-bottom:12px;">📝 {note}</div>', 
+                        unsafe_allow_html=True)
+        
+        st.markdown('<hr style="margin: 4px 0 12px 0; border:0; border-top:1px solid #e0e3e8;">', unsafe_allow_html=True)
 
 # Footer
 st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
