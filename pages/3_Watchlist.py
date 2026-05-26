@@ -466,41 +466,29 @@ for stock_idx, stock in enumerate(watchlist):
         ltp_display = fmt(ltp) if ltp else "---"
         sector_text = sector if sector else ""
         
+        # Build card HTML
         card_html = (
             '<div style="display:flex;align-items:center;gap:8px;padding:12px;background:#fff;'
             'border:1px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
             'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
-            # Symbol + Sector
             '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;">' + sym + '</span>'
             '<span style="font-size:9px;color:#7a8394;">' + sector_text + '</span>'
-            # Time
             '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
-            # Direction
             '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + buy_bg + ';color:' + buy_color + ';">' + buy_text + '</span>'
-            # Separator
             '<span style="color:#e0e3e8;margin:0 4px;">|</span>'
-            # Price + %
             '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
             '<span style="color:' + pct_color + ';font-family:monospace;font-weight:600;font-size:11px;">' + pct_val + '</span>'
             '<span style="font-size:9px;color:#7a8394;">' + src_badge + '</span>'
-            # Separator
             '<span style="color:#e0e3e8;margin:0 4px;">|</span>'
-            # Entry Box
             '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">Entry</span><br/><span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
-            # SL Box
             '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">SL</span><br/><span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
-            # T1 Box
             '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">T1</span><br/><span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
-            # T2 Box
             '<span style="display:inline-block;padding:4px 8px;border:1px solid #e0e3e8;border-radius:4px;font-family:monospace;font-size:10px;background:#f8f9fb;"><span style="color:#7a8394;">T2</span><br/><span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
-            # Status Badge
-            '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;'
-            'background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
+            '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
             '</div>'
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Action buttons - inline in a compact row
         b1, b2, b3, b_empty = st.columns([0.5, 0.5, 0.5, 3], gap="small")
         with b1:
             if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
@@ -521,7 +509,6 @@ for stock_idx, stock in enumerate(watchlist):
                 set_list(current_tab, lst)
                 st.rerun()
         
-        # Note below
         if note:
             st.markdown(f'<div style="font-size:10px;color:#7a8394;margin-left:12px;margin-top:-8px;">📝 {note}</div>', 
                        unsafe_allow_html=True)
