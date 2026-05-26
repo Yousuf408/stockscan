@@ -1,420 +1,524 @@
+# ══════════════════════════════════════════
+#  TRADESENTRY — pages/3_Watchlist.py
+#  Single row card design - all data inline
+# ══════════════════════════════════════════
+
 import streamlit as st
-import requests
-import pandas as pd
-import yfinance as yf
-import time
-import datetime
-import sys, os
+import json, os, pyotp, yfinance as yf
+from datetime import datetime
+from SmartApi import SmartConnect
 
+import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from stocks import SECTOR_YAHOO, get_stock_token, get_stock_sector
 from styles import apply_styles, sidebar_brand, page_header
-from stocks import SECTOR_YAHOO, get_stocks_by_sector
 
-# 1. Page Configuration
-st.set_page_config(page_title="TradeSentry — Sectors", layout="wide", page_icon="📊")
+st.set_page_config(
+    page_title="Watchlist · TradeSentry",
+    layout="wide",
+    page_icon="👁",
+    initial_sidebar_state="collapsed"
+)
 apply_styles()
 sidebar_brand()
-page_header("Sector Performance — NSE Indices")
-
-st.markdown("""
-<style>
-    .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stMain"] {
-        background-color: #ffffff !important;
-    }
-
-    /* Kill gaps — scoped to not break control row */
-    div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-    div[data-testid="stVerticalBlock"] div[data-testid="element-container"] {
-        margin-top: 0 !important;
-        margin-bottom: 0 !important;
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-    }
-    /* But restore spacing inside horizontal blocks (control row) */
-    div[data-testid="stHorizontalBlock"] div[data-testid="element-container"] {
-        margin-top: revert !important;
-        margin-bottom: revert !important;
-        padding-top: revert !important;
-        padding-bottom: revert !important;
-    }
-
-    div[data-testid="stHorizontalBlock"] > div:nth-child(4) {
-        background: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 10px !important;
-        padding: 14px 18px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        min-height: 65px !important;
-        max-height: 65px !important;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-
-    div[data-testid="stHorizontalBlock"] > div:nth-child(5) {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0px !important;
-        min-height: 65px !important;
-        max-height: 65px !important;
-        min-width: 110px !important;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-    }
-
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
-        border: none !important;
-    }
-
-    div[data-testid="stHorizontalBlock"] button[key="refresh_btn"] {
-        height: 42px !important;
-        background-color: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 10px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        font-size: 14px !important;
-        color: #3d4452 !important;
-    }
+page_header("Watchlist", "Track your trades")
 
 
-    /* ── SECTOR TOGGLE BUTTON: invisible click target ──
-       Card HTML overlays on top via negative margin-top. */
-    [data-testid="stBaseButton-secondary"] {
-        width: 100% !important;
-        height: 38px !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        opacity: 0 !important;
-        position: relative !important;
-        z-index: 2 !important;
-        cursor: pointer !important;
-    }
+# ══════════════════════════════════════════
+#  SOUND ALERT
+# ══════════════════════════════════════════
 
-    /* ── Restore Refresh button visibility specifically ── */
-    button[data-testid="stBaseButton-secondary"][kind="secondary"]:has(> div > p:only-child) {
-        opacity: 1 !important;
-    }
-    /* Fallback: target by key via aria-label or just restore all buttons NOT in sector list */
-    div[data-testid="stHorizontalBlock"] [data-testid="stBaseButton-secondary"] {
-        opacity: 1 !important;
-        height: 42px !important;
-        background-color: #ffffff !important;
-        border: 1px solid #e0e3e8 !important;
-        border-radius: 10px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        font-size: 14px !important;
-        color: #3d4452 !important;
-    }
+def play_alert_sound(alert_type="triggered"):
+    if alert_type == "triggered":
+        freq, dur = 800, 300
+    elif alert_type == "sl_hit":
+        freq, dur = 400, 500
+    else:
+        freq, dur = 1200, 200
+    
+    html_code = f"""<script>
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.frequency.value = {freq}; osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + {dur/1000});
+    osc.start(ac.currentTime); osc.stop(ac.currentTime + {dur/1000});
+    </script>"""
+    st.components.v1.html(html_code, height=0)
 
-    /* ── CARD overlays on top of the invisible button ── */
-    .sector-card {
-        background: #ffffff;
-        border-left: 1px solid #e0e3e8;
-        border-right: 1px solid #e0e3e8;
-        border-top: 1px solid #e0e3e8;
-        border-bottom: none;
-        border-radius: 0px;
-        padding: 10px 18px;
-        display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
-        align-items: center;
-        gap: 16px;
-        margin-top: -44px;
-        margin-bottom: 0px;
-        pointer-events: none;
-        box-shadow: none;
-        position: relative;
-        z-index: 1;
-    }
 
-    .sector-card-active {
-        background: #f5fdf8;
-        border-left: 1px solid #c8e6c9;
-        border-right: 1px solid #c8e6c9;
-        border-top: 1px solid #c8e6c9;
-        border-bottom: none;
-        border-radius: 0px;
-        padding: 10px 18px;
-        display: grid;
-        grid-template-columns: 140px 1fr 100px 30px;
-        align-items: center;
-        gap: 16px;
-        margin-top: -44px;
-        margin-bottom: 0px;
-        pointer-events: none;
-        box-shadow: none;
-        position: relative;
-        z-index: 1;
-    }
+# ══════════════════════════════════════════
+#  STORAGE
+# ══════════════════════════════════════════
 
-    /* ── Expanded stock breakdown panel ── */
-    .breakdown-box {
-        background: #fafbfc;
-        border-left: 3px solid #c8e6c9;
-        border-right: 3px solid #c8e6c9;
-        border-top: none;
-        border-bottom: none;
-        border-radius: 0px;
-        margin: 0 1%;
-        padding: 10px 16px 14px 16px;
-    }
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
-    .bar-track {
-        height: 6px;
-        background: #f0f2f5;
-        border-radius: 3px;
-        overflow: hidden;
-    }
+def load_all() -> dict:
+    if not os.path.exists(WATCHLIST_FILE):
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
+    try:
+        with open(WATCHLIST_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
 
-    .expand-icon {
-        font-size: 16px;
-        font-weight: 400;
-        color: #7a8394;
-        text-align: right;
-        user-select: none;
-    }
-</style>
-""", unsafe_allow_html=True)
+def save_all(data: dict):
+    try:
+        with open(WATCHLIST_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        st.error(f"Save error: {e}")
 
-# Session state
-if "selected_tf" not in st.session_state:
-    st.session_state["selected_tf"] = "1 Day"
-if "expanded_sector" not in st.session_state:
-    st.session_state["expanded_sector"] = None
+def get_list(tab: str) -> list:
+    d = load_all()
+    for n in WATCHLIST_NAMES:
+        d.setdefault(f"watchlist_{n}", [])
+    return d.get(f"watchlist_{tab}", [])
 
-# Timeframe → Yahoo (interval, range) mapping
-TF_MAP = {
-    "1 Day":   ("1d",  "1d"),
-    "1 Week":  ("1d",  "5d"),
-    "1 Month": ("1d",  "1mo"),
-    "1 Year":  ("1wk", "1y"),
+def set_list(tab: str, lst: list):
+    data = load_all()
+    data[f"watchlist_{tab}"] = lst
+    save_all(data)
+
+
+# ══════════════════════════════════════════
+#  ANGEL ONE
+# ══════════════════════════════════════════
+
+@st.cache_resource(ttl=3600)
+def get_angel_session():
+    try:
+        obj = SmartConnect(api_key=st.secrets["API_KEY"])
+        totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
+        sess = obj.generateSession(st.secrets["CLIENT_CODE"], st.secrets["PASSWORD"], totp)
+        return obj if sess.get("status") else None
+    except:
+        return None
+
+
+# ══════════════════════════════════════════
+#  PRICE FETCH
+# ══════════════════════════════════════════
+
+def fetch_ltp_angel(symbol: str, exchange: str) -> float | None:
+    try:
+        obj = get_angel_session()
+        if not obj: return None
+        token = get_stock_token(symbol)
+        if not token: return None
+        resp = obj.ltpData("NSE" if exchange == "NS" else "BSE", symbol, token)
+        if resp and resp.get("status"):
+            return float(resp["data"]["ltp"])
+    except:
+        pass
+    return None
+
+def fetch_ltp_yfinance(symbol: str, exchange: str) -> float | None:
+    try:
+        suffix = ".NS" if exchange == "NS" else ".BO"
+        t = yf.Ticker(f"{symbol}{suffix}")
+        p = t.fast_info.get("last_price") or t.fast_info.get("regularMarketPrice")
+        return float(p) if p else None
+    except:
+        return None
+
+def fetch_ltp(symbol: str, exchange: str) -> tuple[float | None, str]:
+    p = fetch_ltp_angel(symbol, exchange)
+    if p: return p, "angel"
+    p = fetch_ltp_yfinance(symbol, exchange)
+    if p: return p, "yfinance"
+    return None, "none"
+
+
+# ══════════════════════════════════════════
+#  STATUS LOGIC
+# ══════════════════════════════════════════
+
+def compute_status(stock: dict, ltp: float) -> str:
+    entry, sl, t1, t2 = stock.get("entry"), stock.get("sl"), stock.get("target1"), stock.get("target2")
+    d = stock.get("direction", "BUY")
+    if not entry: return "WATCHING"
+    if d == "BUY":
+        if sl and ltp <= sl: return "SL_HIT"
+        if t2 and ltp >= t2: return "TARGET2"
+        if t1 and ltp >= t1: return "TARGET1"
+        if ltp >= entry: return "TRIGGERED"
+        if abs(ltp - entry) / entry <= 0.01: return "NEAR"
+    else:
+        if sl and ltp >= sl: return "SL_HIT"
+        if t2 and ltp <= t2: return "TARGET2"
+        if t1 and ltp <= t1: return "TARGET1"
+        if ltp <= entry: return "TRIGGERED"
+        if abs(ltp - entry) / entry <= 0.01: return "NEAR"
+    return "WATCHING"
+
+STATUS_LABEL = {
+    "WATCHING": "Watching",
+    "NEAR": "Near Entry", 
+    "TRIGGERED": "Entry Triggered",
+    "SL_HIT": "SL Hit",
+    "TARGET1": "T1 Hit",
+    "TARGET2": "T2 Hit"
+}
+STATUS_COLOR = {
+    "WATCHING": "#f59e0b",
+    "NEAR": "#f59e0b",
+    "TRIGGERED": "#00a854",
+    "SL_HIT": "#e53935",
+    "TARGET1": "#2563eb",
+    "TARGET2": "#7c3aed"
 }
 
-# 2. Data Fetchers
-@st.cache_data(ttl=30)
-def fetch_sector_indices(tf: str = "1 Day"):
-    interval, range_ = TF_MAP.get(tf, ("1d", "1d"))
-    data = []
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    for name, symbol in SECTOR_YAHOO.items():
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol)}?interval={interval}&range={range_}"
-            resp = requests.get(url, headers=headers, timeout=5)
-            if not resp.ok: continue
-            result = resp.json().get('chart', {}).get('result', [{}])[0]
-            meta   = result.get('meta', {})
-            if meta:
-                cp = meta.get('regularMarketPrice', 0)
-                # For multi-day timeframes, compare vs first candle's open for period % change
-                if tf == "1 Day":
-                    pc = meta.get('chartPreviousClose', 0)
-                else:
-                    quotes = result.get('indicators', {}).get('quote', [{}])[0]
-                    opens  = [o for o in quotes.get('open', []) if o is not None]
-                    pc     = opens[0] if opens else meta.get('chartPreviousClose', 0)
-                change = ((cp - pc) / pc * 100) if pc else 0.0
-                data.append({'name': name, 'symbol': symbol, 'change': round(change, 2),
-                             'direction': 'up' if change >= 0 else 'down', 'ltp': cp})
-        except:
-            continue
-    data.sort(key=lambda x: x['change'], reverse=True)
-    return data
+def fmt(v) -> str:
+    if v is None: return "---"
+    try: return f"₹{float(v):,.0f}"
+    except: return "---"
 
-@st.cache_data(ttl=30)
-def fetch_sector_stocks_live(sector_name):
-    stocks = get_stocks_by_sector(sector_name)
-    if not stocks:
-        return []
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    results = []
-    for s in stocks[:5]:
-        sym = f"{s['sym']}.NS"
-        try:
-            # Changed range=1d to range=2d to ensure we capture the explicit yesterday vs today candle arrays
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d"
-            resp = requests.get(url, headers=headers, timeout=3)
-            if not resp.ok: continue
-            
-            result = resp.json().get('chart', {}).get('result', [{}])[0]
-            meta   = result.get('meta', {})
-            indicators = result.get('indicators', {}).get('quote', [{}])[0]
-            
-            # Safely extract historical open and close arrays
-            opens = indicators.get('open', [])
-            closes = indicators.get('close', [])
-            
-            if meta:
-                ltp = meta.get('regularMarketPrice', 0)
-                prev_close = meta.get('chartPreviousClose', 0)
-                chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-                # Robust Gap Calculation using sequence arrays
-                gap_pct = None
-                if len(opens) >= 2 and closes[0] is not None and opens[1] is not None:
-                    # Case A: We have at least 2 distinct days of data (Yesterday Close -> Today Open)
-                    gap_pct = ((opens[1] - closes[0]) / closes[0]) * 100
-                elif len(opens) == 1 and opens[0] is not None and prev_close:
-                    # Case B: Only 1 day returned, fallback using metadata previous close
-                    gap_pct = ((opens[0] - prev_close) / prev_close) * 100
-                elif meta.get('regularMarketOpen') and prev_close:
-                    # Case C: Hard fallback to metadata parameters
-                    gap_pct = ((meta.get('regularMarketOpen') - prev_close) / prev_close) * 100
+# ══════════════════════════════════════════
+#  SESSION STATE
+# ══════════════════════════════════════════
 
-                results.append({
-                    'ticker': s['sym'],
-                    'ltp': round(ltp, 2),
-                    'change': round(chg, 2),
-                    'gap': round(gap_pct, 2) if gap_pct is not None else None,
-                })
-        except:
-            continue
-    results.sort(key=lambda x: x['change'], reverse=True)
-    return results
+for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
+             ("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0),
+             ("edit_idx",None), ("edit_tab",None), ("price_source",{}), ("sort_by","default"),
+             ("sort_open",False), ("sound_enabled",True)]:
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# 3. Fetch + derive stats
-with st.spinner("Analyzing sector feeds..."):
-    sector_data = fetch_sector_indices(st.session_state["selected_tf"])
 
-if not sector_data:
-    st.error("No real-time market indices available right now.")
-    st.stop()
+# ══════════════════════════════════════════
+#  ADD TRADE FORM
+# ══════════════════════════════════════════
 
-gainers = [s for s in sector_data if s['direction'] == 'up']
-losers  = [s for s in sector_data if s['direction'] == 'down']
-top     = sector_data[0]
-bottom  = sector_data[-1]
+with st.expander("➕ ADD TRADE", expanded=False):
+    st.markdown(
+        '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);'
+        'background:var(--bg3);border-radius:6px;padding:8px 12px;margin-bottom:12px">'
+        '⚡ Smart paste: <b>RELIANCE 2800 2750 2900 2950</b></div>',
+        unsafe_allow_html=True
+    )
 
-# 4. Control Row
-c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
-with c1:
-    st.markdown(f'<div class="ts-metric" style="height:65px;"><div class="ts-metric-label">Top Gainer</div><div class="ts-metric-value" style="color:var(--green); font-size:15px; margin-top:4px;">▲ {top["name"]} {top["change"]:+.2f}%</div></div>', unsafe_allow_html=True)
-with c2:
-    st.markdown(f'<div class="ts-metric" style="height:65px;"><div class="ts-metric-label">Top Loser</div><div class="ts-metric-value" style="color:var(--red); font-size:15px; margin-top:4px;">▼ {bottom["name"]} {bottom["change"]:+.2f}%</div></div>', unsafe_allow_html=True)
-with c3:
-    st.markdown(f'<div class="ts-metric" style="height:65px;"><div class="ts-metric-label">Breadth</div><div class="ts-metric-value" style="font-size:15px; margin-top:4px;"><span style="color:var(--green);">{len(gainers)}↑</span> <span style="color:var(--border2);">/</span> <span style="color:var(--red);">{len(losers)}↓</span></div></div>', unsafe_allow_html=True)
-with c4:
-    st.markdown('<div style="font-size:10px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:#7a8394; margin-bottom:2px;">Timeframe</div>', unsafe_allow_html=True)
-    chosen = st.selectbox("TF", ["1 Day", "1 Week", "1 Month", "1 Year"], label_visibility="collapsed", key="tf_selector")
-    if chosen != st.session_state["selected_tf"]:
-        st.session_state["selected_tf"] = chosen
-        st.cache_data.clear()
-        st.rerun()
-with c5:
-    st.markdown('<div style="font-size:10px; margin-bottom:2px; color:transparent; user-select:none;">x</div>', unsafe_allow_html=True)
-    if st.button("⟳ Refresh", key="refresh_btn", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    st.markdown('<div class="ts-section-label">Trade Direction</div>', unsafe_allow_html=True)
+    d1, d2 = st.columns(2)
+    with d1:
+        if st.button("▲ BUY", use_container_width=True, key="add_buy",
+                     type="primary" if st.session_state.direction == "BUY" else "secondary"):
+            st.session_state.direction = "BUY"; st.rerun()
+    with d2:
+        if st.button("▼ SELL", use_container_width=True, key="add_sell",
+                     type="primary" if st.session_state.direction == "SELL" else "secondary"):
+            st.session_state.direction = "SELL"; st.rerun()
 
-st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="ts-section-label" style="margin-top:10px">Symbol</div>', unsafe_allow_html=True)
+    raw_input = st.text_input("", value=st.session_state.f_symbol,
+                              placeholder="RELIANCE 2800 2750 2900 2950",
+                              key="raw_symbol_input", label_visibility="collapsed")
 
-# 5. Toggle callback — keeps toggle logic clean and separate
-def toggle_sector(sector_name):
-    current = st.session_state.get("expanded_sector")
-    st.session_state["expanded_sector"] = None if current == sector_name else sector_name
+    if raw_input:
+        parts = raw_input.strip().upper().split()
+        if len(parts) >= 1:
+            st.session_state.f_symbol = parts[0]
+            nums = []
+            for p in parts[1:]:
+                try: nums.append(float(p))
+                except: pass
+            if len(nums) >= 1: st.session_state.f_entry = nums[0]
+            if len(nums) >= 2: st.session_state.f_sl = nums[1]
+            if len(nums) >= 3: st.session_state.f_t1 = nums[2]
+            if len(nums) >= 4: st.session_state.f_t2 = nums[3]
 
-# 6. Sector rows — button is the click target, card HTML overlays on top
-max_val = max(abs(s['change']) for s in sector_data) or 1
+    symbol = st.session_state.f_symbol.replace(".NS","").replace(".BO","").upper().strip()
 
-st.markdown('<div style="border-radius:8px; overflow:hidden; border:1px solid #e0e3e8; box-shadow:0 1px 4px rgba(0,0,0,0.05);">', unsafe_allow_html=True)
+    st.markdown('<div class="ts-section-label" style="margin-top:10px">Exchange</div>', unsafe_allow_html=True)
+    ex1, ex2 = st.columns(2)
+    with ex1:
+        if st.button("NSE", use_container_width=True, key="add_nse",
+                     type="primary" if st.session_state.exchange == "NS" else "secondary"):
+            st.session_state.exchange = "NS"; st.rerun()
+    with ex2:
+        if st.button("BSE", use_container_width=True, key="add_bse",
+                     type="primary" if st.session_state.exchange == "BO" else "secondary"):
+            st.session_state.exchange = "BO"; st.rerun()
 
-for idx, s in enumerate(sector_data):
-    is_last = (idx == len(sector_data) - 1)
-    is_expanded = (st.session_state["expanded_sector"] == s['name'])
-    bar_w  = (abs(s['change']) / max_val) * 100
-    color  = "#00a854" if s['direction'] == 'up' else "#e53935"
-    sign   = "+" if s['change'] >= 0 else ""
-    icon   = "−" if is_expanded else "+"
-    card_class = "sector-card-active" if is_expanded else "sector-card"
+    st.markdown('<div class="ts-section-label" style="margin-top:10px">Price Levels</div>', unsafe_allow_html=True)
+    st.markdown("**Entry**")
+    entry = st.number_input("", value=st.session_state.f_entry, min_value=0.0, format="%.0f",
+                            key="add_entry", label_visibility="collapsed")
+    sl_col, t1_col = st.columns(2)
+    with sl_col:
+        st.markdown("**SL**")
+        sl = st.number_input("", value=st.session_state.f_sl, min_value=0.0, format="%.0f",
+                             key="add_sl", label_visibility="collapsed")
+    with t1_col:
+        st.markdown("**T1**")
+        t1 = st.number_input("", value=st.session_state.f_t1, min_value=0.0, format="%.0f",
+                             key="add_t1", label_visibility="collapsed")
+    st.markdown("**T2** (optional)")
+    t2 = st.number_input("", value=st.session_state.f_t2, min_value=0.0, format="%.0f",
+                         key="add_t2", label_visibility="collapsed")
+    st.markdown("**Notes** (optional)")
+    note = st.text_input("", placeholder="e.g. Breakout", key="add_note", label_visibility="collapsed")
 
-    # STEP 1: Real Streamlit button — invisible (opacity:0 via CSS), full width
-    # This is the actual click target Streamlit responds to
-    st.button(
-        label=s['name'],
-        key=f"toggle_{s['name']}",
-        on_click=toggle_sector,
-        args=(s['name'],),
-        use_container_width=True,
-    )
+    if st.button(f"{'▲ ADD LONG' if st.session_state.direction=='BUY' else '▼ ADD SHORT'} → {st.session_state.current_tab}",
+                 use_container_width=True, type="primary", key="add_submit"):
+        if not symbol:
+            st.error("Symbol required")
+        elif entry <= 0:
+            st.error("Entry required")
+        else:
+            lst = get_list(st.session_state.current_tab)
+            dup = [s for s in lst if s.get("symbol")==symbol and s.get("exchange")==st.session_state.exchange 
+                                      and s.get("direction")==st.session_state.direction]
+            if dup:
+                st.error(f"⚠ {symbol} {st.session_state.direction} already exists")
+            else:
+                lst.append({
+                    "symbol": symbol, "exchange": st.session_state.exchange, "direction": st.session_state.direction,
+                    "entry": entry, "sl": sl if sl > 0 else None, "target1": t1 if t1 > 0 else None,
+                    "target2": t2 if t2 > 0 else None, "note": note.strip() or None,
+                    "sector": get_stock_sector(symbol), "status": "WATCHING", "lastPrice": None,
+                    "added_at": datetime.now().isoformat(),
+                })
+                set_list(st.session_state.current_tab, lst)
+                for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
+                    st.session_state[k] = "" if k == "f_symbol" else 0.0
+                st.success(f"✅ {symbol} added!")
+                st.rerun()
 
-    # STEP 2: Card HTML overlays on top of the button via negative margin-top
-    # pointer-events: none ensures clicks pass through card to the button below
-    st.markdown(f"""
-    <div class="{card_class}">
-        <div style="font-size:13px; font-weight:700; color:#0f1117;">{s['name']}</div>
-        <div class="bar-track">
-            <div style="width:{bar_w:.1f}%; height:100%; background:{color}; border-radius:3px;"></div>
-        </div>
-        <div style="font-size:13px; font-weight:700; text-align:right; color:{color}; font-family:'JetBrains Mono',monospace;">
-            {sign}{s['change']:.2f}%
-        </div>
-        <div class="expand-icon">{icon}</div>
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown('<div style="height:2px"></div>', unsafe_allow_html=True)
 
-    # STEP 3: Stock drill-down panel — only renders when this sector is expanded
-    if is_expanded:
-        st.markdown('<div class="breakdown-box">', unsafe_allow_html=True)
-        stocks_list = fetch_sector_stocks_live(s['name'])
+# ══════════════════════════════════════════
+#  TABS
+# ══════════════════════════════════════════
 
-        if not stocks_list:
-            st.markdown("<div style='font-size:12px; color:#7a8394; padding:12px 0;'>No constituents available.</div>", unsafe_allow_html=True)
-        else:
-            # Header row
-            st.markdown("""
-            <div style="display:grid; grid-template-columns:120px 1fr 100px 72px 80px;
-            gap:12px; padding:6px 12px; border-bottom:1px solid #e0e3e8; margin-bottom:4px;">
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em;">Stock</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; padding-left:4px;">Change</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">LTP</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Chg %</div>
-                <div style="font-size:10px; font-weight:700; color:#7a8394; text-transform:uppercase; letter-spacing:0.06em; text-align:right;">Gap</div>
-            </div>
-            """, unsafe_allow_html=True)
+tc1, tc2, tc3 = st.columns(3)
+for i, name in enumerate([tc1, tc2, tc3]):
+    with name:
+        cnt = len(get_list(WATCHLIST_NAMES[i]))
+        is_active = st.session_state.current_tab == WATCHLIST_NAMES[i]
+        if st.button(f"{'● ' if is_active else ''}{WATCHLIST_NAMES[i]}  ({cnt})",
+                     key=f"tab_{WATCHLIST_NAMES[i]}", use_container_width=True,
+                     type="primary" if is_active else "secondary"):
+            st.session_state.current_tab = WATCHLIST_NAMES[i]
+            st.rerun()
 
-            # Scale bars relative to max change among top 5 stocks
-            max_stk_chg = max((abs(stk['change']) for stk in stocks_list), default=1) or 1
+st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
 
-            for stk in stocks_list:
-                stk_color = "#00a854" if stk['change'] >= 0 else "#e53935"
-                stk_sign  = "+" if stk['change'] >= 0 else ""
-                stk_bar_w = (abs(stk['change']) / max_stk_chg) * 100
+current_tab = st.session_state.current_tab
+watchlist = get_list(current_tab)
 
-                # Gap display
-                gap = stk.get('gap')
-                if gap is not None:
-                    is_gap_up   = gap >= 0
-                    gap_color   = "#00a854" if is_gap_up else "#e53935"
-                    gap_bg      = "#d4f0de" if is_gap_up else "#fcd9d7"
-                    gap_border  = "#a8d5b5" if is_gap_up else "#f5a9a5"
-                    gap_sign    = "▲ +" if is_gap_up else "▼ "
-                    gap_label   = f"{gap_sign}{gap:.2f}%"
-                    gap_html = (
-                        f'<div style="font-size:11px; font-weight:700; text-align:center; '
-                        f'color:{gap_color}; font-family:\'JetBrains Mono\',monospace; '
-                        f'background:{gap_bg}; border:1px solid {gap_border}; '
-                        f'border-radius:5px; padding:3px 7px; white-space:nowrap;">'
-                        f'{gap_label}</div>'
-                    )
-                else:
-                    gap_html = '<div style="font-size:11px; text-align:right; color:#c0c4cc;">—</div>'
+# Header
+h1, h2, h3, h4 = st.columns([2.5, 0.8, 0.8, 0.8])
+with h1:
+    st.markdown(f'<div class="ts-section-label">{current_tab} · {len(watchlist)} stock{"s" if len(watchlist)!=1 else ""}</div>',
+                unsafe_allow_html=True)
+with h2:
+    if st.button("Sort", use_container_width=True, key="sort_btn"):
+        st.session_state.sort_open = not st.session_state.sort_open
+        st.rerun()
+with h3:
+    refresh = st.button("↺", use_container_width=True, help="Refresh", key="refresh_btn")
+with h4:
+    if st.button("🗑", use_container_width=True, help="Clear all", key="clear_btn"):
+        if watchlist:
+            set_list(current_tab, [])
+            st.rerun()
 
-                st.markdown(f"""
-                <div style="display:grid; grid-template-columns:120px 1fr 100px 72px 80px;
-                gap:12px; align-items:center; padding:9px 12px; border-bottom:1px solid #f0f2f5;">
-                    <div style="font-size:13px; font-weight:600; color:#3d4452;">{stk['ticker']}</div>
-                    <div style="height:6px; background:#f0f2f5; border-radius:3px; overflow:hidden;">
-                        <div style="width:{stk_bar_w:.1f}%; height:100%; background:{stk_color}; border-radius:3px;"></div>
-                    </div>
-                    <div style="font-size:13px; font-weight:600; text-align:right; color:#0f1117; font-family:'JetBrains Mono',monospace;">&#8377;{stk['ltp']:,.1f}</div>
-                    <div style="font-size:13px; font-weight:700; text-align:right; color:{stk_color}; font-family:'JetBrains Mono',monospace;">{stk_sign}{stk['change']:.2f}%</div>
-                    {gap_html}
-                </div>
-                """, unsafe_allow_html=True)
+# Sort panel
+if st.session_state.sort_open:
+    s1, s2, s3, s4 = st.columns(4)
+    for btn, lbl in [(s1, "Default"), (s2, "Status"), (s3, "Symbol"), (s4, "Distance")]:
+        with btn:
+            key = lbl.lower()
+            if st.button(lbl, use_container_width=True, key=f"sort_{key}",
+                        type="primary" if st.session_state.sort_by == key else "secondary"):
+                st.session_state.sort_by = key
+                st.rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
+# Sound toggle
+col1, col2, col3 = st.columns([4, 1, 1])
+with col3:
+    if st.button(f"{'🔊' if st.session_state.sound_enabled else '🔇'} Sound", use_container_width=True, key="sound_toggle"):
+        st.session_state.sound_enabled = not st.session_state.sound_enabled
+        st.rerun()
 
-st.markdown('</div>', unsafe_allow_html=True)
+# Fetch prices
+if watchlist and refresh:
+    updated = []
+    progress = st.progress(0, text="Fetching...")
+    for i, stock in enumerate(watchlist):
+        ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange","NS"))
+        s = stock.copy()
+        s["lastPrice"] = ltp
+        old_status = stock.get("status", "WATCHING")
+        if ltp:
+            s["status"] = compute_status(s, ltp)
+            st.session_state.price_source[s["symbol"]] = source
+            
+            if st.session_state.sound_enabled and s["status"] != old_status:
+                if s["status"] == "SL_HIT":
+                    play_alert_sound("sl_hit")
+                elif s["status"] in ["TARGET1", "TARGET2"]:
+                    play_alert_sound("target")
+                elif s["status"] == "TRIGGERED":
+                    play_alert_sound("triggered")
+        updated.append(s)
+        progress.progress((i+1)/len(watchlist))
+    progress.empty()
+    set_list(current_tab, updated)
+    watchlist = updated
+
+# Sort
+def sort_list(lst, by):
+    order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
+    if by == "status":
+        return sorted(lst, key=lambda s: order.get(s.get("status","WATCHING"), 9))
+    if by == "symbol":
+        return sorted(lst, key=lambda s: s.get("symbol",""))
+    if by == "distance":
+        def dist(s):
+            ltp = s.get("lastPrice"); e = s.get("entry")
+            return abs(ltp-e)/e if ltp and e else 999
+        return sorted(lst, key=dist)
+    return lst
+
+watchlist = sort_list(watchlist, st.session_state.sort_by)
+
+# Empty state
+if not watchlist:
+    st.markdown(
+        '<div class="ts-card" style="text-align:center;padding:40px">'
+        '<div style="font-size:32px">📭</div>'
+        '<div style="color:var(--text2);margin-top:8px">No stocks in <b>' + current_tab + '</b></div>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+
+# ══════════════════════════════════════════
+#  SINGLE ROW CARD DISPLAY
+# ══════════════════════════════════════════
+
+for stock_idx, stock in enumerate(watchlist):
+    sym = stock.get("symbol","")
+    dirn = stock.get("direction","BUY")
+    status = stock.get("status","WATCHING")
+    ltp = stock.get("lastPrice")
+    entry = stock.get("entry")
+    sl = stock.get("sl")
+    t1 = stock.get("target1")
+    t2 = stock.get("target2")
+    note = stock.get("note", "")
+    src = st.session_state.price_source.get(sym,"")
+
+    pct_val = ""
+    pct_color = "#7a8394"
+    if ltp and entry:
+        p = (ltp - entry) / entry * 100
+        pct_val = f"{'+' if p >= 0 else ''}{p:.2f}%"
+        pct_color = "#00a854" if p >= 0 else "#e53935"
+
+    src_badge = "⚡" if src == "angel" else ("yf" if src == "yfinance" else "")
+    status_color = STATUS_COLOR.get(status, "#f59e0b")
+    status_text = STATUS_LABEL.get(status, "")
+
+    if st.session_state.edit_idx == stock_idx and st.session_state.edit_tab == current_tab:
+        # ── EDIT MODE ──
+        st.markdown(f'<div class="ts-section-label">Edit — {sym}</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            e1, e2 = st.columns(2)
+            with e1:
+                ne = st.number_input("Entry", value=int(stock.get("entry") or 0), format="%d", key=f"e_en_{stock_idx}")
+                ns = st.number_input("SL", value=int(stock.get("sl") or 0), format="%d", key=f"e_sl_{stock_idx}")
+            with e2:
+                nt1 = st.number_input("T1", value=int(stock.get("target1") or 0), format="%d", key=f"e_t1_{stock_idx}")
+                nt2 = st.number_input("T2", value=int(stock.get("target2") or 0), format="%d", key=f"e_t2_{stock_idx}")
+            nn = st.text_input("Note", value=stock.get("note") or "", key=f"e_note_{stock_idx}")
+            s1, s2 = st.columns(2)
+            with s1:
+                if st.button("💾 Save", use_container_width=True, type="primary", key=f"save_{stock_idx}"):
+                    lst = get_list(current_tab)
+                    lst[stock_idx].update({
+                        "entry": ne if ne > 0 else stock.get("entry"),
+                        "sl": ns if ns > 0 else None,
+                        "target1": nt1 if nt1 > 0 else None,
+                        "target2": nt2 if nt2 > 0 else None,
+                        "note": nn.strip() or None,
+                    })
+                    set_list(current_tab, lst)
+                    st.session_state.edit_idx = None
+                    st.session_state.edit_tab = None
+                    st.rerun()
+            with s2:
+                if st.button("Cancel", use_container_width=True, key=f"cancel_{stock_idx}"):
+                    st.session_state.edit_idx = None
+                    st.session_state.edit_tab = None
+                    st.rerun()
+    else:
+        # ── DISPLAY MODE — SINGLE ROW ──
+        # Build HTML with proper escaping
+        buy_bg = "#f0faf5" if dirn == "BUY" else "#fff5f5"
+        buy_color = "#00a854" if dirn == "BUY" else "#e53935"
+        buy_text = "▲ BUY" if dirn == "BUY" else "▼ SELL"
+        ltp_display = fmt(ltp) if ltp else "---"
+        
+        card_html = (
+            '<div style="display:flex;align-items:center;gap:12px;padding:12px;background:#fff;'
+            'border:1px solid #e0e3e8;border-left:4px solid ' + status_color + ';'
+            'border-radius:8px;margin-bottom:8px;flex-wrap:wrap;">'
+            '<span style="font-family:monospace;font-weight:700;font-size:16px;color:#0f1117;min-width:80px;">' + sym + '</span>'
+            '<span style="font-size:10px;color:#7a8394;">3m ago</span>'
+            '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + buy_bg + ';color:' + buy_color + ';">' + buy_text + '</span>'
+            '<span style="color:#e0e3e8;">|</span>'
+            '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
+            '<span style="color:' + pct_color + ';font-family:monospace;font-weight:600;font-size:11px;">' + pct_val + '</span>'
+            '<span style="font-size:9px;color:#7a8394;">' + src_badge + '</span>'
+            '<span style="color:#e0e3e8;">|</span>'
+            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">Entry: <span style="color:#0f1117;font-weight:600;">' + fmt(entry) + '</span></span>'
+            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">SL: <span style="color:#e53935;font-weight:600;">' + fmt(sl) + '</span></span>'
+            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T1: <span style="color:#2563eb;font-weight:600;">' + fmt(t1) + '</span></span>'
+            '<span style="font-family:monospace;font-size:11px;color:#7a8394;">T2: <span style="color:#7c3aed;font-weight:600;">' + fmt(t2) + '</span></span>'
+            '<span style="margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;'
+            'background:rgba(25,63,155,0.1);color:' + status_color + ';">' + status_text + '</span>'
+            '</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+        # Action buttons - below card
+        a1, a2, a3, a_empty = st.columns([0.5, 0.5, 0.5, 3], gap="small")
+        with a1:
+            if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
+                lst = get_list(current_tab)
+                lst[stock_idx]["status"] = "WATCHING"
+                lst[stock_idx]["lastPrice"] = None
+                set_list(current_tab, lst)
+                st.rerun()
+        with a2:
+            if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
+                st.session_state.edit_idx = stock_idx
+                st.session_state.edit_tab = current_tab
+                st.rerun()
+        with a3:
+            if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
+                lst = get_list(current_tab)
+                lst.pop(stock_idx)
+                set_list(current_tab, lst)
+                st.rerun()
+        
+        # Note below
+        if note:
+            st.markdown(f'<div style="font-size:10px;color:#7a8394;margin-left:12px;margin-top:-8px;">📝 {note}</div>', 
+                       unsafe_allow_html=True)
+
+# Footer
+st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
+angel_ok = get_angel_session() is not None
+st.markdown(
+    f'<div style="font-size:11px;color:var(--text3)">'
+    f'{"🟢 Angel One" if angel_ok else "🟡 yfinance"} · watchlist.json</div>',
+    unsafe_allow_html=True
+)
