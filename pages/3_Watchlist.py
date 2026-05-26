@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — pages/3_Watchlist.py
-#  Horizontal card design with Entry/SL/T1/T2, Sound alerts
+#  Horizontal card design, unlimited trades, no duplicates
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -22,44 +22,6 @@ st.set_page_config(
 apply_styles()
 sidebar_brand()
 page_header("Watchlist", "Track your trades")
-
-
-# ══════════════════════════════════════════
-#  SOUND ALERT FUNCTION
-# ══════════════════════════════════════════
-
-def play_alert_sound(alert_type="triggered"):
-    """Play sound alert using Web Audio API"""
-    if alert_type == "triggered":
-        frequency = 800
-        duration = 300
-    elif alert_type == "sl_hit":
-        frequency = 400
-        duration = 500
-    elif alert_type == "target":
-        frequency = 1200
-        duration = 200
-    
-    html_code = f"""
-    <script>
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.frequency.value = {frequency};
-    oscillator.type = 'sine';
-    
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + {duration/1000});
-    
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + {duration/1000});
-    </script>
-    """
-    st.components.v1.html(html_code, height=0)
 
 
 # ══════════════════════════════════════════
@@ -192,6 +154,11 @@ def fmt(v) -> str:
     try: return f"₹{float(v):,.0f}"
     except: return "---"
 
+def pct_color(ltp, entry) -> str:
+    if not ltp or not entry: return ""
+    p = (ltp - entry) / entry * 100
+    return "wl-pct-pos" if p >= 0 else "wl-pct-neg"
+
 
 # ══════════════════════════════════════════
 #  SESSION STATE
@@ -200,7 +167,7 @@ def fmt(v) -> str:
 for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
              ("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0),
              ("edit_idx",None), ("edit_tab",None), ("price_source",{}), ("sort_by","default"),
-             ("sort_open",False), ("sound_enabled",True)]:
+             ("sort_open",False)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -354,13 +321,6 @@ if st.session_state.sort_open:
                 st.session_state.sort_by = key
                 st.rerun()
 
-# Sound toggle
-col1, col2, col3 = st.columns([4, 1, 1])
-with col3:
-    if st.button(f"{'🔊' if st.session_state.sound_enabled else '🔇'} Sound", use_container_width=True, key="sound_toggle"):
-        st.session_state.sound_enabled = not st.session_state.sound_enabled
-        st.rerun()
-
 # Fetch prices
 if watchlist and refresh:
     updated = []
@@ -369,19 +329,9 @@ if watchlist and refresh:
         ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange","NS"))
         s = stock.copy()
         s["lastPrice"] = ltp
-        old_status = stock.get("status", "WATCHING")
         if ltp:
             s["status"] = compute_status(s, ltp)
             st.session_state.price_source[s["symbol"]] = source
-            
-            # Sound alert on status change
-            if st.session_state.sound_enabled and s["status"] != old_status:
-                if s["status"] == "SL_HIT":
-                    play_alert_sound("sl_hit")
-                elif s["status"] in ["TARGET1", "TARGET2"]:
-                    play_alert_sound("target")
-                elif s["status"] == "TRIGGERED":
-                    play_alert_sound("triggered")
         updated.append(s)
         progress.progress((i+1)/len(watchlist))
     progress.empty()
@@ -417,7 +367,7 @@ if not watchlist:
 
 
 # ══════════════════════════════════════════
-#  CARD DISPLAY (Properly Formatted)
+#  HORIZONTAL CARD DISPLAY
 # ══════════════════════════════════════════
 
 for stock_idx, stock in enumerate(watchlist):
@@ -427,20 +377,23 @@ for stock_idx, stock in enumerate(watchlist):
     status = stock.get("status","WATCHING")
     ltp = stock.get("lastPrice")
     entry = stock.get("entry")
-    sl = stock.get("sl")
-    t1 = stock.get("target1")
-    t2 = stock.get("target2")
     sector = stock.get("sector")
     src = st.session_state.price_source.get(sym,"")
-    note = stock.get("note", "")
 
     # Compute pct
     pct_val = ""
-    pct_color = "color: #7a8394"
+    pct_cls = ""
     if ltp and entry:
         p = (ltp - entry) / entry * 100
         pct_val = f"{'+' if p >= 0 else ''}{p:.2f}%"
-        pct_color = "color: #00a854" if p >= 0 else "color: #e53935"
+        pct_cls = "wl-pct-pos" if p >= 0 else "wl-pct-neg"
+
+    # Sector
+    sect_html = ""
+    if sector and sector in SECTOR_YAHOO:
+        sp = fetch_sector_pct(SECTOR_YAHOO[sector])
+        if sp is not None:
+            sect_html = f"EMA200: {fmt(sp)} | "
 
     # Source
     src_badge = "⚡" if src == "angel" else ("yf" if src == "yfinance" else "")
@@ -481,88 +434,54 @@ for stock_idx, stock in enumerate(watchlist):
                     st.rerun()
     else:
         # ── DISPLAY MODE ──
-        # Use st.container for better layout
-        with st.container(border=True):
-            # Header row
-            col_hdr1, col_hdr2 = st.columns([5, 1])
-            with col_hdr1:
-                st.markdown(f"""
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--text)">{sym}</span>
-                    <span style="font-size:10px;color:var(--text3)">{sector or ''}</span>
-                    <span style="font-size:10px;color:var(--text3)">3m ago</span>
-                    <span style="font-size:10px;font-weight:700;background:{'#f0faf5' if dirn=='BUY' else '#fff5f5'};color:{'#00a854' if dirn=='BUY' else '#e53935'};border:1px solid {'#00a85430' if dirn=='BUY' else '#e5393530'};padding:2px 8px;border-radius:12px;font-family:var(--mono)">
-                        {'▲ BUY' if dirn=='BUY' else '▼ SELL'}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col_hdr2:
-                badge_bg = {"WATCHING":"background:#fffbf0","NEAR":"background:#fffbf0","TRIGGERED":"background:#f0faf5",
-                           "SL_HIT":"background:#fff5f5","TARGET1":"background:#eff6ff","TARGET2":"background:#f5f3ff"}
-                badge_color = {"WATCHING":"color:#f59e0b","NEAR":"color:#f59e0b","TRIGGERED":"color:#00a854",
-                              "SL_HIT":"color:#e53935","TARGET1":"color:#2563eb","TARGET2":"color:#7c3aed"}
-                st.markdown(f"""
-                <div style="{badge_bg.get(status,'background:#fffbf0')};{badge_color.get(status,'color:#f59e0b')};
-                font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid;display:inline-block;text-align:center;">
-                    {STATUS_LABEL.get(status,'')}
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Data row
-            st.markdown(f"""
-            <div style="font-size:11px;margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--text)">
-                    {fmt(ltp) if ltp else '---'}
-                </span>
-                <span style="{pct_color};font-family:var(--mono);font-weight:600;">
-                    {pct_val}
-                </span>
-                <span style="color:var(--text3);font-size:9px;">{src_badge}</span>
-                <span style="color:#e0e3e8">·</span>
-                <span style="color:var(--text3);font-family:var(--mono);">
-                    Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span>
-                </span>
-                <span style="color:#e0e3e8">·</span>
-                <span style="color:var(--text3);font-family:var(--mono);">
-                    SL: <span style="color:#e53935;font-weight:600">{fmt(sl)}</span>
-                </span>
-                <span style="color:#e0e3e8">·</span>
-                <span style="color:var(--text3);font-family:var(--mono);">
-                    T1: <span style="color:#2563eb;font-weight:600">{fmt(t1)}</span>
-                </span>
-                <span style="color:#e0e3e8">·</span>
-                <span style="color:var(--text3);font-family:var(--mono);">
-                    T2: <span style="color:#7c3aed;font-weight:600">{fmt(t2)}</span>
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Note
-            if note:
-                st.markdown(f'<div style="font-size:11px;color:var(--text3);margin-top:6px;">📝 {note}</div>', 
-                           unsafe_allow_html=True)
-            
-            # Action buttons
-            a1, a2, a3 = st.columns(3, gap="small")
-            with a1:
-                if st.button("↺ Reset", use_container_width=True, key=f"rst_{stock_idx}"):
-                    lst = get_list(current_tab)
-                    lst[stock_idx]["status"] = "WATCHING"
-                    lst[stock_idx]["lastPrice"] = None
-                    set_list(current_tab, lst)
-                    st.rerun()
-            with a2:
-                if st.button("✏ Edit", use_container_width=True, key=f"edt_{stock_idx}"):
-                    st.session_state.edit_idx = stock_idx
-                    st.session_state.edit_tab = current_tab
-                    st.rerun()
-            with a3:
-                if st.button("✕ Delete", use_container_width=True, key=f"del_{stock_idx}"):
-                    lst = get_list(current_tab)
-                    lst.pop(stock_idx)
-                    set_list(current_tab, lst)
-                    st.rerun()
+        st.markdown(f"""
+<div class="wl-card {card_class}">
+  <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:16px">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+        <span class="wl-symbol">{sym}</span>
+        <span style="font-size:11px;color:var(--text3)">{sector or ''}</span>
+        <span style="margin-left:auto;color:var(--text3);font-size:10px">3m ago</span>
+        <span class="wl-pill-{'buy' if dirn=='BUY' else 'sell'}">{'▲ BUY' if dirn=='BUY' else '▼ SELL'}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <span class="wl-ltp">{'<span class="wl-ltp">' + fmt(ltp) + '</span>' if ltp else '---'}</span>
+          <span class="{pct_cls}" style="margin-left:6px">{pct_val}</span>
+          <span style="color:var(--text3);font-size:10px;margin-left:6px">{src_badge}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);display:flex;gap:8px">
+          <span>EMA20: {fmt(entry)}</span>
+          <span>VWAP: {fmt(stock.get('sl'))}</span>
+          <span>{sect_html}</span>
+        </div>
+      </div>
+    </div>
+    <span class="{STATUS_BADGE.get(status,'ts-badge-amber')}">{STATUS_LABEL.get(status,'')}</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # Action buttons
+        a1, a2, a3 = st.columns(3, gap="small")
+        with a1:
+            if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
+                lst = get_list(current_tab)
+                lst[stock_idx]["status"] = "WATCHING"
+                lst[stock_idx]["lastPrice"] = None
+                set_list(current_tab, lst)
+                st.rerun()
+        with a2:
+            if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
+                st.session_state.edit_idx = stock_idx
+                st.session_state.edit_tab = current_tab
+                st.rerun()
+        with a3:
+            if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
+                lst = get_list(current_tab)
+                lst.pop(stock_idx)
+                set_list(current_tab, lst)
+                st.rerun()
 
 # Footer
 st.markdown('<hr class="ts-divider">', unsafe_allow_html=True)
