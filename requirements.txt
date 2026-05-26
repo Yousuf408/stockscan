@@ -5,3 +5,4 @@ pandas
 yfinance
 logzero
 websocket-client
+jugaad-data
