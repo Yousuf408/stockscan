@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — pages/3_Watchlist.py
-#  Horizontal card design, unlimited trades, no duplicates
+#  Horizontal card design with Entry/SL/T1/T2, Sound alerts
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -22,6 +22,44 @@ st.set_page_config(
 apply_styles()
 sidebar_brand()
 page_header("Watchlist", "Track your trades")
+
+
+# ══════════════════════════════════════════
+#  SOUND ALERT FUNCTION
+# ══════════════════════════════════════════
+
+def play_alert_sound(alert_type="triggered"):
+    """Play sound alert using Web Audio API"""
+    if alert_type == "triggered":
+        frequency = 800
+        duration = 300
+    elif alert_type == "sl_hit":
+        frequency = 400
+        duration = 500
+    elif alert_type == "target":
+        frequency = 1200
+        duration = 200
+    
+    html_code = f"""
+    <script>
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = {frequency};
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + {duration/1000});
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + {duration/1000});
+    </script>
+    """
+    st.components.v1.html(html_code, height=0)
 
 
 # ══════════════════════════════════════════
@@ -154,11 +192,6 @@ def fmt(v) -> str:
     try: return f"₹{float(v):,.0f}"
     except: return "---"
 
-def pct_color(ltp, entry) -> str:
-    if not ltp or not entry: return ""
-    p = (ltp - entry) / entry * 100
-    return "wl-pct-pos" if p >= 0 else "wl-pct-neg"
-
 
 # ══════════════════════════════════════════
 #  SESSION STATE
@@ -167,7 +200,7 @@ def pct_color(ltp, entry) -> str:
 for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
              ("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0),
              ("edit_idx",None), ("edit_tab",None), ("price_source",{}), ("sort_by","default"),
-             ("sort_open",False)]:
+             ("sort_open",False), ("last_status",{}), ("sound_enabled",True)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -321,6 +354,13 @@ if st.session_state.sort_open:
                 st.session_state.sort_by = key
                 st.rerun()
 
+# Sound toggle
+col1, col2, col3 = st.columns([4, 1, 1])
+with col3:
+    if st.button(f"{'🔊' if st.session_state.sound_enabled else '🔇'} Sound", use_container_width=True, key="sound_toggle"):
+        st.session_state.sound_enabled = not st.session_state.sound_enabled
+        st.rerun()
+
 # Fetch prices
 if watchlist and refresh:
     updated = []
@@ -329,9 +369,19 @@ if watchlist and refresh:
         ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange","NS"))
         s = stock.copy()
         s["lastPrice"] = ltp
+        old_status = stock.get("status", "WATCHING")
         if ltp:
             s["status"] = compute_status(s, ltp)
             st.session_state.price_source[s["symbol"]] = source
+            
+            # Sound alert on status change
+            if st.session_state.sound_enabled and s["status"] != old_status:
+                if s["status"] == "SL_HIT":
+                    play_alert_sound("sl_hit")
+                elif s["status"] in ["TARGET1", "TARGET2"]:
+                    play_alert_sound("target")
+                elif s["status"] == "TRIGGERED":
+                    play_alert_sound("triggered")
         updated.append(s)
         progress.progress((i+1)/len(watchlist))
     progress.empty()
@@ -367,7 +417,7 @@ if not watchlist:
 
 
 # ══════════════════════════════════════════
-#  HORIZONTAL CARD DISPLAY
+#  HORIZONTAL CARD DISPLAY WITH LEVELS
 # ══════════════════════════════════════════
 
 for stock_idx, stock in enumerate(watchlist):
@@ -377,6 +427,9 @@ for stock_idx, stock in enumerate(watchlist):
     status = stock.get("status","WATCHING")
     ltp = stock.get("lastPrice")
     entry = stock.get("entry")
+    sl = stock.get("sl")
+    t1 = stock.get("target1")
+    t2 = stock.get("target2")
     sector = stock.get("sector")
     src = st.session_state.price_source.get(sym,"")
 
@@ -387,13 +440,6 @@ for stock_idx, stock in enumerate(watchlist):
         p = (ltp - entry) / entry * 100
         pct_val = f"{'+' if p >= 0 else ''}{p:.2f}%"
         pct_cls = "wl-pct-pos" if p >= 0 else "wl-pct-neg"
-
-    # Sector
-    sect_html = ""
-    if sector and sector in SECTOR_YAHOO:
-        sp = fetch_sector_pct(SECTOR_YAHOO[sector])
-        if sp is not None:
-            sect_html = f"EMA200: {fmt(sp)} | "
 
     # Source
     src_badge = "⚡" if src == "angel" else ("yf" if src == "yfinance" else "")
@@ -436,28 +482,45 @@ for stock_idx, stock in enumerate(watchlist):
         # ── DISPLAY MODE ──
         st.markdown(f"""
 <div class="wl-card {card_class}">
-  <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:16px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;gap:12px">
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
         <span class="wl-symbol">{sym}</span>
-        <span style="font-size:11px;color:var(--text3)">{sector or ''}</span>
-        <span style="margin-left:auto;color:var(--text3);font-size:10px">3m ago</span>
+        <span style="font-size:10px;color:var(--text3)">{sector or ''}</span>
+        <span style="color:var(--text3);font-size:10px">3m ago</span>
         <span class="wl-pill-{'buy' if dirn=='BUY' else 'sell'}">{'▲ BUY' if dirn=='BUY' else '▼ SELL'}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
         <div>
           <span class="wl-ltp">{'<span class="wl-ltp">' + fmt(ltp) + '</span>' if ltp else '---'}</span>
           <span class="{pct_cls}" style="margin-left:6px">{pct_val}</span>
           <span style="color:var(--text3);font-size:10px;margin-left:6px">{src_badge}</span>
         </div>
-        <div style="font-size:11px;color:var(--text3);display:flex;gap:8px">
-          <span>EMA20: {fmt(entry)}</span>
-          <span>VWAP: {fmt(stock.get('sl'))}</span>
-          <span>{sect_html}</span>
-        </div>
+        <span style="color:var(--border);font-size:10px">·</span>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
+          Entry: <span style="color:var(--text);font-weight:600">{fmt(entry)}</span>
+        </span>
+        <span style="color:var(--border);font-size:10px">·</span>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
+          SL: <span style="color:var(--red);font-weight:600">{fmt(sl)}</span>
+        </span>
+        <span style="color:var(--border);font-size:10px">·</span>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
+          T1: <span style="color:var(--blue);font-weight:600">{fmt(t1)}</span>
+        </span>
+        <span style="color:var(--border);font-size:10px">·</span>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">
+          T2: <span style="color:var(--purple);font-weight:600">{fmt(t2)}</span>
+        </span>
       </div>
+      
+      {f'<div class="wl-note">📝 {stock.get("note")}</div>' if stock.get("note") else ''}
     </div>
-    <span class="{STATUS_BADGE.get(status,'ts-badge-amber')}">{STATUS_LABEL.get(status,'')}</span>
+    
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:60px">
+      <span class="{STATUS_BADGE.get(status,'ts-badge-amber')}">{STATUS_LABEL.get(status,'')}</span>
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
