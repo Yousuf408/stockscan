@@ -361,10 +361,12 @@ with left_col:
         "offline": "#7a8394"
     }
     
+    mode_color_val = mode_color.get(cache_mode, "#7a8394")
+    mode_badge_val = mode_badge.get(cache_mode, "Loading...")
     st.markdown(
-        f'<div style="font-size:10px;color:{mode_color.get(cache_mode, \"#7a8394\")};'
+        f'<div style="font-size:10px;color:{mode_color_val};'
         f'font-weight:600;margin:8px 0;padding:4px 8px;background:#f5f5f5;border-radius:4px;">'
-        f'{mode_badge.get(cache_mode, "Loading...")}</div>',
+        f'{mode_badge_val}</div>',
         unsafe_allow_html=True
     )
 
