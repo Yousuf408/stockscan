@@ -1,13 +1,137 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#   ENHANCED CHART RENDERER — TradingView Lightweight Charts + Indicators
-#   Replaces the current Plotly candlestick with professional trading charts
+#   ENHANCED CHART RENDERER — TradingView Lightweight Charts + Angel One API
+#   Uses Angel One real-time data instead of yfinance (no rate limiting!)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from datetime import datetime, timedelta
+import pytz
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#   ANGEL ONE SESSION
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource
+def get_angel_session():
+    """Get Angel One session from credentials"""
+    try:
+        import pyotp
+        from SmartApi import SmartConnect
+        
+        # Get credentials from Streamlit secrets
+        api_key = st.secrets.get("API_KEY")
+        client_code = st.secrets.get("CLIENT_CODE")
+        password = st.secrets.get("PASSWORD")
+        totp_secret = st.secrets.get("TOTP_SECRET")
+        
+        if not all([api_key, client_code, password, totp_secret]):
+            st.error("Missing Angel One credentials in secrets")
+            return None
+        
+        # Initialize SmartConnect
+        obj = SmartConnect(api_key=api_key)
+        
+        # Generate TOTP
+        totp = pyotp.TOTP(totp_secret).now()
+        
+        # Create session
+        sess = obj.generateSession(client_code, password, totp)
+        
+        if sess and sess.get("status"):
+            return obj
+        else:
+            st.error("Angel One session creation failed")
+            return None
+            
+    except Exception as e:
+        st.error(f"Angel One connection error: {str(e)}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#   FETCH DATA FROM ANGEL ONE
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=300)
+def fetch_chart_data_angelone(symbol: str, exchange: str):
+    """Fetch historical OHLC data from Angel One API"""
+    try:
+        # Get Angel One session
+        obj = get_angel_session()
+        if not obj:
+            st.error("Cannot connect to Angel One")
+            return None
+        
+        # Import token fetcher
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        try:
+            from stocks import get_stock_token
+            token = get_stock_token(symbol)
+        except:
+            st.error(f"Cannot find stock token for {symbol}")
+            return None
+        
+        if not token:
+            st.error(f"Token not found for {symbol}")
+            return None
+        
+        # Fetch candle data from Angel One
+        resp = obj.getCandleData(
+            mode="FULL",  # FULL = Open, High, Low, Close, Volume
+            exchangeTokens=[str(token)],
+            interval="ONE_DAY"  # Daily candles
+        )
+        
+        if not resp:
+            st.error("No response from Angel One API")
+            return None
+        
+        if resp.get("status") != True:
+            st.error(f"Angel One API error: {resp.get('message', 'Unknown error')}")
+            return None
+        
+        # Extract candle data
+        fetched_data = resp.get("data", {}).get("fetched", [])
+        
+        if not fetched_data or len(fetched_data) == 0:
+            st.error(f"No candle data available for {symbol}")
+            return None
+        
+        # Convert to DataFrame
+        candles = []
+        for candle in fetched_data:
+            try:
+                # Angel One format: [timestamp, open, high, low, close, volume]
+                candles.append({
+                    'Date': pd.to_datetime(int(candle[0]), unit='s'),
+                    'Open': float(candle[1]),
+                    'High': float(candle[2]),
+                    'Low': float(candle[3]),
+                    'Close': float(candle[4]),
+                    'Volume': int(candle[5]) if len(candle) > 5 else 0
+                })
+            except (ValueError, IndexError) as e:
+                continue
+        
+        if not candles:
+            st.error("Could not parse candle data")
+            return None
+        
+        # Create DataFrame
+        df = pd.DataFrame(candles)
+        df.set_index('Date', inplace=True)
+        df = df.sort_index()
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Error fetching Angel One data: {str(e)}")
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -254,29 +378,17 @@ def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame,
 #   STREAMLIT INTEGRATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=300)
-def fetch_chart_data_enhanced(symbol: str, exchange: str, period: str = "1y"):
-    """Fetch historical data from yfinance"""
-    try:
-        suffix = ".NS" if exchange == "NS" else ".BO"
-        ticker = yf.Ticker(f"{symbol}{suffix}")
-        hist = ticker.history(period=period)
-        return hist
-    except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
-        return None
-
 def render_enhanced_chart(symbol: str, exchange: str):
     """Render professional trading chart with indicators in Streamlit"""
     
     exch_label = "NSE" if exchange == "NS" else "BSE"
     
     with st.spinner(f"📊 Loading advanced chart for {symbol}..."):
-        hist = fetch_chart_data_enhanced(symbol, exchange)
+        hist = fetch_chart_data_angelone(symbol, exchange)
     
     if hist is None or hist.empty:
         st.error(f"❌ No data available for {symbol} ({exch_label})")
-        st.info("💡 Check symbol and exchange. Some stocks may be delisted.")
+        st.info("💡 Make sure Angel One credentials are configured in Streamlit secrets.")
         return
     
     # Chart options in sidebar
@@ -320,8 +432,8 @@ def render_enhanced_chart(symbol: str, exchange: str):
     with stat_col1:
         st.metric("Current Price", f"₹{current:,.0f}")
     with stat_col2:
-        st.metric("52W High", f"₹{year_high:,.0f}")
+        st.metric("High", f"₹{year_high:,.0f}")
     with stat_col3:
-        st.metric("52W Low", f"₹{year_low:,.0f}")
+        st.metric("Low", f"₹{year_low:,.0f}")
     with stat_col4:
         st.metric("Avg Volume", f"{int(avg_vol):,}")
