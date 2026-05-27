@@ -7,3 +7,4 @@ logzero
 websocket-client
 jugaad-data
 pytz
+plotly>=5.0.0
