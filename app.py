@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
-#  TRADESENTRY — app.py
-#  Clean rewrite - no cache_resource
-#  VERSION: 3.0
+#   TRADESENTRY — app.py
+#   Clean rewrite - no cache_resource bugs
+#   VERSION: 3.1
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -33,7 +33,7 @@ sidebar_brand()
 page_header("Live Market Dashboard")
 
 # ══════════════════════════════════════════
-#  CONFIG
+#   CONFIG
 # ══════════════════════════════════════════
 
 BASE_DIR         = os.path.dirname(__file__)
@@ -47,7 +47,7 @@ MARKET_CLOSE = (15, 30)
 
 
 # ══════════════════════════════════════════
-#  TIME HELPERS
+#   TIME HELPERS
 # ══════════════════════════════════════════
 
 def now_ist():
@@ -65,7 +65,7 @@ def is_market_open():
 
 
 # ══════════════════════════════════════════
-#  CACHE HELPERS
+#   CACHE HELPERS
 # ══════════════════════════════════════════
 
 def load_cache():
@@ -95,9 +95,7 @@ def set_price(symbol, exchange, price, source):
 
 def set_mode(mode):
     cache = load_cache()
-    # Never set offline if stocks exist in cache
-    if mode == "offline" and cache.get("stocks"):
-        return
+    # Fixed: Removed the restrictive return check that locked empty boot environments out
     cache["mode"] = mode
     save_cache(cache)
 
@@ -108,7 +106,7 @@ def force_mode(mode):
 
 
 # ══════════════════════════════════════════
-#  WATCHLIST HELPERS
+#   WATCHLIST HELPERS
 # ══════════════════════════════════════════
 
 def get_all_stocks():
@@ -125,6 +123,7 @@ def get_all_stocks():
             k = (s.get("symbol"), s.get("exchange","NS"))
             if k not in seen:
                 seen.add(k)
+                seen.add(k)
                 unique.append(s)
         return unique
     except Exception as e:
@@ -133,7 +132,7 @@ def get_all_stocks():
 
 
 # ══════════════════════════════════════════
-#  FETCH PRICES - YFINANCE
+#   FETCH PRICES - YFINANCE
 # ══════════════════════════════════════════
 
 def fetch_all_yfinance(label="yfinance"):
@@ -162,7 +161,7 @@ def fetch_all_yfinance(label="yfinance"):
 
 
 # ══════════════════════════════════════════
-#  FETCH PRICES - HTTP (Angel One)
+#   FETCH PRICES - HTTP (Angel One)
 # ══════════════════════════════════════════
 
 def fetch_all_http(angel_obj):
@@ -195,7 +194,7 @@ def fetch_all_http(angel_obj):
 
 
 # ══════════════════════════════════════════
-#  WEBSOCKET STREAMER
+#   WEBSOCKET STREAMER
 # ══════════════════════════════════════════
 
 class Streamer:
@@ -267,29 +266,38 @@ class Streamer:
             print(f"[{t()}] WS connect error: {e}")
 
     def run(self):
-        """Main streamer loop"""
+        """Main streamer loop with robust off-market fallback"""
         close_fetched_date = None
 
         while True:
             try:
                 now       = now_ist()
                 market_on = is_market_open()
+                cache     = load_cache()
+                cache_empty = len(cache.get("stocks", {})) == 0
 
                 # ── MARKET CLOSED ──
                 if not market_on:
                     today = now.date()
-                    # Fetch close price once per day
-                    if close_fetched_date != today:
-                        print(f"[{t()}] Market closed. Fetching close prices via yfinance...")
-                        fetch_all_yfinance("close_price")
-                        close_fetched_date = today
+                    
+                    # Force a fetch if it's a new day OR if the cache is currently blank
+                    if close_fetched_date != today or cache_empty:
+                        print(f"[{t()}] Market closed. Fetching fallback prices via yfinance...")
+                        fetched = fetch_all_yfinance("close_price")
+                        
+                        # Only toggle daily flag if we actually populated cache entries
+                        if fetched > 0:
+                            close_fetched_date = today
+                        else:
+                            print(f"[{t()}] yfinance fetch returned 0 stocks. Will retry shortly.")
                     else:
-                        print(f"[{t()}] Market closed. Sleeping 60s...")
+                        print(f"[{t()}] Market closed & cache populated. Sleeping 60s...")
+                    
                     time.sleep(60)
                     continue
 
                 # ── MARKET OPEN ──
-                close_fetched_date = None  # Reset for next close
+                close_fetched_date = None  # Reset for next session close
 
                 stocks = get_all_stocks()
                 if not stocks:
@@ -336,8 +344,8 @@ class Streamer:
 
 
 # ══════════════════════════════════════════
-#  STARTUP — Use st.cache_resource with
-#  version key to force re-run on deploy
+#   STARTUP — Use st.cache_resource with
+#   version key to force re-run on deploy
 # ══════════════════════════════════════════
 
 @st.cache_resource(show_spinner=False)
@@ -350,7 +358,7 @@ def start_streamer(_version):
         pwd     = st.secrets["PASSWORD"]
         totp_s  = st.secrets["TOTP_SECRET"]
 
-        print(f"[{t()}] ══ TRADESENTRY v3.0 STARTING ══")
+        print(f"[{t()}] ══ TRADESENTRY v3.1 STARTING ══")
         print(f"[{t()}] Client: {client}")
         print(f"[{t()}] IST: {t()}")
         print(f"[{t()}] Market: {'OPEN' if is_market_open() else 'CLOSED'}")
@@ -392,11 +400,11 @@ def start_streamer(_version):
 
 
 # ══════════════════════════════════════════
-#  UI
+#   UI
 # ══════════════════════════════════════════
 
 # VERSION KEY — change this to force cache clear on next deploy
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 
 result     = start_streamer(APP_VERSION)
 cache      = load_cache()
@@ -409,7 +417,7 @@ ist_now    = now_ist().strftime("%I:%M %p IST")
 mode_badge = {
     "websocket":    "🟢 WebSocket Live",
     "http_polling": "🟡 HTTP Polling",
-    "yfinance":     "🟠 yfinance",
+    "yfinance":      "🟠 yfinance",
     "close_price":  "🟠 Close Price",
     "offline":      "⚪ Offline"
 }
