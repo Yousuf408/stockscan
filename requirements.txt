@@ -8,3 +8,4 @@ websocket-client
 jugaad-data
 pytz
 plotly>=5.0.0
+numpy>=1.23.0  
