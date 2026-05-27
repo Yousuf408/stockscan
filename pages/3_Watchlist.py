@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
-#  TRADESENTRY — pages/3_Watchlist.py
-#  Direct price fetching — no JSON dependency
-#  Fetches from yfinance/Angel One directly
+#   TRADESENTRY — pages/3_Watchlist.py
+#   Price fetching with Local JSON fallback
+#   Fetches from yfinance/Angel One directly + price_cache.json fallback
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -25,7 +25,7 @@ page_header("Watchlist", "Track your trades")
 
 
 # ══════════════════════════════════════════
-#  TIMEZONE
+#   TIMEZONE
 # ══════════════════════════════════════════
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -42,7 +42,7 @@ def is_market_open():
 
 
 # ══════════════════════════════════════════
-#  SOUND ALERT
+#   SOUND ALERT
 # ══════════════════════════════════════════
 
 def play_alert_sound(alert_type="triggered"):
@@ -65,10 +65,11 @@ def play_alert_sound(alert_type="triggered"):
 
 
 # ══════════════════════════════════════════
-#  STORAGE
+#   STORAGE & CACHE RUNTIME
 # ══════════════════════════════════════════
 
 WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+PRICE_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "price_cache.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 def load_all() -> dict:
@@ -98,10 +99,19 @@ def set_list(tab: str, lst: list):
     data[f"watchlist_{tab}"] = lst
     save_all(data)
 
+def load_external_price_cache() -> dict:
+    """Reads engine data from price_cache.json fallback safely"""
+    if os.path.exists(PRICE_CACHE_FILE):
+        try:
+            with open(PRICE_CACHE_FILE, "r") as f:
+                return json.load(f).get("stocks", {})
+        except:
+            pass
+    return {}
+
 
 # ══════════════════════════════════════════
-#  DIRECT PRICE FETCH
-#  No JSON file needed — fetches directly
+#   DIRECT PRICE FETCH
 # ══════════════════════════════════════════
 
 @st.cache_resource
@@ -154,21 +164,19 @@ def fetch_price_yfinance(symbol: str, exchange: str):
 def fetch_price(symbol: str, exchange: str):
     """
     Fetch price with fallback chain:
-    Market Open  → Angel One HTTP → yfinance
+    Market Open   → Angel One HTTP → yfinance
     Market Closed → yfinance only
     """
     if is_market_open():
-        # Try Angel One first
         price, source = fetch_price_angel(symbol, exchange)
         if price:
             return price, source
-    # Fallback to yfinance (works anytime)
     price, source = fetch_price_yfinance(symbol, exchange)
     return price, source
 
 
 # ══════════════════════════════════════════
-#  STATUS LOGIC
+#   STATUS LOGIC
 # ══════════════════════════════════════════
 
 def compute_status(stock: dict, ltp: float) -> str:
@@ -225,7 +233,7 @@ SOURCE_ICON = {
 
 
 # ══════════════════════════════════════════
-#  SESSION STATE
+#   SESSION STATE
 # ══════════════════════════════════════════
 
 for k, v in [
@@ -234,14 +242,18 @@ for k, v in [
     ("edit_idx", None), ("edit_tab", None), ("sort_by", "default"),
     ("sort_open", False), ("sound_enabled", True), ("selected_symbol", ""),
     ("selected_exchange", "NS"), ("show_add_form", False),
-    ("prices", {}),  # ← Stores fetched prices in session
+    ("prices", {}),  
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
 
+# Load background price engine modifications onto current runtime
+ext_cache = load_external_price_cache()
+
+
 # ══════════════════════════════════════════
-#  TERMINAL LAYOUT
+#   TERMINAL LAYOUT
 # ══════════════════════════════════════════
 
 left_col, right_col = st.columns([3, 7], gap="small")
@@ -446,8 +458,9 @@ with left_col:
             return sorted(lst, key=lambda s: s.get("symbol",""))
         if by == "distance":
             def dist(s):
-                key  = f"{s.get('symbol','')}_{s.get('exchange','NS')}"
-                data = st.session_state.prices.get(key,{})
+                sym_code = s.get('symbol','')
+                key  = f"{sym_code}_{s.get('exchange','NS')}"
+                data = st.session_state.prices.get(key) or ext_cache.get(sym_code, {})
                 ltp  = data.get("price")
                 e    = s.get("entry")
                 return abs(ltp-e)/e if ltp and e else 999
@@ -467,7 +480,7 @@ with left_col:
         )
     else:
         # ══════════════════════════════════════════
-        #  STOCK CARDS
+        #   STOCK CARDS
         # ══════════════════════════════════════════
 
         for stock_idx, stock in enumerate(watchlist):
@@ -480,9 +493,19 @@ with left_col:
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
 
-            # Get price from session state (persists across reruns)
+            # Check 1: Session State first (Manually refreshed)
             price_key  = f"{sym}_{exchange}"
-            price_data = st.session_state.prices.get(price_key, {})
+            price_data = st.session_state.prices.get(price_key)
+            
+            # Check 2: Fallback to your file engine data if Session State is empty
+            if not price_data and sym in ext_cache:
+                price_data = {
+                    "price": ext_cache[sym].get("price"),
+                    "source": ext_cache[sym].get("source", "close_price")
+                }
+            elif not price_data:
+                price_data = {}
+
             ltp        = price_data.get("price")
             source     = price_data.get("source", "offline")
 
@@ -590,25 +613,29 @@ with left_col:
                     'padding:2px 7px;border-radius:4px;border:0.5px solid #b4b2a9;background:#f1efe8;">'
                     '<span style="font-size:8px;color:#5f5e5a;font-weight:600;">E</span>'
                     '<span style="font-family:monospace;font-size:11px;font-weight:600;'
-                    'color:#2c2c2a;">' + fmt(entry) + '</span></div>'
+                    'color:#2c2c2a;">' + fmt(entry) + '</span>'
+                    '</div>'
 
                     '<div style="display:flex;flex-direction:column;align-items:center;'
                     'padding:2px 7px;border-radius:4px;border:0.5px solid #f09595;background:#fcebeb;">'
                     '<span style="font-size:8px;color:#a32d2d;font-weight:600;">SL</span>'
                     '<span style="font-family:monospace;font-size:11px;font-weight:600;'
-                    'color:#a32d2d;">' + fmt(sl) + '</span></div>'
+                    'color:#a32d2d;">' + fmt(sl) + '</span>'
+                    '</div>'
 
                     '<div style="display:flex;flex-direction:column;align-items:center;'
                     'padding:2px 7px;border-radius:4px;border:0.5px solid #85b7eb;background:#e6f1fb;">'
                     '<span style="font-size:8px;color:#185fa5;font-weight:600;">T1</span>'
                     '<span style="font-family:monospace;font-size:11px;font-weight:600;'
-                    'color:#185fa5;">' + fmt(t1) + '</span></div>'
+                    'color:#185fa5;">' + fmt(t1) + '</span>'
+                    '</div>'
 
                     '<div style="display:flex;flex-direction:column;align-items:center;'
                     'padding:2px 7px;border-radius:4px;border:0.5px solid #afa9ec;background:#eeedfe;">'
                     '<span style="font-size:8px;color:#534ab7;font-weight:600;">T2</span>'
                     '<span style="font-family:monospace;font-size:11px;font-weight:600;'
-                    'color:' + ('#534ab7' if t2 else '#aaa') + ';">' + fmt(t2) + '</span></div>'
+                    'color:' + ('#534ab7' if t2 else '#aaa') + ';">' + fmt(t2) + '</span>'
+                    '</div>'
                     '</div></div>'
                 )
                 st.markdown(card_html, unsafe_allow_html=True)
@@ -629,7 +656,6 @@ with left_col:
                         lst[stock_idx]["status"]    = "WATCHING"
                         lst[stock_idx]["lastPrice"] = None
                         set_list(current_tab, lst)
-                        # Also clear session price
                         st.session_state.prices.pop(f"{sym}_{exchange}", None)
                         st.rerun()
                 with btn_cols[2]:
@@ -668,7 +694,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#  RIGHT PANEL — TRADINGVIEW CHART
+#   RIGHT PANEL — TRADINGVIEW CHART
 # ══════════════════════════════════════════
 
 with right_col:
@@ -717,14 +743,10 @@ with right_col:
             "locale": "en",
             "toolbar_bg": "#f1f3f6",
             "enable_publishing": false,
-            "allow_symbol_change": true,
-            "container_id": "tradingview_chart",
             "hide_side_toolbar": false,
-            "studies": ["MASimple@tv-scriptstd","RSI@tv-scriptstd","MACD@tv-scriptstd"],
-            "show_popup_button": true,
-            "popup_width": "1000",
-            "popup_height": "650"
+            "allow_symbol_change": true,
+            "container_id": "tradingview_chart"
         }});
         </script>
         """
-        st.components.v1.html(tv_html, height=660, scrolling=False)
+        st.components.v1.html(tv_html, height=660)
