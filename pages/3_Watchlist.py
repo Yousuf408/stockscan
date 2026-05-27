@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py
 #   Price fetching with Local JSON fallback
-#   VERSION: 3.5.0 (Unified Core Engine Sync)
+#   VERSION: 3.5.1 (Unified Core Engine Sync)
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -227,7 +227,7 @@ SOURCE_ICON = {
 
 
 # ══════════════════════════════════════════
-#   RUNTIME ENGINE SEEDINGS
+#   RUNTIME ENGINE SEEDINGS & STATE
 # ══════════════════════════════════════════
 
 for k, v in [
@@ -242,6 +242,9 @@ for k, v in [
 
 # Pull centralized metrics from background streaming engine file
 master_file_cache = load_price_cache()
+
+# Core State Checks
+market_now = is_market_open()
 
 
 # ══════════════════════════════════════════
