@@ -1,12 +1,12 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — pages/3_Watchlist.py
 #  Terminal layout: Left watchlist + Right TradingView chart
+#  Updated: Reads prices from price_cache.json (not API)
 # ══════════════════════════════════════════
 
 import streamlit as st
-import json, os, pyotp, yfinance as yf
+import json, os
 from datetime import datetime
-from SmartApi import SmartConnect
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -52,6 +52,7 @@ def play_alert_sound(alert_type="triggered"):
 # ══════════════════════════════════════════
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+PRICE_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "price_cache.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 def load_all() -> dict:
@@ -83,52 +84,40 @@ def set_list(tab: str, lst: list):
 
 
 # ══════════════════════════════════════════
-#  ANGEL ONE
+#  PRICE CACHE (NEW - reads from cache file)
 # ══════════════════════════════════════════
 
-@st.cache_resource(ttl=3600)
-def get_angel_session():
+def load_price_cache() -> dict:
+    """Load price cache from price_cache.json"""
+    if not os.path.exists(PRICE_CACHE_FILE):
+        return {"mode": "offline", "last_update": "", "stocks": {}}
     try:
-        obj = SmartConnect(api_key=st.secrets["API_KEY"])
-        totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
-        sess = obj.generateSession(st.secrets["CLIENT_CODE"], st.secrets["PASSWORD"], totp)
-        return obj if sess.get("status") else None
+        with open(PRICE_CACHE_FILE, "r") as f:
+            return json.load(f)
     except:
-        return None
+        return {"mode": "offline", "last_update": "", "stocks": {}}
 
+def get_cached_price(symbol: str) -> tuple[float | None, str, str]:
+    """Get cached price for a symbol
+    Returns: (price, source, time)
+    source: websocket, http, yfinance, cached, offline
+    """
+    cache = load_price_cache()
+    
+    if symbol not in cache.get("stocks", {}):
+        return None, "offline", ""
+    
+    stock_data = cache["stocks"][symbol]
+    price = stock_data.get("price")
+    source = stock_data.get("source", "offline")
+    time_str = stock_data.get("time", "")
+    
+    return price, source, time_str
 
-# ══════════════════════════════════════════
-#  PRICE FETCH
-# ══════════════════════════════════════════
-
-def fetch_ltp_angel(symbol: str, exchange: str) -> float | None:
-    try:
-        obj = get_angel_session()
-        if not obj: return None
-        token = get_stock_token(symbol)
-        if not token: return None
-        resp = obj.ltpData("NSE" if exchange == "NS" else "BSE", symbol, token)
-        if resp and resp.get("status"):
-            return float(resp["data"]["ltp"])
-    except:
-        pass
-    return None
-
-def fetch_ltp_yfinance(symbol: str, exchange: str) -> float | None:
-    try:
-        suffix = ".NS" if exchange == "NS" else ".BO"
-        t = yf.Ticker(f"{symbol}{suffix}")
-        p = t.fast_info.get("last_price") or t.fast_info.get("regularMarketPrice")
-        return float(p) if p else None
-    except:
-        return None
-
-def fetch_ltp(symbol: str, exchange: str) -> tuple[float | None, str]:
-    p = fetch_ltp_angel(symbol, exchange)
-    if p: return p, "angel"
-    p = fetch_ltp_yfinance(symbol, exchange)
-    if p: return p, "yfinance"
-    return None, "none"
+def get_cache_mode() -> str:
+    """Get current cache mode (websocket, http_polling, yfinance, offline)"""
+    cache = load_price_cache()
+    return cache.get("mode", "offline")
 
 
 # ══════════════════════════════════════════
@@ -187,7 +176,7 @@ def get_tv_symbol(symbol: str, exchange: str) -> str:
 
 for k, v in [("current_tab","Today"), ("direction","BUY"), ("exchange","NS"),
              ("f_symbol",""), ("f_entry",0.0), ("f_sl",0.0), ("f_t1",0.0), ("f_t2",0.0),
-             ("edit_idx",None), ("edit_tab",None), ("price_source",{}), ("sort_by","default"),
+             ("edit_idx",None), ("edit_tab",None), ("sort_by","default"),
              ("sort_open",False), ("sound_enabled",True), ("selected_symbol",""),
              ("selected_exchange","NS"), ("show_add_form", False)]:
     if k not in st.session_state:
@@ -209,7 +198,9 @@ with left_col:
             st.session_state.show_add_form = not st.session_state.show_add_form
             st.rerun()
     with ctrl2:
-        refresh = st.button("↺", use_container_width=True, help="Refresh prices", key="refresh_btn")
+        # NEW: Refresh button reloads cache (doesn't fetch, price_streamer does that)
+        if st.button("↺", use_container_width=True, help="Reload prices", key="refresh_btn"):
+            st.rerun()  # Just refresh the UI to show latest cached prices
     with ctrl3:
         if st.button(f"{'🔊' if st.session_state.sound_enabled else '🔇'}", use_container_width=True, key="sound_toggle"):
             st.session_state.sound_enabled = not st.session_state.sound_enabled
@@ -355,27 +346,27 @@ with left_col:
                     st.session_state.sort_by = key
                     st.rerun()
 
-    # ── REFRESH PRICES ──
-    if watchlist and refresh:
-        updated = []
-        progress = st.progress(0, text="Fetching...")
-        for i, stock in enumerate(watchlist):
-            ltp, source = fetch_ltp(stock["symbol"], stock.get("exchange","NS"))
-            s = stock.copy()
-            s["lastPrice"] = ltp
-            old_status = stock.get("status", "WATCHING")
-            if ltp:
-                s["status"] = compute_status(s, ltp)
-                st.session_state.price_source[s["symbol"]] = source
-                if st.session_state.sound_enabled and s["status"] != old_status:
-                    if s["status"] == "SL_HIT": play_alert_sound("sl_hit")
-                    elif s["status"] in ["TARGET1","TARGET2"]: play_alert_sound("target")
-                    elif s["status"] == "TRIGGERED": play_alert_sound("triggered")
-            updated.append(s)
-            progress.progress((i+1)/len(watchlist))
-        progress.empty()
-        set_list(current_tab, updated)
-        watchlist = updated
+    # ── PRICE CACHE STATUS ──
+    cache_mode = get_cache_mode()
+    mode_badge = {
+        "websocket": "🟢 WebSocket",
+        "http_polling": "🟡 HTTP",
+        "yfinance": "🟠 yfinance",
+        "offline": "⚪ Offline"
+    }
+    mode_color = {
+        "websocket": "#00a854",
+        "http_polling": "#f59e0b",
+        "yfinance": "#ff6b35",
+        "offline": "#7a8394"
+    }
+    
+    st.markdown(
+        f'<div style="font-size:10px;color:{mode_color.get(cache_mode, \"#7a8394\")};'
+        f'font-weight:600;margin:8px 0;padding:4px 8px;background:#f5f5f5;border-radius:4px;">'
+        f'{mode_badge.get(cache_mode, "Loading...")}</div>',
+        unsafe_allow_html=True
+    )
 
     # ── SORT ──
     def sort_list(lst, by):
@@ -411,14 +402,15 @@ with left_col:
             sym      = stock.get("symbol","")
             dirn     = stock.get("direction","BUY")
             status   = stock.get("status","WATCHING")
-            ltp      = stock.get("lastPrice")
             entry    = stock.get("entry")
             sl       = stock.get("sl")
             t1       = stock.get("target1")
             t2       = stock.get("target2")
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
-            src      = st.session_state.price_source.get(sym,"")
+
+            # NEW: Get cached price instead of API call
+            ltp, source, time_str = get_cached_price(sym)
 
             pct_val   = ""
             pct_color = "#7a8394"
@@ -427,11 +419,36 @@ with left_col:
                 pct_val   = f"{'+' if p >= 0 else ''}{p:.2f}%"
                 pct_color = "#00a854" if p >= 0 else "#e53935"
 
+            # Update status if we have new LTP
+            old_status = stock.get("status", "WATCHING")
+            if ltp:
+                stock["lastPrice"] = ltp
+                stock["status"] = compute_status(stock, ltp)
+                new_status = stock.get("status", "WATCHING")
+                
+                # Play sound if status changed
+                if st.session_state.sound_enabled and new_status != old_status:
+                    if new_status == "SL_HIT": play_alert_sound("sl_hit")
+                    elif new_status in ["TARGET1","TARGET2"]: play_alert_sound("target")
+                    elif new_status == "TRIGGERED": play_alert_sound("triggered")
+            else:
+                stock["lastPrice"] = None
+
+            status = stock.get("status","WATCHING")
             status_color = STATUS_COLOR.get(status, "#f59e0b")
             status_text  = STATUS_LABEL.get(status, "")
             buy_color    = "#00a854" if dirn == "BUY" else "#e53935"
             ltp_display  = fmt(ltp) if ltp else "---"
             is_selected  = st.session_state.selected_symbol == sym and st.session_state.selected_exchange == exchange
+
+            # Source badge mapping
+            source_icons = {
+                "websocket": "🟢",
+                "http": "🟡",
+                "yfinance": "🟠",
+                "offline": "⚪"
+            }
+            src_icon = source_icons.get(source, "⚪")
 
             # Edit mode
             if st.session_state.edit_idx == stock_idx and st.session_state.edit_tab == current_tab:
@@ -487,10 +504,11 @@ with left_col:
                     'background:rgba(25,63,155,0.08);color:' + status_color + ';">' + status_text + '</span>'
                     '</div>'
 
-                    # Row 2: LTP + % change
+                    # Row 2: LTP + % change + source
                     '<div style="display:flex;align-items:baseline;gap:8px;">'
                     '<span style="font-family:monospace;font-weight:700;font-size:15px;color:#0f1117;">' + ltp_display + '</span>'
                     '<span style="font-family:monospace;font-size:11px;color:' + pct_color + ';">' + pct_val + '</span>'
+                    '<span style="font-size:10px;color:#7a8394;">' + src_icon + '</span>'
                     '</div>'
 
                     # Row 3: Entry / SL / T1 mini boxes
@@ -559,12 +577,14 @@ with left_col:
                         unsafe_allow_html=True
                     )
 
+        # Update watchlist with status changes
+        set_list(current_tab, watchlist)
+
     # Footer
     st.markdown('<hr style="margin:8px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
-    angel_ok = get_angel_session() is not None
     st.markdown(
         f'<div style="font-size:10px;color:#7a8394">'
-        f'{"🟢 Angel" if angel_ok else "🟡 yfinance"} · watchlist.json</div>',
+        f'price_streamer.py · watchlist.json</div>',
         unsafe_allow_html=True
     )
 
