@@ -1,18 +1,18 @@
-# ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py
-#   Price fetching with Local JSON fallback
-#   Fetches from yfinance/Angel One directly + price_cache.json fallback
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#   TRADESENTRY — pages/3_Watchlist.py (ENHANCED)
+#   Integrated with Professional TradingView Charts + Indicators
+# ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import json, os, pytz, yfinance as yf
 from datetime import datetime
-import plotly.graph_objects as go
-
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from stocks import SECTOR_YAHOO, get_stock_token, get_stock_sector
 from styles import apply_styles, sidebar_brand, page_header
+
+# Import enhanced chart module
+from enhanced_chart_module import render_enhanced_chart
 
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
@@ -25,9 +25,9 @@ sidebar_brand()
 page_header("Watchlist", "Track your trades")
 
 
-# ══════════════════════════════════════════
-#   TIMEZONE
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#   TIMEZONE & MARKET STATUS
+# ══════════════════════════════════════════════════════════════════════════════
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -42,9 +42,9 @@ def is_market_open():
     return (9*60+15) <= mins <= (15*60+30)
 
 
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #   SOUND ALERT
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 def play_alert_sound(alert_type="triggered"):
     if alert_type == "triggered":
@@ -65,9 +65,9 @@ def play_alert_sound(alert_type="triggered"):
     st.components.v1.html(html_code, height=0)
 
 
-# ══════════════════════════════════════════
-#   STORAGE & CACHE RUNTIME
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#   STORAGE & CACHE
+# ══════════════════════════════════════════════════════════════════════════════
 
 WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
 PRICE_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "price_cache.json")
@@ -111,9 +111,9 @@ def load_external_price_cache() -> dict:
     return {}
 
 
-# ══════════════════════════════════════════
-#   DIRECT PRICE FETCH
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#   PRICE FETCHING
+# ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_resource
 def get_angel_session():
@@ -163,11 +163,7 @@ def fetch_price_yfinance(symbol: str, exchange: str):
     return None, "yfinance_failed"
 
 def fetch_price(symbol: str, exchange: str):
-    """
-    Fetch price with fallback chain:
-    Market Open   → Angel One HTTP → yfinance
-    Market Closed → yfinance only
-    """
+    """Fetch price with fallback chain"""
     if is_market_open():
         price, source = fetch_price_angel(symbol, exchange)
         if price:
@@ -176,96 +172,9 @@ def fetch_price(symbol: str, exchange: str):
     return price, source
 
 
-# ══════════════════════════════════════════
-#   CHART RENDERING (PLOTLY - FIXED)
-# ══════════════════════════════════════════
-
-@st.cache_data(ttl=300)
-def fetch_chart_data(symbol: str, exchange: str):
-    """Fetch historical chart data from yfinance"""
-    try:
-        suffix = ".NS" if exchange == "NS" else ".BO"
-        ticker = yf.Ticker(f"{symbol}{suffix}")
-        hist = ticker.history(period="1y")
-        return hist
-    except Exception as e:
-        st.error(f"Error fetching chart data: {str(e)}")
-        return None
-
-def render_chart_plotly(symbol: str, exchange: str):
-    """Render professional candlestick chart using Plotly for Indian stocks"""
-    exch_label = "NSE" if exchange == "NS" else "BSE"
-    
-    with st.spinner(f"📈 Loading {symbol} chart..."):
-        hist = fetch_chart_data(symbol, exchange)
-    
-    if hist is None or hist.empty:
-        st.error(f"❌ No chart data available for {symbol} ({exch_label})")
-        st.info("💡 Symbol may be incorrect or delisted. Check your watchlist.")
-        return
-    
-    try:
-        fig = go.Figure(data=[go.Candlestick(
-            x=hist.index,
-            open=hist['Open'],
-            high=hist['High'],
-            low=hist['Low'],
-            close=hist['Close'],
-            name=f"{symbol}",
-            increasing_line_color='#00a854',
-            decreasing_line_color='#e53935',
-        )])
-        
-        fig.update_layout(
-            title={
-                'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
-                'x': 0.5,
-                'xanchor': 'center',
-                'font': {'size': 18, 'color': '#0f1117'}
-            },
-            yaxis_title="Price (₹)",
-            xaxis_title="Date",
-            template="plotly_white",
-            height=650,
-            hovermode='x unified',
-            xaxis_rangeslider_visible=False,
-            font=dict(family="monospace", size=11, color="#0f1117"),
-            plot_bgcolor='#fafafa',
-            paper_bgcolor='#ffffff',
-            margin=dict(l=50, r=50, t=80, b=50),
-            xaxis=dict(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor='#e0e3e8',
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor='#e0e3e8',
-            )
-        )
-        
-        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
-        
-        current_price = hist['Close'].iloc[-1]
-        year_high = hist['High'].max()
-        year_low = hist['Low'].min()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Current", f"₹{current_price:,.0f}")
-        with col2:
-            st.metric("52W High", f"₹{year_high:,.0f}")
-        with col3:
-            st.metric("52W Low", f"₹{year_low:,.0f}")
-            
-    except Exception as e:
-        st.error(f"❌ Error rendering chart: {str(e)}")
-
-
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #   STATUS LOGIC
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 def compute_status(stock: dict, ltp: float) -> str:
     entry, sl, t1, t2 = stock.get("entry"), stock.get("sl"), stock.get("target1"), stock.get("target2")
@@ -316,17 +225,16 @@ SOURCE_ICON = {
 }
 
 
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #   SESSION STATE
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 for k, v in [
     ("current_tab", "Today"), ("direction", "BUY"), ("exchange", "NS"),
     ("f_symbol", ""), ("f_entry", 0.0), ("f_sl", 0.0), ("f_t1", 0.0), ("f_t2", 0.0),
     ("edit_idx", None), ("edit_tab", None), ("sort_by", "default"),
     ("sort_open", False), ("sound_enabled", True), ("selected_symbol", ""),
-    ("selected_exchange", "NS"), ("show_add_form", False),
-    ("prices", {}),  
+    ("selected_exchange", "NS"), ("show_add_form", False), ("prices", {}),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -334,11 +242,11 @@ for k, v in [
 ext_cache = load_external_price_cache()
 
 
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #   TERMINAL LAYOUT
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
-left_col, right_col = st.columns([3, 7], gap="small")
+left_col, right_col = st.columns([2.5, 7.5], gap="small")
 
 with left_col:
 
@@ -759,9 +667,9 @@ with left_col:
     )
 
 
-# ══════════════════════════════════════════
-#   RIGHT PANEL — PLOTLY CHART
-# ══════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#   RIGHT PANEL — ENHANCED CHART
+# ══════════════════════════════════════════════════════════════════════════════
 
 with right_col:
     if not st.session_state.selected_symbol:
@@ -779,18 +687,4 @@ with right_col:
     else:
         symbol = st.session_state.selected_symbol
         exchange = st.session_state.selected_exchange
-        exch_label = "NSE" if exchange == "NS" else "BSE"
-        
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;'
-            f'padding:8px 0;margin-bottom:12px;">'
-            f'<span style="font-family:monospace;font-weight:700;'
-            f'font-size:18px;color:#0f1117;">{symbol}</span>'
-            f'<span style="font-size:11px;font-weight:600;padding:3px 8px;'
-            f'border-radius:6px;background:#e6f1fb;color:#185fa5;">{exch_label}</span>'
-            f'<span style="font-size:12px;color:#7a8394;">1Y Chart</span>'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-        
-        render_chart_plotly(symbol, exchange)
+        render_enhanced_chart(symbol, exchange)
