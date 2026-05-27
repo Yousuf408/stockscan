@@ -80,11 +80,10 @@ def fetch_chart_data_angelone(symbol: str, exchange: str):
             st.error(f"Token not found for {symbol}")
             return None
         
-        # Fetch candle data from Angel One
+        # Fetch candle data from Angel One (CORRECTED - no 'mode' parameter)
         resp = obj.getCandleData(
-            mode="FULL",  # FULL = Open, High, Low, Close, Volume
             exchangeTokens=[str(token)],
-            interval="ONE_DAY"  # Daily candles
+            interval="ONE_DAY"
         )
         
         if not resp:
@@ -132,7 +131,6 @@ def fetch_chart_data_angelone(symbol: str, exchange: str):
     except Exception as e:
         st.error(f"Error fetching Angel One data: {str(e)}")
         return None
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 #   TECHNICAL INDICATORS
