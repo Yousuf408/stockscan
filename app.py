@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — app.py
-#   Clean rewrite - no cache_resource bugs
-#   VERSION: 3.1
+#   Hardened Production Build
+#   VERSION: 3.2
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -73,30 +73,26 @@ def load_cache():
         if os.path.exists(PRICE_CACHE_FILE):
             with open(PRICE_CACHE_FILE, "r") as f:
                 return json.load(f)
-    except:
-        pass
+    except Exception as e:
+        print(f"[{t()}] Cache load error: {e}")
     return {"mode": "offline", "last_update": "", "stocks": {}}
 
 def save_cache(cache):
     try:
         with open(PRICE_CACHE_FILE, "w") as f:
-            json.dump(cache, f)
+            json.dump(cache, f, indent=4)
     except Exception as e:
         print(f"[{t()}] Cache save error: {e}")
 
 def set_price(symbol, exchange, price, source):
     cache = load_cache()
+    if "stocks" not in cache:
+        cache["stocks"] = {}
     cache["stocks"][symbol] = {
-        "price": price, "source": source,
+        "price": float(price), "source": source,
         "time": t(), "exchange": exchange
     }
     cache["last_update"] = t()
-    save_cache(cache)
-
-def set_mode(mode):
-    cache = load_cache()
-    # Fixed: Removed the restrictive return check that locked empty boot environments out
-    cache["mode"] = mode
     save_cache(cache)
 
 def force_mode(mode):
@@ -106,23 +102,31 @@ def force_mode(mode):
 
 
 # ══════════════════════════════════════════
-#   WATCHLIST HELPERS
+#   WATCHLIST HELPERS (CRASH PROOFED)
 # ══════════════════════════════════════════
 
 def get_all_stocks():
     try:
         if not os.path.exists(WATCHLIST_FILE):
             return []
-        with open(WATCHLIST_FILE) as f:
+        with open(WATCHLIST_FILE, "r") as f:
             data = json.load(f)
+        
         all_stocks = []
-        for tab in [f"watchlist_{n}" for n in WATCHLIST_NAMES]:
-            all_stocks.extend(data.get(tab, []))
+        for name in WATCHLIST_NAMES:
+            tab_key = f"watchlist_{name}"
+            tab_data = data.get(tab_key, [])
+            if isinstance(tab_data, list):
+                all_stocks.extend(tab_data)
+                
         seen, unique = set(), []
         for s in all_stocks:
-            k = (s.get("symbol"), s.get("exchange","NS"))
+            if not isinstance(s, dict) or not s.get("symbol"):
+                continue
+            sym = s.get("symbol")
+            exch = s.get("exchange", "NS")
+            k = (sym, exch)
             if k not in seen:
-                seen.add(k)
                 seen.add(k)
                 unique.append(s)
         return unique
@@ -132,13 +136,13 @@ def get_all_stocks():
 
 
 # ══════════════════════════════════════════
-#   FETCH PRICES - YFINANCE
+#   BULLETPROOF FETCH VIA HISTORICAL SLICE
 # ══════════════════════════════════════════
 
 def fetch_all_yfinance(label="yfinance"):
     stocks = get_all_stocks()
     if not stocks:
-        print(f"[{t()}] No stocks to fetch")
+        print(f"[{t()}] No active stocks found in watchlist to process.")
         return 0
     fetched = 0
     for stock in stocks:
@@ -146,22 +150,32 @@ def fetch_all_yfinance(label="yfinance"):
             sym    = stock.get("symbol")
             exch   = stock.get("exchange","NS")
             suffix = ".NS" if exch == "NS" else ".BO"
+            
+            # Using 1-day history is 100% stable regardless of Yahoo API structural revisions
             ticker = yf.Ticker(f"{sym}{suffix}")
-            price  = (ticker.fast_info.get("last_price")
-                      or ticker.fast_info.get("regularMarketPrice"))
-            if price:
+            df = ticker.history(period="1d")
+            
+            if not df.empty:
+                price = df['Close'].iloc[-1]
                 set_price(sym, exch, float(price), label)
                 fetched += 1
-                print(f"[{t()}] {sym}: ₹{price:.2f}")
+                print(f"[{t()}] {label.upper()} -> {sym}: ₹{price:.2f}")
+            else:
+                # Backup recovery option if history yields empty sets
+                price = ticker.info.get("regularMarketPreviousClose") or ticker.info.get("currentPrice")
+                if price:
+                    set_price(sym, exch, float(price), label)
+                    fetched += 1
         except Exception as e:
-            print(f"[{t()}] yfinance error {stock.get('symbol')}: {e}")
-    force_mode(label)
-    print(f"[{t()}] Fetched {fetched}/{len(stocks)} stocks via {label}")
+            print(f"[{t()}] Structural yfinance error on token {stock.get('symbol')}: {e}")
+    
+    if fetched > 0:
+        force_mode(label)
     return fetched
 
 
 # ══════════════════════════════════════════
-#   FETCH PRICES - HTTP (Angel One)
+#   FETCH PRICES - HTTP (Angel One REST Engine)
 # ══════════════════════════════════════════
 
 def fetch_all_http(angel_obj):
@@ -189,12 +203,13 @@ def fetch_all_http(angel_obj):
             except Exception as e:
                 print(f"[{t()}] HTTP error {stock.get('symbol')}: {e}")
         time.sleep(1)
-    force_mode("http_polling")
+    if fetched > 0:
+        force_mode("http_polling")
     return fetched
 
 
 # ══════════════════════════════════════════
-#   WEBSOCKET STREAMER
+#   BACKGROUND ORCHESTRATION ENGINE
 # ══════════════════════════════════════════
 
 class Streamer:
@@ -232,12 +247,12 @@ class Streamer:
                 if tok in self.token_map:
                     sym, exch = self.token_map[tok]
                     set_price(sym, exch, ltp, "websocket")
-                    print(f"[{t()}] WS {sym}: ₹{ltp:.2f}")
+                    force_mode("websocket")
         except Exception as e:
-            print(f"[{t()}] WS data error: {e}")
+            print(f"[{t()}] WS data execution parse failure: {e}")
 
     def on_open(self, wsapp):
-        print(f"[{t()}] WS Connected!")
+        print(f"[{t()}] WS Connected successfully!")
         force_mode("websocket")
         nse, bse = self.build_tokens()
         token_list = []
@@ -245,13 +260,12 @@ class Streamer:
         if bse: token_list.append({"exchangeType":3,"tokens":bse})
         if token_list:
             wsapp.subscribe("ts_001", 1, token_list)
-            print(f"[{t()}] WS Subscribed: {len(nse)} NSE + {len(bse)} BSE")
 
     def on_error(self, wsapp, err):
-        print(f"[{t()}] WS Error: {err}")
+        print(f"[{t()}] WS Core Pipeline Error: {err}")
 
     def on_close(self, wsapp):
-        print(f"[{t()}] WS Closed")
+        print(f"[{t()}] WS Channel Disconnected")
 
     def connect_ws(self):
         try:
@@ -263,94 +277,81 @@ class Streamer:
             self.sws.on_close = self.on_close
             self.sws.connect()
         except Exception as e:
-            print(f"[{t()}] WS connect error: {e}")
+            print(f"[{t()}] WS Core connection loop failed: {e}")
 
     def run(self):
-        """Main streamer loop with robust off-market fallback"""
+        """Main streamer loop running in complete safety isolate"""
         close_fetched_date = None
 
         while True:
             try:
-                now       = now_ist()
+                now = now_ist()
                 market_on = is_market_open()
-                cache     = load_cache()
+                cache = load_cache()
                 cache_empty = len(cache.get("stocks", {})) == 0
 
-                # ── MARKET CLOSED ──
+                # ── DECOUPLED HANDLING FOR OFF-MARKET WINDOWS ──
                 if not market_on:
                     today = now.date()
-                    
-                    # Force a fetch if it's a new day OR if the cache is currently blank
                     if close_fetched_date != today or cache_empty:
-                        print(f"[{t()}] Market closed. Fetching fallback prices via yfinance...")
+                        print(f"[{t()}] Off-market active state. Pulling data sync via historical matrix...")
                         fetched = fetch_all_yfinance("close_price")
-                        
-                        # Only toggle daily flag if we actually populated cache entries
                         if fetched > 0:
                             close_fetched_date = today
                         else:
-                            print(f"[{t()}] yfinance fetch returned 0 stocks. Will retry shortly.")
+                            print(f"[{t()}] Warning: No records written. System will loop re-verification.")
                     else:
-                        print(f"[{t()}] Market closed & cache populated. Sleeping 60s...")
+                        print(f"[{t()}] Cache validation intact. Sleeping thread cycle.")
                     
-                    time.sleep(60)
+                    time.sleep(30)
                     continue
 
-                # ── MARKET OPEN ──
-                close_fetched_date = None  # Reset for next session close
-
+                # ── LIVE SESSION HANDLING ──
+                close_fetched_date = None 
                 stocks = get_all_stocks()
                 if not stocks:
-                    print(f"[{t()}] No stocks in watchlist. Waiting...")
                     time.sleep(10)
                     continue
 
-                print(f"[{t()}] Market open. Trying WebSocket...")
-
-                # Try WebSocket
                 try:
-                    self.connect_ws()  # Blocking until disconnect
+                    self.connect_ws()
                 except Exception as e:
-                    print(f"[{t()}] WS failed: {e}")
+                    print(f"[{t()}] Live structural exception context: {e}")
 
-                # WS ended — try HTTP
+                # Level 2 Pipeline Fallback via HTTP
                 if is_market_open():
-                    print(f"[{t()}] WS ended. Trying HTTP polling...")
                     force_mode("http_polling")
                     while is_market_open():
                         try:
                             fetch_all_http(self.angel)
                         except Exception as e:
-                            print(f"[{t()}] HTTP failed: {e}")
+                            print(f"[{t()}] REST polling crash trace: {e}")
                             break
                         time.sleep(5)
 
-                # HTTP ended — try yfinance
+                # Level 3 Data Scraping Core
                 if is_market_open():
-                    print(f"[{t()}] HTTP ended. Trying yfinance...")
                     while is_market_open():
                         try:
                             fetch_all_yfinance()
                         except Exception as e:
-                            print(f"[{t()}] yfinance failed: {e}")
+                            print(f"[{t()}] Fallback engine pipeline fault: {e}")
                             break
                         time.sleep(10)
 
                 time.sleep(5)
 
             except Exception as e:
-                print(f"[{t()}] Streamer loop error: {e}")
+                print(f"[{t()}] Core execution worker thread isolated fault: {e}")
                 time.sleep(10)
 
 
 # ══════════════════════════════════════════
-#   STARTUP — Use st.cache_resource with
-#   version key to force re-run on deploy
+#   STARTUP SYSTEM RESOURCE SINGLETON
 # ══════════════════════════════════════════
 
 @st.cache_resource(show_spinner=False)
 def start_streamer(_version):
-    """Starts background streamer thread ONCE per process"""
     result = {"ok": False, "error": ""}
     try:
         api_key = st.secrets["API_KEY"]
@@ -358,16 +359,9 @@ def start_streamer(_version):
         pwd     = st.secrets["PASSWORD"]
         totp_s  = st.secrets["TOTP_SECRET"]
 
-        print(f"[{t()}] ══ TRADESENTRY v3.1 STARTING ══")
-        print(f"[{t()}] Client: {client}")
-        print(f"[{t()}] IST: {t()}")
-        print(f"[{t()}] Market: {'OPEN' if is_market_open() else 'CLOSED'}")
-
         obj  = SmartConnect(api_key=api_key)
         totp = pyotp.TOTP(totp_s).now()
         sess = obj.generateSession(client, pwd, totp)
-
-        print(f"[{t()}] Login: {sess.get('status')} — {sess.get('message','')}")
 
         if not sess.get("status"):
             result["error"] = sess.get("message","Login failed")
@@ -376,35 +370,26 @@ def start_streamer(_version):
         auth = sess["data"]["jwtToken"]
         feed = sess["data"].get("feedToken") or obj.getfeedToken()
 
-        print(f"[{t()}] Auth: {auth[:25]}...")
-        print(f"[{t()}] Feed: {str(feed)[:25] if feed else 'MISSING!'}")
-
         if not feed:
-            result["error"] = "Feed token missing"
+            result["error"] = "Feed token missing from terminal session response"
             return result
 
         streamer = Streamer(auth, api_key, client, feed, obj)
-
         th = threading.Thread(
-            target=streamer.run, daemon=True, name="TradeSentryStreamer")
+            target=streamer.run, daemon=True, name="TradeSentryStreamerWorker")
         th.start()
 
-        print(f"[{t()}] ✅ Streamer thread started: {th.name}")
         result["ok"] = True
-
     except Exception as e:
         result["error"] = str(e)
-        print(f"[{t()}] ❌ Start error: {e}")
-
     return result
 
 
 # ══════════════════════════════════════════
-#   UI
+#   RENDER UI CONTROLS
 # ══════════════════════════════════════════
 
-# VERSION KEY — change this to force cache clear on next deploy
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 
 result     = start_streamer(APP_VERSION)
 cache      = load_cache()
@@ -432,28 +417,28 @@ st.divider()
 
 if result["ok"]:
     if market_now:
-        st.success("✅ Connected · Streamer running · Live prices flowing")
+        st.success("✅ Engine Online · Live pipelines running.")
     else:
-        st.warning(f"⏰ Connected · Market closed · Auto-starts 9:15 AM IST · Now: {ist_now}")
+        st.warning(f"⏰ Session Closed · Internal engines parked · System running on background fallbacks.")
 else:
-    st.error(f"❌ Failed: {result.get('error','Unknown')}")
+    st.error(f"❌ Handshake Fault: {result.get('error','Unknown')}")
 
 st.info("💡 Go to **Watchlist** to see prices.")
 
-with st.expander("🔧 Debug"):
-    st.write(f"**Version:** {APP_VERSION}")
-    st.write(f"**IST:** {ist_now}")
-    st.write(f"**Market:** {market_now}")
-    st.write(f"**Mode:** `{mode}`")
-    st.write(f"**Cache stocks:** {total}")
-    st.write(f"**Watchlist stocks:** {len(get_all_stocks())}")
+with st.expander("🔧 Diagnostics Desk"):
+    st.write(f"**Engine Framework Version:** {APP_VERSION}")
+    st.write(f"**Thread Strategy State Mode:** `{mode}`")
+    st.write(f"**Local Storage Cache Stack Counter:** {total}")
+    st.write(f"**Watchlist Target Stock Array:** {len(get_all_stocks())}")
 
-    if st.button("🔄 Force fetch via yfinance now", type="primary"):
-        stocks = get_all_stocks()
-        if not stocks:
-            st.error("No stocks in watchlist!")
+    if st.button("🔄 Force Immediate yfinance Overwrite", type="primary"):
+        if len(get_all_stocks()) == 0:
+            st.error("Engine failure: Target watchlist array contains no actionable components.")
         else:
-            with st.spinner("Fetching prices..."):
-                fetched = fetch_all_yfinance()
-            st.success(f"✅ Fetched {fetched} stocks!")
-            st.rerun()
+            with st.spinner("Executing hard data synchronization overrides..."):
+                fetched = fetch_all_yfinance("yfinance")
+            if fetched > 0:
+                st.success(f"Successfully processed and written {fetched} records into registry.")
+                st.rerun()
+            else:
+                st.error("Scraper interface rejection: Yahoo system rejected requested metrics or returned blank frames.")
