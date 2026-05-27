@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py
 #   Price fetching with Local JSON fallback
-#   VERSION: 3.5.1 (Unified Core Engine Sync)
+#   VERSION: 3.5.2 (Advanced Chart Engine Fix)
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -240,10 +240,7 @@ for k, v in [
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Pull centralized metrics from background streaming engine file
 master_file_cache = load_price_cache()
-
-# Core State Checks
 market_now = is_market_open()
 
 
@@ -356,19 +353,14 @@ with left_col:
                         })
                         set_list(st.session_state.current_tab, lst)
                         
-                        # ═════════════════════════════════════════════════════════
-                        # ⚡ INSTANT ACTION HOOK: PULL PRICE IMMEDIATELY ON CLICK
-                        # ═════════════════════════════════════════════════════════
                         with st.spinner(f"Fetching instant entry price for {symbol}..."):
                             calc_price, calc_src = fetch_price(symbol, st.session_state.exchange)
                         
                         if calc_price:
                             p_key = f"{symbol}_{st.session_state.exchange}"
-                            # Push into running local view state container
                             st.session_state.prices[p_key] = {
                                 "price": calc_price, "source": calc_src, "time": now_ist().strftime("%H:%M:%S")
                             }
-                            # Push directly to centralized storage file for cross-tab mapping
                             update_single_stock_cache(symbol, st.session_state.exchange, calc_price, calc_src)
 
                         for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
@@ -376,7 +368,6 @@ with left_col:
                         st.session_state.show_add_form = False
                         st.success(f"✅ {symbol} added successfully with price initialization!")
                         
-                        # Force instant UI repaint frame shift
                         import time
                         time.sleep(0.05)
                         st.rerun()
@@ -435,7 +426,6 @@ with left_col:
             progress.progress((i+1)/len(watchlist), text=f"Fetching {sym}...")
         progress.empty()
 
-    # SORT STRATEGIES
     def sort_list(lst, by):
         order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
         if by == "status": return sorted(lst, key=lambda s: order.get(s.get("status","WATCHING"),9))
@@ -453,11 +443,9 @@ with left_col:
 
     watchlist = sort_list(watchlist, st.session_state.sort_by)
 
-    # ── EMPTY WATCHLIST ──
     if not watchlist:
         st.markdown('<div style="text-align:center;padding:40px 10px"><div style="font-size:32px">📭</div><div style="color:#7a8394;margin-top:8px;font-size:13px">No stocks in <b>' + current_tab + '</b></div></div>', unsafe_allow_html=True)
     else:
-        # ── RENDER CARD ELEMENTS ──
         for stock_idx, stock in enumerate(watchlist):
             sym      = stock.get("symbol","")
             dirn     = stock.get("direction","BUY")
@@ -468,7 +456,6 @@ with left_col:
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
 
-            # DATA SYNC CHECKPOINT: Read session cache first, fallback to physical shared engine file directly
             price_key  = f"{sym}_{exchange}"
             price_data = st.session_state.prices.get(price_key)
             
@@ -508,7 +495,6 @@ with left_col:
             src_icon     = SOURCE_ICON.get(source,"⚪")
 
             if st.session_state.edit_idx==stock_idx and st.session_state.edit_tab==current_tab:
-                # EDIT CARD CONTAINER
                 st.markdown(f'<div class="ts-section-label">Edit — {sym}</div>', unsafe_allow_html=True)
                 with st.container(border=True):
                     e1, e2 = st.columns(2)
@@ -538,7 +524,6 @@ with left_col:
                             st.session_state.edit_idx, st.session_state.edit_tab = None, None
                             st.rerun()
             else:
-                # STYLISH CARD PRESENTATION
                 selected_border = "2px solid #2563eb" if is_selected else "1px solid #e0e3e8"
                 selected_bg     = "#f0f5ff" if is_selected else "#fff"
 
@@ -604,7 +589,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#   RIGHT PANEL — NATIVE TRADINGVIEW ENGINE
+#   RIGHT PANEL — UPGRADED ADVANCED EMBED
 # ══════════════════════════════════════════
 
 with right_col:
@@ -623,28 +608,38 @@ with right_col:
             f'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;margin-bottom:6px;">'
             f'<span style="font-family:monospace;font-weight:700;font-size:18px;color:#0f1117;">{st.session_state.selected_symbol}</span>'
             f'<span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#e6f1fb;color:#185fa5;">{exch_label}</span>'
-            f'<span style="font-size:12px;color:#7a8394;">TradingView Chart Engine</span></div>',
+            f'<span style="font-size:12px;color:#7a8394;">TradeSentry Core Chart Engine</span></div>',
             unsafe_allow_html=True
         )
 
+        # Switched over to the unified advanced chart library to clear ticker resolution blocks inside iframes
         tv_html = f"""
-        <div id="tradingview_chart" style="height:650px;width:100%;border-radius:10px;overflow:hidden;border:1px solid #e0e3e8;"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-            "autosize": true,
+        <div class="tradingview-widget-container" style="height:650px;width:100%;">
+          <div id="tradingview_advanced_chart" style="height:650px;width:100%;border-radius:10px;overflow:hidden;border:1px solid #e0e3e8;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "width": "100%",
+            "height": 650,
             "symbol": "{tv_symbol}",
             "interval": "D",
             "timezone": "Asia/Kolkata",
             "theme": "light",
             "style": "1",
             "locale": "en",
-            "toolbar_bg": "#f1f3f6",
             "enable_publishing": false,
             "hide_side_toolbar": false,
             "allow_symbol_change": true,
-            "container_id": "tradingview_chart"
-        }});
-        </script>
+            "container_id": "tradingview_advanced_chart",
+            "studies": [
+              "RSI@tv-basicstudies",
+              "MASimple@tv-basicstudies"
+            ],
+            "show_popup_button": false,
+            "popup_width": "1000",
+            "popup_height": "650"
+          }});
+          </script>
+        </div>
         """
         st.components.v1.html(tv_html, height=660)
