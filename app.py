@@ -12,10 +12,37 @@ import threading
 import time
 import struct
 import pytz
+import logging
 from datetime import datetime
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
+# ══════════════════════════════════════════
+#  TERMINAL LOGGING TIMEZONE PATCH (IST)
+# ══════════════════════════════════════════
+IST = pytz.timezone("Asia/Kolkata")
+
+class ISTFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, pytz.utc).astimezone(IST)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+# Overriding root and SmartApi loggers to force IST output in the console
+root_logger = logging.getLogger()
+handler = logging.StreamHandler()
+handler.setFormatter(ISTFormatter('%(levelname)s [%(asctime)s] %(name)s: %(message)s', datefmt='%H:%M:%S IST'))
+
+# Clear existing handlers to prevent duplicate lines
+if root_logger.hasHandlers():
+    root_logger.handlers.clear()
+root_logger.addHandler(handler)
+root_logger.setLevel(logging.INFO)
+
+# ══════════════════════════════════════════
+#  APP PATHS & INITIALIZATION
+# ══════════════════════════════════════════
 import sys
 sys.path.append(os.path.dirname(__file__))
 from styles import apply_styles, sidebar_brand, page_header
@@ -34,12 +61,10 @@ page_header("Live Market Dashboard")
 # ══════════════════════════════════════════
 #  CONFIG
 # ══════════════════════════════════════════
-
 WATCHLIST_FILE   = os.path.join(os.path.dirname(__file__), "watchlist.json")
 PRICE_CACHE_FILE = os.path.join(os.path.dirname(__file__), "price_cache.json")
 WATCHLIST_NAMES  = ["Today", "Yesterday", "New"]
 
-IST          = pytz.timezone("Asia/Kolkata")
 MARKET_OPEN  = (9,  15)   # 9:15 AM IST
 MARKET_CLOSE = (15, 30)   # 3:30 PM IST
 
@@ -57,7 +82,6 @@ def ist_time_str() -> str:
 
 def is_market_open() -> bool:
     now = now_ist()
-    # 5 = Saturday, 6 = Sunday
     if now.weekday() >= 5:
         return False
     open_mins  = MARKET_OPEN[0]  * 60 + MARKET_OPEN[1]
@@ -108,7 +132,6 @@ def set_mode(mode: str):
             last = cache.get("last_update", "")
             if last:
                 try:
-                    # Parse using clean string splits to completely avoid timezone conflicts
                     last_clean = last.replace(" IST", "").strip()
                     last_time = datetime.strptime(last_clean, "%H:%M:%S")
                     now_time  = now_ist()
@@ -126,7 +149,6 @@ def set_mode(mode: str):
     save_cache(cache)
 
 def force_set_mode(mode: str):
-    """Force set mode regardless of current state"""
     cache = load_cache()
     cache["mode"] = mode
     save_cache(cache)
@@ -443,10 +465,8 @@ def init_price_streamer():
 #  STREAMLIT UI & LIVE RERUN FRAGMENT
 # ══════════════════════════════════════════
 
-# Wrap the metrics and core engine activation inside a safe timezone fragment
 @st.fragment(run_every=3)
 def render_dashboard():
-    # Instantiating inside the execution scope to guarantee it forces local machine calculation
     status     = init_price_streamer()
     cache      = load_cache()
     mode       = cache.get("mode", "offline")
@@ -455,7 +475,6 @@ def render_dashboard():
     market_now = is_market_open()
     ist_now    = now_ist().strftime("%I:%M %p IST")
 
-    # Mapping raw values straight to metrics to avoid truncation misleading the feed state
     mode_badge = {
         "websocket":    "🟢 Live WS",
         "http_polling": "🟡 Polling",
