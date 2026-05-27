@@ -227,7 +227,7 @@ with left_col:
                     st.session_state.direction = "SELL"; st.rerun()
 
             st.markdown('<div class="ts-section-label" style="margin-top:10px">Symbol</div>', unsafe_allow_html=True)
-            raw_input = st.text_input("", value=st.session_state.f_symbol,
+            raw_input = st.text_input("Symbol", value=st.session_state.f_symbol,
                                       placeholder="RELIANCE 2800 2750 2900 2950",
                                       key="raw_symbol_input", label_visibility="collapsed")
             if raw_input:
@@ -258,22 +258,22 @@ with left_col:
 
             st.markdown('<div class="ts-section-label" style="margin-top:10px">Price Levels</div>', unsafe_allow_html=True)
             st.markdown("**Entry**")
-            entry_val = st.number_input("", value=st.session_state.f_entry, min_value=0.0, format="%.0f",
+            entry_val = st.number_input("Entry Price", value=st.session_state.f_entry, min_value=0.0, format="%.0f",
                                 key="add_entry", label_visibility="collapsed")
             sl_col, t1_col = st.columns(2)
             with sl_col:
                 st.markdown("**SL**")
-                sl_val = st.number_input("", value=st.session_state.f_sl, min_value=0.0, format="%.0f",
+                sl_val = st.number_input("Stop Loss", value=st.session_state.f_sl, min_value=0.0, format="%.0f",
                                  key="add_sl", label_visibility="collapsed")
             with t1_col:
                 st.markdown("**T1**")
-                t1_val = st.number_input("", value=st.session_state.f_t1, min_value=0.0, format="%.0f",
+                t1_val = st.number_input("Target 1", value=st.session_state.f_t1, min_value=0.0, format="%.0f",
                                  key="add_t1", label_visibility="collapsed")
             st.markdown("**T2** (optional)")
-            t2_val = st.number_input("", value=st.session_state.f_t2, min_value=0.0, format="%.0f",
+            t2_val = st.number_input("Target 2", value=st.session_state.f_t2, min_value=0.0, format="%.0f",
                              key="add_t2", label_visibility="collapsed")
             st.markdown("**Notes** (optional)")
-            note_val = st.text_input("", placeholder="e.g. Breakout", key="add_note", label_visibility="collapsed")
+            note_val = st.text_input("Notes", placeholder="e.g. Breakout", key="add_note", label_visibility="collapsed")
 
             if st.button(f"{'▲ ADD LONG' if st.session_state.direction=='BUY' else '▼ ADD SHORT'} → {st.session_state.current_tab}",
                          use_container_width=True, type="primary", key="add_submit"):
