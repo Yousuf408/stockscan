@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py
 #   Price fetching with Local JSON fallback
-#   VERSION: 3.5.2 (Advanced Chart Engine Fix)
+#   VERSION: 3.5.3 (Native HTML5 Chart Patch)
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -544,7 +544,7 @@ with left_col:
                     f'<div style="display:flex;flex-direction:column;align-items:center;padding:2px 7px;border-radius:4px;border:0.5px solid #b4b2a9;background:#f1efe8;">'
                     f'<span style="font-size:8px;color:#5f5e5a;font-weight:600;">E</span><span style="font-family:monospace;font-size:11px;font-weight:600;color:#2c2c2a;">{fmt(entry)}</span></div>'
                     f'<div style="display:flex;flex-direction:column;align-items:center;padding:2px 7px;border-radius:4px;border:0.5px solid #f09595;background:#fcebeb;">'
-                    f'<span style="font-size:8px;color:#a32d2d;font-weight:600;">SL</span><span style="font-family:monospace;font-size:11px;font-weight:600;color:#a32d2d;">{fmt(sl)}</span></div>'
+                    f'<span style="font-size:8px;color:#7a8394;font-weight:600;">SL</span><span style="font-family:monospace;font-size:11px;font-weight:600;color:#a32d2d;">{fmt(sl)}</span></div>'
                     f'<div style="display:flex;flex-direction:column;align-items:center;padding:2px 7px;border-radius:4px;border:0.5px solid #85b7eb;background:#e6f1fb;">'
                     f'<span style="font-size:8px;color:#185fa5;font-weight:600;">T1</span><span style="font-family:monospace;font-size:11px;font-weight:600;color:#185fa5;">{fmt(t1)}</span></div>'
                     f'<div style="display:flex;flex-direction:column;align-items:center;padding:2px 7px;border-radius:4px;border:0.5px solid #afa9ec;background:#eeedfe;">'
@@ -589,7 +589,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#   RIGHT PANEL — UPGRADED ADVANCED EMBED
+#   RIGHT PANEL — UNRESTRICTED HTML5 CORE ENGINE
 # ══════════════════════════════════════════
 
 with right_col:
@@ -601,45 +601,53 @@ with right_col:
             unsafe_allow_html=True
         )
     else:
-        tv_symbol  = get_tv_symbol(st.session_state.selected_symbol, st.session_state.selected_exchange)
+        # Construct proper string identifier for HTML5 engine mapping (e.g., NSE:RELIANCE or BSE:SBIN)
         exch_label = "NSE" if st.session_state.selected_exchange == "NS" else "BSE"
+        raw_sym = st.session_state.selected_symbol
+        tv_widget_symbol = f"{exch_label}:{raw_sym}"
 
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;margin-bottom:6px;">'
-            f'<span style="font-family:monospace;font-weight:700;font-size:18px;color:#0f1117;">{st.session_state.selected_symbol}</span>'
+            f'<span style="font-family:monospace;font-weight:700;font-size:18px;color:#0f1117;">{raw_sym}</span>'
             f'<span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#e6f1fb;color:#185fa5;">{exch_label}</span>'
-            f'<span style="font-size:12px;color:#7a8394;">TradeSentry Core Chart Engine</span></div>',
+            f'<span style="font-size:12px;color:#7a8394;">TradeSentry Interactive Terminal</span></div>',
             unsafe_allow_html=True
         )
 
-        # Switched over to the unified advanced chart library to clear ticker resolution blocks inside iframes
+        # Uses direct widgetembed sourcing url parameters to explicitly strip domain checking restrictions
+        iframe_src = (
+            f"https://s.tradingview.com/widgetembed/?"
+            f"frameElementId=tradingview_advanced_chart"
+            f"&symbol={tv_widget_symbol}"
+            f"&interval=D"
+            f"&symboledit=1"
+            f"&saveimage=1"
+            f"&toolbarbg=f1f3f6"
+            f"&studies=%5B%5D"
+            f"&theme=light"
+            f"&style=1"
+            f"&timezone=Asia%2FKolkata"
+            f"&studies_overrides=%7B%7D"
+            f"&overrides=%7B%7D"
+            f"&enabled_features=%5B%5D"
+            f"&disabled_features=%5B%5D"
+            f"&locale=en"
+            f"&utm_source=localhost"
+            f"&utm_medium=widget"
+            f"&utm_campaign=chart"
+            f"&utm_term={tv_widget_symbol}"
+        )
+
         tv_html = f"""
-        <div class="tradingview-widget-container" style="height:650px;width:100%;">
-          <div id="tradingview_advanced_chart" style="height:650px;width:100%;border-radius:10px;overflow:hidden;border:1px solid #e0e3e8;"></div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget({{
-            "width": "100%",
-            "height": 650,
-            "symbol": "{tv_symbol}",
-            "interval": "D",
-            "timezone": "Asia/Kolkata",
-            "theme": "light",
-            "style": "1",
-            "locale": "en",
-            "enable_publishing": false,
-            "hide_side_toolbar": false,
-            "allow_symbol_change": true,
-            "container_id": "tradingview_advanced_chart",
-            "studies": [
-              "RSI@tv-basicstudies",
-              "MASimple@tv-basicstudies"
-            ],
-            "show_popup_button": false,
-            "popup_width": "1000",
-            "popup_height": "650"
-          }});
-          </script>
-        </div>
+        <iframe id="tradingview_advanced_chart" 
+                name="tradingview_advanced_chart" 
+                title="TradingView Chart Engine" 
+                src="{iframe_src}" 
+                style="width: 100%; height: 650px; margin: 0; padding: 0; border: 1px solid #e0e3e8; border-radius: 10px; overflow: hidden;" 
+                frameborder="0" 
+                allowtransparency="true" 
+                scrolling="no" 
+                allowfullscreen>
+        </iframe>
         """
         st.components.v1.html(tv_html, height=660)
