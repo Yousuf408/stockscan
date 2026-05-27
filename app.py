@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — app.py
 #   Hardened Production Build
-#   VERSION: 3.2.1 (Clean Syntax + Auto-Sync)
+#   VERSION: 3.3.0 (Instant Sync Engine)
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -136,8 +136,33 @@ def get_all_stocks():
 
 
 # ══════════════════════════════════════════
-#   BULLETPROOF FETCH VIA HISTORICAL SLICE
+#   AUTOMATED TARGET INTERCEPT SYNC PIPELINE
 # ══════════════════════════════════════════
+
+def fetch_single_ticker_immediate(symbol, exch="NS", label="close_price"):
+    """
+    Fires instantaneously from the frontend UI on asset registration.
+    Eliminates the cache-mismatch gap completely without manual button intervention.
+    """
+    try:
+        suffix = ".NS" if exch == "NS" else ".BO"
+        ticker = yf.Ticker(f"{symbol}{suffix}")
+        df = ticker.history(period="1d")
+        
+        if not df.empty:
+            price = df['Close'].iloc[-1]
+            set_price(symbol, exch, float(price), label)
+            print(f"[{t()}] INSTANT ADDITION SYNC -> {symbol}: ₹{price:.2f}")
+            return True
+        else:
+            price = ticker.info.get("regularMarketPreviousClose") or ticker.info.get("currentPrice")
+            if price:
+                set_price(symbol, exch, float(price), label)
+                return True
+    except Exception as e:
+        print(f"[{t()}] Instant sync execution fault on token {symbol}: {e}")
+    return False
+
 
 def fetch_all_yfinance(label="yfinance"):
     stocks = get_all_stocks()
@@ -294,11 +319,11 @@ class Streamer:
                 if not market_on:
                     today = now.date()
                     
-                    # Watchlist hot-reload condition checking for any counter drift
+                    # Watchlist hot-reload backup condition verification
                     mismatch_detected = len(watchlist_stocks) != len(cache_stocks)
                     
                     if close_fetched_date != today or cache_empty or mismatch_detected:
-                        print(f"[{t()}] Configuration mismatch or calendar roll hit. Synchronizing target indexes...")
+                        print(f"[{t()}] Configuration mismatch detected in background loop. Refreshing indices...")
                         fetched = fetch_all_yfinance("close_price")
                         if fetched > 0:
                             close_fetched_date = today
@@ -392,9 +417,25 @@ def start_streamer(_version):
 #   RENDER UI CONTROLS
 # ══════════════════════════════════════════
 
-APP_VERSION = "3.2.1"
+APP_VERSION = "3.3.0"
 
 result     = start_streamer(APP_VERSION)
+
+# ─── FRONTEND REALTIME ADDITION TRACKER INTERCEPT ───
+# If your watchlist file handler exists inside another file or script, 
+# this block catches addition deltas right as they land.
+current_stocks = get_all_stocks()
+current_cache  = load_cache()
+cached_keys    = current_cache.get("stocks", {}).keys()
+
+for stock_obj in current_stocks:
+    sym = stock_obj.get("symbol")
+    exch = stock_obj.get("exchange", "NS")
+    if sym and sym not in cached_keys:
+        # Pull metric parameters immediately for the newly discovered token
+        fetch_single_ticker_immediate(sym, exch, label="close_price" if not is_market_open() else "yfinance")
+
+# Reload clean localized cache state vectors post-intercept processing
 cache      = load_cache()
 mode       = cache.get("mode","offline")
 last       = cache.get("last_update","---")
