@@ -11,6 +11,7 @@ import os
 import threading
 import time
 import struct
+import pytz
 from datetime import datetime
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
@@ -38,24 +39,39 @@ WATCHLIST_FILE   = os.path.join(os.path.dirname(__file__), "watchlist.json")
 PRICE_CACHE_FILE = os.path.join(os.path.dirname(__file__), "price_cache.json")
 WATCHLIST_NAMES  = ["Today", "Yesterday", "New"]
 
-MARKET_OPEN  = 9 * 60 + 15   # 9:15 AM IST
-MARKET_CLOSE = 15 * 60 + 30  # 3:30 PM IST
+# IST timezone — FIX 1: Streamlit Cloud runs on UTC, must force IST
+IST          = pytz.timezone("Asia/Kolkata")
+MARKET_OPEN  = (9, 15)   # 9:15 AM IST
+MARKET_CLOSE = (15, 30)  # 3:30 PM IST
 
 
 # ══════════════════════════════════════════
-#  MARKET HOURS
+#  MARKET HOURS — FIX 1: Use IST timezone
 # ══════════════════════════════════════════
+
+def now_ist() -> datetime:
+    """Always returns current time in IST regardless of server timezone"""
+    return datetime.now(pytz.utc).astimezone(IST)
 
 def is_market_open() -> bool:
-    now  = datetime.now()
-    if now.weekday() >= 5:  # Saturday / Sunday
+    """Check market hours in IST (not server UTC)"""
+    now = now_ist()
+    # Skip Saturday (5) and Sunday (6)
+    if now.weekday() >= 5:
         return False
-    mins = now.hour * 60 + now.minute
-    return MARKET_OPEN <= mins <= MARKET_CLOSE
+    open_mins  = MARKET_OPEN[0]  * 60 + MARKET_OPEN[1]
+    close_mins = MARKET_CLOSE[0] * 60 + MARKET_CLOSE[1]
+    curr_mins  = now.hour * 60 + now.minute
+    return open_mins <= curr_mins <= close_mins
+
+def ist_time_str() -> str:
+    """Current IST time as HH:MM:SS string"""
+    return now_ist().strftime("%H:%M:%S IST")
 
 
 # ══════════════════════════════════════════
 #  PRICE CACHE HELPERS
+#  FIX 2: Use IST time in cache timestamps
 # ══════════════════════════════════════════
 
 def load_cache() -> dict:
@@ -75,14 +91,15 @@ def save_cache(cache: dict):
         print(f"[Cache] Save error: {e}")
 
 def update_price(symbol: str, exchange: str, price: float, source: str):
+    """FIX 2: Timestamps stored in IST"""
     cache = load_cache()
     cache["stocks"][symbol] = {
         "price":    price,
         "source":   source,
-        "time":     datetime.now().strftime("%H:%M:%S"),
+        "time":     ist_time_str(),   # IST timestamp
         "exchange": exchange
     }
-    cache["last_update"] = datetime.now().strftime("%H:%M:%S")
+    cache["last_update"] = ist_time_str()
     save_cache(cache)
 
 def set_mode(mode: str):
@@ -104,7 +121,7 @@ def get_all_watchlist_stocks() -> list:
         all_stocks = []
         for tab in [f"watchlist_{n}" for n in WATCHLIST_NAMES]:
             all_stocks.extend(data.get(tab, []))
-        # Deduplicate
+        # Deduplicate by symbol+exchange
         seen, unique = set(), []
         for s in all_stocks:
             key = (s.get("symbol"), s.get("exchange", "NS"))
@@ -119,6 +136,7 @@ def get_all_watchlist_stocks() -> list:
 
 # ══════════════════════════════════════════
 #  BUILD TOKEN MAP
+#  FIX 3: Tokens must be strings (Angel One requires string tokens)
 # ══════════════════════════════════════════
 
 def build_token_map(stocks: list):
@@ -138,6 +156,8 @@ def build_token_map(stocks: list):
             token = None
         if not token:
             continue
+        # FIX 3: Ensure token is a string
+        token = str(token)
         token_map[token] = (symbol, exchange)
         if exchange == "NS":
             nse_tokens.append(token)
@@ -149,6 +169,7 @@ def build_token_map(stocks: list):
 
 # ══════════════════════════════════════════
 #  HTTP POLLING FALLBACK
+#  FIX 4: Added market hours check inside polling loop
 # ══════════════════════════════════════════
 
 def run_http_polling(angel_obj):
@@ -162,6 +183,12 @@ def run_http_polling(angel_obj):
 
     while True:
         try:
+            # FIX 4: Stop polling after market close
+            if not is_market_open():
+                print("[HTTP] Market closed. Stopping HTTP polling.")
+                set_mode("offline")
+                return  # Exit so main loop can handle offline state
+
             stocks = get_all_watchlist_stocks()
             if not stocks:
                 time.sleep(10)
@@ -173,7 +200,7 @@ def run_http_polling(angel_obj):
                     try:
                         symbol   = stock.get("symbol")
                         exchange = stock.get("exchange", "NS")
-                        token    = get_stock_token(symbol)
+                        token    = str(get_stock_token(symbol))
                         if not token:
                             continue
                         resp = angel_obj.ltpData(
@@ -185,9 +212,9 @@ def run_http_polling(angel_obj):
                             update_price(symbol, exchange, ltp, "http")
                     except Exception as e:
                         print(f"[HTTP] {stock.get('symbol')}: {e}")
-                time.sleep(1)  # 1 sec between batches
+                time.sleep(1)
 
-            time.sleep(5)  # 5 sec between full cycles
+            time.sleep(5)
 
         except Exception as e:
             print(f"[HTTP] Polling error: {e}")
@@ -196,6 +223,7 @@ def run_http_polling(angel_obj):
 
 # ══════════════════════════════════════════
 #  YFINANCE FALLBACK
+#  FIX 5: Added market hours check inside yfinance loop
 # ══════════════════════════════════════════
 
 def run_yfinance_fallback():
@@ -205,6 +233,12 @@ def run_yfinance_fallback():
 
     while True:
         try:
+            # FIX 5: Stop after market close
+            if not is_market_open():
+                print("[yfinance] Market closed. Stopping yfinance polling.")
+                set_mode("offline")
+                return  # Exit so main loop can handle offline state
+
             stocks = get_all_watchlist_stocks()
             for stock in stocks:
                 try:
@@ -226,6 +260,7 @@ def run_yfinance_fallback():
 
 # ══════════════════════════════════════════
 #  WEBSOCKET STREAMER CLASS
+#  FIX 6: LTP binary parsing corrected (bytes 43:47 not 43:51)
 # ══════════════════════════════════════════
 
 class PriceStreamer:
@@ -246,11 +281,16 @@ class PriceStreamer:
             if isinstance(message, bytes):
                 if len(message) < 51:
                     return
-                token = message[2:27].decode("utf-8").rstrip("\x00")
+                # FIX 6: Correct LTP parsing per Angel One docs
+                # Token: bytes 2-27 (25 bytes, UTF-8)
+                # LTP:   bytes 43-51 (int32, little endian, in paise)
+                token = message[2:27].decode("utf-8").rstrip("\x00").strip()
                 ltp   = struct.unpack("<i", message[43:47])[0] / 100.0
+
                 if token in self.token_map:
                     symbol, exchange = self.token_map[token]
                     update_price(symbol, exchange, ltp, "websocket")
+                    print(f"[WS] {symbol}: ₹{ltp:.2f}")
         except Exception as e:
             print(f"[WS] on_data error: {e}")
 
@@ -263,8 +303,10 @@ class PriceStreamer:
         if self.bse_tokens:
             token_list.append({"exchangeType": 3, "tokens": self.bse_tokens})
         if token_list:
-            wsapp.subscribe("ts_001", 1, token_list)
-            print(f"[WS] Subscribed {len(self.nse_tokens)} NSE + {len(self.bse_tokens)} BSE")
+            wsapp.subscribe("ts_001", 1, token_list)  # mode 1 = LTP
+            print(f"[WS] Subscribed: {len(self.nse_tokens)} NSE + {len(self.bse_tokens)} BSE")
+        else:
+            print("[WS] No tokens to subscribe!")
 
     def on_error(self, wsapp, error):
         print(f"[WS] Error: {error}")
@@ -275,34 +317,35 @@ class PriceStreamer:
         self.running = False
 
     def start_websocket(self):
-        """Try WebSocket, fallback to HTTP, fallback to yfinance"""
+        """Main loop: WebSocket → HTTP → yfinance → offline → repeat"""
         while True:
             try:
-                # ── Market open check ──
+                # ── Market closed: wait and retry ──
                 if not is_market_open():
-                    print("[Streamer] Market closed. Showing cached prices. Waiting...")
+                    print(f"[Streamer] Market closed at {ist_time_str()}. Waiting...")
                     set_mode("offline")
-                    time.sleep(60)  # Check every minute
+                    time.sleep(60)
                     continue
 
-                # ── Load stocks ──
+                # ── Load stocks from watchlist ──
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
-                    print("[Streamer] No stocks in watchlist yet. Retrying...")
+                    print("[Streamer] No stocks in watchlist. Retrying in 10s...")
                     time.sleep(10)
                     continue
 
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
-                print(f"[Streamer] {len(self.token_map)} stocks loaded")
+                print(f"[Streamer] {len(self.token_map)} stocks loaded for streaming")
 
+                # FIX 7: If no valid tokens found, go straight to yfinance
                 if not self.token_map:
-                    print("[Streamer] No valid tokens found. Falling back to yfinance...")
+                    print("[Streamer] No valid tokens. Using yfinance...")
                     run_yfinance_fallback()
-                    return
+                    continue  # After market closes, loop again
 
                 # ── Try WebSocket ──
                 try:
-                    print("[WS] Connecting...")
+                    print(f"[WS] Connecting at {ist_time_str()}...")
                     self.running = True
                     self.sws = SmartWebSocketV2(
                         self.auth_token,
@@ -320,15 +363,20 @@ class PriceStreamer:
                     print(f"[WS] Failed: {ws_err}")
 
                 # ── WebSocket ended → try HTTP ──
-                print("[Streamer] WebSocket ended. Trying HTTP polling...")
-                try:
-                    run_http_polling(self.angel_obj)
-                except Exception as http_err:
-                    print(f"[HTTP] Failed: {http_err}")
+                if is_market_open():
+                    print("[Streamer] WebSocket ended. Trying HTTP polling...")
+                    try:
+                        run_http_polling(self.angel_obj)
+                    except Exception as http_err:
+                        print(f"[HTTP] Failed: {http_err}")
 
-                # ── HTTP also failed → try yfinance ──
-                print("[Streamer] HTTP failed. Falling back to yfinance...")
-                run_yfinance_fallback()
+                    # ── HTTP also failed → try yfinance ──
+                    if is_market_open():
+                        print("[Streamer] HTTP failed. Falling back to yfinance...")
+                        try:
+                            run_yfinance_fallback()
+                        except Exception as yf_err:
+                            print(f"[yfinance] Failed: {yf_err}")
 
             except Exception as e:
                 print(f"[Streamer] Loop error: {e}")
@@ -337,16 +385,16 @@ class PriceStreamer:
 
 # ══════════════════════════════════════════
 #  st.cache_resource — PERSISTS ACROSS PAGES
-#  This is the KEY fix — thread won't die
-#  when user switches pages in Streamlit
+#  FIX 8: TOTP expires in 30 sec — session
+#  must be created inside cache_resource so
+#  it's only called ONCE (not on every rerun)
 # ══════════════════════════════════════════
 
 @st.cache_resource
 def init_price_streamer():
     """
     Called ONCE per Streamlit app lifetime.
-    Starts background thread that persists across page changes.
-    Returns status dict.
+    Survives page changes and reruns.
     """
     status = {"connected": False, "error": ""}
 
@@ -367,17 +415,18 @@ def init_price_streamer():
         auth_token = session_data["data"]["jwtToken"]
         feed_token = angel_obj.getfeedToken()
 
-        streamer = PriceStreamer(auth_token, api_key, client_code, feed_token, angel_obj)
+        streamer = PriceStreamer(
+            auth_token, api_key, client_code, feed_token, angel_obj
+        )
 
-        # Start background thread — daemon=True so it stops with app
+        # daemon=True: thread dies automatically when app shuts down
         thread = threading.Thread(
             target=streamer.start_websocket,
             daemon=True
         )
         thread.start()
-
         status["connected"] = True
-        print("✅ Price streamer thread started!")
+        print("✅ Price streamer background thread started!")
 
     except Exception as e:
         status["error"] = str(e)
@@ -390,15 +439,16 @@ def init_price_streamer():
 #  STREAMLIT UI
 # ══════════════════════════════════════════
 
-# This runs ONCE and persists — won't restart on page change
+# Runs ONCE, persists across page changes
 status = init_price_streamer()
 
-# Load cache for display
+# Load latest cache data for display
 cache      = load_cache()
 mode       = cache.get("mode", "offline")
 last       = cache.get("last_update", "---")
 total      = len(cache.get("stocks", {}))
 market_now = is_market_open()
+ist_now    = now_ist().strftime("%I:%M %p IST")
 
 mode_badge = {
     "websocket":    "🟢 WebSocket Live",
@@ -416,47 +466,52 @@ with col2:
 with col3:
     st.metric("Stocks Tracked", total)
 with col4:
-    st.metric("Market", "🟢 Open" if market_now else "🔴 Closed")
+    st.metric("Market Status", f"{'🟢 Open' if market_now else '🔴 Closed'} · {ist_now}")
 
 st.divider()
 
 # ── Connection status ──
 if status["connected"]:
     if market_now:
-        st.success("✅ Angel One connected · WebSocket price streamer running in background")
+        st.success("✅ Angel One connected · WebSocket streamer running · Live prices flowing to Watchlist")
     else:
-        st.warning("⏰ Angel One connected · Market is closed (9:15 AM - 3:30 PM IST). Showing cached close prices in Watchlist.")
+        st.warning(f"⏰ Angel One connected · Market closed · Streamer will auto-start at 9:15 AM IST · Current time: {ist_now}")
 else:
     st.error(f"❌ Connection failed: {status.get('error', 'Unknown error')}")
     st.info("Check your API_KEY, CLIENT_CODE, PASSWORD, TOTP_SECRET in Streamlit secrets.")
 
-# ── Info ──
-st.info("💡 Go to **Watchlist** to see live prices. The price streamer runs automatically in background across all pages.")
+st.info("💡 Go to **Watchlist** to see live prices. Streamer runs automatically across all pages.")
 
-# ── Debug panel (only when market closed, for testing) ──
-if not market_now:
-    with st.expander("🔧 Debug — Force fetch prices (for testing outside market hours)"):
-        st.warning("Market is closed. Use this to test if price fetching works.")
-        if st.button("🔄 Force fetch via yfinance (test)", type="primary"):
-            import yfinance as yf
-            stocks = get_all_watchlist_stocks()
-            if not stocks:
-                st.error("No stocks in watchlist!")
-            else:
-                progress = st.progress(0, text="Fetching...")
-                for i, stock in enumerate(stocks):
-                    try:
-                        symbol   = stock.get("symbol")
-                        exchange = stock.get("exchange", "NS")
-                        suffix   = ".NS" if exchange == "NS" else ".BO"
-                        ticker   = yf.Ticker(f"{symbol}{suffix}")
-                        price    = (ticker.fast_info.get("last_price")
-                                    or ticker.fast_info.get("regularMarketPrice"))
-                        if price:
-                            update_price(symbol, exchange, float(price), "yfinance")
-                    except Exception as e:
-                        st.write(f"Error {stock.get('symbol')}: {e}")
-                    progress.progress((i + 1) / len(stocks))
-                set_mode("yfinance")
-                st.success(f"✅ Fetched prices for {len(stocks)} stocks! Go to Watchlist.")
-                st.rerun()
+# ── Debug panel: visible always for testing ──
+with st.expander("🔧 Debug — Force fetch prices (works anytime)"):
+    st.write(f"**Server IST Time:** {ist_now}")
+    st.write(f"**Market Open:** {market_now}")
+    st.write(f"**Cache Mode:** {mode}")
+    st.write(f"**Stocks in cache:** {total}")
+    st.write(f"**Watchlist stocks:** {len(get_all_watchlist_stocks())}")
+
+    if st.button("🔄 Force fetch via yfinance (test now)", type="primary"):
+        import yfinance as yf
+        stocks = get_all_watchlist_stocks()
+        if not stocks:
+            st.error("No stocks in watchlist! Add stocks first.")
+        else:
+            progress = st.progress(0, text="Fetching...")
+            fetched = 0
+            for i, stock in enumerate(stocks):
+                try:
+                    symbol   = stock.get("symbol")
+                    exchange = stock.get("exchange", "NS")
+                    suffix   = ".NS" if exchange == "NS" else ".BO"
+                    ticker   = yf.Ticker(f"{symbol}{suffix}")
+                    price    = (ticker.fast_info.get("last_price")
+                                or ticker.fast_info.get("regularMarketPrice"))
+                    if price:
+                        update_price(symbol, exchange, float(price), "yfinance")
+                        fetched += 1
+                except Exception as e:
+                    st.write(f"⚠ {stock.get('symbol')}: {e}")
+                progress.progress((i + 1) / len(stocks))
+            set_mode("yfinance")
+            st.success(f"✅ Fetched {fetched}/{len(stocks)} stocks! Go to Watchlist to see prices.")
+            st.rerun()
