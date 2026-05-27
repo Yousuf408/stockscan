@@ -399,39 +399,60 @@ class PriceStreamer:
 
 
 # ══════════════════════════════════════════
-#  INIT — st.cache_resource
-#  Runs ONCE, persists across all page changes
+#  INIT — Global thread tracker
+#  Uses threading.Event to ensure only ONE
+#  thread starts regardless of reruns
 # ══════════════════════════════════════════
 
-@st.cache_resource
+# Global flag — lives at module level, not in session state
+# This persists as long as the Python process is alive
+_streamer_started = threading.Event()
+_streamer_status  = {"connected": False, "error": ""}
+
 def init_price_streamer():
-    status = {"connected": False, "error": ""}
+    global _streamer_status
+
+    # Already started in this process — skip
+    if _streamer_started.is_set():
+        print("[Init] Streamer already running, skipping re-init")
+        return _streamer_status
+
+    # Mark as started BEFORE starting thread (prevents race condition)
+    _streamer_started.set()
+
     try:
         api_key     = st.secrets["API_KEY"]
         client_code = st.secrets["CLIENT_CODE"]
         password    = st.secrets["PASSWORD"]
         totp_secret = st.secrets["TOTP_SECRET"]
 
+        print(f"[Init] Connecting to Angel One for {client_code}...")
+        print(f"[Init] IST time: {ist_time_str()}")
+        print(f"[Init] Market open: {is_market_open()}")
+
         angel_obj    = SmartConnect(api_key=api_key)
         totp         = pyotp.TOTP(totp_secret).now()
         session_data = angel_obj.generateSession(client_code, password, totp)
 
+        print(f"[Init] Session status: {session_data.get('status')}")
+
         if not session_data.get("status"):
-            status["error"] = session_data.get("message", "Login failed")
-            return status
+            _streamer_status["error"] = session_data.get("message", "Login failed")
+            print(f"❌ Login failed: {_streamer_status['error']}")
+            _streamer_started.clear()  # Allow retry
+            return _streamer_status
 
         auth_token = session_data["data"]["jwtToken"]
         feed_token = session_data["data"].get("feedToken") or angel_obj.getfeedToken()
 
-        # Debug logs — verify tokens
-        print(f"[Init] Client: {client_code}")
         print(f"[Init] Auth token: {auth_token[:20]}...")
-        print(f"[Init] Feed token: {feed_token[:20] if feed_token else 'MISSING!'}")
+        print(f"[Init] Feed token: {str(feed_token)[:20] if feed_token else 'MISSING!'}")
 
         if not feed_token:
-            status["error"] = "Feed token missing — WebSocket will not work"
-            print("❌ Feed token is missing!")
-            return status
+            _streamer_status["error"] = "Feed token missing"
+            print("❌ Feed token missing! WebSocket will not work.")
+            _streamer_started.clear()
+            return _streamer_status
 
         streamer = PriceStreamer(
             auth_token, api_key, client_code, feed_token, angel_obj
@@ -439,18 +460,21 @@ def init_price_streamer():
 
         thread = threading.Thread(
             target=streamer.start_websocket,
-            daemon=True
+            daemon=True,
+            name="PriceStreamer"
         )
         thread.start()
-        status["connected"] = True
-        status["feed_token_ok"] = True
-        print("✅ Price streamer started!")
+
+        _streamer_status["connected"]     = True
+        _streamer_status["feed_token_ok"] = True
+        print(f"✅ Price streamer thread started! Thread: {thread.name}")
 
     except Exception as e:
-        status["error"] = str(e)
+        _streamer_status["error"] = str(e)
         print(f"❌ Init error: {e}")
+        _streamer_started.clear()  # Allow retry on error
 
-    return status
+    return _streamer_status
 
 
 # ══════════════════════════════════════════
