@@ -102,22 +102,27 @@ def get_cached_price(symbol: str) -> tuple[float | None, str, str]:
     Returns: (price, source, time)
     source: websocket, http, yfinance, cached, offline
     """
-    cache = load_price_cache()
-    
-    if symbol not in cache.get("stocks", {}):
+    cache  = load_price_cache()
+    stocks = cache.get("stocks", {})
+
+    # Try exact match first, then uppercase
+    stock_data = stocks.get(symbol) or stocks.get(symbol.upper()) or stocks.get(symbol.strip())
+
+    if not stock_data:
         return None, "offline", ""
-    
-    stock_data = cache["stocks"][symbol]
-    price = stock_data.get("price")
-    source = stock_data.get("source", "offline")
+
+    price    = stock_data.get("price")
+    source   = stock_data.get("source", "offline")
     time_str = stock_data.get("time", "")
-    
+
     return price, source, time_str
 
 def get_cache_mode() -> str:
-    """Get current cache mode (websocket, http_polling, yfinance, offline)"""
+    """Get current cache mode"""
     cache = load_price_cache()
     return cache.get("mode", "offline")
+
+
 
 
 # ══════════════════════════════════════════
