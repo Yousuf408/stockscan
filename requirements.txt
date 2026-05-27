@@ -6,3 +6,4 @@ yfinance
 logzero
 websocket-client
 jugaad-data
+pytz
