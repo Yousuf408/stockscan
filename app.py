@@ -93,21 +93,16 @@ def update_price(symbol: str, exchange: str, price: float, source: str):
         "exchange": exchange
     }
     cache["last_update"] = ist_time_str()
-    # KEY FIX: mode is set by whoever is actively fetching
-    # Do NOT override mode here — only the fetcher sets mode
     save_cache(cache)
 
 def set_mode(mode: str):
     cache = load_cache()
-    # KEY FIX: Never downgrade from active mode to offline
-    # if prices are being received
     current = cache.get("mode", "offline")
     active_modes = ["websocket", "http_polling", "yfinance"]
-    # Only allow offline if explicitly requested or no active fetcher
+    
     if mode == "offline" and current in active_modes:
         stocks = cache.get("stocks", {})
         if stocks:
-            # Check if any price was updated in last 30 seconds
             last = cache.get("last_update", "")
             if last:
                 try:
@@ -208,7 +203,7 @@ def run_http_polling(angel_obj):
 
             stocks = get_all_watchlist_stocks()
             if not stocks:
-                time.sleep(10)
+                time.sleep(5)
                 continue
 
             for i in range(0, len(stocks), 50):
@@ -231,12 +226,12 @@ def run_http_polling(angel_obj):
                         print(f"[HTTP] {stock.get('symbol')}: {e}")
                 time.sleep(1)
 
-            force_set_mode("http_polling")  # Keep mode current
+            force_set_mode("http_polling")
             time.sleep(5)
 
         except Exception as e:
             print(f"[HTTP] Polling error: {e}")
-            time.sleep(10)
+            time.sleep(5)
 
 
 # ══════════════════════════════════════════
@@ -268,7 +263,7 @@ def run_yfinance_fallback():
                 except Exception as e:
                     print(f"[yfinance] {stock.get('symbol')}: {e}")
 
-            force_set_mode("yfinance")  # Keep mode current
+            force_set_mode("yfinance")
             time.sleep(10)
 
         except Exception as e:
@@ -325,38 +320,31 @@ class PriceStreamer:
         print("[WS] Closed")
 
     def start_websocket(self):
-        """Main loop: WebSocket → HTTP → yfinance → sleep → repeat"""
         while True:
             try:
-                # ── Market closed: just sleep, DO NOT set mode offline ──
-                # Mode will naturally stay as last fetched (close price)
+                # If market is closed, sleep for 10 seconds and check again
                 if not is_market_open():
-                    print(f"[Streamer] Market closed ({ist_time_str()}). Sleeping 60s...")
-                    # Only set offline if cache is completely empty
+                    print(f"[Streamer] Market closed ({ist_time_str()}). Sleeping 10s...")
                     cache = load_cache()
                     if not cache.get("stocks"):
                         force_set_mode("offline")
-                    time.sleep(60)
+                    time.sleep(10)
                     continue
 
-                # ── Load stocks ──
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
                     print("[Streamer] No stocks in watchlist. Retrying in 10s...")
                     time.sleep(10)
                     continue
 
-                # ── Build token map ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
                 print(f"[Streamer] {len(self.token_map)} stocks loaded")
 
-                # ── No valid tokens: fallback to yfinance ──
                 if not self.token_map:
                     print("[Streamer] No valid tokens. Using yfinance...")
                     run_yfinance_fallback()
                     continue
 
-                # ── Try WebSocket ──
                 try:
                     print(f"[WS] Connecting at {ist_time_str()}...")
                     self.sws = SmartWebSocketV2(
@@ -369,12 +357,11 @@ class PriceStreamer:
                     self.sws.on_data  = self.on_data
                     self.sws.on_error = self.on_error
                     self.sws.on_close = self.on_close
-                    self.sws.connect()  # Blocking until disconnect
+                    self.sws.connect()
 
                 except Exception as ws_err:
                     print(f"[WS] Failed: {ws_err}")
 
-                # ── WebSocket ended → HTTP fallback ──
                 if is_market_open():
                     print("[Streamer] WS ended. Starting HTTP polling...")
                     try:
@@ -382,7 +369,6 @@ class PriceStreamer:
                     except Exception as http_err:
                         print(f"[HTTP] Failed: {http_err}")
 
-                    # ── HTTP failed → yfinance ──
                     if is_market_open():
                         print("[Streamer] HTTP failed. Starting yfinance...")
                         try:
@@ -390,7 +376,6 @@ class PriceStreamer:
                         except Exception as yf_err:
                             print(f"[yfinance] Failed: {yf_err}")
 
-                # Brief pause before restarting loop
                 time.sleep(5)
 
             except Exception as e:
@@ -399,60 +384,37 @@ class PriceStreamer:
 
 
 # ══════════════════════════════════════════
-#  INIT — Global thread tracker
-#  Uses threading.Event to ensure only ONE
-#  thread starts regardless of reruns
+#  INIT — st.cache_resource
 # ══════════════════════════════════════════
 
-# Global flag — lives at module level, not in session state
-# This persists as long as the Python process is alive
-_streamer_started = threading.Event()
-_streamer_status  = {"connected": False, "error": ""}
-
+@st.cache_resource
 def init_price_streamer():
-    global _streamer_status
-
-    # Already started in this process — skip
-    if _streamer_started.is_set():
-        print("[Init] Streamer already running, skipping re-init")
-        return _streamer_status
-
-    # Mark as started BEFORE starting thread (prevents race condition)
-    _streamer_started.set()
-
+    status = {"connected": False, "error": ""}
     try:
         api_key     = st.secrets["API_KEY"]
         client_code = st.secrets["CLIENT_CODE"]
         password    = st.secrets["PASSWORD"]
         totp_secret = st.secrets["TOTP_SECRET"]
 
-        print(f"[Init] Connecting to Angel One for {client_code}...")
-        print(f"[Init] IST time: {ist_time_str()}")
-        print(f"[Init] Market open: {is_market_open()}")
-
         angel_obj    = SmartConnect(api_key=api_key)
         totp         = pyotp.TOTP(totp_secret).now()
         session_data = angel_obj.generateSession(client_code, password, totp)
 
-        print(f"[Init] Session status: {session_data.get('status')}")
-
         if not session_data.get("status"):
-            _streamer_status["error"] = session_data.get("message", "Login failed")
-            print(f"❌ Login failed: {_streamer_status['error']}")
-            _streamer_started.clear()  # Allow retry
-            return _streamer_status
+            status["error"] = session_data.get("message", "Login failed")
+            return status
 
         auth_token = session_data["data"]["jwtToken"]
         feed_token = session_data["data"].get("feedToken") or angel_obj.getfeedToken()
 
+        print(f"[Init] Client: {client_code}")
         print(f"[Init] Auth token: {auth_token[:20]}...")
-        print(f"[Init] Feed token: {str(feed_token)[:20] if feed_token else 'MISSING!'}")
+        print(f"[Init] Feed token: {feed_token[:20] if feed_token else 'MISSING!'}")
 
         if not feed_token:
-            _streamer_status["error"] = "Feed token missing"
-            print("❌ Feed token missing! WebSocket will not work.")
-            _streamer_started.clear()
-            return _streamer_status
+            status["error"] = "Feed token missing — WebSocket will not work"
+            print("❌ Feed token is missing!")
+            return status
 
         streamer = PriceStreamer(
             auth_token, api_key, client_code, feed_token, angel_obj
@@ -460,95 +422,99 @@ def init_price_streamer():
 
         thread = threading.Thread(
             target=streamer.start_websocket,
-            daemon=True,
-            name="PriceStreamer"
+            daemon=True
         )
         thread.start()
-
-        _streamer_status["connected"]     = True
-        _streamer_status["feed_token_ok"] = True
-        print(f"✅ Price streamer thread started! Thread: {thread.name}")
+        status["connected"] = True
+        status["feed_token_ok"] = True
+        print("✅ Price streamer started!")
 
     except Exception as e:
-        _streamer_status["error"] = str(e)
+        status["error"] = str(e)
         print(f"❌ Init error: {e}")
-        _streamer_started.clear()  # Allow retry on error
 
-    return _streamer_status
+    return status
 
 
 # ══════════════════════════════════════════
-#  STREAMLIT UI
+#  STREAMLIT UI & LIVE RERUN FRAGMENT
 # ══════════════════════════════════════════
 
-status     = init_price_streamer()
-cache      = load_cache()
-mode       = cache.get("mode", "offline")
-last       = cache.get("last_update", "---")
-total      = len(cache.get("stocks", {}))
-market_now = is_market_open()
-ist_now    = now_ist().strftime("%I:%M %p IST")
+status = init_price_streamer()
 
-mode_badge = {
-    "websocket":    "🟢 WebSocket Live",
-    "http_polling": "🟡 HTTP Polling",
-    "yfinance":     "🟠 yfinance (Delayed)",
-    "offline":      "⚪ Market Closed"
-}
+# Wrap the dashboard metrics inside a fragment to auto-refresh every 3 seconds
+@st.fragment(run_every=3)
+def render_dashboard():
+    cache      = load_cache()
+    mode       = cache.get("mode", "offline")
+    last       = cache.get("last_update", "---")
+    total      = len(cache.get("stocks", {}))
+    market_now = is_market_open()
+    ist_now    = now_ist().strftime("%I:%M %p IST")
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Price Feed", mode_badge.get(mode, "Unknown"))
-with col2:
-    st.metric("Last Price Update", last if last else "Waiting...")
-with col3:
-    st.metric("Stocks Tracked", total)
-with col4:
-    st.metric("Market Status", f"{'🟢 Open' if market_now else '🔴 Closed'} · {ist_now}")
+    mode_badge = {
+        "websocket":    "🟢 WebSocket Live",
+        "http_polling": "🟡 HTTP Polling",
+        "yfinance":     "🟠 yfinance (Delayed)",
+        "offline":      "⚪ Market Closed"
+    }
 
-st.divider()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Price Feed", mode_badge.get(mode, "Unknown"))
+    with col2:
+        st.metric("Last Price Update", last if last else "Waiting...")
+    with col3:
+        st.metric("Stocks Tracked", total)
+    with col4:
+        st.metric("Market Status", f"{'🟢 Open' if market_now else '🔴 Closed'} · {ist_now}")
 
-if status["connected"]:
-    if market_now:
-        st.success("✅ Angel One connected · Streamer running · Live prices flowing to Watchlist")
-    else:
-        st.warning(f"⏰ Angel One connected · Market closed · Will auto-start at 9:15 AM IST · Now: {ist_now}")
-else:
-    st.error(f"❌ Connection failed: {status.get('error', 'Unknown error')}")
-    st.info("Check API_KEY, CLIENT_CODE, PASSWORD, TOTP_SECRET in Streamlit secrets.")
+    st.divider()
 
-st.info("💡 Go to **Watchlist** to see live prices. Streamer runs automatically across all pages.")
-
-# ── Debug panel ──
-with st.expander("🔧 Debug — Force fetch prices (works anytime)"):
-    st.write(f"**IST Time:** {ist_now}")
-    st.write(f"**Market Open:** {market_now}")
-    st.write(f"**Cache Mode:** `{mode}`")
-    st.write(f"**Stocks in cache:** {total}")
-    st.write(f"**Stocks in watchlist:** {len(get_all_watchlist_stocks())}")
-
-    if st.button("🔄 Force fetch via yfinance", type="primary"):
-        import yfinance as yf
-        stocks = get_all_watchlist_stocks()
-        if not stocks:
-            st.error("No stocks in watchlist! Add stocks first.")
+    if status["connected"]:
+        if market_now:
+            st.success("✅ Angel One connected · Streamer running · Live prices flowing to Watchlist")
         else:
-            progress = st.progress(0, text="Fetching...")
-            fetched  = 0
-            for i, stock in enumerate(stocks):
-                try:
-                    symbol   = stock.get("symbol")
-                    exchange = stock.get("exchange", "NS")
-                    suffix   = ".NS" if exchange == "NS" else ".BO"
-                    ticker   = yf.Ticker(f"{symbol}{suffix}")
-                    price    = (ticker.fast_info.get("last_price")
-                                or ticker.fast_info.get("regularMarketPrice"))
-                    if price:
-                        update_price(symbol, exchange, float(price), "yfinance")
-                        fetched += 1
-                except Exception as e:
-                    st.write(f"⚠ {stock.get('symbol')}: {e}")
-                progress.progress((i + 1) / len(stocks))
-            force_set_mode("yfinance")
-            st.success(f"✅ Fetched {fetched}/{len(stocks)} stocks! Go to Watchlist.")
-            st.rerun()
+            st.warning(f"⏰ Angel One connected · Market closed · Will auto-start at 9:15 AM IST · Now: {ist_now}")
+    else:
+        st.error(f"❌ Connection failed: {status.get('error', 'Unknown error')}")
+        st.info("Check API_KEY, CLIENT_CODE, PASSWORD, TOTP_SECRET in Streamlit secrets.")
+
+    st.info("💡 Go to **Watchlist** to see live prices. Streamer runs automatically across all pages.")
+
+    # ── Debug panel ──
+    with st.expander("🔧 Debug — Force fetch prices (works anytime)"):
+        st.write(f"**IST Time:** {ist_now}")
+        st.write(f"**Market Open:** {market_now}")
+        st.write(f"**Cache Mode:** `{mode}`")
+        st.write(f"**Stocks in cache:** {total}")
+        st.write(f"**Stocks in watchlist:** {len(get_all_watchlist_stocks())}")
+
+        if st.button("🔄 Force fetch via yfinance", type="primary"):
+            import yfinance as yf
+            stocks = get_all_watchlist_stocks()
+            if not stocks:
+                st.error("No stocks in watchlist! Add stocks first.")
+            else:
+                progress = st.progress(0, text="Fetching...")
+                fetched  = 0
+                for i, stock in enumerate(stocks):
+                    try:
+                        symbol   = stock.get("symbol")
+                        exchange = stock.get("exchange", "NS")
+                        suffix   = ".NS" if exchange == "NS" else ".BO"
+                        ticker   = yf.Ticker(f"{symbol}{suffix}")
+                        price    = (ticker.fast_info.get("last_price")
+                                    or ticker.fast_info.get("regularMarketPrice"))
+                        if price:
+                            update_price(symbol, exchange, float(price), "yfinance")
+                            fetched += 1
+                    except Exception as e:
+                        st.write(f"⚠ {stock.get('symbol')}: {e}")
+                    progress.progress((i + 1) / len(stocks))
+                force_set_mode("yfinance")
+                st.success(f"✅ Fetched {fetched}/{len(stocks)} stocks! Go to Watchlist.")
+                st.rerun()
+
+# Run the UI rendering function
+render_dashboard()
