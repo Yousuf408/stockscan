@@ -421,7 +421,17 @@ def init_price_streamer():
             return status
 
         auth_token = session_data["data"]["jwtToken"]
-        feed_token = angel_obj.getfeedToken()
+        feed_token = session_data["data"].get("feedToken") or angel_obj.getfeedToken()
+
+        # Debug logs — verify tokens
+        print(f"[Init] Client: {client_code}")
+        print(f"[Init] Auth token: {auth_token[:20]}...")
+        print(f"[Init] Feed token: {feed_token[:20] if feed_token else 'MISSING!'}")
+
+        if not feed_token:
+            status["error"] = "Feed token missing — WebSocket will not work"
+            print("❌ Feed token is missing!")
+            return status
 
         streamer = PriceStreamer(
             auth_token, api_key, client_code, feed_token, angel_obj
@@ -433,6 +443,7 @@ def init_price_streamer():
         )
         thread.start()
         status["connected"] = True
+        status["feed_token_ok"] = True
         print("✅ Price streamer started!")
 
     except Exception as e:
