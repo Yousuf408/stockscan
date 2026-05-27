@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 #   ENHANCED CHART RENDERER — TradingView Lightweight Charts + Angel One API
-#   Uses Angel One real-time data instead of yfinance (no rate limiting!)
+#   SIMPLIFIED VERSION - No indicator checkboxes, just chart
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -177,14 +177,10 @@ def calculate_macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int 
 #   CHART HTML GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
-def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame, 
-                                     show_sma20: bool = True,
-                                     show_ema12: bool = True,
-                                     show_rsi: bool = True,
-                                     show_bollinger: bool = True,
-                                     show_volume: bool = True) -> str:
+def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame) -> str:
     """
-    Generate interactive TradingView Lightweight Chart with indicators
+    Generate interactive TradingView Lightweight Chart with all indicators ON
+    No user controls - just the chart
     """
     
     # Prepare data for chart
@@ -192,17 +188,12 @@ def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame,
     hist.index = pd.to_datetime(hist.index)
     hist = hist.sort_index()
     
-    # Calculate indicators
-    if show_sma20:
-        hist['SMA20'] = calculate_sma(hist['Close'], 20)
-    if show_ema12:
-        hist['EMA12'] = calculate_ema(hist['Close'], 12)
-    if show_rsi:
-        hist['RSI'] = calculate_rsi(hist['Close'], 14)
-    if show_bollinger:
-        hist['BB_Upper'], hist['BB_Middle'], hist['BB_Lower'] = calculate_bollinger_bands(hist['Close'], 20)
-    if show_volume:
-        hist['Volume'] = hist.get('Volume', 0)
+    # Calculate all indicators (always ON)
+    hist['SMA20'] = calculate_sma(hist['Close'], 20)
+    hist['EMA12'] = calculate_ema(hist['Close'], 12)
+    hist['RSI'] = calculate_rsi(hist['Close'], 14)
+    hist['BB_Upper'], hist['BB_Middle'], hist['BB_Lower'] = calculate_bollinger_bands(hist['Close'], 20)
+    hist['Volume'] = hist.get('Volume', 0)
     
     # Format data for JavaScript
     candles = []
@@ -221,17 +212,17 @@ def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame,
     sma20_data = [
         {'time': int(idx.timestamp()), 'value': round(float(val), 2)}
         for idx, val in hist['SMA20'].items() if pd.notna(val)
-    ] if show_sma20 else []
+    ]
     
     ema12_data = [
         {'time': int(idx.timestamp()), 'value': round(float(val), 2)}
         for idx, val in hist['EMA12'].items() if pd.notna(val)
-    ] if show_ema12 else []
+    ]
     
     rsi_data = [
         {'time': int(idx.timestamp()), 'value': round(float(val), 2)}
         for idx, val in hist['RSI'].items() if pd.notna(val)
-    ] if show_rsi else []
+    ]
     
     # Convert to JSON-safe format
     import json
@@ -375,49 +366,23 @@ def generate_tradingview_chart_html(symbol: str, hist: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#   STREAMLIT INTEGRATION
+#   STREAMLIT INTEGRATION - SIMPLIFIED
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_enhanced_chart(symbol: str, exchange: str):
-    """Render professional trading chart with indicators in Streamlit"""
+    """Render trading chart directly - no indicator controls"""
     
-    exch_label = "NSE" if exchange == "NS" else "BSE"
-    
-    with st.spinner(f"📊 Loading advanced chart for {symbol}..."):
+    with st.spinner(f"📊 Loading chart for {symbol}..."):
         hist = fetch_chart_data_angelone(symbol, exchange)
     
     if hist is None or hist.empty:
+        exch_label = "NSE" if exchange == "NS" else "BSE"
         st.error(f"❌ No data available for {symbol} ({exch_label})")
         st.info("💡 Make sure Angel One credentials are configured in Streamlit secrets.")
         return
     
-    # Chart options in sidebar
-    st.subheader(f"{symbol} · {exch_label}")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        show_sma = st.checkbox("SMA 20", value=True, key=f"sma_{symbol}")
-    with col2:
-        show_ema = st.checkbox("EMA 12", value=True, key=f"ema_{symbol}")
-    with col3:
-        show_rsi = st.checkbox("RSI", value=False, key=f"rsi_{symbol}")
-    
-    col4, col5 = st.columns(2)
-    with col4:
-        show_bollinger = st.checkbox("Bollinger Bands", value=False, key=f"bb_{symbol}")
-    with col5:
-        show_volume = st.checkbox("Volume", value=True, key=f"vol_{symbol}")
-    
-    # Generate and render chart
-    chart_html = generate_tradingview_chart_html(
-        symbol, hist,
-        show_sma20=show_sma,
-        show_ema12=show_ema,
-        show_rsi=show_rsi,
-        show_bollinger=show_bollinger,
-        show_volume=show_volume
-    )
-    
+    # Generate and render chart (no controls, just chart)
+    chart_html = generate_tradingview_chart_html(symbol, hist)
     st.components.v1.html(chart_html, height=750)
     
     # Statistics
