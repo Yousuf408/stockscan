@@ -1,12 +1,12 @@
 # ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py
-#   Price fetching with Local JSON fallback
-#   Fetches from yfinance/Angel One directly + price_cache.json fallback
+#   TRADESENTRY — pages/3_Watchlist.py (FIXED)
+#   ✅ Full Indian stock support with Plotly charts
 # ══════════════════════════════════════════
 
 import streamlit as st
 import json, os, pytz, yfinance as yf
 from datetime import datetime
+import plotly.graph_objects as go
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -176,6 +176,100 @@ def fetch_price(symbol: str, exchange: str):
 
 
 # ══════════════════════════════════════════
+#   CHART RENDERING (NEW - FIXED)
+# ══════════════════════════════════════════
+
+@st.cache_data(ttl=300)
+def fetch_chart_data(symbol: str, exchange: str):
+    """Fetch historical chart data from yfinance"""
+    try:
+        suffix = ".NS" if exchange == "NS" else ".BO"
+        ticker = yf.Ticker(f"{symbol}{suffix}")
+        hist = ticker.history(period="1y")
+        return hist
+    except Exception as e:
+        st.error(f"Error fetching chart data: {str(e)}")
+        return None
+
+def render_chart_plotly(symbol: str, exchange: str):
+    """
+    ✅ FIXED: Render professional candlestick chart using Plotly
+    Works for ALL Indian stocks (NSE & BSE)
+    No "symbol unavailable" errors
+    """
+    exch_label = "NSE" if exchange == "NS" else "BSE"
+    
+    with st.spinner(f"📈 Loading {symbol} chart..."):
+        hist = fetch_chart_data(symbol, exchange)
+    
+    if hist is None or hist.empty:
+        st.error(f"❌ No chart data available for {symbol} ({exch_label})")
+        st.info("💡 Symbol may be incorrect or delisted. Check your watchlist.")
+        return
+    
+    try:
+        # Create candlestick chart
+        fig = go.Figure(data=[go.Candlestick(
+            x=hist.index,
+            open=hist['Open'],
+            high=hist['High'],
+            low=hist['Low'],
+            close=hist['Close'],
+            name=f"{symbol}",
+            increasing_line_color='#00a854',
+            decreasing_line_color='#e53935',
+        )])
+        
+        # Add layout
+        fig.update_layout(
+            title={
+                'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'color': '#0f1117'}
+            },
+            yaxis_title="Price (₹)",
+            xaxis_title="Date",
+            template="plotly_white",
+            height=650,
+            hovermode='x unified',
+            xaxis_rangeslider_visible=False,
+            font=dict(family="monospace", size=11, color="#0f1117"),
+            plot_bgcolor='#fafafa',
+            paper_bgcolor='#ffffff',
+            margin=dict(l=50, r=50, t=80, b=50),
+            xaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='#e0e3e8',
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='#e0e3e8',
+            )
+        )
+        
+        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+        
+        # Chart info footer
+        current_price = hist['Close'].iloc[-1]
+        year_high = hist['High'].max()
+        year_low = hist['Low'].min()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Current", f"₹{current_price:,.0f}")
+        with col2:
+            st.metric("52W High", f"₹{year_high:,.0f}")
+        with col3:
+            st.metric("52W Low", f"₹{year_low:,.0f}")
+            
+    except Exception as e:
+        st.error(f"❌ Error rendering chart: {str(e)}")
+
+
+# ══════════════════════════════════════════
 #   STATUS LOGIC
 # ══════════════════════════════════════════
 
@@ -218,10 +312,6 @@ def fmt(v) -> str:
     if v is None: return "---"
     try: return f"₹{float(v):,.0f}"
     except: return "---"
-
-def get_tv_symbol(symbol: str, exchange: str) -> str:
-    exch = "NSE" if exchange == "NS" else "BSE"
-    return f"{exch}:{symbol}"
 
 SOURCE_ICON = {
     "websocket": "🟢",
@@ -676,7 +766,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#   RIGHT PANEL — UNRESTRICTED ADVANCED WIDGET ENGINE
+#   RIGHT PANEL — FIXED CHART DISPLAY
 # ══════════════════════════════════════════
 
 with right_col:
@@ -693,43 +783,22 @@ with right_col:
             unsafe_allow_html=True
         )
     else:
-        # Generate clean exchange labels matching official TV requirements
-        exch_label = "NSE" if st.session_state.selected_exchange == "NS" else "BSE"
-        raw_sym = st.session_state.selected_symbol
-        tv_symbol = f"{exch_label}:{raw_sym}"
-
+        symbol = st.session_state.selected_symbol
+        exchange = st.session_state.selected_exchange
+        
+        # Header
+        exch_label = "NSE" if exchange == "NS" else "BSE"
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;'
-            f'padding:8px 0;margin-bottom:6px;">'
+            f'padding:8px 0;margin-bottom:12px;">'
             f'<span style="font-family:monospace;font-weight:700;'
-            f'font-size:18px;color:#0f1117;">{raw_sym}</span>'
+            f'font-size:18px;color:#0f1117;">{symbol}</span>'
             f'<span style="font-size:11px;font-weight:600;padding:3px 8px;'
             f'border-radius:6px;background:#e6f1fb;color:#185fa5;">{exch_label}</span>'
-            f'<span style="font-size:12px;color:#7a8394;">TradeSentry Terminal Core</span>'
+            f'<span style="font-size:12px;color:#7a8394;">1Y Chart</span>'
             f'</div>',
             unsafe_allow_html=True
         )
-
-        # Deploying the native Advanced Widget Library instance to avoid the iframe asset filter modal
-        tv_html = f"""
-        <div id="tradingview_advanced_chart_container" style="height:650px; width:100%; border:1px solid #e0e3e8; border-radius:10px; overflow:hidden;"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{tv_symbol}",
-            "interval": "D",
-            "timezone": "Asia/Kolkata",
-            "theme": "light",
-            "style": "1",
-            "locale": "en",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_side_toolbar": false,
-            "allow_symbol_change": true,
-            "studies": [],
-            "container_id": "tradingview_advanced_chart_container"
-        }});
-        </script>
-        """
-        st.components.v1.html(tv_html, height=660)
+        
+        # ✅ NEW: Render Plotly chart instead of TradingView
+        render_chart_plotly(symbol, exchange)
