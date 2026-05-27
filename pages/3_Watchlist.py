@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py
 #   Price fetching with Local JSON fallback
-#   Fetches from yfinance/Angel One directly + price_cache.json fallback
+#   VERSION: 3.4.1 (Instant Sync Engine)
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -108,6 +108,20 @@ def load_external_price_cache() -> dict:
         except:
             pass
     return {}
+
+def save_external_price_cache(stocks_cache_data: dict):
+    """Writes immediate addition prices securely back to the file framework"""
+    try:
+        cache_structure = {"mode": "offline" if not is_market_open() else "yfinance", "last_update": now_ist().strftime("%H:%M:%S"), "stocks": stocks_cache_data}
+        if os.path.exists(PRICE_CACHE_FILE):
+            with open(PRICE_CACHE_FILE, "r") as f:
+                cache_structure = json.load(f)
+        cache_structure["stocks"] = stocks_cache_data
+        cache_structure["last_update"] = now_ist().strftime("%H:%M:%S")
+        with open(PRICE_CACHE_FILE, "w") as f:
+            json.dump(cache_structure, f, indent=4)
+    except Exception as e:
+        print(f"Watchlist file cache write error: {e}")
 
 
 # ══════════════════════════════════════════
@@ -373,10 +387,38 @@ with left_col:
                             "added_at": datetime.now().isoformat(),
                         })
                         set_list(st.session_state.current_tab, lst)
+                        
+                        # ═════════════════════════════════════════════════════════
+                        # ⚡ INTERCEPT ADDITION: INSTANTLY ASSIGN NEW PRICE VECTOR ⚡
+                        # ═════════════════════════════════════════════════════════
+                        with st.spinner(f"Synchronizing price for {symbol}..."):
+                            fetched_price, price_src = fetch_price(symbol, st.session_state.exchange)
+                            
+                        if fetched_price:
+                            # 1. Update Session State Runtime directly so UI renders it instantly
+                            price_key = f"{symbol}_{st.session_state.exchange}"
+                            st.session_state.prices[price_key] = {
+                                "price": fetched_price,
+                                "source": price_src,
+                                "time": now_ist().strftime("%H:%M:%S")
+                            }
+                            # 2. Sync to file system so Dashboard metrics stay aligned
+                            ext_cache[symbol] = {
+                                "price": fetched_price,
+                                "source": price_src,
+                                "time": now_ist().strftime("%H:%M:%S"),
+                                "exchange": st.session_state.exchange
+                            }
+                            save_external_price_cache(ext_cache)
+                        
+                        # ═════════════════════════════════════════════════════════
+
                         for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
                             st.session_state[k] = "" if k=="f_symbol" else 0.0
                         st.session_state.show_add_form = False
                         st.success(f"✅ {symbol} added!")
+                        import time
+                        time.sleep(0.1)  # Brief pause to commit writes
                         st.rerun()
 
     # ── TABS ──
@@ -493,7 +535,7 @@ with left_col:
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
 
-            # Check 1: Session State first (Manually refreshed)
+            # Check 1: Session State first (Manually refreshed or newly inserted)
             price_key  = f"{sym}_{exchange}"
             price_data = st.session_state.prices.get(price_key)
             
