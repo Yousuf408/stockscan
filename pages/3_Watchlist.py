@@ -1,6 +1,7 @@
 # ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py (FIXED)
-#   ✅ Full Indian stock support with Plotly charts
+#   TRADESENTRY — pages/3_Watchlist.py
+#   Price fetching with Local JSON fallback
+#   Fetches from yfinance/Angel One directly + price_cache.json fallback
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -176,7 +177,7 @@ def fetch_price(symbol: str, exchange: str):
 
 
 # ══════════════════════════════════════════
-#   CHART RENDERING (NEW - FIXED)
+#   CHART RENDERING (PLOTLY - FIXED)
 # ══════════════════════════════════════════
 
 @st.cache_data(ttl=300)
@@ -192,11 +193,7 @@ def fetch_chart_data(symbol: str, exchange: str):
         return None
 
 def render_chart_plotly(symbol: str, exchange: str):
-    """
-    ✅ FIXED: Render professional candlestick chart using Plotly
-    Works for ALL Indian stocks (NSE & BSE)
-    No "symbol unavailable" errors
-    """
+    """Render professional candlestick chart using Plotly for Indian stocks"""
     exch_label = "NSE" if exchange == "NS" else "BSE"
     
     with st.spinner(f"📈 Loading {symbol} chart..."):
@@ -208,7 +205,6 @@ def render_chart_plotly(symbol: str, exchange: str):
         return
     
     try:
-        # Create candlestick chart
         fig = go.Figure(data=[go.Candlestick(
             x=hist.index,
             open=hist['Open'],
@@ -220,7 +216,6 @@ def render_chart_plotly(symbol: str, exchange: str):
             decreasing_line_color='#e53935',
         )])
         
-        # Add layout
         fig.update_layout(
             title={
                 'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
@@ -252,7 +247,6 @@ def render_chart_plotly(symbol: str, exchange: str):
         
         st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
         
-        # Chart info footer
         current_price = hist['Close'].iloc[-1]
         year_high = hist['High'].max()
         year_low = hist['Low'].min()
@@ -766,7 +760,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#   RIGHT PANEL — FIXED CHART DISPLAY
+#   RIGHT PANEL — PLOTLY CHART
 # ══════════════════════════════════════════
 
 with right_col:
@@ -785,9 +779,8 @@ with right_col:
     else:
         symbol = st.session_state.selected_symbol
         exchange = st.session_state.selected_exchange
-        
-        # Header
         exch_label = "NSE" if exchange == "NS" else "BSE"
+        
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;'
             f'padding:8px 0;margin-bottom:12px;">'
@@ -800,5 +793,4 @@ with right_col:
             unsafe_allow_html=True
         )
         
-        # ✅ NEW: Render Plotly chart instead of TradingView
         render_chart_plotly(symbol, exchange)
