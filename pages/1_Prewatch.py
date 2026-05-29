@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-# Import your master dictionary universe from your file
+# Import master dictionary universe from local directory file
 try:
     from stocks import STOCK_UNIVERSE
 except ImportError:
@@ -11,7 +11,11 @@ except ImportError:
         "RELIANCE": {"sector": "NIFTY ENERGY"},
         "TCS": {"sector": "NIFTY IT"},
         "HEROMOTOCO": {"sector": "NIFTY AUTO"},
-        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS"}
+        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS"},
+        "GMDC": {"sector": "NIFTY METALS"},
+        "ADANIENT": {"sector": "NIFTY ENERGY"},
+        "WELCORP": {"sector": "NIFTY METALS"},
+        "NAVINFLUOR": {"sector": "NIFTY CHEM"}
     }
 
 # Initialize Session States for Multi-page synchronization
@@ -58,13 +62,13 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00FF66", "bg": "#0D1F14", "border": "#00FF66", "status": "buy"}
+        return {"label": "▲ STRONG BUY", "color": "#00FF66", "status": "buy"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00FF66", "bg": "#09170E", "border": "rgba(0, 255, 102, 0.4)", "status": "buy"}
+        return {"label": "▲ BUY", "color": "#00FF66", "status": "buy"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "bg": "#241212", "border": "#FF4B4B", "status": "sell"}
+        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "status": "sell"}
     else:
-        return {"label": "▼ SELL", "color": "#FF4B4B", "bg": "#1A0D0D", "border": "rgba(255, 75, 75, 0.4)", "status": "sell"}
+        return {"label": "▼ SELL", "color": "#FF4B4B", "status": "sell"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -141,10 +145,11 @@ def run_prewatch_scan():
     st.session_state.ts_prewatch_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 # ══════════════════════════════════════════
-#  INTERFACE ENGINE GENERATION
+#  INTERFACE LAYOUT ENGINE
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
+# App Header Styling — Verified Keyword Arguments
 st.markdown(
     """
     <div style="margin-bottom: 20px;">
@@ -155,6 +160,7 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+# Control Action Header Strip
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
 with col_btn1:
     if st.button("🔍 SCAN DAILY EMA", use_container_width=True, type="primary"):
@@ -174,7 +180,7 @@ else:
     col_info.caption(f"Click Scan above to analyze the active stock catalog loaded from stocks.py ({len(STOCK_UNIVERSE)} records found).")
 
 # ══════════════════════════════════════════
-#  IN-PAGE TUNING & FILTERING MATRIX CONTROL PANEL
+#  TUNING & FILTERING MATRIX CONTROL PANEL
 # ══════════════════════════════════════════
 st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #FFFFFF;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 with st.container(border=True):
@@ -204,6 +210,7 @@ if st.session_state.ts_prewatch:
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
+    # Filter Sector Configuration
     available_sectors = sorted(list(set([x["sector"] for x in filtered_data])))
     sector_selection = st.pills("Filter Matrix by Sector Footprint:", ["ALL"] + available_sectors, default="ALL")
     
@@ -227,14 +234,14 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     #  ACTION BANNER: WATCHLIST STORAGE ENGINE
     # ══════════════════════════════════════════
-    st.write("") 
+    st.markdown("<div style='margin-top:15px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown("<h4 style='margin:0; font-size:15px; color:#FFFFFF;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([4, 3])
         with w_col1:
             target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
         with w_col2:
-            st.write("") 
+            st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
@@ -257,7 +264,7 @@ if st.session_state.ts_prewatch:
                     st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
 
     # ══════════════════════════════════════════
-    #  STYLED CARDS DISPLAY PRESENTATION ENGINE
+    #  NATIVE COMPATIBLE STYLED DISPLAY presentation 
     # ══════════════════════════════════════════
     st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options</h3>", unsafe_allow_html=True)
     
@@ -272,80 +279,52 @@ if st.session_state.ts_prewatch:
             for index, stock in enumerate(batch_chunk):
                 with grid_cols[index]:
                     
-                    # Generate dynamic badge tokens without using nesting raw string variables inside string formatting dict templates
-                    badge_row_html = ""
-                    if stock["abs_dist"] <= 1.0:
-                        badge_row_html += "<span style='color: #FF9900; background: rgba(255,153,0,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700; margin-right:6px;'>⭐ VERY NEAR</span>"
-                    if stock["body_gt_wick"]:
-                        badge_row_html += "<span style='color: #00FF66; background: rgba(0,255,102,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700;'>💪 STRONG BODY</span>"
-                    if not badge_row_html:
-                        badge_row_html = "<span style='color: #666666; font-size:11px;'>• BALANCED ACTION PRICE</span>"
-                    
-                    # Dist 200 processing
-                    dist_200_val = f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"
-                    vol_formatted = format_volume_indian(stock['volume'])
-
-                    # Unified Raw HTML Injection Block to keep Streamlit from auto-escaping character tags
-                    rendered_card_html = f"""
-                    <div style="
-                        background: #111217;
-                        border: 1px solid rgba(255, 255, 255, 0.08);
-                        padding: 16px;
-                        border-radius: 8px;
-                        margin-bottom: 4px;
-                    ">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                            <div>
-                                <h4 style="margin: 0; font-size: 18px; font-weight: 700; color: #FFFFFF;">{stock['sym']}</h4>
-                                <div style="font-size: 10px; color: #666666; font-weight: 600; margin-top: 2px; text-transform: uppercase;">📁 {stock['sector']}</div>
-                            </div>
-                            <div style="
-                                background: {stock['sig']['bg']};
-                                color: {stock['sig']['color']};
-                                border: 1px solid {stock['sig']['border']};
-                                padding: 3px 8px;
-                                border-radius: 4px;
-                                font-size: 10px;
-                                font-weight: 700;
-                                letter-spacing: 0.5px;
-                            ">
-                                {stock['sig']['label']}
-                            </div>
-                        </div>
+                    # Create clean structured nested container block
+                    with st.container(border=True):
+                        # Header line containing info
+                        t_col1, t_col2 = st.columns([2, 1])
+                        with t_col1:
+                            st.markdown(f"### **{stock['sym']}**")
+                            st.markdown(f"<span style='font-size:11px; color:#777777;'>📁 {stock['sector']}</span>", unsafe_allow_html=True)
+                        with t_col2:
+                            lbl_color = stock['sig']['color']
+                            st.markdown(f"<div style='text-align:right; font-weight:bold; color:{lbl_color}; font-size:12px;'>{stock['sig']['label']}</div>", unsafe_allow_html=True)
                         
-                        <div style="margin-top: 10px; margin-bottom: 14px; height: 16px;">
-                            {badge_row_html}
-                        </div>
+                        # Badges space metric
+                        badge_markdown_items = []
+                        if stock["abs_dist"] <= 1.0:
+                            badge_markdown_items.append("`⭐ VERY NEAR`")
+                        if stock["body_gt_wick"]:
+                            badge_markdown_items.append("`💪 STRONG BODY`")
                         
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
-                            <div>
-                                <div style="font-size: 10px; color: #666666; font-weight:600;">CMP</div>
-                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">₹{stock['ltp']:.2f}</div>
-                            </div>
-                            <div>
-                                <div style="font-size: 10px; color: #666666; font-weight:600;">VOLUME</div>
-                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{vol_formatted}</div>
-                            </div>
-                            <div>
-                                <div style="font-size: 10px; color: #666666; font-weight:600;">EMA20 DIST</div>
-                                <div style="font-size: 13px; font-weight: 700; color: {stock['sig']['color']}; margin-top: 1px;">{stock['dist_pct']:.2f}%</div>
-                            </div>
-                            <div>
-                                <div style="font-size: 10px; color: #666666; font-weight:600;">200EMA DIST</div>
-                                <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{dist_200_val}</div>
-                            </div>
-                        </div>
+                        if badge_markdown_items:
+                            st.markdown(" ".join(badge_markdown_items))
+                        else:
+                            st.markdown("<span style='color:#555555; font-size:11px;'>• BALANCED ACTION PRICE</span>", unsafe_allow_html=True)
                         
-                        <div style="margin-top: 14px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: 4px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.04);">
-                            <span style="font-size: 10px; color: #666666; font-weight: 600;">VOLUME STRENGTH</span>
-                            <span style="font-size: 11px; font-weight: 700; color: {stock['v_strength']['color']};">{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
-                        </div>
-                    </div>
-                    """
-                    
-                    st.markdown(rendered_card_html, unsafe_allow_html=True)
-                    st.write("")
-                    st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
+                        st.markdown("---")
+                        
+                        # Data Parameter Matrix Blocks
+                        m_col1, m_col2 = st.columns(2)
+                        with m_col1:
+                            st.metric(label="CMP", value=f"₹{stock['ltp']:.2f}")
+                            st.metric(label="EMA20 DIST", value=f"{stock['dist_pct']:.2f}%")
+                        with m_col2:
+                            st.metric(label="VOLUME", value=format_volume_indian(stock['volume']))
+                            dist_200_str = f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"
+                            st.metric(label="200EMA DIST", value=dist_200_str)
+                        
+                        # Footer space volume tracker
+                        st.markdown(
+                            f"<div style='background:rgba(255,255,255,0.03); padding:8px; border-radius:4px; text-align:center; font-size:12px; border:1px solid rgba(255,255,255,0.05);'>"
+                            f"<span style='color:#888888;'>VOLUME STRENGTH: </span>"
+                            f"<b style='color:{stock['v_strength']['color']};'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</b>"
+                            f"</div>", 
+                            unsafe_allow_html=True
+                        )
+                        
+                        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+                        st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
     if st.session_state.ts_prewatch is None:
         st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
