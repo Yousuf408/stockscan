@@ -259,20 +259,30 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Confidence Score":
         processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
-    # ══════════════════════════════════════════
-    #  WATCHLIST BATCH INJECTOR PANEL
-    # ══════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════
+    #  WATCHLIST BATCH INJECTOR PANEL — SYNCED WITH OFFICIAL FILE BUCKETS
+    # ════════════════════════════════════════════════════════════════════════
     st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([5, 3])
+        
         with w_col1:
-            target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"], label_visibility="collapsed")
+            # Matches exactly with your main file dashboard tabs configuration
+            target_list_id = st.selectbox(
+                "Select Target Database Watchlist Bucket Location:", 
+                ["Today's Watchlist", "Yesterday's Watchlist", "New Setup Watchlist"], 
+                label_visibility="collapsed"
+            )
+        
         with w_col2:
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
+                    if "watchlist_data" not in st.session_state:
+                        st.session_state.watchlist_data = {}
+                        
                     if target_list_id not in st.session_state.watchlist_data:
                         st.session_state.watchlist_data[target_list_id] = []
                     
@@ -281,14 +291,24 @@ if st.session_state.ts_prewatch:
                         clean_sym = f"{item['sym']}.NS" if "." not in item['sym'] else item['sym']
                         trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
                         
-                        already_present = any(x["symbol"] == clean_sym and x["direction"] == trade_dir for x in st.session_state.watchlist_data[target_list_id])
+                        already_present = any(
+                            x.get("symbol") == clean_sym and x.get("direction") == trade_dir 
+                            for x in st.session_state.watchlist_data[target_list_id]
+                        )
+                        
                         if not already_present:
+                            # Row format mapping for table rendering engine
                             st.session_state.watchlist_data[target_list_id].append({
-                                "symbol": clean_sym, "direction": trade_dir, "exchange": "NS",
-                                "sector": item["sector"], "status": "WATCHING"
+                                "symbol": clean_sym, 
+                                "direction": trade_dir, 
+                                "exchange": "NS",
+                                "sector": item["sector"].replace('NIFTY ', ''), 
+                                "status": "WATCHING",
+                                "ltp": item["ltp"]
                             })
                             added_counter += 1
-                    st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
+                            
+                    st.toast(f"⚡ Injected {added_counter} Stocks directly into [{target_list_id}] Matrix!", icon="✅")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
     
