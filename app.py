@@ -330,7 +330,7 @@ class PriceStreamer:
     def on_close(self, wsapp):
         print("[WS] Closed")
 
-   def start_websocket(self):
+  def start_websocket(self):
         """Main loop: WebSocket → Single Pass Fallback → Retry WebSocket"""
         while True:
             try:
