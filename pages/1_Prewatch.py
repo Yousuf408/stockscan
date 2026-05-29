@@ -297,7 +297,7 @@ if st.session_state.ts_prewatch:
             with col_card_main:
                 with st.container(border=True):
                     # Header layout metrics
-                    t_col1, t_col2 = st.columns([3, 1])
+                    t_col1, t_col2 = st.columns([2, 1])
                     with t_col1:
                         st.markdown(f"## **{stock['sym']}** | <span style='font-size:13px; color:#888888; font-weight:normal;'>📁 {stock['sector']}</span>", unsafe_allow_html=True)
                     with t_col2:
