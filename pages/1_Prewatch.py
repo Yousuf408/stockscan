@@ -339,7 +339,7 @@ if st.session_state.ts_prewatch:
                 with m_col1:
                     m1_color = "#00AA3B" if stock['dist_pct'] >= 0 else "#D32F2F"
                     m1_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
-                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px;'>EMA20 DIST</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>EMA20 DIST</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: {m1_color}; margin-top: 2px;'>{m1_sign} {abs(stock['dist_pct']):.2f}%</div>", unsafe_allow_html=True)
                 
                 # Metric 2: 200EMA Distance Layout Column
@@ -352,17 +352,17 @@ if st.session_state.ts_prewatch:
                     else:
                         m2_html = "<span style='color: #888888;'>—</span>"
                         
-                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px;'>200EMA DIST</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>200EMA DIST</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; margin-top: 2px;'>{m2_html}</div>", unsafe_allow_html=True)
                 
                 # Metric 3: Current Market Price (CMP) Layout Column - FORCED DARK visibility
                 with m_col3:
-                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px;'>CMP</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>CMP</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>₹{stock['ltp']:.2f}</div>", unsafe_allow_html=True)
                 
                 # Metric 4: Volume Tracking Layout Column - FORCED DARK visibility
                 with m_col4:
-                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px;'>VOLUME</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>VOLUME</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>{format_volume_indian(stock['volume'])}</div>", unsafe_allow_html=True)
                 
                 # Metric 5: Advanced Volume analytics matrix block & Gauge tracking
@@ -370,7 +370,7 @@ if st.session_state.ts_prewatch:
                     st.markdown(
                         f"""
                         <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; padding-left: 10px;'>
-                            <span style='font-size: 11px; color: #666666; font-weight: 700; text-transform: uppercase;'>Volume Strength</span>
+                            <span style='font-size: 11px; color: #000000; font-weight: 700; text-transform: uppercase;'>Volume Strength</span>
                             <span style='font-size: 12px; color: {stock['v_strength']['color']}; font-weight: 700;'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
                         </div>
                         """, unsafe_allow_html=True
