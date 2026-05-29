@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import math
 from datetime import datetime
 
 # ══════════════════════════════════════════
@@ -70,22 +71,28 @@ def calculate_ema(prices: list, period: int) -> float:
         return None
     prices_series = pd.Series(prices)
     ema = prices_series.ewm(span=period, adjust=False).mean()
-    return float(ema.iloc[-1]) # Explicit conversion to single scalar float
+    val = ema.iloc[-1]
+    if pd.isna(val) or math.isnan(val):
+        return None
+    return float(val)
 
 def calculate_volume_median(volumes: list) -> float:
     if len(volumes) < 5:
         return None
-    return float(np.median(volumes[-5:]))
+    val = np.median(volumes[-5:])
+    if pd.isna(val) or math.isnan(val):
+        return None
+    return float(val)
 
 def format_volume_indian(vol: float) -> str:
-    if not vol or vol == 0: return "0"
+    if not vol or pd.isna(vol) or math.isnan(vol) or vol == 0: return "0"
     if vol >= 10000000: return f"{vol / 10000000:.1f}Cr"
     if vol >= 100000: return f"{vol / 100000:.1f}L"
     if vol >= 1000: return f"{vol / 1000:.1f}K"
     return str(int(vol))
 
 def get_volume_strength(current_vol: float, median_vol: float) -> dict:
-    if not median_vol or median_vol == 0:
+    if not median_vol or pd.isna(median_vol) or math.isnan(median_vol) or median_vol == 0:
         return {"label": "🔴 WEAK", "ratio": 1.0, "color": "#FF4B4B"}
     ratio = current_vol / median_vol
     if ratio > 2.0: return {"label": "🔥 EXPLOSIVE", "ratio": ratio, "color": "#FF9900"}
@@ -106,21 +113,35 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
         return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    # Double check and force safe typecasting to clean float values
+    # Handle incoming structural NaN values safely to avoid type errors
+    if pd.isna(abs_dist) or math.isnan(abs_dist):
+        abs_dist = 0.0
+        
     if hasattr(abs_dist, "iloc"):
         abs_dist = float(abs_dist.iloc[-1])
     else:
         abs_dist = float(abs_dist)
         
-    if hasattr(abs_dist_200, "iloc"):
-        abs_dist_200 = float(abs_dist_200.iloc[-1])
-    elif abs_dist_200 is not None:
-        abs_dist_200 = float(abs_dist_200)
+    if abs_dist_200 is not None:
+        if pd.isna(abs_dist_200) or math.isnan(abs_dist_200) or hasattr(abs_dist_200, "dropna"):
+            abs_dist_200 = None
+        elif hasattr(abs_dist_200, "iloc"):
+            abs_dist_200 = float(abs_dist_200.iloc[-1])
+        else:
+            abs_dist_200 = float(abs_dist_200)
 
-    score = 100 - (abs_dist * 2)
-    if body_gt_wick: score += 20
-    if abs_dist_200 is not None and abs_dist_200 < 50: score += 10
+    # Secure base math computation
+    score = 100.0 - (abs_dist * 2.0)
     
+    if body_gt_wick: 
+        score += 20.0
+    if abs_dist_200 is not None and abs_dist_200 < 50.0: 
+        score += 10.0
+        
+    # Safeguard check to confirm final score variable is never NaN before parsing to int
+    if pd.isna(score) or math.isnan(score):
+        return 50
+        
     return int(min(100, max(0, round(float(score)))))
 
 # ══════════════════════════════════════════
@@ -287,7 +308,7 @@ if st.session_state.ts_prewatch:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
         
-        # Calling our secure type-casted logic function safely
+        # Calling our secure runtime validation method
         conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
         
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
@@ -412,10 +433,10 @@ if st.session_state.ts_prewatch:
                 
                 with m2:
                     st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>200 EMA PRICE</p>", unsafe_allow_html=True)
-                    if stock['ema200'] is not None:
+                    if stock['ema200'] is not None and not math.isnan(stock['ema200']):
                         m2_html = f"<span style='color: #111111;'>₹{stock['ema200']:.2f}</span>"
                     else:
-                        m2_html = "<span style='color: #888888;'>—</span>"
+                        m2_html = "<span style='color: #888888;'>No Data (New Stock)</span>"
                     st.markdown(f"<p style='font-size:16px; font-weight:700; margin:2px 0 0 0;'>{m2_html}</p>", unsafe_allow_html=True)
                 
                 with m3:
