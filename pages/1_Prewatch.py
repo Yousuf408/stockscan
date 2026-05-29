@@ -7,7 +7,7 @@ from datetime import datetime
 #  EXTERNAL MODULE & BACKEND INTEGRATION
 # ══════════════════════════════════════════
 try:
-    import yfinance as tf
+    import yfinance as yf
     YFINANCE_AVAILABLE = True
 except ImportError:
     YFINANCE_AVAILABLE = False
@@ -61,43 +61,38 @@ def format_volume_indian(vol: float) -> str:
 
 def get_volume_strength(current_vol: float, median_vol: float) -> dict:
     if not median_vol or median_vol == 0:
-        return {"label": "🔴 Weak", "ratio": 0.0, "color": "#FF4B4B"}
+        return {"label": "🔴 WEAK", "ratio": 1.0, "color": "#FF4B4B"}
     ratio = current_vol / median_vol
-    if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio, "color": "#FF9900"}
-    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00AA3B"}
-    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio, "color": "#B36200"}
-    return {"label": "🔴 Weak", "ratio": ratio, "color": "#D32F2F"}
+    if ratio > 2.0: return {"label": "🔥 EXPLOSIVE", "ratio": ratio, "color": "#FF9900"}
+    if ratio > 1.5: return {"label": "🟢 STRONG", "ratio": ratio, "color": "#00AA3B"}
+    if ratio > 1.0: return {"label": "🟡 BUILD", "ratio": ratio, "color": "#B36200"}
+    return {"label": "🔴 WEAK", "ratio": ratio, "color": "#FF4B4B"}
 
 def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> dict:
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.1)", "status": "buy"}
+        return {"label": "▲ STRONG BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.08)"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.1)", "status": "buy"}
+        return {"label": "▲ BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.08)"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.1)", "status": "sell"}
+        return {"label": "▼ STRONG SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
     else:
-        return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.1)", "status": "sell"}
+        return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    score = 100 - (abs_dist / 5 * 60)
+    # Calculation adjusted to work with price difference in points
+    score = 100 - (abs_dist * 2)
     if body_gt_wick: score += 20
-    if abs_dist_200 is not None and abs_dist_200 < 5: score += 10
+    if abs_dist_200 is not None and abs_dist_200 < 50: score += 10
     return int(min(100, max(0, round(score))))
 
 # ══════════════════════════════════════════
 #  LIVE DATA CONNECTOR (ANGEL ONE + YFINANCE)
 # ══════════════════════════════════════════
 def fetch_daily_candles(symbol: str, info: dict) -> dict:
-    """
-    Attempts to pull data via live Angel One connection from app.py context.
-    If unavailable, it transparently falls back to Yahoo Finance historical pipelines.
-    """
-    # ---- PIPELINE 1: TRY LIVE ANGEL ONE BACKEND ----
     if "smartApi" in globals() or hasattr(st, "session_state") and any("smartApi" in k for k in st.session_state.keys()):
         try:
-            # Safely grab smartApi instance context
             api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
             token = info.get("token")
             
@@ -113,20 +108,18 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
                 if response.get("status") and response.get("data"):
                     candles = []
                     for row in response["data"]:
-                        # Angel One format: [Datetime, Open, High, Low, Close, Volume]
                         candles.append({
                             "o": float(row[1]), "h": float(row[2]),
                             "l": float(row[3]), "c": float(row[4]), "v": int(row[5])
                         })
                     return {"ok": True, "candles": candles, "source": "Angel One"}
         except Exception:
-            pass # Suppress and bubble straight down to fallback engine
+            pass
 
-    # ---- PIPELINE 2: FALLBACK TO LIVE YAHOO FINANCE ----
     if YFINANCE_AVAILABLE:
         try:
             ns_ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
-            ticker_obj = tf.Ticker(ns_ticker)
+            ticker_obj = yf.Ticker(ns_ticker)
             df = ticker_obj.history(period="1y", interval="1d")
             
             if not df.empty and len(df) >= 5:
@@ -138,7 +131,7 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
                     })
                 return {"ok": True, "candles": candles, "source": "Yahoo Finance"}
         except Exception as e:
-            return {"ok": False, "error": f"Data connection dropped: {str(e)}"}
+            return {"ok": False, "error": str(e)}
             
     return {"ok": False, "error": "No operational market data engine active."}
 
@@ -154,7 +147,7 @@ def run_prewatch_scan():
     
     for idx, (sym, info) in enumerate(all_stocks):
         prog_bar.progress(int(((idx + 1) / len(all_stocks)) * 100))
-        status_text.text(f"Querying Core Feed for: {sym} ({idx+1}/{len(all_stocks)})")
+        status_text.text(f"Scanning Ticker Feed: {sym} ({idx+1}/{len(all_stocks)})")
         
         res = fetch_daily_candles(sym, info)
         if res.get("ok") and len(res["candles"]) >= 5:
@@ -169,10 +162,12 @@ def run_prewatch_scan():
             if not ema20: continue
             ltp = last_candle["c"]
             
-            dist_pct = ((ltp - ema20) / ema20) * 100
-            abs_dist = abs(dist_pct)
-            dist_200 = ((ltp - ema200) / ema200) * 100 if ema200 else None
-            abs_dist_200 = abs(dist_200) if dist_200 is not None else None
+            # --- NUMBER CODE (FIRST 2 LINES CHANGED) ---
+            dist_pct = ema20  
+            abs_dist = abs(ltp - ema20)  
+            
+            # Additional calculations for 200 EMA absolute point tracking
+            abs_dist_200 = abs(ltp - ema200) if ema200 is not None else None
             
             body = abs(last_candle["c"] - last_candle["o"])
             wick = (last_candle["h"] - last_candle["l"]) - body
@@ -182,7 +177,7 @@ def run_prewatch_scan():
             results.append({
                 "sym": sym, "sector": info.get("sector", "GENERAL SECTOR"), "ltp": ltp,
                 "ema20": ema20, "ema200": ema200, "dist_pct": dist_pct,
-                "abs_dist": abs_dist, "dist_200": dist_200, "abs_dist_200": abs_dist_200,
+                "abs_dist": abs_dist, "abs_dist_200": abs_dist_200,
                 "body_gt_wick": body_gt_wick, "volume": volume, "vol_median": vol_median,
                 "last_candle": last_candle, "source": res.get("source", "Live")
             })
@@ -197,7 +192,7 @@ def run_prewatch_scan():
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
-# Control Action Header Strip
+# Action Controls
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
 with col_btn1:
     if st.button("🔍 SCAN DAILY EMA", use_container_width=True, type="primary"):
@@ -208,7 +203,7 @@ with col_btn2:
         st.session_state.ts_prewatch_time = None
         st.rerun()
 
-# Scanned Counter Metric Setup
+# Scanned Metrics Information Bar
 total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_prewatch else 0
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
 
@@ -221,22 +216,19 @@ col_info.markdown(
 )
 
 # ══════════════════════════════════════════
-#  TUNING & FILTERING MATRIX CONTROL PANEL
+#  FILTER & REFINEMENT MATRIX PANEL
 # ══════════════════════════════════════════
-st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #000000;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='font-size: 14px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 with st.container(border=True):
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
-    
     with f_col1:
         filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
         body_filter_on = st.toggle("Filter Body > Wick (💪 STRONG)", value=False)
-        
     with f_col2:
         filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
-        
     with f_col3:
-        filter_ema20 = st.number_input("Max Dist from EMA20 %", min_value=0.0, max_value=100.0, value=5.0, step=0.5)
-        
+        # Changed text from % to Rs for filter reference
+        filter_ema20 = st.number_input("Max Dist from EMA20 (₹ Gap)", min_value=0.0, max_value=5000.0, value=15.0, step=1.0)
     with f_col4:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
@@ -251,7 +243,7 @@ if st.session_state.ts_prewatch:
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
-    # Filter Sector Configuration
+    # Sector Filter Badges
     available_sectors = sorted(list(set([x["sector"] for x in filtered_data])))
     sector_selection = st.pills("Filter Matrix by Sector Footprint:", ["ALL"] + available_sectors, default="ALL")
     
@@ -273,16 +265,15 @@ if st.session_state.ts_prewatch:
         processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ══════════════════════════════════════════
-    #  ACTION BANNER: WATCHLIST STORAGE ENGINE
+    #  WATCHLIST BATCH INJECTOR PANEL
     # ══════════════════════════════════════════
-    st.markdown("<div style='margin-top:15px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
-        st.markdown("<h4 style='margin:0; font-size:15px; color:#000000;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
-        w_col1, w_col2 = st.columns([4, 3])
+        st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
+        w_col1, w_col2 = st.columns([5, 3])
         with w_col1:
-            target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
+            target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"], label_visibility="collapsed")
         with w_col2:
-            st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
@@ -293,7 +284,7 @@ if st.session_state.ts_prewatch:
                     added_counter = 0
                     for item in processed_cards_list:
                         clean_sym = f"{item['sym']}.NS" if "." not in item['sym'] else item['sym']
-                        trade_dir = "SELL" if item["sig"]["status"] == "sell" else "BUY"
+                        trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
                         
                         already_present = any(x["symbol"] == clean_sym and x["direction"] == trade_dir for x in st.session_state.watchlist_data[target_list_id])
                         if not already_present:
@@ -304,99 +295,81 @@ if st.session_state.ts_prewatch:
                             added_counter += 1
                     st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
 
-    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
     
     if not processed_cards_list:
         st.info("No stock setups configured matching filters.")
     else:
         # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT ENGINE - LIVE LIGHT MODE VISIBILITY MATRIX
+        #  UI/UX VIEWPORT ENGINE - --- LAST 2 LINES CHANGED TO NUMBER ENGINE ---
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
-                head_left, head_right = st.columns([8, 4])
-                
-                with head_left:
+                # 1. Header Metadata Strip Layout
+                h_left, h_right = st.columns([8, 4])
+                with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
-                    
-                    near_badge = ""
-                    if stock["abs_dist"] <= 1.0:
-                        near_badge = "<span style='background: rgba(255,153,0,0.12); color: #B36200; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.3); text-transform: uppercase; white-space: nowrap;'>⭐ Near</span>"
-                        
-                    strong_badge = ""
-                    if stock["body_gt_wick"]:
-                        strong_badge = "<span style='background: rgba(0,204,71,0.12); color: #007A2B; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,204,71,0.3); text-transform: uppercase; white-space: nowrap;'>💪 Strong Body</span>"
-                    
-                    badges_html = ""
-                    if near_badge or strong_badge:
-                        badges_html = f"<div style='display: flex; gap: 8px; align-items: center;'>{near_badge}{strong_badge}</div>"
+                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR</span>" if stock["abs_dist"] <= 5.0 else ""
+                    strong_badge = f"<span style='background: rgba(0,170,59,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
                     
                     st.markdown(
                         f"""
-                        <div style='display: flex; align-items: center; gap: 12px; width: 100%; max-width: 650px;'>
-                            <div style='min-width: 130px;'>
-                                <span style='font-size: 22px; font-weight: 800; color: #1E1E1E; letter-spacing: -0.3px;'>{stock['sym']}</span>
-                            </div>
-                            <span style='font-size: 18px; color: rgba(0,0,0,0.15); font-weight: 300;'>|</span>
-                            <div style='min-width: 140px; display: flex; align-items: center;'>
-                                <span style='font-size: 12px; color: #000000; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>📁 {clean_sector}</span>
-                            </div>
-                            {badges_html}
-                            <span style='font-size: 10px; color: #888888; background: #f1f1f1; padding: 1px 5px; border-radius:3px;'>{stock.get('source', 'Live')}</span>
+                        <div style='display: flex; align-items: center; gap: 8px;'>
+                            <span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span>
+                            <span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>
+                            {near_badge}
+                            {strong_badge}
                         </div>
                         """, unsafe_allow_html=True
                     )
-                
-                with head_right:
+                with h_right:
                     st.markdown(
                         f"""
-                        <div style='text-align: right; padding-top: 4px;'>
-                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 900; padding: 4px 12px; border-radius: 4px; border: 1px solid {stock['sig']['color']}33; letter-spacing: 0.5px;'>
+                        <div style='text-align: right;'>
+                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}40; letter-spacing: 0.5px;'>
                                 {stock['sig']['label']}
                             </span>
                         </div>
                         """, unsafe_allow_html=True
                     )
                 
-                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
-                m_col1, m_col2, m_col3, m_col4, vol_analysis_col = st.columns([2.0, 2.0, 2.0, 2.0, 4.0])
+                st.markdown("<div style='margin-top: 10px; border-bottom: 1px solid #f0f0f0;'></div>", unsafe_allow_html=True)
                 
-                with m_col1:
-                    m1_color = "#00AA3B" if stock['dist_pct'] >= 0 else "#D32F2F"
-                    m1_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
-                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>EMA20 DIST</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: {m1_color}; margin-top: 2px;'>{m1_sign} {abs(stock['dist_pct']):.2f}%</div>", unsafe_allow_html=True)
+                # 2. Horizontal Rows Displaying exact Numbers/Prices instead of Percentages
+                m1, m2, m3, m4, m5 = st.columns([2, 2, 2, 2, 4])
                 
-                with m_col2:
-                    dist_200_val = stock['dist_200']
-                    if dist_200_val is not None:
-                        m2_color = "#00AA3B" if dist_200_val >= 0 else "#D32F2F"
-                        m2_sign = "▲" if dist_200_val >= 0 else "▼"
-                        m2_html = f"<span style='color: {m2_color};'>{m2_sign} {abs(dist_200_val):.1f}%</span>"
+                with m1:
+                    # Ab yeh EMA20 ka exact price number dikhayega
+                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
+                
+                with m2:
+                    # Ab yeh EMA200 ka exact price number dikhayega
+                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>200 EMA PRICE</p>", unsafe_allow_html=True)
+                    if stock['ema200'] is not None:
+                        m2_html = f"<span style='color: #111111;'>₹{stock['ema200']:.2f}</span>"
                     else:
                         m2_html = "<span style='color: #888888;'>—</span>"
-                        
-                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>200EMA DIST</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size: 20px; font-weight: 700; margin-top: 2px;'>{m2_html}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size:16px; font-weight:700; margin:2px 0 0 0;'>{m2_html}</p>", unsafe_allow_html=True)
                 
-                with m_col3:
-                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>CMP</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>₹{stock['ltp']:.2f}</div>", unsafe_allow_html=True)
+                with m3:
+                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>CMP</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>₹{stock['ltp']:.2f}</p>", unsafe_allow_html=True)
                 
-                with m_col4:
-                    st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>VOLUME</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>{format_volume_indian(stock['volume'])}</div>", unsafe_allow_html=True)
+                with m4:
+                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>VOLUME</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>{format_volume_indian(stock['volume'])}</p>", unsafe_allow_html=True)
                 
-                with vol_analysis_col:
+                with m5:
                     st.markdown(
                         f"""
-                        <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; padding-left: 10px;'>
-                            <span style='font-size: 11px; color: #000000; font-weight: 700; text-transform: uppercase;'>Volume Strength</span>
-                            <span style='font-size: 12px; color: {stock['v_strength']['color']}; font-weight: 700;'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
+                        <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;'>
+                            <span style='font-size: 10px; color: #777777; font-weight: 700;'>VOL MATRIX:</span>
+                            <span style='font-size: 11px; color: {stock['v_strength']['color']}; font-weight: 700;'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
                         </div>
                         """, unsafe_allow_html=True
                     )
-                    st.progress(stock["confidence"] / 100, text=f"Confidence: {stock['confidence']}%")            
+                    st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
     if st.session_state.ts_prewatch is None:
         st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
