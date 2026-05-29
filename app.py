@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — app.py
 #  Production-Grade Safe WebSocket Streamer
-#  Strict Max-2-Retry Strict Circuit Breaker
+#  With Unmapped Token UI Fallback Core Engine
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -108,7 +108,6 @@ def increment_failure_count() -> int:
     current_fails = cache.get("failures", 0) + 1
     cache["failures"] = current_fails
     
-    # STRICT RULE: Hard shutdown on exactly 2 failed attempts
     if current_fails >= 2:
         cache["circuit_broken"] = True
         cache["mode"] = "http_polling"
@@ -158,9 +157,16 @@ def build_token_map(stocks: list):
     for stock in stocks:
         symbol   = stock.get("symbol")
         exchange = stock.get("exchange", "NS")
-        try: token = get_stock_token(symbol)
-        except: token = None
-        if not token: continue
+        try: 
+            token = get_stock_token(symbol)
+        except: 
+            token = None
+            
+        if not token: 
+            # Quietly log unmapped tokens without breaking execution flow
+            print(f"[Token Warning] No valid active mapping found for symbol: {symbol}")
+            continue
+            
         token = str(token)
         token_map[token] = (symbol, exchange)
         if exchange == "NS": nse_tokens.append(token)
@@ -190,32 +196,43 @@ def run_http_polling(angel_obj):
             try:
                 symbol   = stock.get("symbol")
                 exchange = stock.get("exchange", "NS")
-                token    = str(get_stock_token(symbol) or "")
-                if not token: continue
-                resp = angel_obj.ltpData("NSE" if exchange == "NS" else "BSE", symbol, token)
+                token    = get_stock_token(symbol)
+                
+                # Dynamic validation redirect step
+                if not token:
+                    run_single_yfinance_patch(symbol, exchange)
+                    continue
+                    
+                resp = angel_obj.ltpData("NSE" if exchange == "NS" else "BSE", symbol, str(token))
                 if resp and resp.get("status"):
                     ltp = float(resp["data"]["ltp"])
                     update_price(symbol, exchange, ltp, "http")
             except Exception as e:
-                print(f"[HTTP] API Sleep State: {e}")
+                print(f"[HTTP] API Routing Exception: {e}")
         time.sleep(1)
 
 def run_yfinance_fallback():
-    import yfinance as yf
-    print("[yfinance Fallback] Fetching cloud data feed...")
-    force_set_mode("yfinance")
+    print("[yfinance Fallback] Fetching comprehensive cloud data feed...")
     stocks = get_all_watchlist_stocks()
     for stock in stocks:
-        try:
-            symbol   = stock.get("symbol")
-            exchange = stock.get("exchange", "NS")
-            suffix   = ".NS" if exchange == "NS" else ".BO"
-            ticker   = yf.Ticker(f"{symbol}{suffix}")
-            price    = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
-            if price:
-                update_price(symbol, exchange, float(price), "yfinance")
-        except Exception as e:
-            print(f"[yfinance] Error: {e}")
+        run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
+
+def run_single_yfinance_patch(symbol: str, exchange: str):
+    """Safely patches missing token data slots using a public web interface"""
+    import yfinance as yf
+    try:
+        # Check if ticker name matches corporate identity and adjust accordingly
+        ticker_symbol = symbol
+        if symbol.upper() == "BSE":
+            ticker_symbol = "BSE" if exchange == "NS" else "540073" # Corporate code fallback block
+            
+        suffix = ".NS" if exchange == "NS" else ".BO"
+        ticker = yf.Ticker(f"{ticker_symbol}{suffix}")
+        price = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
+        if price:
+            update_price(symbol, exchange, float(price), "yfinance")
+    except Exception as e:
+        print(f"[yfinance Patch Error] Failed to resolve value for {symbol}: {e}")
 
 
 # ══════════════════════════════════════════
@@ -307,21 +324,28 @@ class PriceStreamer:
                 # ── FILE PERMANENT STATE BLOCK CHECK ──
                 cache = load_cache()
                 if cache.get("circuit_broken", False):
-                    print("[ANTI-BAN ACTIVATED] Polling cleanly via HTTP every 15s to guarantee account protection...")
+                    print("[ANTI-BAN ACTIVATED] Polling safely via HTTP...")
                     run_http_polling(self.angel_obj)
                     time.sleep(15)
                     continue
 
-                # Prepare assets
+                # Prepare assets and capture unmapped tickers
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
+                
+                # Check for unmapped assets like 'BSE' to run parallel yfinance patches
+                for stock in stocks:
+                    from stocks import get_stock_token
+                    try: t = get_stock_token(stock.get("symbol"))
+                    except: t = None
+                    if not t:
+                        run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
+
                 if not self.token_map:
                     run_yfinance_fallback()
-                    time.sleep(10)
+                    time.sleep(15)
                     continue
 
                 self.refresh_angel_session()
-                
-                # Register attempt to permanent storage
                 current_fail_count = increment_failure_count()
                 print(f"[WS Engine] Attempting WebSocket Connection... Persistent Trace Count: {current_fail_count}/2")
                 
@@ -332,34 +356,24 @@ class PriceStreamer:
                     self.feed_token
                 )
                 
-                # ── FORCE OVERRIDE ANGEL ONE INTERNAL RETRY LOOP ──
-                self.sws.max_retry_attempt = 1  # Stop internal SDK looping!
-                
+                self.sws.max_retry_attempt = 1  
                 self.sws.on_open  = self.on_open
                 self.sws.on_data  = self.on_data
                 self.sws.on_error = self.on_error
                 self.sws.on_close = self.on_close
                 
-                # Run connection in isolated background thread
                 network_worker = threading.Thread(target=self.sws.connect, daemon=True)
                 network_worker.start()
-                
-                # Wait 5 seconds to verify if handshake is accepted
                 time.sleep(5)
 
-                # Maintain context anchor while connection stays up
                 while self.is_ws_connected and is_market_open():
                     time.sleep(1)
 
-                # If connection dropped, execute single-pass fallback
                 if is_market_open() and not self.is_ws_connected:
-                    print("[WS Engine] Connection failed or ended. Processing safe fallback route...")
+                    print("[WS Engine] Processing safe fallback route...")
                     try: run_http_polling(self.angel_obj)
-                    except:
-                        try: run_yfinance_fallback()
-                        except: pass
+                    except: run_yfinance_fallback()
 
-                # Enforce a 15-second delay before attempting another loop iteration
                 time.sleep(15)
 
             except Exception as e:
@@ -422,17 +436,17 @@ ist_now    = now_ist().strftime("%I:%M %p IST")
 mode_badge = {
     "websocket":    "🟢 WebSocket Live",
     "http_polling": "🟡 HTTP Polling",
-    "yfinance":     "🟠 yfinance (Delayed)",
+    "yfinance":     "🟠 yfinance (Hybrid)",
     "offline":      "⚪ Market Closed"
 }
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Price Feed", mode_badge.get(mode, "Unknown"))
+    st.metric("Price Feed Status", mode_badge.get(mode, "Unknown"))
 with col2:
     st.metric("Last Price Update", last if last else "Waiting...")
 with col3:
-    st.metric("Stocks Tracked", total)
+    st.metric("Total Unique Items Tracked", total)
 with col4:
     st.metric("Market Status", f"{'🟢 Open' if market_now else '🔴 Closed'} · {ist_now}")
 
@@ -440,15 +454,14 @@ st.divider()
 
 if status["connected"]:
     if cache.get("circuit_broken", False):
-        st.error("🔒 Anti-Ban Protection Active: The background WebSocket was permanently shut down after 2 failed connection handshakes. Secure, throttled HTTP Polling fallback is active to safeguard your credentials.")
+        st.error("🔒 Anti-Ban Protection Active: Core safe HTTP polling fallback processing active.")
     elif market_now:
-        st.success("✅ Angel One Session Operational · Streamer actively processing prices")
+        st.success("✅ Angel One Session Operational · Streamer processing prices across multi-channel fallbacks")
     else:
         st.warning(f"⏰ System Active · Market Closed · Engine idling until opening bell.")
 else:
     st.error(f"❌ Initial Connection Failure: {status.get('error', 'Unknown Error')}")
 
-# Diagnostic Panel Admin Reset Area
 with st.expander("🔧 System Diagnostic Admin Panel"):
     st.write(f"**Persistent Failures counted on disk:** `{cache.get('failures', 0)} / 2`")
     st.write(f"**Circuit Breaker Status:** `{cache.get('circuit_broken', False)}`")
