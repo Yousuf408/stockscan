@@ -170,9 +170,7 @@ with col_btn2:
         st.session_state.ts_prewatch_time = None
         st.rerun()
 
-# ══════════════════════════════════════════
-#  BUG FIX: GLOBAL SCANNED TRACKER ALWAYS SHOWING
-# ══════════════════════════════════════════
+# Scanned Counter Metric Setup
 total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_prewatch else 0
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
 
@@ -268,22 +266,14 @@ if st.session_state.ts_prewatch:
                             added_counter += 1
                     st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
 
-    # ══════════════════════════════════════════
-    #  BUG FIX: DYNAMIC FILTER TRACKER TEXT HEADER
-    # ══════════════════════════════════════════
-    st.markdown(
-        f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>"
-        f"📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options"
-        f"</h3>", 
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
     
     if not processed_cards_list:
-        st.info("No stock setups configured in this screen view bucket context frame matching your filters.")
+        st.info("No stock setups configured matching filters.")
     else:
         # ════════════════════════════════════════════════════════════════════════
         #  CHANGE CARD LAYOUT SIZE / WIDTH FROM HERE 
-        #  Modify ratios below to change size. Large numbers on sides = smaller card width.
+        #  Increase spacers (e.g., 2.0) to make it narrower, decrease to expand.
         # ════════════════════════════════════════════════════════════════════════
         LEFT_SPACER_SIZE = 1.5
         CARD_BODY_SIZE = 5.0
@@ -291,34 +281,31 @@ if st.session_state.ts_prewatch:
         # ════════════════════════════════════════════════════════════════════════
 
         for stock in processed_cards_list:
-            # Build viewport grid sequence layout
             col_spacer_left, col_card_main, col_spacer_right = st.columns([LEFT_SPACER_SIZE, CARD_BODY_SIZE, RIGHT_SPACER_SIZE])
             
             with col_card_main:
+                # COMPACT DESIGN FIX: Drastically condensed padding and row distribution blocks
                 with st.container(border=True):
-                    # Header layout metrics
-                    t_col1, t_col2 = st.columns([2, 1])
-                    with t_col1:
-                        st.markdown(f"## **{stock['sym']}** | <span style='font-size:13px; color:#888888; font-weight:normal;'>📁 {stock['sector']}</span>", unsafe_allow_html=True)
-                    with t_col2:
+                    
+                    # --- ROW 1: Header Titles, Badges, and Signals on a Single Row (Saves massive vertical space) ---
+                    h_col1, h_col2, h_col3 = st.columns([2.5, 2.5, 2])
+                    with h_col1:
+                        st.markdown(f"<h3 style='margin:0; font-size:19px; font-weight:800;'>{stock['sym']} <span style='font-size:12px; color:#777777; font-weight:normal;'>| {stock['sector']}</span></h3>", unsafe_allow_html=True)
+                    with h_col2:
+                        badge_markdown_items = []
+                        if stock["abs_dist"] <= 1.0:
+                            badge_markdown_items.append("`⭐ NEAR`")
+                        if stock["body_gt_wick"]:
+                            badge_markdown_items.append("`💪 STRONG`")
+                        st.markdown(" ".join(badge_markdown_items) if badge_markdown_items else "<span style='color:#555555; font-size:11px;'>• BALANCED</span>", unsafe_allow_html=True)
+                    with h_col3:
                         lbl_color = stock['sig']['color']
-                        st.markdown(f"<div style='text-align:right; font-weight:800; color:{lbl_color}; font-size:15px; padding-top:4px;'>{stock['sig']['label']}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='text-align:right; font-weight:800; color:{lbl_color}; font-size:14px;'>{stock['sig']['label']}</div>", unsafe_allow_html=True)
                     
-                    # Tag array line
-                    badge_markdown_items = []
-                    if stock["abs_dist"] <= 1.0:
-                        badge_markdown_items.append("`⭐ VERY NEAR`")
-                    if stock["body_gt_wick"]:
-                        badge_markdown_items.append("`💪 STRONG BODY`")
+                    # Small structural spacing divider without an aggressive lines layout break
+                    st.markdown("<div style='margin-bottom:-5px; padding-top:4px; border-bottom:1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
                     
-                    if badge_markdown_items:
-                        st.markdown(" ".join(badge_markdown_items))
-                    else:
-                        st.markdown("<span style='color:#555555; font-size:11px;'>• BALANCED ACTION PRICE</span>", unsafe_allow_html=True)
-                    
-                    st.markdown("---")
-                    
-                    # High density parameters layout matrix
+                    # --- ROW 2: Metrics Matrix Data parameters Grid ---
                     m_col1, m_col2, m_col3, m_col4 = st.columns(4)
                     with m_col1:
                         st.metric(label="CMP", value=f"₹{stock['ltp']:.2f}")
@@ -330,20 +317,20 @@ if st.session_state.ts_prewatch:
                         dist_200_str = f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"
                         st.metric(label="200EMA DIST", value=dist_200_str)
                     
-                    st.markdown("---")
+                    # Small structural spacing divider 
+                    st.markdown("<div style='margin-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.04);'></div>", unsafe_allow_html=True)
                     
-                    # Combined footer lines layout metrics
-                    f_col_left, f_col_right = st.columns([2, 2])
+                    # --- ROW 3: Volume Strength & Confidence Tracking Bar mapped horizontally side by side ---
+                    f_col_left, f_col_right = st.columns([2.5, 3.5])
                     with f_col_left:
                         st.markdown(
-                            f"<div style='background:rgba(255,255,255,0.02); padding:10px; border-radius:4px; text-align:center; font-size:13px; border:1px solid rgba(255,255,255,0.05); margin-top:4px;'>"
-                            f"<span style='color:#888888;'>VOLUME STRENGTH: </span>"
-                            f"<b style='color:{stock['v_strength']['color']};'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</b>"
+                            f"<div style='background:rgba(255,255,255,0.01); padding:4px 8px; border-radius:4px; font-size:12px; border:1px solid rgba(255,255,255,0.04); margin-top:2px; text-align:center;'>"
+                            f"<span style='color:#777777;'>VOL: </span><b style='color:{stock['v_strength']['color']};'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</b>"
                             f"</div>", 
                             unsafe_allow_html=True
                         )
                     with f_col_right:
-                        st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
+                        st.progress(stock["confidence"] / 100, text=f"Conf: {stock['confidence']}%")
 else:
     if st.session_state.ts_prewatch is None:
         st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
