@@ -93,21 +93,15 @@ def update_price(symbol: str, exchange: str, price: float, source: str):
         "exchange": exchange
     }
     cache["last_update"] = ist_time_str()
-    # KEY FIX: mode is set by whoever is actively fetching
-    # Do NOT override mode here — only the fetcher sets mode
     save_cache(cache)
 
 def set_mode(mode: str):
     cache = load_cache()
-    # KEY FIX: Never downgrade from active mode to offline
-    # if prices are being received
     current = cache.get("mode", "offline")
     active_modes = ["websocket", "http_polling", "yfinance"]
-    # Only allow offline if explicitly requested or no active fetcher
     if mode == "offline" and current in active_modes:
         stocks = cache.get("stocks", {})
         if stocks:
-            # Check if any price was updated in last 30 seconds
             last = cache.get("last_update", "")
             if last:
                 try:
@@ -188,7 +182,7 @@ def build_token_map(stocks: list):
 
 
 # ══════════════════════════════════════════
-#  HTTP POLLING FALLBACK
+#  HTTP POLLING FALLBACK (SINGLE round)
 # ══════════════════════════════════════════
 
 def run_http_polling(angel_obj):
@@ -225,6 +219,10 @@ def run_http_polling(angel_obj):
         time.sleep(1)
 
 
+# ══════════════════════════════════════════
+#  YFINANCE FALLBACK (SINGLE round)
+# ══════════════════════════════════════════
+
 def run_yfinance_fallback():
     import yfinance as yf
     print("[yfinance] Running single yfinance fallback pass...")
@@ -243,43 +241,6 @@ def run_yfinance_fallback():
                 update_price(symbol, exchange, float(price), "yfinance")
         except Exception as e:
             print(f"[yfinance] {stock.get('symbol')}: {e}")
-
-
-# ══════════════════════════════════════════
-#  YFINANCE FALLBACK
-# ══════════════════════════════════════════
-
-def run_yfinance_fallback():
-    import yfinance as yf
-    print("[yfinance] Starting yfinance fallback...")
-    force_set_mode("yfinance")
-
-    while True:
-        try:
-            if not is_market_open():
-                print("[yfinance] Market closed. Exiting yfinance.")
-                return
-
-            stocks = get_all_watchlist_stocks()
-            for stock in stocks:
-                try:
-                    symbol   = stock.get("symbol")
-                    exchange = stock.get("exchange", "NS")
-                    suffix   = ".NS" if exchange == "NS" else ".BO"
-                    ticker   = yf.Ticker(f"{symbol}{suffix}")
-                    price    = (ticker.fast_info.get("last_price")
-                                or ticker.fast_info.get("regularMarketPrice"))
-                    if price:
-                        update_price(symbol, exchange, float(price), "yfinance")
-                except Exception as e:
-                    print(f"[yfinance] {stock.get('symbol')}: {e}")
-
-            force_set_mode("yfinance")  # Keep mode current
-            time.sleep(10)
-
-        except Exception as e:
-            print(f"[yfinance] Error: {e}")
-            time.sleep(10)
 
 
 # ══════════════════════════════════════════
@@ -330,7 +291,7 @@ class PriceStreamer:
     def on_close(self, wsapp):
         print("[WS] Closed")
 
-  def start_websocket(self):
+    def start_websocket(self):
         """Main loop: WebSocket → Single Pass Fallback → Retry WebSocket"""
         while True:
             try:
@@ -374,12 +335,12 @@ class PriceStreamer:
                     self.sws.on_data  = self.on_data
                     self.sws.on_error = self.on_error
                     self.sws.on_close = self.on_close
-                    self.sws.connect()  # This blocks here while WS is alive
+                    self.sws.connect()  # Blocks here while WS session is alive
 
                 except Exception as ws_err:
                     print(f"[WS] Failed to connect: {ws_err}")
 
-                # ── IF WEBSOCKET CLOSES / FAILS: Run a temporary fallback cycle ──
+                # ── IF WEBSOCKET CLOSES / FAILS: Run a quick fallback cycle ──
                 if is_market_open():
                     print("[Streamer] WS disconnected. Fetching a single round of prices via HTTP...")
                     try:
