@@ -3,19 +3,29 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-# Import master dictionary universe from local directory file
+# ══════════════════════════════════════════
+#  EXTERNAL MODULE & BACKEND INTEGRATION
+# ══════════════════════════════════════════
+try:
+    import yfinance as tf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
+
+# Import your master dictionary universe containing your official tokens
 try:
     from stocks import STOCK_UNIVERSE
 except ImportError:
+    # Fallback structure with placeholder Angel One tokens if file link breaks
     STOCK_UNIVERSE = {
-        "RELIANCE": {"sector": "NIFTY ENERGY"},
-        "TCS": {"sector": "NIFTY IT"},
-        "HEROMOTOCO": {"sector": "NIFTY AUTO"},
-        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS"},
-        "GMDC": {"sector": "NIFTY METALS"},
-        "ADANIENT": {"sector": "NIFTY ENERGY"},
-        "WELCORP": {"sector": "NIFTY METALS"},
-        "NAVINFLUOR": {"sector": "NIFTY CHEM"}
+        "RELIANCE": {"sector": "NIFTY ENERGY", "token": "2885"},
+        "TCS": {"sector": "NIFTY IT", "token": "11536"},
+        "HEROMOTOCO": {"sector": "NIFTY AUTO", "token": "1348"},
+        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS", "token": "19485"},
+        "GMDC": {"sector": "NIFTY METALS", "token": "10174"},
+        "ADANIENT": {"sector": "NIFTY ENERGY", "token": "25"},
+        "WELCORP": {"sector": "NIFTY METALS", "token": "11369"},
+        "NAVINFLUOR": {"sector": "NIFTY CHEM", "token": "14144"}
     }
 
 # Initialize Session States for Multi-page synchronization
@@ -54,9 +64,9 @@ def get_volume_strength(current_vol: float, median_vol: float) -> dict:
         return {"label": "🔴 Weak", "ratio": 0.0, "color": "#FF4B4B"}
     ratio = current_vol / median_vol
     if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio, "color": "#FF9900"}
-    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00FF66"}
-    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio, "color": "#FFFF00"}
-    return {"label": "🔴 Weak", "ratio": ratio, "color": "#FF4B4B"}
+    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00AA3B"}
+    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio, "color": "#B36200"}
+    return {"label": "🔴 Weak", "ratio": ratio, "color": "#D32F2F"}
 
 def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> dict:
     is_above = ltp > ema20
@@ -77,36 +87,60 @@ def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: floa
     return int(min(100, max(0, round(score))))
 
 # ══════════════════════════════════════════
-#  FIXED OHLC ENGINE (Controlled Walk)
+#  LIVE DATA CONNECTOR (ANGEL ONE + YFINANCE)
 # ══════════════════════════════════════════
-def fetch_daily_candles(symbol: str) -> dict:
-    np.random.seed(abs(hash(symbol)) % 10000)
-    
-    # Establish realistic baseline valuation matrix mapping for NSE profiles
-    if "ADANIENT" in symbol: base_price = 3150.0
-    elif "RELIANCE" in symbol: base_price = 1420.0
-    elif "TCS" in symbol: base_price = 3950.0
-    elif "HEROMOTOCO" in symbol: base_price = 4200.0
-    elif "NAVINFLUOR" in symbol: base_price = 3200.0
-    elif "GMDC" in symbol: base_price = 450.0
-    else: base_price = np.random.uniform(500, 1800)
-    
-    candles = []
-    current_price = base_price
-    
-    # Generate bounded historic curve data frames
-    for _ in range(250):
-        # Controlled daily drift matrix prevents compounding inflation out of bounds
-        open_p = current_price * np.random.uniform(0.995, 1.005)
-        close = open_p * np.random.uniform(0.99, 1.01)
-        high = max(open_p, close) * np.random.uniform(1.00, 1.008)
-        low = min(open_p, close) * np.random.uniform(0.992, 1.00)
-        volume = int(np.random.uniform(80000, 1200000))
-        
-        candles.append({"o": open_p, "h": high, "l": low, "c": close, "v": volume})
-        current_price = close
-        
-    return {"ok": True, "candles": candles}
+def fetch_daily_candles(symbol: str, info: dict) -> dict:
+    """
+    Attempts to pull data via live Angel One connection from app.py context.
+    If unavailable, it transparently falls back to Yahoo Finance historical pipelines.
+    """
+    # ---- PIPELINE 1: TRY LIVE ANGEL ONE BACKEND ----
+    if "smartApi" in globals() or hasattr(st, "session_state") and any("smartApi" in k for k in st.session_state.keys()):
+        try:
+            # Safely grab smartApi instance context
+            api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
+            token = info.get("token")
+            
+            if api_obj and token:
+                params = {
+                    "exchange": "NSE",
+                    "symboltoken": str(token),
+                    "interval": "ONE_DAY",
+                    "fromdate": (pd.Timestamp.now() - pd.Timedelta(days=365)).strftime("%Y-%m-%d %H:%M"),
+                    "todate": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
+                }
+                response = api_obj.getHistoricData(params)
+                if response.get("status") and response.get("data"):
+                    candles = []
+                    for row in response["data"]:
+                        # Angel One format: [Datetime, Open, High, Low, Close, Volume]
+                        candles.append({
+                            "o": float(row[1]), "h": float(row[2]),
+                            "l": float(row[3]), "c": float(row[4]), "v": int(row[5])
+                        })
+                    return {"ok": True, "candles": candles, "source": "Angel One"}
+        except Exception:
+            pass # Suppress and bubble straight down to fallback engine
+
+    # ---- PIPELINE 2: FALLBACK TO LIVE YAHOO FINANCE ----
+    if YFINANCE_AVAILABLE:
+        try:
+            ns_ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+            ticker_obj = tf.Ticker(ns_ticker)
+            df = ticker_obj.history(period="1y", interval="1d")
+            
+            if not df.empty and len(df) >= 5:
+                candles = []
+                for idx, row in df.iterrows():
+                    candles.append({
+                        "o": float(row["Open"]), "h": float(row["High"]),
+                        "l": float(row["Low"]), "c": float(row["Close"]), "v": int(row["Volume"])
+                    })
+                return {"ok": True, "candles": candles, "source": "Yahoo Finance"}
+        except Exception as e:
+            return {"ok": False, "error": f"Data connection dropped: {str(e)}"}
+            
+    return {"ok": False, "error": "No operational market data engine active."}
 
 # ══════════════════════════════════════════
 #  SCAN OPERATIONS PIPELINE
@@ -120,9 +154,9 @@ def run_prewatch_scan():
     
     for idx, (sym, info) in enumerate(all_stocks):
         prog_bar.progress(int(((idx + 1) / len(all_stocks)) * 100))
-        status_text.text(f"Scanning Data Engine: {sym} ({idx+1}/{len(all_stocks)})")
+        status_text.text(f"Querying Core Feed for: {sym} ({idx+1}/{len(all_stocks)})")
         
-        res = fetch_daily_candles(sym)
+        res = fetch_daily_candles(sym, info)
         if res.get("ok") and len(res["candles"]) >= 5:
             candles = res["candles"]
             last_candle = candles[-1]
@@ -150,7 +184,7 @@ def run_prewatch_scan():
                 "ema20": ema20, "ema200": ema200, "dist_pct": dist_pct,
                 "abs_dist": abs_dist, "dist_200": dist_200, "abs_dist_200": abs_dist_200,
                 "body_gt_wick": body_gt_wick, "volume": volume, "vol_median": vol_median,
-                "last_candle": last_candle
+                "last_candle": last_candle, "source": res.get("source", "Live")
             })
                 
     prog_bar.empty()
@@ -276,7 +310,7 @@ if st.session_state.ts_prewatch:
         st.info("No stock setups configured matching filters.")
     else:
         # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT ENGINE - SYSTEMATIC LIGHT MODE DISPLAY
+        #  UI/UX VIEWPORT ENGINE - LIVE LIGHT MODE VISIBILITY MATRIX
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
@@ -308,6 +342,7 @@ if st.session_state.ts_prewatch:
                                 <span style='font-size: 12px; color: #000000; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>📁 {clean_sector}</span>
                             </div>
                             {badges_html}
+                            <span style='font-size: 10px; color: #888888; background: #f1f1f1; padding: 1px 5px; border-radius:3px;'>{stock.get('source', 'Live')}</span>
                         </div>
                         """, unsafe_allow_html=True
                     )
