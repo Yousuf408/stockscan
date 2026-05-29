@@ -185,7 +185,7 @@ col_info.markdown(
 # ══════════════════════════════════════════
 #  TUNING & FILTERING MATRIX CONTROL PANEL
 # ══════════════════════════════════════════
-st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #FFFFFF;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #000000;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 with st.container(border=True):
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
