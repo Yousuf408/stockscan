@@ -176,8 +176,8 @@ scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatc
 
 col_info.markdown(
     f"<div style='padding-top: 6px; font-size: 13px; color: #AAAAAA;'>"
-    f"⏳ <b>Last Scanned:</b> <span style='color:#FFFFFF;'>{scan_time_str}</span> | "
-    f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#FFFFFF;'>{total_scanned_count}</span>"
+    f"⏳ <b>Last Scanned:</b> <span style='color:#000000;'>{scan_time_str}</span> | "
+    f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#000000;'>{total_scanned_count}</span>"
     f"</div>",
     unsafe_allow_html=True
 )
