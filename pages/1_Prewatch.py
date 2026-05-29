@@ -81,7 +81,6 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
         return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    # Calculation adjusted to work with price difference in points
     score = 100 - (abs_dist * 2)
     if body_gt_wick: score += 20
     if abs_dist_200 is not None and abs_dist_200 < 50: score += 10
@@ -162,11 +161,8 @@ def run_prewatch_scan():
             if not ema20: continue
             ltp = last_candle["c"]
             
-            # --- NUMBER CODE (FIRST 2 LINES CHANGED) ---
             dist_pct = ema20  
             abs_dist = abs(ltp - ema20)  
-            
-            # Additional calculations for 200 EMA absolute point tracking
             abs_dist_200 = abs(ltp - ema200) if ema200 is not None else None
             
             body = abs(last_candle["c"] - last_candle["o"])
@@ -227,7 +223,6 @@ with st.container(border=True):
     with f_col2:
         filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
     with f_col3:
-        # Changed text from % to Rs for filter reference
         filter_ema20 = st.number_input("Max Dist from EMA20 (₹ Gap)", min_value=0.0, max_value=5000.0, value=15.0, step=1.0)
     with f_col4:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
@@ -269,107 +264,4 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
-        st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
-        w_col1, w_col2 = st.columns([5, 3])
-        with w_col1:
-            target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"], label_visibility="collapsed")
-        with w_col2:
-            if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
-                if not processed_cards_list:
-                    st.warning("No processing stocks found matching parameters to add.")
-                else:
-                    if target_list_id not in st.session_state.watchlist_data:
-                        st.session_state.watchlist_data[target_list_id] = []
-                    
-                    added_counter = 0
-                    for item in processed_cards_list:
-                        clean_sym = f"{item['sym']}.NS" if "." not in item['sym'] else item['sym']
-                        trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
-                        
-                        already_present = any(x["symbol"] == clean_sym and x["direction"] == trade_dir for x in st.session_state.watchlist_data[target_list_id])
-                        if not already_present:
-                            st.session_state.watchlist_data[target_list_id].append({
-                                "symbol": clean_sym, "direction": trade_dir, "exchange": "NS",
-                                "sector": item["sector"], "status": "WATCHING"
-                            })
-                            added_counter += 1
-                    st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
-
-    st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
-    
-    if not processed_cards_list:
-        st.info("No stock setups configured matching filters.")
-    else:
-        # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT ENGINE - --- LAST 2 LINES CHANGED TO NUMBER ENGINE ---
-        # ════════════════════════════════════════════════════════════════════════
-        for stock in processed_cards_list:
-            with st.container(border=True):
-                # 1. Header Metadata Strip Layout
-                h_left, h_right = st.columns([8, 4])
-                with h_left:
-                    clean_sector = stock['sector'].replace('NIFTY ', '')
-                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR</span>" if stock["abs_dist"] <= 5.0 else ""
-                    strong_badge = f"<span style='background: rgba(0,170,59,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
-                    
-                    st.markdown(
-                        f"""
-                        <div style='display: flex; align-items: center; gap: 8px;'>
-                            <span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span>
-                            <span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>
-                            {near_badge}
-                            {strong_badge}
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                with h_right:
-                    st.markdown(
-                        f"""
-                        <div style='text-align: right;'>
-                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}40; letter-spacing: 0.5px;'>
-                                {stock['sig']['label']}
-                            </span>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                
-                st.markdown("<div style='margin-top: 10px; border-bottom: 1px solid #f0f0f0;'></div>", unsafe_allow_html=True)
-                
-                # 2. Horizontal Rows Displaying exact Numbers/Prices instead of Percentages
-                m1, m2, m3, m4, m5 = st.columns([2, 2, 2, 2, 4])
-                
-                with m1:
-                    # Ab yeh EMA20 ka exact price number dikhayega
-                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
-                
-                with m2:
-                    # Ab yeh EMA200 ka exact price number dikhayega
-                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>200 EMA PRICE</p>", unsafe_allow_html=True)
-                    if stock['ema200'] is not None:
-                        m2_html = f"<span style='color: #111111;'>₹{stock['ema200']:.2f}</span>"
-                    else:
-                        m2_html = "<span style='color: #888888;'>—</span>"
-                    st.markdown(f"<p style='font-size:16px; font-weight:700; margin:2px 0 0 0;'>{m2_html}</p>", unsafe_allow_html=True)
-                
-                with m3:
-                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>CMP</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>₹{stock['ltp']:.2f}</p>", unsafe_allow_html=True)
-                
-                with m4:
-                    st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>VOLUME</p>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='font-size:16px; font-weight:700; color:#111111; margin:2px 0 0 0;'>{format_volume_indian(stock['volume'])}</p>", unsafe_allow_html=True)
-                
-                with m5:
-                    st.markdown(
-                        f"""
-                        <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;'>
-                            <span style='font-size: 10px; color: #777777; font-weight: 700;'>VOL MATRIX:</span>
-                            <span style='font-size: 11px; color: {stock['v_strength']['color']}; font-weight: 700;'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
-                    st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
-else:
-    if st.session_state.ts_prewatch is None:
-        st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
+        st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>
