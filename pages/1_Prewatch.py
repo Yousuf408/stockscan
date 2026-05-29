@@ -70,7 +70,7 @@ def calculate_ema(prices: list, period: int) -> float:
         return None
     prices_series = pd.Series(prices)
     ema = prices_series.ewm(span=period, adjust=False).mean()
-    return float(ema.iloc[-1])
+    return float(ema.iloc[-1]) # Explicit conversion to single scalar float
 
 def calculate_volume_median(volumes: list) -> float:
     if len(volumes) < 5:
@@ -106,10 +106,22 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
         return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
+    # Double check and force safe typecasting to clean float values
+    if hasattr(abs_dist, "iloc"):
+        abs_dist = float(abs_dist.iloc[-1])
+    else:
+        abs_dist = float(abs_dist)
+        
+    if hasattr(abs_dist_200, "iloc"):
+        abs_dist_200 = float(abs_dist_200.iloc[-1])
+    elif abs_dist_200 is not None:
+        abs_dist_200 = float(abs_dist_200)
+
     score = 100 - (abs_dist * 2)
     if body_gt_wick: score += 20
     if abs_dist_200 is not None and abs_dist_200 < 50: score += 10
-    return int(min(100, max(0, round(score))))
+    
+    return int(min(100, max(0, round(float(score)))))
 
 # ══════════════════════════════════════════
 #  LIVE DATA CONNECTOR (ANGEL ONE + YFINANCE)
@@ -183,16 +195,16 @@ def run_prewatch_scan():
             ema20 = calculate_ema(close_prices, 20)
             ema200 = calculate_ema(close_prices, 200)
             
-            if not ema20: continue
-            ltp = last_candle["c"]
+            if ema20 is None: continue
+            ltp = float(last_candle["c"])
             
-            dist_pct = ema20  
-            abs_dist = abs(ltp - ema20)  
-            abs_dist_200 = abs(ltp - ema200) if ema200 is not None else None
+            dist_pct = float(ema20)  
+            abs_dist = float(abs(ltp - ema20))  
+            abs_dist_200 = float(abs(ltp - ema200)) if ema200 is not None else None
             
             body = abs(last_candle["c"] - last_candle["o"])
             wick = (last_candle["h"] - last_candle["l"]) - body
-            body_gt_wick = body > wick
+            body_gt_wick = bool(body > wick)
             vol_median = calculate_volume_median([c["v"] for c in candles])
             
             results.append({
@@ -274,7 +286,10 @@ if st.session_state.ts_prewatch:
     for r in filtered_data:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
+        
+        # Calling our secure type-casted logic function safely
         conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
+        
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
     if sort_strategy == "Distance to EMA20":
@@ -293,7 +308,6 @@ if st.session_state.ts_prewatch:
         w_col1, w_col2 = st.columns([5, 3])
         
         with w_col1:
-            # Dropdown displaying standard user labels
             user_selected_tab = st.selectbox(
                 "Select Target Database Watchlist Bucket Location:", 
                 ["Today", "Yesterday", "New"], 
@@ -305,21 +319,16 @@ if st.session_state.ts_prewatch:
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
-                    # 1. Load data directly from Tradesentry storage architecture file
                     current_json_db = load_all_watchlist_data()
-                    
-                    # 2. Map structural keys exactly to your system format ("watchlist_Today", etc.)
                     db_target_key = f"watchlist_{user_selected_tab}"
                     if db_target_key not in current_json_db:
                         current_json_db[db_target_key] = []
                     
                     added_counter = 0
                     for item in processed_cards_list:
-                        # Tradesentry cleans suffix and keeps raw text ticker symbol
                         clean_sym = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
                         
-                        # Prevent cross duplicate injection profiles
                         already_present = any(
                             x.get("symbol") == clean_sym and 
                             x.get("exchange") == "NS" and 
@@ -328,7 +337,6 @@ if st.session_state.ts_prewatch:
                         )
                         
                         if not already_present:
-                            # Matches structural schema fields required by 3_Watchlist.py
                             current_json_db[db_target_key].append({
                                 "symbol": clean_sym,
                                 "exchange": "NS",
@@ -345,7 +353,6 @@ if st.session_state.ts_prewatch:
                             })
                             added_counter += 1
                     
-                    # 3. Commit states directly into watchlist.json permanent storage filesystem
                     if added_counter > 0:
                         save_all_watchlist_data(current_json_db)
                         st.toast(f"⚡ Injected {added_counter} Stocks directly into '{user_selected_tab}' Watchlist file!", icon="✅")
@@ -362,7 +369,6 @@ if st.session_state.ts_prewatch:
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
-                # Header Metadata Strip Layout
                 h_left, h_right = st.columns([8, 4])
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
@@ -392,12 +398,10 @@ if st.session_state.ts_prewatch:
                 
                 st.markdown("<div style='margin-top: 10px; border-bottom: 1px solid #f0f0f0;'></div>", unsafe_allow_html=True)
                 
-                # Five-Column Financial Metrics Visual Matrix
                 m1, m2, m3, m4, m5 = st.columns([2, 2, 2, 2, 4])
                 
                 with m1:
                     st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p>", unsafe_allow_html=True)
-                    # --- OPTION 3 COLOR LOGIC ENGINE ---
                     if stock['ltp'] >= stock['ema20']:
                         ema20_color = "#00AA3B"  
                         ema20_arrow = "▲ "
