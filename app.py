@@ -331,9 +331,10 @@ class PriceStreamer:
         print("[WS] Closed")
 
    def start_websocket(self):
-        """Main loop: Tries WebSocket. If it drops, updates once via fallbacks and retries WS."""
+        """Main loop: WebSocket → Single Pass Fallback → Retry WebSocket"""
         while True:
             try:
+                # ── Market closed: just sleep ──
                 if not is_market_open():
                     print(f"[Streamer] Market closed ({ist_time_str()}). Sleeping 60s...")
                     cache = load_cache()
@@ -342,48 +343,57 @@ class PriceStreamer:
                     time.sleep(60)
                     continue
 
+                # ── Load stocks ──
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
                     print("[Streamer] No stocks in watchlist. Retrying in 10s...")
                     time.sleep(10)
                     continue
 
+                # ── Build token map ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
+                print(f"[Streamer] {len(self.token_map)} stocks loaded")
 
+                # ── No valid tokens: fallback pass ──
                 if not self.token_map:
                     print("[Streamer] No valid tokens. Using yfinance fallback pass...")
                     run_yfinance_fallback()
                     time.sleep(10)
                     continue
 
-                # ── Try WebSocket ──
+                # ── Try Live WebSocket ──
                 try:
                     print(f"[WS] Connecting at {ist_time_str()}...")
                     self.sws = SmartWebSocketV2(
-                        self.auth_token, self.api_key, self.client_code, self.feed_token
+                        self.auth_token,
+                        self.api_key,
+                        self.client_code,
+                        self.feed_token
                     )
                     self.sws.on_open  = self.on_open
                     self.sws.on_data  = self.on_data
                     self.sws.on_error = self.on_error
                     self.sws.on_close = self.on_close
-                    self.sws.connect()  # This blocks until disconnected
-                except Exception as ws_err:
-                    print(f"[WS] Connection failed: {ws_err}")
+                    self.sws.connect()  # This blocks here while WS is alive
 
-                # ── If WebSocket drops or fails to connect, do a fallback cycle ──
+                except Exception as ws_err:
+                    print(f"[WS] Failed to connect: {ws_err}")
+
+                # ── IF WEBSOCKET CLOSES / FAILS: Run a temporary fallback cycle ──
                 if is_market_open():
-                    print("[Streamer] WS not connected. Running HTTP polling pass before retry...")
+                    print("[Streamer] WS disconnected. Fetching a single round of prices via HTTP...")
                     try:
                         run_http_polling(self.angel_obj)
                     except Exception as http_err:
                         print(f"[HTTP] Pass failed: {http_err}")
-                        # If HTTP fails too, hit yfinance
+                        print("[Streamer] HTTP failed. Fetching a single round via yfinance...")
                         try:
                             run_yfinance_fallback()
                         except Exception as yf_err:
                             print(f"[yfinance] Pass failed: {yf_err}")
 
-                # Wait 5 seconds before trying to boot up the WebSocket again
+                # Brief pause before looping back to retry connecting to WebSocket
+                print("[Streamer] Fallback pass complete. Retrying WebSocket connection in 5s...")
                 time.sleep(5)
 
             except Exception as e:
