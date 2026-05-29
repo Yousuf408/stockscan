@@ -239,7 +239,7 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     st.markdown("<div style='margin-top:15px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
-        st.markdown("<h4 style='margin:0; font-size:15px; color:#FFFFFF;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='margin:0; font-size:15px; color:#000000;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([4, 3])
         with w_col1:
             target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
