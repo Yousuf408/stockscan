@@ -113,7 +113,6 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
         return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    # Handle incoming structural NaN values safely to avoid type errors
     if pd.isna(abs_dist) or math.isnan(abs_dist):
         abs_dist = 0.0
         
@@ -130,7 +129,6 @@ def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: floa
         else:
             abs_dist_200 = float(abs_dist_200)
 
-    # Secure base math computation
     score = 100.0 - (abs_dist * 2.0)
     
     if body_gt_wick: 
@@ -138,7 +136,6 @@ def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: floa
     if abs_dist_200 is not None and abs_dist_200 < 50.0: 
         score += 10.0
         
-    # Safeguard check to confirm final score variable is never NaN before parsing to int
     if pd.isna(score) or math.isnan(score):
         return 50
         
@@ -212,6 +209,10 @@ def run_prewatch_scan():
             last_candle = candles[-1]
             volume = last_candle["v"]
             
+            # --- MANDATORY 1 LAKH LIQUIDITY CONDITIONAL BLOCK ---
+            if volume < 100000: 
+                continue
+                
             close_prices = [c["c"] for c in candles]
             ema20 = calculate_ema(close_prices, 20)
             ema200 = calculate_ema(close_prices, 200)
@@ -307,10 +308,7 @@ if st.session_state.ts_prewatch:
     for r in filtered_data:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
-        
-        # Calling our secure runtime validation method
         conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
-        
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
     if sort_strategy == "Distance to EMA20":
@@ -358,11 +356,18 @@ if st.session_state.ts_prewatch:
                         )
                         
                         if not already_present:
+                            # --- SAFE PARSING VALIDATION FOR COERCING THE LTP VALUE ---
+                            raw_ltp = item.get("ltp", 0.0)
+                            if pd.isna(raw_ltp) or math.isnan(raw_ltp):
+                                parsed_entry = 0.0
+                            else:
+                                parsed_entry = float(round(raw_ltp))
+
                             current_json_db[db_target_key].append({
                                 "symbol": clean_sym,
                                 "exchange": "NS",
                                 "direction": trade_dir,
-                                "entry": float(round(item["ltp"])),
+                                "entry": parsed_entry,
                                 "sl": None,
                                 "target1": None,
                                 "target2": None,
