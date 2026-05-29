@@ -322,19 +322,47 @@ if st.session_state.ts_prewatch:
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
-    # Sector Filter Badges
-    available_sectors = sorted(list(set([x["sector"] for x in filtered_data])))
-    sector_selection = st.pills("Filter Matrix by Sector Footprint:", ["ALL"] + available_sectors, default="ALL")
-    
-    if sector_selection != "ALL":
-        filtered_data = [x for x in filtered_data if x["sector"] == sector_selection]
-
     processed_cards_list = []
     for r in filtered_data:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
         conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
+        
+    # ════════════════════════════════════════════════════════════════════════
+    #  MODIFICATION BLOCK: DYNAMIC SECTOR PILLS WITH COUNT
+    # ════════════════════════════════════════════════════════════════════════
+    # 1. Create a list of available (prefixed) sectors from STOCK_UNIVERSE
+    available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
+
+    # 2. Calculate current processed counts per sector footpring
+    sector_counts = {}
+    for r in processed_cards_list:
+        sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
+        
+    # 3. Prepare display mapping: Prefixed Name -> Display Label (for Pills)
+    pill_options = ["ALL"]
+    display_label_to_prefixed = {} # To reverse map pill selection to prefixed sector key
+    for sector in available_sectors:
+        clean_name = sector.replace('NIFTY ', '')
+        # Get count, default to 0 if no stocks pass filters in that sector
+        count = sector_counts.get(sector, 0)
+        label = f"{clean_name} ({count})"
+        pill_options.append(label)
+        # Store prefixed name as key for reverse lookup
+        display_label_to_prefixed[label] = sector
+            
+    # 4. Use official Streamlit Pills component for sector filtering matrix
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+    sector_selection_label = st.pills("Filter Matrix by Sector Footprint:", pill_options, default="ALL")
+    
+    # 5. Handle user selection and perform final filtering logic before display viewport engine
+    if sector_selection_label != "ALL":
+        prefixed_selected_sector = display_label_to_prefixed.get(sector_selection_label)
+        if prefixed_selected_sector:
+            processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
+
+    # ... remaining sorting logic and display matrix continue as before ...
 
     if sort_strategy == "Distance to EMA20":
         processed_cards_list.sort(key=lambda x: x["abs_dist"])
@@ -352,7 +380,8 @@ if st.session_state.ts_prewatch:
         w_col1, w_col2 = st.columns([5, 3])
         
         with w_col1:
-            user_selected_tab = st.selectbox(
+            # Dropdown options exact aapke main page ke teen tabs se match karne ke liye
+            target_list_id = st.selectbox(
                 "Select Target Database Watchlist Bucket Location:", 
                 ["Today", "Yesterday", "New"], 
                 label_visibility="collapsed"
@@ -363,8 +392,11 @@ if st.session_state.ts_prewatch:
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
+                    # 1. Load data directly from Tradesentry storage architecture file
                     current_json_db = load_all_watchlist_data()
-                    db_target_key = f"watchlist_{user_selected_tab}"
+                    
+                    # 2. Map structural keys exactly to your system format ("watchlist_Today", etc.)
+                    db_target_key = f"watchlist_{target_list_id}"
                     if db_target_key not in current_json_db:
                         current_json_db[db_target_key] = []
                     
@@ -373,6 +405,7 @@ if st.session_state.ts_prewatch:
                         clean_sym = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
                         
+                        # Duplicate check taaki ek hi stock baar-baar add na ho
                         already_present = any(
                             x.get("symbol") == clean_sym and 
                             x.get("exchange") == "NS" and 
@@ -381,6 +414,7 @@ if st.session_state.ts_prewatch:
                         )
                         
                         if not already_present:
+                            # Row format mapping for table rendering engine
                             raw_ltp = item.get("ltp", 0.0)
                             if pd.isna(raw_ltp) or math.isnan(raw_ltp):
                                 parsed_entry = 0.0
@@ -405,7 +439,7 @@ if st.session_state.ts_prewatch:
                     
                     if added_counter > 0:
                         save_all_watchlist_data(current_json_db)
-                        st.toast(f"⚡ Injected {added_counter} Stocks directly into '{user_selected_tab}' Watchlist file!", icon="✅")
+                        st.toast(f"⚡ Injected {added_counter} Stocks directly into '{target_list_id}' Watchlist file!", icon="✅")
                     else:
                         st.info("Selected setups are already active inside that watchlist container.")
 
@@ -419,6 +453,7 @@ if st.session_state.ts_prewatch:
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
+                # Header Metadata Strip Layout
                 h_left, h_right = st.columns([8, 4])
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
@@ -448,10 +483,12 @@ if st.session_state.ts_prewatch:
                 
                 st.markdown("<div style='margin-top: 10px; border-bottom: 1px solid #f0f0f0;'></div>", unsafe_allow_html=True)
                 
+                # Five-Column Financial Metrics Visual Matrix
                 m1, m2, m3, m4, m5 = st.columns([2, 2, 2, 2, 4])
                 
                 with m1:
                     st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p>", unsafe_allow_html=True)
+                    # --- OPTION 3 COLOR LOGIC ENGINE ---
                     if stock['ltp'] >= stock['ema20']:
                         ema20_color = "#00AA3B"  
                         ema20_arrow = "▲ "
