@@ -169,7 +169,7 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
                             "o": float(row[1]), "h": float(row[2]),
                             "l": float(row[3]), "c": float(row[4]), "v": int(row[5])
                         })
-                    return {"ok": True, "candles": candles, "source": "Angel One"}
+                    return {"ok": True, "candles": candles, "source": "Angel One", "live_price": float(candles[-1]["c"])}
         except Exception:
             pass
 
@@ -179,17 +179,28 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
             ticker_obj = yf.Ticker(ns_ticker)
             df = ticker_obj.history(period="1y", interval="1d")
             
-            # CRITICAL FIX: Clean missing/incomplete rows from Yahoo Stream
-            df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
-            
-            if not df.empty and len(df) >= 5:
+            # Extract bulletproof realtime live CMP directly from Yahoo Fast-Info Object API
+            fallback_cmp = None
+            try:
+                fallback_cmp = ticker_obj.fast_info.get("lastPrice") or ticker_obj.fast_info.get("last_price")
+            except:
+                pass
+
+            if not df.empty:
+                # Store the absolute latest row price before dropping potential partial data
+                if fallback_cmp is None or pd.isna(fallback_cmp) or math.isnan(fallback_cmp):
+                    fallback_cmp = df["Close"].iloc[-1]
+                
+                # Drop rows where critical mathematical tracking structures are empty
+                df = df.dropna(subset=["Open", "High", "Low", "Close"])
+                
                 candles = []
                 for idx, row in df.iterrows():
                     candles.append({
                         "o": float(row["Open"]), "h": float(row["High"]),
                         "l": float(row["Low"]), "c": float(row["Close"]), "v": int(row["Volume"])
                     })
-                return {"ok": True, "candles": candles, "source": "Yahoo Finance"}
+                return {"ok": True, "candles": candles, "source": "Yahoo Finance", "live_price": float(fallback_cmp)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
             
@@ -223,8 +234,11 @@ def run_prewatch_scan():
             ema20 = calculate_ema(close_prices, 20)
             ema200 = calculate_ema(close_prices, 200)
             
-            # Safe parsing for LTP extraction
-            ltp = last_candle["c"]
+            # Inject Verified Realtime Live Price Engine mapping directly to CMP
+            ltp = res.get("live_price")
+            if ltp is None or pd.isna(ltp) or math.isnan(ltp):
+                ltp = last_candle["c"]
+                
             if ltp is None or pd.isna(ltp) or math.isnan(ltp):
                 continue
             ltp = float(ltp)
