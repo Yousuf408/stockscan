@@ -51,7 +51,7 @@ def format_volume_indian(vol: float) -> str:
 
 def get_volume_strength(current_vol: float, median_vol: float) -> dict:
     if not median_vol or median_vol == 0:
-        return {"label": "🔴 WEAK", "ratio": 0.0, "color": "#FF4B4B"}
+        return {"label": "🔴 Weak", "ratio": 0.0, "color": "#FF4B4B"}
     ratio = current_vol / median_vol
     if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio, "color": "#FF9900"}
     if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00FF66"}
@@ -272,93 +272,89 @@ if st.session_state.ts_prewatch:
         st.info("No stock setups configured matching filters.")
     else:
         # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT MATRIX RENDERING (COMPACT ROW ENGINE)
+        #  UI/UX VIEWPORT ENGINE - HORIZONTAL FLAT CARDS (BOX 2 PARADIGM)
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
-                # Structural Head Division: Stock | Sector Title Left vs Alert Action Badge Right
-                title_col, action_col = st.columns([8, 4])
+                # Row 1: Header Branding block and Condition Tags + Right Align Action Signals
+                head_left, head_right = st.columns([8, 4])
                 
-                with title_col:
-                    # Combined Single Line Branding String (Ex: ADANIENT | NIFTY ENERGY)
-                    clean_sector_title = stock['sector'].replace('NIFTY ', '')
+                with head_left:
+                    clean_sector = stock['sector'].replace('NIFTY ', '')
+                    
+                    # Target single inline row signature: STOCK | SECTOR followed by clean borderless styling badges
+                    near_badge = f"<span style='background: rgba(255,153,0,0.15); color: #FF9900; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.3); text-transform: uppercase;'>⭐ Near</span>" if stock["abs_dist"] <= 1.0 else ""
+                    strong_badge = f"<span style='background: rgba(0,255,102,0.15); color: #00FF66; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,255,102,0.3); text-transform: uppercase;'>💪 Strong</span>" if stock["body_gt_wick"] else ""
+                    
                     st.markdown(
                         f"""
-                        <div style='display: flex; align-items: center; gap: 10px; padding-top: 2px;'>
-                            <span style='font-size: 20px; font-weight: 800; color: #FFFFFF;'>{stock['sym']}</span>
-                            <span style='font-size: 18px; color: #444444; font-weight: 300;'>|</span>
-                            <span style='font-size: 13px; color: #888888; font-weight: 600; letter-spacing: 0.5px;'>{clean_sector_title}</span>
-                            <div style='margin-left: 10px; display: flex; gap: 6px;'>
-                                {"<span style='background:#1F1F1F; color:#FF9900; font-size:10px; padding:2px 6px; border-radius:3px; font-weight:700; border:1px solid rgba(255,153,0,0.2);'>⭐ VERY NEAR</span>" if stock["abs_dist"] <= 1.0 else ""}
-                                {"<span style='background:#1F1F1F; color:#00FF66; font-size:10px; padding:2px 6px; border-radius:3px; font-weight:700; border:1px solid rgba(0,255,102,0.2);'>💪 STRONG</span>" if stock["body_gt_wick"] else ""}
+                        <div style='display: flex; align-items: center; gap: 12px;'>
+                            <span style='font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.3px;'>{stock['sym']}</span>
+                            <span style='font-size: 18px; color: rgba(255,255,255,0.15); font-weight: 300;'>|</span>
+                            <span style='font-size: 13px; color: #888888; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;'>{clean_sector}</span>
+                            <div style='display: flex; gap: 8px; margin-left: 10px;'>
+                                {near_badge}
+                                {strong_badge}
                             </div>
                         </div>
                         """, unsafe_allow_html=True
                     )
                 
-                with action_col:
-                    # Clean isolated top-right action badge
+                with head_right:
+                    # Clean top-right signal execution block
                     st.markdown(
                         f"""
-                        <div style='text-align: right;'>
-                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 900; padding: 4px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}33; letter-spacing: 0.5px;'>
+                        <div style='text-align: right; padding-top: 4px;'>
+                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 900; padding: 4px 12px; border-radius: 4px; border: 1px solid {stock['sig']['color']}33; letter-spacing: 0.5px;'>
                                 {stock['sig']['label']}
                             </span>
                         </div>
                         """, unsafe_allow_html=True
                     )
                 
-                st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+                # Structural Spacer Divider Margin
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
                 
-                # Main Technical Parameters Data Dock Block
-                data_col, status_col = st.columns([8, 4])
+                # Row 2: 4 Technical Metrics Array positioned next to each other sequentially
+                m_col1, m_col2, m_col3, m_col4, vol_analysis_col = st.columns([2.0, 2.0, 2.0, 2.0, 4.0])
                 
-                with data_col:
-                    # 4-Metric Inline High Density Row Grid Template Setup (Matches image layout)
-                    ema20_color = "#00FF66" if stock['dist_pct'] >= 0 else "#FF4B4B"
-                    ema20_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
-                    
+                # Metric 1: EMA20 Distance Layout Column
+                with m_col1:
+                    m1_color = "#00FF66" if stock['dist_pct'] >= 0 else "#FF4B4B"
+                    m1_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
+                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>EMA20 DIST</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 18px; font-weight: 700; color: {m1_color}; margin-top: 2px;'>{m1_sign} {abs(stock['dist_pct']):.2f}%</div>", unsafe_allow_html=True)
+                
+                # Metric 2: 200EMA Distance Layout Column
+                with m_col2:
                     dist_200_val = stock['dist_200']
                     if dist_200_val is not None:
-                        ema200_color = "#00FF66" if dist_200_val >= 0 else "#FF4B4B"
-                        ema200_sign = "▲" if dist_200_val >= 0 else "▼"
-                        ema200_str = f"<span style='color:{ema200_color}; font-weight:700;'>{ema200_sign} {abs(dist_200_val):.1f}%</span>"
+                        m2_color = "#00FF66" if dist_200_val >= 0 else "#FF4B4B"
+                        m2_sign = "▲" if dist_200_val >= 0 else "▼"
+                        m2_html = f"<span style='color: {m2_color};'>{m2_sign} {abs(dist_200_val):.1f}%</span>"
                     else:
-                        ema200_str = "<span style='color:#444444;'>—</span>"
-
-                    st.markdown(
-                        f"""
-                        <div style='display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; background: rgba(0,0,0,0.1); text-align: left;'>
-                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
-                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>EMA20 Dist</div>
-                                <div style='font-size: 15px; color: {ema20_color}; font-weight: 700;'>{ema20_sign} {abs(stock['dist_pct']):.2f}%</div>
-                            </div>
-                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
-                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>200EMA Dist</div>
-                                <div style='font-size: 15px;'>{ema200_str}</div>
-                            </div>
-                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
-                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>CMP</div>
-                                <div style='font-size: 15px; font-weight: 700; color: #FFFFFF;'>₹{stock['ltp']:.2f}</div>
-                            </div>
-                            <div style='padding: 8px 12px;'>
-                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>Volume</div>
-                                <div style='font-size: 15px; font-weight: 700; color: #FFFFFF;'>{format_volume_indian(stock['volume'])}</div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True
-                    )
+                        m2_html = "<span style='color: #444444;'>—</span>"
+                        
+                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>200EMA DIST</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 18px; font-weight: 700; margin-top: 2px;'>{m2_html}</div>", unsafe_allow_html=True)
                 
-                with status_col:
-                    # Right Side: Volume Analytical Footprint Strength Indicator & Match Bar
+                # Metric 3: Current Market Price (CMP) Layout Column
+                with m_col3:
+                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>CMP</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 18px; font-weight: 700; color: #FFFFFF; margin-top: 2px;'>₹{stock['ltp']:.2f}</div>", unsafe_allow_html=True)
+                
+                # Metric 4: Volume Tracking Layout Column
+                with m_col4:
+                    st.markdown(f"<span style='font-size: 11px; color: #666666; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>VOLUME</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 18px; font-weight: 700; color: #FFFFFF; margin-top: 2px;'>{format_volume_indian(stock['volume'])}</div>", unsafe_allow_html=True)
+                
+                # Metric 5: Advanced Volume analytics matrix block & Gauge tracking
+                with vol_analysis_col:
                     st.markdown(
                         f"""
-                        <div style='padding-left: 10px; padding-top: 2px;'>
-                            <div style='font-size: 12px; color: #888888; margin-bottom: 8px;'>
-                                🔥 <span style='font-weight: 500;'>{stock['v_strength']['label']}</span> 
-                                <span style='color: #444444; margin: 0 4px;'>•</span> 
-                                <span style='color: {stock['v_strength']['color']}; font-weight: 700;'>({stock['v_strength']['ratio']:.2f}x)</span>
-                            </div>
+                        <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; padding-left: 10px;'>
+                            <span style='font-size: 11px; color: #666666; font-weight: 700; text-transform: uppercase;'>Volume Strength</span>
+                            <span style='font-size: 12px; color: {stock['v_strength']['color']}; font-weight: 700;'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
                         </div>
                         """, unsafe_allow_html=True
                     )
