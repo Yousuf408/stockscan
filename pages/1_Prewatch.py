@@ -310,7 +310,7 @@ if st.session_state.ts_prewatch:
                             </div>
                             <span style='font-size: 18px; color: rgba(0,0,0,0.15); font-weight: 300;'>|</span>
                             <div style='min-width: 140px; display: flex; align-items: center;'>
-                                <span style='font-size: 12px; color: #666666; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>📁 {clean_sector}</span>
+                                <span style='font-size: 12px; color: #000000; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>📁 {clean_sector}</span>
                             </div>
                             {badges_html}
                         </div>
