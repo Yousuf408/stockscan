@@ -53,24 +53,24 @@ def format_volume_indian(vol: float) -> str:
 
 def get_volume_strength(current_vol: float, median_vol: float) -> dict:
     if not median_vol or median_vol == 0:
-        return {"label": "🔴 Weak", "ratio": 0.0, "color": "#FF4B4B"}
+        return {"label": "🔴 Weak", "ratio": 0.0}
     ratio = current_vol / median_vol
-    if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio, "color": "#FFAA00"}
-    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00FF66"}
-    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio, "color": "#FFFF00"}
-    return {"label": "🔴 Weak", "ratio": ratio, "color": "#FF4B4B"}
+    if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio}
+    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio}
+    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio}
+    return {"label": "🔴 Weak", "ratio": ratio}
 
 def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> dict:
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00CC66", "status": "buy", "bg": "rgba(0, 204, 102, 0.15)"}
+        return {"label": "▲ STRONG BUY", "status": "buy", "icon": "🟢"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00CC66", "status": "buy", "bg": "rgba(0, 204, 102, 0.08)"}
+        return {"label": "▲ BUY", "status": "buy", "icon": "🍀"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#FF3333", "status": "sell", "bg": "rgba(255, 51, 51, 0.15)"}
+        return {"label": "▼ STRONG SELL", "status": "sell", "icon": "🔴"}
     else:
-        return {"label": "▼ SELL", "color": "#FF3333", "status": "sell", "bg": "rgba(255, 51, 51, 0.08)"}
+        return {"label": "▼ SELL", "status": "sell", "icon": "🔻"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -116,7 +116,6 @@ def run_prewatch_scan():
             last_candle = candles[-1]
             volume = last_candle["v"]
             
-            # EARLY RECONNAISSANCE FILTER: Skip if volume < 1L
             if volume < 100000: continue
                 
             close_prices = [c["c"] for c in candles]
@@ -156,13 +155,7 @@ def run_prewatch_scan():
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
-st.markdown(
-    """
-    <div style="display:flex; align-items:center; gap:12px; margin-bottom:20px;">
-        <h1 style="margin:0; font-weight:800; letter-spacing:-1px;">🛡️ TRADE SENTRY — Prewatch Scanner v6.0</h1>
-    </div>
-    """, unsafe_allowed_html=True
-)
+st.title("🛡️ TRADE SENTRY — Prewatch Scanner v6.0")
 
 # Control Action Header Strip
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
@@ -177,9 +170,7 @@ with col_btn2:
 
 if st.session_state.ts_prewatch_time:
     col_info.markdown(
-        f"<div style='padding-top:6px; font-size:13px;'>⏳ <b>Last Scanned:</b> {st.session_state.ts_prewatch_time} | "
-        f"🎯 <b>Total Matches:</b> {len(st.session_state.ts_prewatch)} stocks</div>", 
-        unsafe_allowed_html=True
+        f"**Last Scanned:** {st.session_state.ts_prewatch_time} | **Total Matches:** {len(st.session_state.ts_prewatch)} stocks"
     )
 else:
     col_info.caption("Click Scan above to calculate setups nearest to the 20 EMA on daily charts.")
@@ -231,14 +222,14 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     #  ACTION BANNER: WATCHLIST STORAGE ENGINE
     # ══════════════════════════════════════════
-    st.markdown("<br>", unsafe_allowed_html=True)
+    st.markdown("---")
     with st.container(border=True):
-        st.markdown("<h4 style='margin-top:0;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allowed_html=True)
+        st.markdown("#### 📦 Batch Inject Watchlist Management Panel")
         w_col1, w_col2 = st.columns([4, 3])
         with w_col1:
             target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
         with w_col2:
-            # Replaced bad padding element with native clean Streamlit button alignment architecture
+            st.write(" ")  # Elegant native vertical layout separator spacing
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
@@ -261,14 +252,14 @@ if st.session_state.ts_prewatch:
                     st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
 
     # ══════════════════════════════════════════
-    #  ADAPTIVE SYSTEM STYLE CARDS LAYOUT DESIGN
+    #  NATIVE STABLE METRIC CARDS PRESENTATION 
     # ══════════════════════════════════════════
-    st.markdown(f"### 📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options")
+    st.subheader(f"📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options")
     
     if not processed_cards_list:
         st.info("No stock setups configured in this screen view bucket context frame.")
     else:
-        # Display structures dynamically inside balanced 3-Column viewport wrappers
+        # Render clean containers using safe columns layout architecture
         cols_per_row = 3
         for i in range(0, len(processed_cards_list), cols_per_row):
             batch_chunk = processed_cards_list[i:i + cols_per_row]
@@ -276,57 +267,37 @@ if st.session_state.ts_prewatch:
             
             for index, stock in enumerate(batch_chunk):
                 with grid_cols[index]:
-                    # Build Dynamic Inline Badges
-                    badge_str = "⭐ VERY NEAR" if stock["abs_dist"] <= 1.0 else ""
-                    if stock["body_gt_wick"]:
-                        badge_str += " | 💪 STRONG BODY" if badge_str else "💪 STRONG BODY"
-                    
-                    # Native-adaptive styled component container logic
-                    st.markdown(
-                        f"""
-                        <div style="
-                            padding: 18px; 
-                            border-radius: 10px; 
-                            border: 1px solid rgba(128, 128, 128, 0.25); 
-                            background-color: {stock['sig']['bg']};
-                            margin-bottom: 5px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-                        ">
-                            <div style="display:flex; justify-content:between; align-items:flex-start; width:100%;">
-                                <div style="flex-grow:1;">
-                                    <h3 style="margin:0; font-size:18px; font-weight:700; letter-spacing:-0.5px;">{stock['sym']}</h3>
-                                    <span style="font-size:11px; color:gray; font-weight:600; text-transform:uppercase;">{stock['sector']}</span>
-                                </div>
-                                <div style="
-                                    background: {stock['sig']['color']}; 
-                                    color: #000; 
-                                    padding: 4px 8px; 
-                                    border-radius: 4px; 
-                                    font-size: 11px; 
-                                    font-weight: 800;
-                                    text-align: right;
-                                ">
-                                    {stock['sig']['label']}
-                                </div>
-                            </div>
-                            <div style="margin: 6px 0; font-size:11px; color:#FF8800; font-weight:bold;">
-                                {badge_str if badge_str else '• NORMAL SETUP DISTANCE'}
-                            </div>
-                            <hr style="margin:10px 0; opacity:0.15;">
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:13px; margin-bottom:10px;">
-                                <div><span style="color:gray;">EMA20 Dist:</span> <b style="color:{stock['sig']['color']}">{stock['dist_pct']:.2f}%</b></div>
-                                <div><span style="color:gray;">200EMA:</span> <b>{f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else '—'}</b></div>
-                                <div><span style="color:gray;">CMP:</span> <b>₹{stock['ltp']:.2f}</b></div>
-                                <div><span style="color:gray;">Volume:</span> <b>{format_volume_indian(stock['volume'])}</b></div>
-                            </div>
-                            <div style="font-size:12px; padding:6px 8px; background:rgba(128,128,128,0.08); border-radius:4px; margin-bottom:8px;">
-                                <span style="color:gray;">Vol Strength:</span> <b style="color:{stock['v_strength']['color']}">{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.2f}x)</b>
-                            </div>
-                        </div>
-                        """, 
-                        unsafe_allowed_html=True
-                    )
-                    # Confidence slider metric bar
-                    st.progress(stock["confidence"] / 100, text=f"Setup Confidence Rank: {stock['confidence']}%")
+                    with st.container(border=True):
+                        # Header Row
+                        header_left, header_right = st.columns([2, 1.2])
+                        header_left.markdown(f"### {stock['sym']}")
+                        header_left.caption(f"📁 {stock['sector']}")
+                        header_right.button(stock['sig']['label'], key=f"sig_{stock['sym']}_{i}", disabled=True, use_container_width=True)
+                        
+                        # System Tags
+                        badges = []
+                        if stock["abs_dist"] <= 1.0:
+                            badges.append("⭐ VERY NEAR")
+                        if stock["body_gt_wick"]:
+                            badges.append("💪 STRONG BODY")
+                        
+                        if badges:
+                            st.markdown(f"**{' | '.join(badges)}**")
+                        
+                        st.markdown("---")
+                        
+                        # Market Metrics Grid
+                        m_col1, m_col2 = st.columns(2)
+                        m_col1.metric("CMP", f"₹{stock['ltp']:.2f}")
+                        m_col1.metric("EMA20 Dist", f"{stock['dist_pct']:.2f}%")
+                        
+                        m_col2.metric("Volume", format_volume_indian(stock['volume']))
+                        m_col2.metric("200EMA Dist", f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—")
+                        
+                        # Vol strength status block
+                        st.info(f"📊 Vol Strength: {stock['v_strength']['label']} ({stock['v_strength']['ratio']:.2f}x)")
+                        
+                        # Confidence indicator bar
+                        st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
     st.warning("No prewatch matrix cache records found. Initialize database scan sequences.")
