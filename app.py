@@ -197,46 +197,52 @@ def run_http_polling(angel_obj):
     except:
         return
 
-    print("[HTTP] Starting HTTP polling...")
+    print("[HTTP] Running single HTTP polling pass...")
     force_set_mode("http_polling")
 
-    while True:
+    stocks = get_all_watchlist_stocks()
+    if not stocks:
+        return
+
+    for i in range(0, len(stocks), 50):
+        batch = stocks[i:i + 50]
+        for stock in batch:
+            try:
+                symbol   = stock.get("symbol")
+                exchange = stock.get("exchange", "NS")
+                token    = str(get_stock_token(symbol) or "")
+                if not token:
+                    continue
+                resp = angel_obj.ltpData(
+                    "NSE" if exchange == "NS" else "BSE",
+                    symbol, token
+                )
+                if resp and resp.get("status"):
+                    ltp = float(resp["data"]["ltp"])
+                    update_price(symbol, exchange, ltp, "http")
+            except Exception as e:
+                print(f"[HTTP] {stock.get('symbol')}: {e}")
+        time.sleep(1)
+
+
+def run_yfinance_fallback():
+    import yfinance as yf
+    print("[yfinance] Running single yfinance fallback pass...")
+    force_set_mode("yfinance")
+
+    stocks = get_all_watchlist_stocks()
+    for stock in stocks:
         try:
-            if not is_market_open():
-                print("[HTTP] Market closed. Exiting HTTP polling.")
-                return
-
-            stocks = get_all_watchlist_stocks()
-            if not stocks:
-                time.sleep(10)
-                continue
-
-            for i in range(0, len(stocks), 50):
-                batch = stocks[i:i + 50]
-                for stock in batch:
-                    try:
-                        symbol   = stock.get("symbol")
-                        exchange = stock.get("exchange", "NS")
-                        token    = str(get_stock_token(symbol) or "")
-                        if not token:
-                            continue
-                        resp = angel_obj.ltpData(
-                            "NSE" if exchange == "NS" else "BSE",
-                            symbol, token
-                        )
-                        if resp and resp.get("status"):
-                            ltp = float(resp["data"]["ltp"])
-                            update_price(symbol, exchange, ltp, "http")
-                    except Exception as e:
-                        print(f"[HTTP] {stock.get('symbol')}: {e}")
-                time.sleep(1)
-
-            force_set_mode("http_polling")  # Keep mode current
-            time.sleep(5)
-
+            symbol   = stock.get("symbol")
+            exchange = stock.get("exchange", "NS")
+            suffix   = ".NS" if exchange == "NS" else ".BO"
+            ticker   = yf.Ticker(f"{symbol}{suffix}")
+            price    = (ticker.fast_info.get("last_price")
+                        or ticker.fast_info.get("regularMarketPrice"))
+            if price:
+                update_price(symbol, exchange, float(price), "yfinance")
         except Exception as e:
-            print(f"[HTTP] Polling error: {e}")
-            time.sleep(10)
+            print(f"[yfinance] {stock.get('symbol')}: {e}")
 
 
 # ══════════════════════════════════════════
@@ -324,73 +330,60 @@ class PriceStreamer:
     def on_close(self, wsapp):
         print("[WS] Closed")
 
-    def start_websocket(self):
-        """Main loop: WebSocket → HTTP → yfinance → sleep → repeat"""
+   def start_websocket(self):
+        """Main loop: Tries WebSocket. If it drops, updates once via fallbacks and retries WS."""
         while True:
             try:
-                # ── Market closed: just sleep, DO NOT set mode offline ──
-                # Mode will naturally stay as last fetched (close price)
                 if not is_market_open():
                     print(f"[Streamer] Market closed ({ist_time_str()}). Sleeping 60s...")
-                    # Only set offline if cache is completely empty
                     cache = load_cache()
                     if not cache.get("stocks"):
                         force_set_mode("offline")
                     time.sleep(60)
                     continue
 
-                # ── Load stocks ──
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
                     print("[Streamer] No stocks in watchlist. Retrying in 10s...")
                     time.sleep(10)
                     continue
 
-                # ── Build token map ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
-                print(f"[Streamer] {len(self.token_map)} stocks loaded")
 
-                # ── No valid tokens: fallback to yfinance ──
                 if not self.token_map:
-                    print("[Streamer] No valid tokens. Using yfinance...")
+                    print("[Streamer] No valid tokens. Using yfinance fallback pass...")
                     run_yfinance_fallback()
+                    time.sleep(10)
                     continue
 
                 # ── Try WebSocket ──
                 try:
                     print(f"[WS] Connecting at {ist_time_str()}...")
                     self.sws = SmartWebSocketV2(
-                        self.auth_token,
-                        self.api_key,
-                        self.client_code,
-                        self.feed_token
+                        self.auth_token, self.api_key, self.client_code, self.feed_token
                     )
                     self.sws.on_open  = self.on_open
                     self.sws.on_data  = self.on_data
                     self.sws.on_error = self.on_error
                     self.sws.on_close = self.on_close
-                    self.sws.connect()  # Blocking until disconnect
-
+                    self.sws.connect()  # This blocks until disconnected
                 except Exception as ws_err:
-                    print(f"[WS] Failed: {ws_err}")
+                    print(f"[WS] Connection failed: {ws_err}")
 
-                # ── WebSocket ended → HTTP fallback ──
+                # ── If WebSocket drops or fails to connect, do a fallback cycle ──
                 if is_market_open():
-                    print("[Streamer] WS ended. Starting HTTP polling...")
+                    print("[Streamer] WS not connected. Running HTTP polling pass before retry...")
                     try:
                         run_http_polling(self.angel_obj)
                     except Exception as http_err:
-                        print(f"[HTTP] Failed: {http_err}")
-
-                    # ── HTTP failed → yfinance ──
-                    if is_market_open():
-                        print("[Streamer] HTTP failed. Starting yfinance...")
+                        print(f"[HTTP] Pass failed: {http_err}")
+                        # If HTTP fails too, hit yfinance
                         try:
                             run_yfinance_fallback()
                         except Exception as yf_err:
-                            print(f"[yfinance] Failed: {yf_err}")
+                            print(f"[yfinance] Pass failed: {yf_err}")
 
-                # Brief pause before restarting loop
+                # Wait 5 seconds before trying to boot up the WebSocket again
                 time.sleep(5)
 
             except Exception as e:
