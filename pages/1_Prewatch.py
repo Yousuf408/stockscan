@@ -141,11 +141,11 @@ def run_prewatch_scan():
     st.session_state.ts_prewatch_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 # ══════════════════════════════════════════
-#  NATIVE COMPATIBLE INTERFACE GENERATION
+#  INTERFACE ENGINE GENERATION
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
-# App Header Styling
+# App Header Styling — FIXED KEYWORD ARGUMENT
 st.markdown(
     """
     <div style="margin-bottom: 20px;">
@@ -153,7 +153,7 @@ st.markdown(
             🛡️ TRADE SENTRY <span style="font-size: 13px; font-weight: 400; color: #888888; vertical-align: middle; margin-left: 8px;">Prewatch Scanner v6.0</span>
         </h1>
     </div>
-    """, unsafe_allowed_html=True
+    """, unsafe_allow_html=True
 )
 
 # Control Action Header Strip
@@ -172,7 +172,7 @@ if st.session_state.ts_prewatch_time:
         f"<div style='padding-top: 6px; font-size: 13px; color: #AAAAAA;'>"
         f"⏳ <b>Last Scanned:</b> <span style='color:#FFFFFF;'>{st.session_state.ts_prewatch_time}</span> | "
         f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#FFFFFF;'>{len(st.session_state.ts_prewatch)}</span></div>",
-        unsafe_allowed_html=True
+        unsafe_allow_html=True
     )
 else:
     col_info.caption(f"Click Scan above to analyze the active stock catalog loaded from stocks.py ({len(STOCK_UNIVERSE)} records found).")
@@ -180,7 +180,7 @@ else:
 # ══════════════════════════════════════════
 #  IN-PAGE TUNING & FILTERING MATRIX CONTROL PANEL
 # ══════════════════════════════════════════
-st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #FFFFFF;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allowed_html=True)
+st.markdown("<h3 style='font-size: 15px; font-weight: 700; margin-top: 20px; color: #FFFFFF;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 with st.container(border=True):
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
@@ -237,7 +237,7 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     st.write("") 
     with st.container(border=True):
-        st.markdown("<h4 style='margin:0; font-size:15px; color:#FFFFFF;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allowed_html=True)
+        st.markdown("<h4 style='margin:0; font-size:15px; color:#FFFFFF;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([4, 3])
         with w_col1:
             target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
@@ -267,7 +267,7 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     #  STYLED CARDS DISPLAY PRESENTATION ENGINE
     # ══════════════════════════════════════════
-    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options</h3>", unsafe_allowed_html=True)
+    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options</h3>", unsafe_allow_html=True)
     
     if not processed_cards_list:
         st.info("No stock setups configured in this screen view bucket context frame matching your filters.")
@@ -289,7 +289,7 @@ if st.session_state.ts_prewatch:
                     
                     badge_row_html = "".join(badge_items) if badge_items else "<span style='color: #666666; font-size:11px;'>• BALANCED ACTION PRICE</span>"
                     
-                    # CRITICAL FIX: Build the string explicitly without inline code evaluation inside the markdown method block
+                    # Base Template String
                     card_html_template = """
                     <div style="
                         background: #111217;
@@ -364,8 +364,8 @@ if st.session_state.ts_prewatch:
                         v_strength_ratio=stock['v_strength']['ratio']
                     )
                     
-                    # Send pure, pre-compiled static text content to the markdown renderer
-                    st.markdown(rendered_card_html, unsafe_allowed_html=True)
+                    # FIXED KEYWORD ARGUMENTS HERE ALSO
+                    st.markdown(rendered_card_html, unsafe_allow_html=True)
                     
                     st.write("")
                     st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
