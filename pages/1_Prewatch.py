@@ -53,22 +53,22 @@ def get_volume_strength(current_vol: float, median_vol: float) -> dict:
     if not median_vol or median_vol == 0:
         return {"label": "🔴 WEAK", "ratio": 0.0, "color": "#FF4B4B"}
     ratio = current_vol / median_vol
-    if ratio > 2.0: return {"label": "🔥 EXPLOSIVE", "ratio": ratio, "color": "#FF9900"}
-    if ratio > 1.5: return {"label": "🟢 STRONG", "ratio": ratio, "color": "#00FF66"}
-    if ratio > 1.0: return {"label": "🟡 BUILD", "ratio": ratio, "color": "#FFFF00"}
-    return {"label": "🔴 WEAK", "ratio": ratio, "color": "#FF4B4B"}
+    if ratio > 2.0: return {"label": "🔥 Explosive", "ratio": ratio, "color": "#FF9900"}
+    if ratio > 1.5: return {"label": "🟢 Strong", "ratio": ratio, "color": "#00FF66"}
+    if ratio > 1.0: return {"label": "🟡 Build", "ratio": ratio, "color": "#FFFF00"}
+    return {"label": "🔴 Weak", "ratio": ratio, "color": "#FF4B4B"}
 
 def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> dict:
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00FF66", "status": "buy"}
+        return {"label": "▲ STRONG BUY", "color": "#00FF66", "bg": "rgba(0,255,102,0.1)", "status": "buy"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00FF66", "status": "buy"}
+        return {"label": "▲ BUY", "color": "#00FF66", "bg": "rgba(0,255,102,0.1)", "status": "buy"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "status": "sell"}
+        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "bg": "rgba(255,75,75,0.1)", "status": "sell"}
     else:
-        return {"label": "▼ SELL", "color": "#FF4B4B", "status": "sell"}
+        return {"label": "▼ SELL", "color": "#FF4B4B", "bg": "rgba(255,75,75,0.1)", "status": "sell"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -272,66 +272,97 @@ if st.session_state.ts_prewatch:
         st.info("No stock setups configured matching filters.")
     else:
         # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX WORKSPACE VIEWPORT TUNING
-        #  Both spacers are set to 0.0 to guarantee a wide footprint (BOX 2 layout match)
+        #  UI/UX VIEWPORT MATRIX RENDERING (COMPACT ROW ENGINE)
         # ════════════════════════════════════════════════════════════════════════
-        LEFT_SPACER_SIZE = 0.0
-        CARD_BODY_SIZE = 12.0
-        RIGHT_SPACER_SIZE = 0.0
-        # ════════════════════════════════════════════════════════════════════════
-
         for stock in processed_cards_list:
-            # Full screen stretch configuration pipeline
-            if CARD_BODY_SIZE >= 12.0:
-                col_card_main = st.container()
-            else:
-                _, col_card_main, _ = st.columns([LEFT_SPACER_SIZE, CARD_BODY_SIZE, RIGHT_SPACER_SIZE])
-            
-            with col_card_main:
-                # High-density flat card strip template
-                with st.container(border=True):
+            with st.container(border=True):
+                # Structural Head Division: Stock | Sector Title Left vs Alert Action Badge Right
+                title_col, action_col = st.columns([8, 4])
+                
+                with title_col:
+                    # Combined Single Line Branding String (Ex: ADANIENT | NIFTY ENERGY)
+                    clean_sector_title = stock['sector'].replace('NIFTY ', '')
+                    st.markdown(
+                        f"""
+                        <div style='display: flex; align-items: center; gap: 10px; padding-top: 2px;'>
+                            <span style='font-size: 20px; font-weight: 800; color: #FFFFFF;'>{stock['sym']}</span>
+                            <span style='font-size: 18px; color: #444444; font-weight: 300;'>|</span>
+                            <span style='font-size: 13px; color: #888888; font-weight: 600; letter-spacing: 0.5px;'>{clean_sector_title}</span>
+                            <div style='margin-left: 10px; display: flex; gap: 6px;'>
+                                {"<span style='background:#1F1F1F; color:#FF9900; font-size:10px; padding:2px 6px; border-radius:3px; font-weight:700; border:1px solid rgba(255,153,0,0.2);'>⭐ VERY NEAR</span>" if stock["abs_dist"] <= 1.0 else ""}
+                                {"<span style='background:#1F1F1F; color:#00FF66; font-size:10px; padding:2px 6px; border-radius:3px; font-weight:700; border:1px solid rgba(0,255,102,0.2);'>💪 STRONG</span>" if stock["body_gt_wick"] else ""}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+                
+                with action_col:
+                    # Clean isolated top-right action badge
+                    st.markdown(
+                        f"""
+                        <div style='text-align: right;'>
+                            <span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 900; padding: 4px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}33; letter-spacing: 0.5px;'>
+                                {stock['sig']['label']}
+                            </span>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+                
+                st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+                
+                # Main Technical Parameters Data Dock Block
+                data_col, status_col = st.columns([8, 4])
+                
+                with data_col:
+                    # 4-Metric Inline High Density Row Grid Template Setup (Matches image layout)
+                    ema20_color = "#00FF66" if stock['dist_pct'] >= 0 else "#FF4B4B"
+                    ema20_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
                     
-                    # Layout setup: 5 Columns to flatten information onto a single ultra-short deck height
-                    c1, c2, c3, c4, c5 = st.columns([2.5, 2.0, 2.0, 2.0, 3.5])
-                    
-                    # Column 1: Core Corporate Branding Identity and sector tagging
-                    with c1:
-                        st.markdown(f"<h3 style='margin:0; font-size:20px; font-weight:800; padding-top:2px;'>{stock['sym']}</h3>", unsafe_allow_html=True)
-                        st.markdown(f"<span style='font-size:11px; color:#666666; font-weight:500;'>📁 {stock['sector']}</span>", unsafe_allow_html=True)
-                    
-                    # Column 2: Value parameters metric mapping (CMP & EMA 20)
-                    with c2:
-                        st.metric(label="CMP", value=f"₹{stock['ltp']:.2f}")
-                        st.metric(label="EMA20 DIST", value=f"{stock['dist_pct']:.2f}%")
-                        
-                    # Column 3: Volume metrics mapping
-                    with c3:
-                        st.metric(label="VOLUME", value=format_volume_indian(stock['volume']))
-                        dist_200_str = f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"
-                        st.metric(label="200EMA DIST", value=dist_200_str)
-                    
-                    # Column 4: Quality Check Badges and Execution Signal
-                    with c4:
-                        lbl_color = stock['sig']['color']
-                        st.markdown(f"<div style='font-weight:900; color:{lbl_color}; font-size:14px; margin-bottom:12px; letter-spacing:0.3px;'>{stock['sig']['label']}</div>", unsafe_allow_html=True)
-                        
-                        # Generate flat badges array
-                        badge_markdown_items = []
-                        if stock["abs_dist"] <= 1.0:
-                            badge_markdown_items.append("`⭐ NEAR`")
-                        if stock["body_gt_wick"]:
-                            badge_markdown_items.append("`💪 STRG`")
-                        st.markdown(" ".join(badge_markdown_items) if badge_markdown_items else "<span style='color:#444444; font-size:11px;'>• BALANCED</span>", unsafe_allow_html=True)
-                        
-                    # Column 5: Advanced Volume analytics cluster & Confidence tracking bar metric gauges
-                    with c5:
-                        st.markdown(
-                            f"<div style='background:rgba(255,255,255,0.02); padding:5px 10px; border-radius:4px; font-size:12px; border:1px solid rgba(255,255,255,0.05); text-align:center; margin-bottom:10px;'>"
-                            f"<span style='color:#777777;'>VOL MATRIX: </span><b style='color:{stock['v_strength']['color']};'>{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</b>"
-                            f"</div>", 
-                            unsafe_allow_html=True
-                        )
-                        st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
+                    dist_200_val = stock['dist_200']
+                    if dist_200_val is not None:
+                        ema200_color = "#00FF66" if dist_200_val >= 0 else "#FF4B4B"
+                        ema200_sign = "▲" if dist_200_val >= 0 else "▼"
+                        ema200_str = f"<span style='color:{ema200_color}; font-weight:700;'>{ema200_sign} {abs(dist_200_val):.1f}%</span>"
+                    else:
+                        ema200_str = "<span style='color:#444444;'>—</span>"
+
+                    st.markdown(
+                        f"""
+                        <div style='display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; background: rgba(0,0,0,0.1); text-align: left;'>
+                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
+                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>EMA20 Dist</div>
+                                <div style='font-size: 15px; color: {ema20_color}; font-weight: 700;'>{ema20_sign} {abs(stock['dist_pct']):.2f}%</div>
+                            </div>
+                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
+                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>200EMA Dist</div>
+                                <div style='font-size: 15px;'>{ema200_str}</div>
+                            </div>
+                            <div style='padding: 8px 12px; border-right: 1px solid rgba(255,255,255,0.06);'>
+                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>CMP</div>
+                                <div style='font-size: 15px; font-weight: 700; color: #FFFFFF;'>₹{stock['ltp']:.2f}</div>
+                            </div>
+                            <div style='padding: 8px 12px;'>
+                                <div style='font-size: 10px; color: #666666; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;'>Volume</div>
+                                <div style='font-size: 15px; font-weight: 700; color: #FFFFFF;'>{format_volume_indian(stock['volume'])}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+                
+                with status_col:
+                    # Right Side: Volume Analytical Footprint Strength Indicator & Match Bar
+                    st.markdown(
+                        f"""
+                        <div style='padding-left: 10px; padding-top: 2px;'>
+                            <div style='font-size: 12px; color: #888888; margin-bottom: 8px;'>
+                                🔥 <span style='font-weight: 500;'>{stock['v_strength']['label']}</span> 
+                                <span style='color: #444444; margin: 0 4px;'>•</span> 
+                                <span style='color: {stock['v_strength']['color']}; font-weight: 700;'>({stock['v_strength']['ratio']:.2f}x)</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+                    st.progress(stock["confidence"] / 100, text=f"Confidence: {stock['confidence']}%")
                         
 else:
     if st.session_state.ts_prewatch is None:
