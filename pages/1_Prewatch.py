@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import json
+import os
 from datetime import datetime
 
 # ══════════════════════════════════════════
@@ -12,11 +14,10 @@ try:
 except ImportError:
     YFINANCE_AVAILABLE = False
 
-# Import your master dictionary universe containing your official tokens
+# Import your master universe functions and structural settings
 try:
-    from stocks import STOCK_UNIVERSE
+    from stocks import STOCK_UNIVERSE, get_stock_token, get_stock_sector
 except ImportError:
-    # Fallback structure with placeholder Angel One tokens if file link breaks
     STOCK_UNIVERSE = {
         "RELIANCE": {"sector": "NIFTY ENERGY", "token": "2885"},
         "TCS": {"sector": "NIFTY IT", "token": "11536"},
@@ -27,19 +28,43 @@ except ImportError:
         "WELCORP": {"sector": "NIFTY METALS", "token": "11369"},
         "NAVINFLUOR": {"sector": "NIFTY CHEM", "token": "14144"}
     }
+    def get_stock_sector(sym):
+        return STOCK_UNIVERSE.get(sym, {}).get("sector", "GENERAL")
+    def get_stock_token(sym):
+        return STOCK_UNIVERSE.get(sym, {}).get("token", None)
+
+# Path Resolution matching Tradesentry architecture
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+
+# ══════════════════════════════════════════
+#  OFFICIAL STORAGE ACCESS FUNCTIONS
+# ══════════════════════════════════════════
+def load_all_watchlist_data() -> dict:
+    if not os.path.exists(WATCHLIST_FILE):
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
+    try:
+        with open(WATCHLIST_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
+
+def save_all_watchlist_data(data: dict):
+    try:
+        with open(WATCHLIST_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        st.error(f"Failed to sync directly with watchlist database: {e}")
 
 # Initialize Session States for Multi-page synchronization
 if "ts_prewatch" not in st.session_state:
     st.session_state.ts_prewatch = None
 if "ts_prewatch_time" not in st.session_state:
     st.session_state.ts_prewatch_time = None
-if "watchlist_data" not in st.session_state:
-    st.session_state.watchlist_data = {}
 
 # ══════════════════════════════════════════
 #  CORE INDICATORS & MATHEMATICS LOGIC
 # ══════════════════════════════════════════
-
 def calculate_ema(prices: list, period: int) -> float:
     if len(prices) < period:
         return None
@@ -93,7 +118,7 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
     if "smartApi" in globals() or hasattr(st, "session_state") and any("smartApi" in k for k in st.session_state.keys()):
         try:
             api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
-            token = info.get("token")
+            token = info.get("token") or get_stock_token(symbol)
             
             if api_obj and token:
                 params = {
@@ -260,7 +285,7 @@ if st.session_state.ts_prewatch:
         processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ════════════════════════════════════════════════════════════════════════
-    #  WATCHLIST BATCH INJECTOR PANEL — SYNCED WITH OFFICIAL FILE BUCKETS
+    #  WATCHLIST BATCH INJECTOR PANEL — SYNCED DIRECTLY WITH WATCHLIST.JSON
     # ════════════════════════════════════════════════════════════════════════
     st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
     with st.container(border=True):
@@ -268,10 +293,10 @@ if st.session_state.ts_prewatch:
         w_col1, w_col2 = st.columns([5, 3])
         
         with w_col1:
-            # Matches exactly with your main file dashboard tabs configuration
-            target_list_id = st.selectbox(
+            # Dropdown displaying standard user labels
+            user_selected_tab = st.selectbox(
                 "Select Target Database Watchlist Bucket Location:", 
-                ["Today's Watchlist", "Yesterday's Watchlist", "New Setup Watchlist"], 
+                ["Today", "Yesterday", "New"], 
                 label_visibility="collapsed"
             )
         
@@ -280,35 +305,52 @@ if st.session_state.ts_prewatch:
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
-                    if "watchlist_data" not in st.session_state:
-                        st.session_state.watchlist_data = {}
-                        
-                    if target_list_id not in st.session_state.watchlist_data:
-                        st.session_state.watchlist_data[target_list_id] = []
+                    # 1. Load data directly from Tradesentry storage architecture file
+                    current_json_db = load_all_watchlist_data()
+                    
+                    # 2. Map structural keys exactly to your system format ("watchlist_Today", etc.)
+                    db_target_key = f"watchlist_{user_selected_tab}"
+                    if db_target_key not in current_json_db:
+                        current_json_db[db_target_key] = []
                     
                     added_counter = 0
                     for item in processed_cards_list:
-                        clean_sym = f"{item['sym']}.NS" if "." not in item['sym'] else item['sym']
+                        # Tradesentry cleans suffix and keeps raw text ticker symbol
+                        clean_sym = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
                         
+                        # Prevent cross duplicate injection profiles
                         already_present = any(
-                            x.get("symbol") == clean_sym and x.get("direction") == trade_dir 
-                            for x in st.session_state.watchlist_data[target_list_id]
+                            x.get("symbol") == clean_sym and 
+                            x.get("exchange") == "NS" and 
+                            x.get("direction") == trade_dir 
+                            for x in current_json_db[db_target_key]
                         )
                         
                         if not already_present:
-                            # Row format mapping for table rendering engine
-                            st.session_state.watchlist_data[target_list_id].append({
-                                "symbol": clean_sym, 
-                                "direction": trade_dir, 
+                            # Matches structural schema fields required by 3_Watchlist.py
+                            current_json_db[db_target_key].append({
+                                "symbol": clean_sym,
                                 "exchange": "NS",
-                                "sector": item["sector"].replace('NIFTY ', ''), 
+                                "direction": trade_dir,
+                                "entry": float(round(item["ltp"])),
+                                "sl": None,
+                                "target1": None,
+                                "target2": None,
+                                "note": "EMA 20 Automated Scan",
+                                "sector": get_stock_sector(clean_sym),
                                 "status": "WATCHING",
-                                "ltp": item["ltp"]
+                                "lastPrice": None,
+                                "added_at": datetime.now().isoformat()
                             })
                             added_counter += 1
-                            
-                    st.toast(f"⚡ Injected {added_counter} Stocks directly into [{target_list_id}] Matrix!", icon="✅")
+                    
+                    # 3. Commit states directly into watchlist.json permanent storage filesystem
+                    if added_counter > 0:
+                        save_all_watchlist_data(current_json_db)
+                        st.toast(f"⚡ Injected {added_counter} Stocks directly into '{user_selected_tab}' Watchlist file!", icon="✅")
+                    else:
+                        st.info("Selected setups are already active inside that watchlist container.")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
     
@@ -356,12 +398,11 @@ if st.session_state.ts_prewatch:
                 with m1:
                     st.markdown("<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p>", unsafe_allow_html=True)
                     # --- OPTION 3 COLOR LOGIC ENGINE ---
-                    # Checks if CMP is above or below EMA20 to apply direct green/red indicator
                     if stock['ltp'] >= stock['ema20']:
-                        ema20_color = "#00AA3B"  # Professional Dark Green
+                        ema20_color = "#00AA3B"  
                         ema20_arrow = "▲ "
                     else:
-                        ema20_color = "#D32F2F"  # Professional Crimson Red
+                        ema20_color = "#D32F2F"  
                         ema20_arrow = "▼ "
                     st.markdown(f"<p style='font-size:16px; font-weight:700; color:{ema20_color}; margin:2px 0 0 0;'>{ema20_arrow}₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
                 
