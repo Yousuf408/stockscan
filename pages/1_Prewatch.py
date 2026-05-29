@@ -3,6 +3,18 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
+# Import your master dictionary universe from your file
+try:
+    from stocks import STOCK_UNIVERSE
+except ImportError:
+    # Safe structural fallback if file is temporarily disconnected
+    STOCK_UNIVERSE = {
+        "RELIANCE": {"sector": "NIFTY ENERGY"},
+        "TCS": {"sector": "NIFTY IT"},
+        "HEROMOTOCO": {"sector": "NIFTY AUTO"},
+        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS"}
+    }
+
 # Initialize Session States for Multi-page synchronization
 if "ts_prewatch" not in st.session_state:
     st.session_state.ts_prewatch = None
@@ -10,23 +22,6 @@ if "ts_prewatch_time" not in st.session_state:
     st.session_state.ts_prewatch_time = None
 if "watchlist_data" not in st.session_state:
     st.session_state.watchlist_data = {}
-
-# ─── NIFTY INDEX MATCHING STOCK UNIVERSE ───
-STOCK_UNIVERSE = {
-    "RELIANCE": {"sector": "NIFTY ENERGY"},
-    "TCS": {"sector": "NIFTY IT"},
-    "HDFCBANK": {"sector": "NIFTY BANK"},
-    "HEROMOTOCO": {"sector": "NIFTY AUTO"},
-    "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS"},
-    "GAIL": {"sector": "NIFTY ENERGY"},
-    "GMDC": {"sector": "NIFTY METALS"},
-    "TIPSMUSIC": {"sector": "NIFTY MEDIA"},
-    "LANDMARK": {"sector": "NIFTY REALTY"},
-    "CEATLTD": {"sector": "NIFTY AUTO"},
-    "MUTHOOTFIN": {"sector": "NIFTY FINANCIAL SERVICES"},
-    "KIRLOSENG": {"sector": "NIFTY CAPITAL GOODS"},
-    "WHEELS": {"sector": "NIFTY AUTO"}
-}
 
 # ══════════════════════════════════════════
 #  CORE INDICATORS & MATHEMATICS LOGIC
@@ -64,13 +59,13 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "status": "buy", "icon": "🟢"}
+        return {"label": "▲ STRONG BUY", "status": "buy"}
     elif is_above:
-        return {"label": "▲ BUY", "status": "buy", "icon": "🍀"}
+        return {"label": "▲ BUY", "status": "buy"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "status": "sell", "icon": "🔴"}
+        return {"label": "▼ STRONG SELL", "status": "sell"}
     else:
-        return {"label": "▼ SELL", "status": "sell", "icon": "🔻"}
+        return {"label": "▼ SELL", "status": "sell"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -108,7 +103,7 @@ def run_prewatch_scan():
     
     for idx, (sym, info) in enumerate(all_stocks):
         prog_bar.progress(int(((idx + 1) / len(all_stocks)) * 100))
-        status_text.text(f"Scanning Data Engine: {sym} ({idx+1}/{len(all_stocks)})")
+        status_text.text(f"Scanning Data Engine from stocks.py: {sym} ({idx+1}/{len(all_stocks)})")
         
         res = fetch_daily_candles(sym)
         if res.get("ok") and len(res["candles"]) >= 5:
@@ -116,16 +111,13 @@ def run_prewatch_scan():
             last_candle = candles[-1]
             volume = last_candle["v"]
             
-            if volume < 100000: continue
-                
             close_prices = [c["c"] for c in candles]
             ema20 = calculate_ema(close_prices, 20)
             ema200 = calculate_ema(close_prices, 200)
             
             if not ema20: continue
             ltp = last_candle["c"]
-            if ltp < 300 or ltp > 6000: continue
-                
+            
             dist_pct = ((ltp - ema20) / ema20) * 100
             abs_dist = abs(dist_pct)
             dist_200 = ((ltp - ema200) / ema200) * 100 if ema200 else None
@@ -136,14 +128,13 @@ def run_prewatch_scan():
             body_gt_wick = body > wick
             vol_median = calculate_volume_median([c["v"] for c in candles])
             
-            if abs_dist <= 5.0:
-                results.append({
-                    "sym": sym, "sector": info["sector"], "ltp": ltp,
-                    "ema20": ema20, "ema200": ema200, "dist_pct": dist_pct,
-                    "abs_dist": abs_dist, "dist_200": dist_200, "abs_dist_200": abs_dist_200,
-                    "body_gt_wick": body_gt_wick, "volume": volume, "vol_median": vol_median,
-                    "last_candle": last_candle
-                })
+            results.append({
+                "sym": sym, "sector": info.get("sector", "GENERAL SECTOR"), "ltp": ltp,
+                "ema20": ema20, "ema200": ema200, "dist_pct": dist_pct,
+                "abs_dist": abs_dist, "dist_200": dist_200, "abs_dist_200": abs_dist_200,
+                "body_gt_wick": body_gt_wick, "volume": volume, "vol_median": vol_median,
+                "last_candle": last_candle
+            })
                 
     prog_bar.empty()
     status_text.empty()
@@ -170,22 +161,33 @@ with col_btn2:
 
 if st.session_state.ts_prewatch_time:
     col_info.markdown(
-        f"**Last Scanned:** {st.session_state.ts_prewatch_time} | **Total Matches:** {len(st.session_state.ts_prewatch)} stocks"
+        f"**Last Scanned:** {st.session_state.ts_prewatch_time} | **Total Universe Scanned:** {len(st.session_state.ts_prewatch)} stocks"
     )
 else:
-    col_info.caption("Click Scan above to calculate setups nearest to the 20 EMA on daily charts.")
+    col_info.caption(f"Click Scan above to analyze the active stock catalog loaded from stocks.py ({len(STOCK_UNIVERSE)} records found).")
+
+# ══════════════════════════════════════════
+#  IN-PAGE TUNING & FILTERING MATRIX CONTROL PANEL
+# ══════════════════════════════════════════
+st.markdown("### 🎯 Refining Matrix Configuration")
+with st.container(border=True):
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+    
+    with f_col1:
+        filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
+        body_filter_on = st.toggle("Filter Body > Wick (💪 STRONG)", value=False)
+        
+    with f_col2:
+        filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
+        
+    with f_col3:
+        filter_ema20 = st.number_input("Max Dist from EMA20 %", min_value=0.0, max_value=100.0, value=5.0, step=0.5)
+        
+    with f_col4:
+        sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
 if st.session_state.ts_prewatch:
-    # Sidebar Filters (Tuning Metrics Panel)
-    st.sidebar.header("🎯 Tuning & Filtering Matrix")
-    filter_price = st.sidebar.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
-    filter_volume = st.sidebar.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
-    filter_ema20 = st.sidebar.number_input("Max Dist from EMA20 %", min_value=0.0, max_value=5.0, value=5.0, step=0.1)
-    body_filter_on = st.sidebar.toggle("Filter Body > Wick (💪 STRONG)", value=True)
-    
-    sort_strategy = st.sidebar.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"])
-
-    # Processing UI Filtering Pipeline Engine
+    # Processing Filtering Matrix Pipeline Engine
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
     
@@ -257,7 +259,7 @@ if st.session_state.ts_prewatch:
     st.subheader(f"📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities Setup Options")
     
     if not processed_cards_list:
-        st.info("No stock setups configured in this screen view bucket context frame.")
+        st.info("No stock setups configured in this screen view bucket context frame matching your filters.")
     else:
         # Render clean containers using safe columns layout architecture
         cols_per_row = 3
@@ -272,7 +274,7 @@ if st.session_state.ts_prewatch:
                         header_left, header_right = st.columns([2, 1.2])
                         header_left.markdown(f"### {stock['sym']}")
                         header_left.caption(f"📁 {stock['sector']}")
-                        header_right.button(stock['sig']['label'], key=f"sig_{stock['sym']}_{i}", disabled=True, use_container_width=True)
+                        header_right.button(stock['sig']['label'], key=f"sig_{stock['sym']}_{i}_{index}", disabled=True, use_container_width=True)
                         
                         # System Tags
                         badges = []
@@ -300,4 +302,5 @@ if st.session_state.ts_prewatch:
                         # Confidence indicator bar
                         st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
-    st.warning("No prewatch matrix cache records found. Initialize database scan sequences.")
+    if st.session_state.ts_prewatch is None:
+        st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
