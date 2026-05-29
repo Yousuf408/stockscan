@@ -58,13 +58,13 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00FF66", "bg": "#0D1F14", "border": "#00FF66"}
+        return {"label": "▲ STRONG BUY", "color": "#00FF66", "bg": "#0D1F14", "border": "#00FF66", "status": "buy"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00FF66", "bg": "#09170E", "border": "rgba(0, 255, 102, 0.4)"}
+        return {"label": "▲ BUY", "color": "#00FF66", "bg": "#09170E", "border": "rgba(0, 255, 102, 0.4)", "status": "buy"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "bg": "#241212", "border": "#FF4B4B"}
+        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "bg": "#241212", "border": "#FF4B4B", "status": "sell"}
     else:
-        return {"label": "▼ SELL", "color": "#FF4B4B", "bg": "#1A0D0D", "border": "rgba(255, 75, 75, 0.4)"}
+        return {"label": "▼ SELL", "color": "#FF4B4B", "bg": "#1A0D0D", "border": "rgba(255, 75, 75, 0.4)", "status": "sell"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -145,7 +145,6 @@ def run_prewatch_scan():
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
-# App Header Styling — FIXED KEYWORD ARGUMENT
 st.markdown(
     """
     <div style="margin-bottom: 20px;">
@@ -156,7 +155,6 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-# Control Action Header Strip
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
 with col_btn1:
     if st.button("🔍 SCAN DAILY EMA", use_container_width=True, type="primary"):
@@ -169,9 +167,7 @@ with col_btn2:
 
 if st.session_state.ts_prewatch_time:
     col_info.markdown(
-        f"<div style='padding-top: 6px; font-size: 13px; color: #AAAAAA;'>"
-        f"⏳ <b>Last Scanned:</b> <span style='color:#FFFFFF;'>{st.session_state.ts_prewatch_time}</span> | "
-        f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#FFFFFF;'>{len(st.session_state.ts_prewatch)}</span></div>",
+        f"<div style='padding-top: 6px; font-size: 13px; color: #AAAAAA;'>⏳ <b>Last Scanned:</b> <span style='color:#FFFFFF;'>{st.session_state.ts_prewatch_time}</span> | 🎯 <b>Total Stocks Scanned:</b> <span style='color:#FFFFFF;'>{len(st.session_state.ts_prewatch)}</span></div>",
         unsafe_allow_html=True
     )
 else:
@@ -198,7 +194,6 @@ with st.container(border=True):
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
 if st.session_state.ts_prewatch:
-    # Processing Filtering Matrix Pipeline Engine
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
     
@@ -209,14 +204,12 @@ if st.session_state.ts_prewatch:
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
-    # Sector Horizontal Navigation Distribution Selection
     available_sectors = sorted(list(set([x["sector"] for x in filtered_data])))
     sector_selection = st.pills("Filter Matrix by Sector Footprint:", ["ALL"] + available_sectors, default="ALL")
     
     if sector_selection != "ALL":
         filtered_data = [x for x in filtered_data if x["sector"] == sector_selection]
 
-    # Structural Enrichment Setup Conversion Loop
     processed_cards_list = []
     for r in filtered_data:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
@@ -224,7 +217,6 @@ if st.session_state.ts_prewatch:
         conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
-    # Sort Operations Executer
     if sort_strategy == "Distance to EMA20":
         processed_cards_list.sort(key=lambda x: x["abs_dist"])
     elif sort_strategy == "Absolute Volume Size":
@@ -280,17 +272,21 @@ if st.session_state.ts_prewatch:
             for index, stock in enumerate(batch_chunk):
                 with grid_cols[index]:
                     
-                    # Generate explicit custom status chips
-                    badge_items = []
+                    # Generate dynamic badge tokens without using nesting raw string variables inside string formatting dict templates
+                    badge_row_html = ""
                     if stock["abs_dist"] <= 1.0:
-                        badge_items.append("<span style='color: #FF9900; background: rgba(255,153,0,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700; margin-right:6px;'>⭐ VERY NEAR</span>")
+                        badge_row_html += "<span style='color: #FF9900; background: rgba(255,153,0,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700; margin-right:6px;'>⭐ VERY NEAR</span>"
                     if stock["body_gt_wick"]:
-                        badge_items.append("<span style='color: #00FF66; background: rgba(0,255,102,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700;'>💪 STRONG BODY</span>")
+                        badge_row_html += "<span style='color: #00FF66; background: rgba(0,255,102,0.12); padding: 2px 6px; border-radius:4px; font-size:10px; font-weight:700;'>💪 STRONG BODY</span>"
+                    if not badge_row_html:
+                        badge_row_html = "<span style='color: #666666; font-size:11px;'>• BALANCED ACTION PRICE</span>"
                     
-                    badge_row_html = "".join(badge_items) if badge_items else "<span style='color: #666666; font-size:11px;'>• BALANCED ACTION PRICE</span>"
-                    
-                    # Base Template String
-                    card_html_template = """
+                    # Dist 200 processing
+                    dist_200_val = f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"
+                    vol_formatted = format_volume_indian(stock['volume'])
+
+                    # Unified Raw HTML Injection Block to keep Streamlit from auto-escaping character tags
+                    rendered_card_html = f"""
                     <div style="
                         background: #111217;
                         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -300,31 +296,31 @@ if st.session_state.ts_prewatch:
                     ">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
-                                <h4 style="margin: 0; font-size: 18px; font-weight: 700; color: #FFFFFF;">{symbol}</h4>
-                                <div style="font-size: 10px; color: #666666; font-weight: 600; margin-top: 2px; text-transform: uppercase;">📁 {sector}</div>
+                                <h4 style="margin: 0; font-size: 18px; font-weight: 700; color: #FFFFFF;">{stock['sym']}</h4>
+                                <div style="font-size: 10px; color: #666666; font-weight: 600; margin-top: 2px; text-transform: uppercase;">📁 {stock['sector']}</div>
                             </div>
                             <div style="
-                                background: {sig_bg};
-                                color: {sig_color};
-                                border: 1px solid {sig_border};
+                                background: {stock['sig']['bg']};
+                                color: {stock['sig']['color']};
+                                border: 1px solid {stock['sig']['border']};
                                 padding: 3px 8px;
                                 border-radius: 4px;
                                 font-size: 10px;
                                 font-weight: 700;
                                 letter-spacing: 0.5px;
                             ">
-                                {sig_label}
+                                {stock['sig']['label']}
                             </div>
                         </div>
                         
                         <div style="margin-top: 10px; margin-bottom: 14px; height: 16px;">
-                            {badges}
+                            {badge_row_html}
                         </div>
                         
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
                             <div>
                                 <div style="font-size: 10px; color: #666666; font-weight:600;">CMP</div>
-                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">₹{ltp:.2f}</div>
+                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">₹{stock['ltp']:.2f}</div>
                             </div>
                             <div>
                                 <div style="font-size: 10px; color: #666666; font-weight:600;">VOLUME</div>
@@ -332,41 +328,22 @@ if st.session_state.ts_prewatch:
                             </div>
                             <div>
                                 <div style="font-size: 10px; color: #666666; font-weight:600;">EMA20 DIST</div>
-                                <div style="font-size: 13px; font-weight: 700; color: {sig_color}; margin-top: 1px;">{dist_20:.2f}%</div>
+                                <div style="font-size: 13px; font-weight: 700; color: {stock['sig']['color']}; margin-top: 1px;">{stock['dist_pct']:.2f}%</div>
                             </div>
                             <div>
                                 <div style="font-size: 10px; color: #666666; font-weight:600;">200EMA DIST</div>
-                                <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{dist_200}</div>
+                                <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{dist_200_val}</div>
                             </div>
                         </div>
                         
                         <div style="margin-top: 14px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: 4px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.04);">
                             <span style="font-size: 10px; color: #666666; font-weight: 600;">VOLUME STRENGTH</span>
-                            <span style="font-size: 11px; font-weight: 700; color: {v_strength_color};">{v_strength_label} ({v_strength_ratio:.1f}x)</span>
+                            <span style="font-size: 11px; font-weight: 700; color: {stock['v_strength']['color']};">{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
                         </div>
                     </div>
                     """
                     
-                    rendered_card_html = card_html_template.format(
-                        symbol=stock['sym'],
-                        sector=stock['sector'],
-                        sig_bg=stock['sig']['bg'],
-                        sig_color=stock['sig']['color'],
-                        sig_border=stock['sig']['border'],
-                        sig_label=stock['sig']['label'],
-                        badges=badge_row_html,
-                        ltp=stock['ltp'],
-                        vol_formatted=format_volume_indian(stock['volume']),
-                        dist_20=stock['dist_pct'],
-                        dist_200=f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—",
-                        v_strength_color=stock['v_strength']['color'],
-                        v_strength_label=stock['v_strength']['label'],
-                        v_strength_ratio=stock['v_strength']['ratio']
-                    )
-                    
-                    # FIXED KEYWORD ARGUMENTS HERE ALSO
                     st.markdown(rendered_card_html, unsafe_allow_html=True)
-                    
                     st.write("")
                     st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
