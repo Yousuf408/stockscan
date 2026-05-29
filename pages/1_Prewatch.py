@@ -266,7 +266,7 @@ if st.session_state.ts_prewatch:
                             added_counter += 1
                     st.toast(f"✅ Injected {added_counter} Trade Targets to Watchlist Matrix bucket [{target_list_id}]!", icon="⚡")
 
-    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #FFFFFF;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='font-size: 15px; font-weight: 700; margin-top: 25px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
     
     if not processed_cards_list:
         st.info("No stock setups configured matching filters.")
