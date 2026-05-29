@@ -69,7 +69,9 @@ if "ts_prewatch_time" not in st.session_state:
 def calculate_ema(prices: list, period: int) -> float:
     if len(prices) < period:
         return None
-    prices_series = pd.Series(prices)
+    prices_series = pd.Series(prices).dropna()
+    if len(prices_series) < period:
+        return None
     ema = prices_series.ewm(span=period, adjust=False).mean()
     val = ema.iloc[-1]
     if pd.isna(val) or math.isnan(val):
@@ -77,9 +79,10 @@ def calculate_ema(prices: list, period: int) -> float:
     return float(val)
 
 def calculate_volume_median(volumes: list) -> float:
-    if len(volumes) < 5:
+    clean_vols = [v for v in volumes if v is not None and not pd.isna(v) and not math.isnan(v)]
+    if len(clean_vols) < 5:
         return None
-    val = np.median(volumes[-5:])
+    val = np.median(clean_vols[-5:])
     if pd.isna(val) or math.isnan(val):
         return None
     return float(val)
@@ -176,6 +179,9 @@ def fetch_daily_candles(symbol: str, info: dict) -> dict:
             ticker_obj = yf.Ticker(ns_ticker)
             df = ticker_obj.history(period="1y", interval="1d")
             
+            # CRITICAL FIX: Clean missing/incomplete rows from Yahoo Stream
+            df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+            
             if not df.empty and len(df) >= 5:
                 candles = []
                 for idx, row in df.iterrows():
@@ -210,15 +216,20 @@ def run_prewatch_scan():
             volume = last_candle["v"]
             
             # --- MANDATORY 1 LAKH LIQUIDITY CONDITIONAL BLOCK ---
-            if volume < 100000: 
+            if volume < 100000 or pd.isna(volume) or math.isnan(volume): 
                 continue
                 
             close_prices = [c["c"] for c in candles]
             ema20 = calculate_ema(close_prices, 20)
             ema200 = calculate_ema(close_prices, 200)
             
+            # Safe parsing for LTP extraction
+            ltp = last_candle["c"]
+            if ltp is None or pd.isna(ltp) or math.isnan(ltp):
+                continue
+            ltp = float(ltp)
+            
             if ema20 is None: continue
-            ltp = float(last_candle["c"])
             
             dist_pct = float(ema20)  
             abs_dist = float(abs(ltp - ema20))  
@@ -356,7 +367,6 @@ if st.session_state.ts_prewatch:
                         )
                         
                         if not already_present:
-                            # --- SAFE PARSING VALIDATION FOR COERCING THE LTP VALUE ---
                             raw_ltp = item.get("ltp", 0.0)
                             if pd.isna(raw_ltp) or math.isnan(raw_ltp):
                                 parsed_entry = 0.0
