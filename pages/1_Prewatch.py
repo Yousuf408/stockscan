@@ -235,14 +235,14 @@ if st.session_state.ts_prewatch:
     # ══════════════════════════════════════════
     #  ACTION BANNER: WATCHLIST STORAGE ENGINE
     # ══════════════════════════════════════════
-    st.write("") # Using a clean empty text widget instead of structural divs
+    st.write("") 
     with st.container(border=True):
         st.markdown("<h4 style='margin:0; font-size:15px; color:#FFFFFF;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allowed_html=True)
         w_col1, w_col2 = st.columns([4, 3])
         with w_col1:
             target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"])
         with w_col2:
-            st.markdown("<div style='height:28px;'></div>", unsafe_allowed_html=True) # Safe label top-alignment height block
+            st.write("") 
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
@@ -289,68 +289,85 @@ if st.session_state.ts_prewatch:
                     
                     badge_row_html = "".join(badge_items) if badge_items else "<span style='color: #666666; font-size:11px;'>• BALANCED ACTION PRICE</span>"
                     
-                    # Core Card Presentation Block
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background: #111217;
-                            border: 1px solid rgba(255, 255, 255, 0.08);
-                            padding: 16px;
-                            border-radius: 8px;
-                            margin-bottom: 4px;
-                        ">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <div>
-                                    <h4 style="margin: 0; font-size: 18px; font-weight: 700; color: #FFFFFF;">{stock['sym']}</h4>
-                                    <div style="font-size: 10px; color: #666666; font-weight: 600; margin-top: 2px; text-transform: uppercase;">📁 {stock['sector']}</div>
-                                </div>
-                                <div style="
-                                    background: {stock['sig']['bg']};
-                                    color: {stock['sig']['color']};
-                                    border: 1px solid {stock['sig']['border']};
-                                    padding: 3px 8px;
-                                    border-radius: 4px;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    letter-spacing: 0.5px;
-                                ">
-                                    {stock['sig']['label']}
-                                </div>
+                    # CRITICAL FIX: Build the string explicitly without inline code evaluation inside the markdown method block
+                    card_html_template = """
+                    <div style="
+                        background: #111217;
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        padding: 16px;
+                        border-radius: 8px;
+                        margin-bottom: 4px;
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h4 style="margin: 0; font-size: 18px; font-weight: 700; color: #FFFFFF;">{symbol}</h4>
+                                <div style="font-size: 10px; color: #666666; font-weight: 600; margin-top: 2px; text-transform: uppercase;">📁 {sector}</div>
                             </div>
-                            
-                            <div style="margin-top: 10px; margin-bottom: 14px; height: 16px;">
-                                {badge_row_html}
-                            </div>
-                            
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
-                                <div>
-                                    <div style="font-size: 10px; color: #666666; font-weight:600;">CMP</div>
-                                    <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">₹{stock['ltp']:.2f}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 10px; color: #666666; font-weight:600;">VOLUME</div>
-                                    <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{format_volume_indian(stock['volume'])}</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 10px; color: #666666; font-weight:600;">EMA20 DIST</div>
-                                    <div style="font-size: 13px; font-weight: 700; color: {stock['sig']['color']}; margin-top: 1px;">{stock['dist_pct']:.2f}%</div>
-                                </div>
-                                <div>
-                                    <div style="font-size: 10px; color: #666666; font-weight:600;">200EMA DIST</div>
-                                    <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—"}</div>
-                                </div>
-                            </div>
-                            
-                            <div style="margin-top: 14px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: 4px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.04);">
-                                <span style="font-size: 10px; color: #666666; font-weight: 600;">VOLUME STRENGTH</span>
-                                <span style="font-size: 11px; font-weight: 700; color: {stock['v_strength']['color']};">{stock['v_strength']['label']} ({stock['v_strength']['ratio']:.1f}x)</span>
+                            <div style="
+                                background: {sig_bg};
+                                color: {sig_color};
+                                border: 1px solid {sig_border};
+                                padding: 3px 8px;
+                                border-radius: 4px;
+                                font-size: 10px;
+                                font-weight: 700;
+                                letter-spacing: 0.5px;
+                            ">
+                                {sig_label}
                             </div>
                         </div>
-                        """,
-                        unsafe_allowed_html=True
+                        
+                        <div style="margin-top: 10px; margin-bottom: 14px; height: 16px;">
+                            {badges}
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+                            <div>
+                                <div style="font-size: 10px; color: #666666; font-weight:600;">CMP</div>
+                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">₹{ltp:.2f}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 10px; color: #666666; font-weight:600;">VOLUME</div>
+                                <div style="font-size: 14px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{vol_formatted}</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 10px; color: #666666; font-weight:600;">EMA20 DIST</div>
+                                <div style="font-size: 13px; font-weight: 700; color: {sig_color}; margin-top: 1px;">{dist_20:.2f}%</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 10px; color: #666666; font-weight:600;">200EMA DIST</div>
+                                <div style="font-size: 13px; font-weight: 700; color: #FFFFFF; margin-top: 1px;">{dist_200}</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 14px; padding: 6px 10px; background: rgba(255,255,255,0.02); border-radius: 4px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.04);">
+                            <span style="font-size: 10px; color: #666666; font-weight: 600;">VOLUME STRENGTH</span>
+                            <span style="font-size: 11px; font-weight: 700; color: {v_strength_color};">{v_strength_label} ({v_strength_ratio:.1f}x)</span>
+                        </div>
+                    </div>
+                    """
+                    
+                    rendered_card_html = card_html_template.format(
+                        symbol=stock['sym'],
+                        sector=stock['sector'],
+                        sig_bg=stock['sig']['bg'],
+                        sig_color=stock['sig']['color'],
+                        sig_border=stock['sig']['border'],
+                        sig_label=stock['sig']['label'],
+                        badges=badge_row_html,
+                        ltp=stock['ltp'],
+                        vol_formatted=format_volume_indian(stock['volume']),
+                        dist_20=stock['dist_pct'],
+                        dist_200=f"{stock['dist_200']:.1f}%" if stock['dist_200'] is not None else "—",
+                        v_strength_color=stock['v_strength']['color'],
+                        v_strength_label=stock['v_strength']['label'],
+                        v_strength_ratio=stock['v_strength']['ratio']
                     )
                     
-                    # Progress confidence metric bar alignment
+                    # Send pure, pre-compiled static text content to the markdown renderer
+                    st.markdown(rendered_card_html, unsafe_allowed_html=True)
+                    
+                    st.write("")
                     st.progress(stock["confidence"] / 100, text=f"Setup Confidence: {stock['confidence']}%")
 else:
     if st.session_state.ts_prewatch is None:
