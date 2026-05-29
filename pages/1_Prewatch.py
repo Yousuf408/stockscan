@@ -271,8 +271,8 @@ if st.session_state.ts_prewatch:
     if not processed_cards_list:
         st.info("No stock setups configured matching filters.")
     else:
-     # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT ENGINE - FIXED LIGHT THEME VISIBILITY
+    # ════════════════════════════════════════════════════════════════════════
+        #  UI/UX VIEWPORT ENGINE - FIXED BADGE TAGS & WIDTH CONFIGURATION
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
@@ -282,21 +282,37 @@ if st.session_state.ts_prewatch:
                 with head_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
                     
-                    # Clean colored border badges optimized for Light Backgrounds
-                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #D47A00; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); text-transform: uppercase;'>⭐ Near</span>" if stock["abs_dist"] <= 1.0 else ""
-                    strong_badge = f"<span style='background: rgba(0,204,71,0.1); color: #008F32; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,204,71,0.25); text-transform: uppercase;'>💪 Strong</span>" if stock["body_gt_wick"] else ""
+                    # Explicit clean string building to prevent any structural leakages
+                    near_badge = ""
+                    if stock["abs_dist"] <= 1.0:
+                        near_badge = "<span style='background: rgba(255,153,0,0.1); color: #D47A00; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); text-transform: uppercase; white-space: nowrap;'>⭐ Near</span>"
+                        
+                    strong_badge = ""
+                    if stock["body_gt_wick"]:
+                        strong_badge = "<span style='background: rgba(0,204,71,0.1); color: #008F32; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,204,71,0.25); text-transform: uppercase; white-space: nowrap;'>💪 Strong</span>"
                     
-                    # Forced dark font styling (#1E1E1E) so text is 100% visible on light themes
+                    # Combined badges container string
+                    badges_html = ""
+                    if near_badge or strong_badge:
+                        badges_html = f"""
+                        <div style='display: flex; gap: 8px; margin-left: 4px; align-items: center;'>
+                            {near_badge}
+                            {strong_badge}
+                        </div>
+                        """
+                    
+                    # Main Header Container with fixed asset layout widths
                     st.markdown(
                         f"""
-                        <div style='display: flex; align-items: center; gap: 12px;'>
-                            <span style='font-size: 22px; font-weight: 800; color: #1E1E1E; letter-spacing: -0.3px;'>{stock['sym']}</span>
-                            <span style='font-size: 18px; color: rgba(0,0,0,0.15); font-weight: 300;'>|</span>
-                            <span style='font-size: 13px; color: #666666; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;'>{clean_sector}</span>
-                            <div style='display: flex; gap: 8px; margin-left: 10px;'>
-                                {near_badge}
-                                {strong_badge}
+                        <div style='display: flex; align-items: center; gap: 12px; width: 100%; max-width: 650px;'>
+                            <div style='min-width: 140px; max-width: 180px;'>
+                                <span style='font-size: 22px; font-weight: 800; color: #1E1E1E; letter-spacing: -0.3px;'>{stock['sym']}</span>
                             </div>
+                            <span style='font-size: 18px; color: rgba(0,0,0,0.15); font-weight: 300;'>|</span>
+                            <div style='min-width: 120px; max-width: 160px;'>
+                                <span style='font-size: 13px; color: #666666; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;'>{clean_sector}</span>
+                            </div>
+                            {badges_html}
                         </div>
                         """, unsafe_allow_html=True
                     )
@@ -339,12 +355,12 @@ if st.session_state.ts_prewatch:
                     st.markdown(f"<span style='font-size: 11px; color: #777777; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>200EMA DIST</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 18px; font-weight: 700; margin-top: 2px;'>{m2_html}</div>", unsafe_allow_html=True)
                 
-                # Metric 3: Current Market Price (CMP) Layout Column - FORCED BLACK FONT
+                # Metric 3: Current Market Price (CMP) Layout Column
                 with m_col3:
                     st.markdown(f"<span style='font-size: 11px; color: #777777; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>CMP</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 18px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>₹{stock['ltp']:.2f}</div>", unsafe_allow_html=True)
                 
-                # Metric 4: Volume Tracking Layout Column - FORCED BLACK FONT
+                # Metric 4: Volume Tracking Layout Column
                 with m_col4:
                     st.markdown(f"<span style='font-size: 11px; color: #777777; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;'>VOLUME</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 18px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>{format_volume_indian(stock['volume'])}</div>", unsafe_allow_html=True)
@@ -359,7 +375,7 @@ if st.session_state.ts_prewatch:
                         </div>
                         """, unsafe_allow_html=True
                     )
-                    st.progress(stock["confidence"] / 100, text=f"Confidence: {stock['confidence']}%")                        
+                    st.progress(stock["confidence"] / 100, text=f"Confidence: {stock['confidence']}%")                      
 else:
     if st.session_state.ts_prewatch is None:
         st.warning("No prewatch matrix cache records found. Initialize database scan sequences by clicking 'SCAN DAILY EMA'.")
