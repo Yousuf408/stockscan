@@ -151,11 +151,7 @@ st.set_page_config(layout="wide")
 
 st.markdown(
     """
-    <div style="margin-bottom: 20px;">
-        <h1 style="margin:0; font-size: 26px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.5px;">
-            🛡️ TRADE SENTRY <span style="font-size: 13px; font-weight: 400; color: #888888; vertical-align: middle; margin-left: 8px;">Prewatch Scanner v6.0</span>
-        </h1>
-    </div>
+   
     """, unsafe_allow_html=True
 )
 
