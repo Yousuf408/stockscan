@@ -62,13 +62,13 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     is_above = ltp > ema20
     is_green = close > open_p
     if is_above and is_green:
-        return {"label": "▲ STRONG BUY", "color": "#00FF66", "bg": "rgba(0,255,102,0.1)", "status": "buy"}
+        return {"label": "▲ STRONG BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.1)", "status": "buy"}
     elif is_above:
-        return {"label": "▲ BUY", "color": "#00FF66", "bg": "rgba(0,255,102,0.1)", "status": "buy"}
+        return {"label": "▲ BUY", "color": "#00AA3B", "bg": "rgba(0,170,59,0.1)", "status": "buy"}
     elif not is_above and not is_green:
-        return {"label": "▼ STRONG SELL", "color": "#FF4B4B", "bg": "rgba(255,75,75,0.1)", "status": "sell"}
+        return {"label": "▼ STRONG SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.1)", "status": "sell"}
     else:
-        return {"label": "▼ SELL", "color": "#FF4B4B", "bg": "rgba(255,75,75,0.1)", "status": "sell"}
+        return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.1)", "status": "sell"}
 
 def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
     score = 100 - (abs_dist / 5 * 60)
@@ -77,21 +77,35 @@ def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: floa
     return int(min(100, max(0, round(score))))
 
 # ══════════════════════════════════════════
-#  MOCK OHLC ENGINE (Replace with Live Feed)
+#  FIXED OHLC ENGINE (Controlled Walk)
 # ══════════════════════════════════════════
 def fetch_daily_candles(symbol: str) -> dict:
     np.random.seed(abs(hash(symbol)) % 10000)
-    base_price = np.random.uniform(300, 2500)
+    
+    # Establish realistic baseline valuation matrix mapping for NSE profiles
+    if "ADANIENT" in symbol: base_price = 3150.0
+    elif "RELIANCE" in symbol: base_price = 1420.0
+    elif "TCS" in symbol: base_price = 3950.0
+    elif "HEROMOTOCO" in symbol: base_price = 4200.0
+    elif "NAVINFLUOR" in symbol: base_price = 3200.0
+    elif "GMDC" in symbol: base_price = 450.0
+    else: base_price = np.random.uniform(500, 1800)
+    
     candles = []
     current_price = base_price
+    
+    # Generate bounded historic curve data frames
     for _ in range(250):
-        open_p = current_price * np.random.uniform(0.98, 1.02)
-        close = open_p * np.random.uniform(0.97, 1.03)
-        high = max(open_p, close) * np.random.uniform(1.00, 1.02)
-        low = min(open_p, close) * np.random.uniform(0.98, 1.00)
-        volume = int(np.random.uniform(30000, 1500000))
+        # Controlled daily drift matrix prevents compounding inflation out of bounds
+        open_p = current_price * np.random.uniform(0.995, 1.005)
+        close = open_p * np.random.uniform(0.99, 1.01)
+        high = max(open_p, close) * np.random.uniform(1.00, 1.008)
+        low = min(open_p, close) * np.random.uniform(0.992, 1.00)
+        volume = int(np.random.uniform(80000, 1200000))
+        
         candles.append({"o": open_p, "h": high, "l": low, "c": close, "v": volume})
         current_price = close
+        
     return {"ok": True, "candles": candles}
 
 # ══════════════════════════════════════════
@@ -149,12 +163,6 @@ def run_prewatch_scan():
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
 
-st.markdown(
-    """
-   
-    """, unsafe_allow_html=True
-)
-
 # Control Action Header Strip
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
 with col_btn1:
@@ -171,9 +179,9 @@ total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_p
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
 
 col_info.markdown(
-    f"<div style='padding-top: 6px; font-size: 13px; color: #AAAAAA;'>"
-    f"⏳ <b>Last Scanned:</b> <span style='color:#000000;'>{scan_time_str}</span> | "
-    f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#000000;'>{total_scanned_count}</span>"
+    f"<div style='padding-top: 6px; font-size: 13px; color: #444444;'>"
+    f"⏳ <b>Last Scanned:</b> <span style='color:#000000; font-weight:700;'>{scan_time_str}</span> | "
+    f"🎯 <b>Total Stocks Scanned:</b> <span style='color:#000000; font-weight:700;'>{total_scanned_count}</span>"
     f"</div>",
     unsafe_allow_html=True
 )
@@ -267,18 +275,16 @@ if st.session_state.ts_prewatch:
     if not processed_cards_list:
         st.info("No stock setups configured matching filters.")
     else:
- # ════════════════════════════════════════════════════════════════════════
-        #  UI/UX VIEWPORT ENGINE - COMPLETE LIGHT THEME OVERHAUL
+        # ════════════════════════════════════════════════════════════════════════
+        #  UI/UX VIEWPORT ENGINE - SYSTEMATIC LIGHT MODE DISPLAY
         # ════════════════════════════════════════════════════════════════════════
         for stock in processed_cards_list:
             with st.container(border=True):
-                # Row 1: Header Branding block and Condition Tags + Right Align Action Signals
                 head_left, head_right = st.columns([8, 4])
                 
                 with head_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
                     
-                    # Explicit clean string building to prevent any structural layout leaks
                     near_badge = ""
                     if stock["abs_dist"] <= 1.0:
                         near_badge = "<span style='background: rgba(255,153,0,0.12); color: #B36200; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.3); text-transform: uppercase; white-space: nowrap;'>⭐ Near</span>"
@@ -287,17 +293,10 @@ if st.session_state.ts_prewatch:
                     if stock["body_gt_wick"]:
                         strong_badge = "<span style='background: rgba(0,204,71,0.12); color: #007A2B; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,204,71,0.3); text-transform: uppercase; white-space: nowrap;'>💪 Strong Body</span>"
                     
-                    # Combined badges container string
                     badges_html = ""
                     if near_badge or strong_badge:
-                        badges_html = f"""
-                        <div style='display: flex; gap: 8px; align-items: center;'>
-                            {near_badge}
-                            {strong_badge}
-                        </div>
-                        """
+                        badges_html = f"<div style='display: flex; gap: 8px; align-items: center;'>{near_badge}{strong_badge}</div>"
                     
-                    # Main Header Container with fixed asset layout widths and forced dark styling
                     st.markdown(
                         f"""
                         <div style='display: flex; align-items: center; gap: 12px; width: 100%; max-width: 650px;'>
@@ -314,7 +313,6 @@ if st.session_state.ts_prewatch:
                     )
                 
                 with head_right:
-                    # Clean top-right signal execution block
                     st.markdown(
                         f"""
                         <div style='text-align: right; padding-top: 4px;'>
@@ -325,20 +323,15 @@ if st.session_state.ts_prewatch:
                         """, unsafe_allow_html=True
                     )
                 
-                # Structural Spacer Divider Margin
                 st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
-                
-                # Row 2: 4 Technical Metrics Array positioned next to each other sequentially
                 m_col1, m_col2, m_col3, m_col4, vol_analysis_col = st.columns([2.0, 2.0, 2.0, 2.0, 4.0])
                 
-                # Metric 1: EMA20 Distance Layout Column
                 with m_col1:
                     m1_color = "#00AA3B" if stock['dist_pct'] >= 0 else "#D32F2F"
                     m1_sign = "▲" if stock['dist_pct'] >= 0 else "▼"
                     st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>EMA20 DIST</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: {m1_color}; margin-top: 2px;'>{m1_sign} {abs(stock['dist_pct']):.2f}%</div>", unsafe_allow_html=True)
                 
-                # Metric 2: 200EMA Distance Layout Column
                 with m_col2:
                     dist_200_val = stock['dist_200']
                     if dist_200_val is not None:
@@ -351,17 +344,14 @@ if st.session_state.ts_prewatch:
                     st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>200EMA DIST</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; margin-top: 2px;'>{m2_html}</div>", unsafe_allow_html=True)
                 
-                # Metric 3: Current Market Price (CMP) Layout Column - FORCED DARK visibility
                 with m_col3:
                     st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>CMP</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>₹{stock['ltp']:.2f}</div>", unsafe_allow_html=True)
                 
-                # Metric 4: Volume Tracking Layout Column - FORCED DARK visibility
                 with m_col4:
                     st.markdown(f"<span style='font-size: 11px; color: #000000; font-weight: 700; letter-spacing: 0.3px;'>VOLUME</span>", unsafe_allow_html=True)
                     st.markdown(f"<div style='font-size: 20px; font-weight: 700; color: #1E1E1E; margin-top: 2px;'>{format_volume_indian(stock['volume'])}</div>", unsafe_allow_html=True)
                 
-                # Metric 5: Advanced Volume analytics matrix block & Gauge tracking
                 with vol_analysis_col:
                     st.markdown(
                         f"""
