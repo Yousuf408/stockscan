@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — app.py
 #  WebSocket price streamer using st.cache_resource
-#  Persists across page changes + Streamlit reruns
+#  With Production-Grade Session Auto-Refresh
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -96,7 +96,6 @@ def update_price(symbol: str, exchange: str, price: float, source: str):
     save_cache(cache)
 
 def force_set_mode(mode: str):
-    """Force set mode regardless of current state"""
     cache = load_cache()
     cache["mode"] = mode
     save_cache(cache)
@@ -159,7 +158,7 @@ def build_token_map(stocks: list):
 
 
 # ══════════════════════════════════════════
-#  HTTP POLLING FALLBACK (SINGLE round)
+#  HTTP POLLING FALLBACK
 # ══════════════════════════════════════════
 
 def run_http_polling(angel_obj):
@@ -197,7 +196,7 @@ def run_http_polling(angel_obj):
 
 
 # ══════════════════════════════════════════
-#  YFINANCE FALLBACK (SINGLE round)
+#  YFINANCE FALLBACK
 # ══════════════════════════════════════════
 
 def run_yfinance_fallback():
@@ -212,8 +211,7 @@ def run_yfinance_fallback():
             exchange = stock.get("exchange", "NS")
             suffix   = ".NS" if exchange == "NS" else ".BO"
             ticker   = yf.Ticker(f"{symbol}{suffix}")
-            price    = (ticker.fast_info.get("last_price")
-                        or ticker.fast_info.get("regularMarketPrice"))
+            price    = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
             if price:
                 update_price(symbol, exchange, float(price), "yfinance")
         except Exception as e:
@@ -235,7 +233,30 @@ class PriceStreamer:
         self.nse_tokens  = []
         self.bse_tokens  = []
         self.sws         = None
-        self.is_ws_connected = False  # Track state explicitly
+        self.is_ws_connected = False
+
+    def refresh_angel_session(self):
+        """Fetches fresh tokens directly from API to fix handshake retry failure loops"""
+        try:
+            print("[Streamer Engine] Re-authenticating credentials to refresh session tokens...")
+            password    = st.secrets["PASSWORD"]
+            totp_secret = st.secrets["TOTP_SECRET"]
+            
+            self.angel_obj = SmartConnect(api_key=self.api_key)
+            totp = pyotp.TOTP(totp_secret).now()
+            session_data = self.angel_obj.generateSession(self.client_code, password, totp)
+            
+            if session_data and session_data.get("status"):
+                self.auth_token = session_data["data"]["jwtToken"]
+                self.feed_token = session_data["data"].get("feedToken") or self.angel_obj.getfeedToken()
+                print("[Streamer Engine] Session token regeneration complete.")
+                return True
+            else:
+                print(f"[Streamer Engine] Session refresh rejected by server: {session_data.get('message')}")
+                return False
+        except Exception as e:
+            print(f"[Streamer Engine] Exception triggered during token refresh: {e}")
+            return False
 
     def on_data(self, wsapp, message):
         try:
@@ -247,15 +268,16 @@ class PriceStreamer:
                 if token in self.token_map:
                     symbol, exchange = self.token_map[token]
                     update_price(symbol, exchange, ltp, "websocket")
-                    # If data arrives but cache mode flipped away, restore it
+                    
+                    # Lock UI view back to green if a fallback state leaked in
                     cache = load_cache()
                     if cache.get("mode") != "websocket":
                         force_set_mode("websocket")
         except Exception as e:
-            print(f"[WS] on_data error: {e}")
+            print(f"[WS] on_data parsing exception: {e}")
 
     def on_open(self, wsapp):
-        print("[WS] Connected successfully!")
+        print("[WS] Handshake approved. Connected to Angel One streaming server!")
         self.is_ws_connected = True
         force_set_mode("websocket")
         token_list = []
@@ -265,21 +287,21 @@ class PriceStreamer:
             token_list.append({"exchangeType": 3, "tokens": self.bse_tokens})
         if token_list:
             wsapp.subscribe("ts_001", 1, token_list)
-            print(f"[WS] Subscribed to tokens successfully.")
+            print(f"[WS] Streaming channels loaded successfully.")
 
     def on_error(self, wsapp, error):
-        print(f"[WS] Error hook triggered: {error}")
+        print(f"[WS] Error encountered: {error}")
         self.is_ws_connected = False
 
     def on_close(self, wsapp, close_status_code=None, close_msg=None):
-        print(f"[WS] Connection closed: {close_status_code} - {close_msg}")
+        print(f"[WS] Connection terminated by remote host.")
         self.is_ws_connected = False
 
     def start_websocket(self):
-        """Robust Supervisor loop tracking state directly"""
+        """Continuous Supervisor monitoring with token-refresh failover architecture"""
         while True:
             try:
-                # ── Market closed handling ──
+                # ── Market Closed Guard ──
                 if not is_market_open():
                     print(f"[Streamer] Market closed ({ist_time_str()}). Sleeping 60s...")
                     self.is_ws_connected = False
@@ -289,23 +311,24 @@ class PriceStreamer:
                     time.sleep(60)
                     continue
 
-                # ── Watchlist validation ──
+                # ── Watchlist Verification ──
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
-                    print("[Streamer] Watchlist empty. Retrying in 10s...")
+                    print("[Streamer] No tickers registered in watchlist. Pausing 10s...")
                     time.sleep(10)
                     continue
 
-                # ── Direct Connection Attempt ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
-                
                 if not self.token_map:
-                    print("[Streamer] Mapping failed. Running yfinance fallback pass...")
+                    print("[Streamer] Token extraction returned empty. Initiating yfinance single pass...")
                     run_yfinance_fallback()
                     time.sleep(10)
                     continue
 
-                print(f"[WS] Initializing connection sequence at {ist_time_str()}...")
+                # 🔄 Auto-refresh tokens right before attempting connection to clear bad state
+                self.refresh_angel_session()
+
+                print(f"[WS] Routing connection request via SmartWebSocketV2 at {ist_time_str()}...")
                 self.sws = SmartWebSocketV2(
                     self.auth_token,
                     self.api_key,
@@ -317,33 +340,40 @@ class PriceStreamer:
                 self.sws.on_error = self.on_error
                 self.sws.on_close = self.on_close
                 
-                # Run connection in an isolated thread or directly block safely
-                # Depending on SmartApi internal updates, we add a keepalive check
-                self.sws.connect()
+                # Non-blocking or blocking context setup depending on SDK installation version
+                threading.Thread(target=self.sws.connect, daemon=True).start()
                 
-                # Give it a 3-second window to switch self.is_ws_connected to True via on_open
-                time.sleep(3)
+                # Give the connection window 4 seconds to confirm stability
+                time.sleep(4)
 
-                # Keep loop context alive here while connection flag remains active
+                # Active monitoring cycle while connection flag remains active
+                keepalive_counter = 0
                 while self.is_ws_connected and is_market_open():
                     time.sleep(1)
+                    keepalive_counter += 1
+                    # Perform an optional token map check every 60 seconds
+                    if keepalive_counter >= 60:
+                        keepalive_counter = 0
+                        latest_stocks = get_all_watchlist_stocks()
+                        self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(latest_stocks)
 
-                # ── Fallback Path (Triggers only if socket is explicitly unflagged) ──
+                # ── Fallback Processing ──
                 if is_market_open() and not self.is_ws_connected:
-                    print("[Streamer] Connection dead or exited. Initiating fallback cycle...")
+                    print("[Streamer] Stream connection is dead. Executing fallback buffer pass...")
                     try:
                         run_http_polling(self.angel_obj)
                     except Exception as http_err:
-                        print(f"[HTTP] Pass failed: {http_err}")
+                        print(f"[HTTP] Pass execution failed: {http_err}")
                         try:
                             run_yfinance_fallback()
                         except Exception as yf_err:
-                            print(f"[yfinance] Pass failed: {yf_err}")
+                            print(f"[yfinance] Pass execution failed: {yf_err}")
 
+                print("[Streamer] Reconnection loop iteration interval pause (5s)...")
                 time.sleep(5)
 
             except Exception as e:
-                print(f"[Streamer] Super Loop error: {e}")
+                print(f"[Streamer] Master loop safety fault: {e}")
                 self.is_ws_connected = False
                 time.sleep(10)
 
