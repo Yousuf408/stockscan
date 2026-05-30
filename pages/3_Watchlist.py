@@ -145,8 +145,17 @@ def fetch_price_yfinance(symbol: str, exchange: str):
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
         ticker = yf.Ticker(f"{sym}{suffix}")
-        price  = (ticker.fast_info.get("last_price") or
-                  ticker.fast_info.get("regularMarketPrice"))
+
+        # Try fast_info first
+        price = (ticker.fast_info.get("last_price") or
+                 ticker.fast_info.get("regularMarketPrice"))
+
+        # Fallback to history() if fast_info returns nothing
+        if not price:
+            hist = ticker.history(period="2d")
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+
         if price:
             return float(price), "yfinance"
     except:
