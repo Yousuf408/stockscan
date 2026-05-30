@@ -210,34 +210,35 @@ col_info.markdown(
 
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════
-#  TWO-PORTION SINGLE DIV REFINEMENT BOX
-# ══════════════════════════════════════════
-with st.container(border=True):
-    # --- 1st Portion: Numeric Data Threshold Inputs ---
-    st.markdown("<b style='font-size:12px; color:#555;'>1st: NUMERIC THRESHOLDS</b>", unsafe_allow_html=True)
-    p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
-    with p1_col1:
-        filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
-    with p1_col2:
-        filter_ema20_pct = st.number_input("EMA Gap % (Max Dist)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
-    with p1_col3:
-        filter_volume = st.number_input("Volume Size (Min Limit)", min_value=0.0, value=0.0, step=50000.0)
+# ══════════════════════════════════════════════════════════
+#  REFINEMENT BOX - REDUCED TO 50% WIDTH WITHOUT HEADLINES
+# ══════════════════════════════════════════════════════════
+box_col_left, box_col_right = st.columns([6, 6])
+
+with box_col_left:
+    with st.container(border=True):
+        # --- 1st Portion: Numeric Data Threshold Inputs ---
+        p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
+        with p1_col1:
+            filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
+        with p1_col2:
+            filter_ema20_pct = st.number_input("EMA Gap % (Max Dist)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
+        with p1_col3:
+            filter_volume = st.number_input("Volume Size (Min Limit)", min_value=0.0, value=0.0, step=50000.0)
+            
+        st.markdown("<div style='margin: 12px 0; border-top: 1px dashed #ddd;'></div>", unsafe_allow_html=True)
         
-    st.markdown("<div style='margin: 10px 0; border-top: 1px dashed #ddd;'></div>", unsafe_allow_html=True)
-    
-    # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters ---
-    st.markdown("<b style='font-size:12px; color:#555;'>2nd: FILTERS & MATRIX SORTING</b>", unsafe_allow_html=True)
-    p2_col1, p2_col2 = st.columns([4.0, 8.0])
-    with p2_col1:
-        st.markdown("<div style='margin-top:25px;'></div>", unsafe_allow_html=True) # visual padding shift to align with radio label
-        body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
-    with p2_col2:
-        sort_strategy = st.radio(
-            "Matrix Evaluation Strategy Vector:", 
-            ["EMA20", "Absolute Volume Size", "Confidence Score"], 
-            horizontal=True
-        )
+        # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters ---
+        p2_col1, p2_col2 = st.columns([4.0, 8.0])
+        with p2_col1:
+            st.markdown("<div style='margin-top:25px;'></div>", unsafe_allow_html=True) # alignments fix
+            body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
+        with p2_col2:
+            sort_strategy = st.radio(
+                "Matrix Evaluation Strategy Vector:", 
+                ["EMA20", "Absolute Volume Size", "Confidence Score"], 
+                horizontal=True
+            )
 
 # --- DATA PROCESSING FLOW ENGINE ---
 if st.session_state.ts_prewatch:
