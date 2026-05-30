@@ -1,25 +1,20 @@
 # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py
-#   Price fetching with db.py persistent storage
-#   Storage: db.py (session_state + JSON + GitHub commit)
+#   Self-contained price fetching
+#   No app.py / price_cache.json dependency
+#   Direct: Angel One HTTP → yfinance fallback
+#   Auto-refresh every 5 minutes
 # ══════════════════════════════════════════
 
 import streamlit as st
-import os, pytz, yfinance as yf
+import json, os, pytz, yfinance as yf, time
 from datetime import datetime
 import plotly.graph_objects as go
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from stocks import SECTOR_YAHOO, get_stock_token, get_stock_sector
+from stocks import get_stock_token, get_stock_sector
 from styles import apply_styles, sidebar_brand, page_header
-
-# ── ONLY CHANGE: import from db.py instead of reading files directly ──
-from db import (
-    get_watchlist, set_watchlist,
-    load_cache,
-    WATCHLIST_NAMES
-)
 
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
@@ -50,25 +45,38 @@ def is_market_open():
 
 
 # ══════════════════════════════════════════
-#   STORAGE HELPERS
-#   Thin wrappers over db.py so rest of
-#   code doesn't need to change at all
+#   WATCHLIST STORAGE (JSON file based)
 # ══════════════════════════════════════════
 
+WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
+WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+
+def load_all() -> dict:
+    if not os.path.exists(WATCHLIST_FILE):
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
+    try:
+        with open(WATCHLIST_FILE, "r") as f:
+            data = json.load(f)
+            for n in WATCHLIST_NAMES:
+                data.setdefault(f"watchlist_{n}", [])
+            return data
+    except:
+        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
+
+def save_all(data: dict):
+    try:
+        with open(WATCHLIST_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        st.error(f"Save error: {e}")
+
 def get_list(tab: str) -> list:
-    """Replaces: get_list() — now reads from db.py"""
-    return get_watchlist(tab)
+    return load_all().get(f"watchlist_{tab}", [])
 
 def set_list(tab: str, lst: list):
-    """Replaces: set_list() — now writes via db.py (disk + GitHub)"""
-    set_watchlist(tab, lst, commit=True)
-
-def load_external_price_cache() -> dict:
-    """Replaces: load_external_price_cache() — reads from db.py price cache"""
-    try:
-        return load_cache().get("stocks", {})
-    except:
-        return {}
+    data = load_all()
+    data[f"watchlist_{tab}"] = lst
+    save_all(data)
 
 
 # ══════════════════════════════════════════
@@ -76,13 +84,10 @@ def load_external_price_cache() -> dict:
 # ══════════════════════════════════════════
 
 def play_alert_sound(alert_type="triggered"):
-    if alert_type == "triggered":
-        freq, dur = 800, 300
-    elif alert_type == "sl_hit":
-        freq, dur = 400, 500
-    else:
-        freq, dur = 1200, 200
-    html_code = f"""<script>
+    if alert_type == "triggered":  freq, dur = 800, 300
+    elif alert_type == "sl_hit":   freq, dur = 400, 500
+    else:                          freq, dur = 1200, 200
+    st.components.v1.html(f"""<script>
     const ac = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ac.createOscillator(), gain = ac.createGain();
     osc.connect(gain); gain.connect(ac.destination);
@@ -90,17 +95,20 @@ def play_alert_sound(alert_type="triggered"):
     gain.gain.setValueAtTime(0.3, ac.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + {dur/1000});
     osc.start(ac.currentTime); osc.stop(ac.currentTime + {dur/1000});
-    </script>"""
-    st.components.v1.html(html_code, height=0)
+    </script>""", height=0)
 
 
 # ══════════════════════════════════════════
-#   DIRECT PRICE FETCH
+#   PRICE FETCH — SELF CONTAINED
+#   No app.py dependency at all
+#   Market Open  → Angel One HTTP → yfinance
+#   Market Closed → yfinance directly
 # ══════════════════════════════════════════
+
+AUTO_REFRESH_SECS = 300  # 5 minutes
 
 @st.cache_resource
 def get_angel_session():
-    """Angel One session — cached for reuse"""
     try:
         import pyotp
         from SmartApi import SmartConnect
@@ -108,26 +116,24 @@ def get_angel_session():
         totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
         sess = obj.generateSession(
             st.secrets["CLIENT_CODE"],
-            st.secrets["PASSWORD"],
-            totp
+            st.secrets["PASSWORD"], totp
         )
         return obj if sess.get("status") else None
     except:
         return None
 
+def clean_symbol(symbol: str) -> str:
+    """Strip $ prefix and exchange suffixes"""
+    return symbol.lstrip("$").strip().upper().replace(".NS", "").replace(".BO", "")
+
 def fetch_price_angel(symbol: str, exchange: str):
-    """Fetch live price from Angel One HTTP"""
     try:
-        obj   = get_angel_session()
+        obj = get_angel_session()
         if not obj: return None, "no_session"
-        # Strip $ and suffixes before token lookup
-        clean = symbol.lstrip("$").strip().upper().replace(".NS","").replace(".BO","")
-        token = get_stock_token(clean)
+        sym   = clean_symbol(symbol)
+        token = get_stock_token(sym)
         if not token: return None, "no_token"
-        resp  = obj.ltpData(
-            "NSE" if exchange == "NS" else "BSE",
-            clean, str(token)
-        )
+        resp  = obj.ltpData("NSE" if exchange == "NS" else "BSE", sym, str(token))
         if resp and resp.get("status"):
             return float(resp["data"]["ltp"]), "http"
     except:
@@ -135,14 +141,12 @@ def fetch_price_angel(symbol: str, exchange: str):
     return None, "angel_failed"
 
 def fetch_price_yfinance(symbol: str, exchange: str):
-    """Fetch price from yfinance"""
     try:
-        # Strip $ and suffixes before building yfinance ticker
-        clean  = symbol.lstrip("$").strip().upper().replace(".NS","").replace(".BO","")
+        sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        ticker = yf.Ticker(f"{clean}{suffix}")
-        price  = (ticker.fast_info.get("last_price")
-                  or ticker.fast_info.get("regularMarketPrice"))
+        ticker = yf.Ticker(f"{sym}{suffix}")
+        price  = (ticker.fast_info.get("last_price") or
+                  ticker.fast_info.get("regularMarketPrice"))
         if price:
             return float(price), "yfinance"
     except:
@@ -151,93 +155,84 @@ def fetch_price_yfinance(symbol: str, exchange: str):
 
 def fetch_price(symbol: str, exchange: str):
     """
-    Fetch price with fallback chain:
-    Market Open   → Angel One HTTP → yfinance
-    Market Closed → yfinance only
+    Market Open  → Angel One HTTP → yfinance fallback
+    Market Closed → yfinance directly
     """
     if is_market_open():
         price, source = fetch_price_angel(symbol, exchange)
         if price:
             return price, source
+        time.sleep(0.3)  # small delay before yfinance fallback
     price, source = fetch_price_yfinance(symbol, exchange)
     return price, source
 
+def fetch_all_prices(watchlist: list) -> dict:
+    """Fetch prices for all stocks. Returns {sym_exch: {price, source, time}}"""
+    prices = {}
+    for i, stock in enumerate(watchlist):
+        sym  = stock.get("symbol", "")
+        exch = stock.get("exchange", "NS")
+        key  = f"{sym}_{exch}"
+        price, source = fetch_price(sym, exch)
+        if price:
+            prices[key] = {
+                "price":  price,
+                "source": source,
+                "time":   now_ist().strftime("%H:%M:%S")
+            }
+        time.sleep(0.5)  # rate limit protection
+    return prices
+
 
 # ══════════════════════════════════════════
-#   CHART RENDERING (PLOTLY)
+#   CHART
 # ══════════════════════════════════════════
 
 @st.cache_data(ttl=300)
 def fetch_chart_data(symbol: str, exchange: str):
-    """Fetch historical chart data from yfinance"""
     try:
-        clean  = symbol.lstrip("$").strip().upper().replace(".NS","").replace(".BO","")
+        sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        ticker = yf.Ticker(f"{clean}{suffix}")
-        hist   = ticker.history(period="1y")
-        return hist
-    except Exception as e:
-        st.error(f"Error fetching chart data: {str(e)}")
+        return yf.Ticker(f"{sym}{suffix}").history(period="1y")
+    except:
         return None
 
 def render_chart_plotly(symbol: str, exchange: str):
-    """Render professional candlestick chart using Plotly for Indian stocks"""
     exch_label = "NSE" if exchange == "NS" else "BSE"
-    
     with st.spinner(f"📈 Loading {symbol} chart..."):
         hist = fetch_chart_data(symbol, exchange)
-    
     if hist is None or hist.empty:
-        st.error(f"❌ No chart data available for {symbol} ({exch_label})")
-        st.info("💡 Symbol may be incorrect or delisted. Check your watchlist.")
+        st.error(f"❌ No chart data for {symbol} ({exch_label})")
         return
-    
     try:
         fig = go.Figure(data=[go.Candlestick(
             x=hist.index,
-            open=hist['Open'],
-            high=hist['High'],
-            low=hist['Low'],
-            close=hist['Close'],
-            name=f"{symbol}",
+            open=hist['Open'], high=hist['High'],
+            low=hist['Low'],   close=hist['Close'],
+            name=symbol,
             increasing_line_color='#00a854',
             decreasing_line_color='#e53935',
         )])
-        
         fig.update_layout(
-            title={
-                'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
-                'x': 0.5,
-                'xanchor': 'center',
-                'font': {'size': 18, 'color': '#0f1117'}
-            },
-            yaxis_title="Price (₹)",
-            xaxis_title="Date",
-            template="plotly_white",
-            height=650,
-            hovermode='x unified',
-            xaxis_rangeslider_visible=False,
+            title={'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
+                   'x': 0.5, 'xanchor': 'center',
+                   'font': {'size': 18, 'color': '#0f1117'}},
+            yaxis_title="Price (₹)", xaxis_title="Date",
+            template="plotly_white", height=650,
+            hovermode='x unified', xaxis_rangeslider_visible=False,
             font=dict(family="monospace", size=11, color="#0f1117"),
-            plot_bgcolor='#fafafa',
-            paper_bgcolor='#ffffff',
+            plot_bgcolor='#fafafa', paper_bgcolor='#ffffff',
             margin=dict(l=50, r=50, t=80, b=50),
             xaxis=dict(showgrid=True, gridwidth=1, gridcolor='#e0e3e8'),
             yaxis=dict(showgrid=True, gridwidth=1, gridcolor='#e0e3e8')
         )
-        
         st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
-        
-        current_price = hist['Close'].iloc[-1]
-        year_high     = hist['High'].max()
-        year_low      = hist['Low'].min()
-        
         col1, col2, col3 = st.columns(3)
-        with col1: st.metric("Current",  f"₹{current_price:,.0f}")
-        with col2: st.metric("52W High", f"₹{year_high:,.0f}")
-        with col3: st.metric("52W Low",  f"₹{year_low:,.0f}")
-            
+        with col1: st.metric("Current",  f"₹{hist['Close'].iloc[-1]:,.0f}")
+        with col2: st.metric("52W High", f"₹{hist['High'].max():,.0f}")
+        with col3: st.metric("52W Low",  f"₹{hist['Low'].min():,.0f}")
     except Exception as e:
-        st.error(f"❌ Error rendering chart: {str(e)}")
+        st.error(f"❌ Chart error: {e}")
 
 
 # ══════════════════════════════════════════
@@ -249,34 +244,28 @@ def compute_status(stock: dict, ltp: float) -> str:
     d = stock.get("direction", "BUY")
     if not entry: return "WATCHING"
     if d == "BUY":
-        if sl and ltp <= sl: return "SL_HIT"
-        if t2 and ltp >= t2: return "TARGET2"
-        if t1 and ltp >= t1: return "TARGET1"
-        if ltp >= entry: return "TRIGGERED"
-        if abs(ltp - entry) / entry <= 0.01: return "NEAR"
+        if sl and ltp <= sl:             return "SL_HIT"
+        if t2 and ltp >= t2:             return "TARGET2"
+        if t1 and ltp >= t1:             return "TARGET1"
+        if ltp >= entry:                 return "TRIGGERED"
+        if abs(ltp-entry)/entry <= 0.01: return "NEAR"
     else:
-        if sl and ltp >= sl: return "SL_HIT"
-        if t2 and ltp <= t2: return "TARGET2"
-        if t1 and ltp <= t1: return "TARGET1"
-        if ltp <= entry: return "TRIGGERED"
-        if abs(ltp - entry) / entry <= 0.01: return "NEAR"
+        if sl and ltp >= sl:             return "SL_HIT"
+        if t2 and ltp <= t2:             return "TARGET2"
+        if t1 and ltp <= t1:             return "TARGET1"
+        if ltp <= entry:                 return "TRIGGERED"
+        if abs(ltp-entry)/entry <= 0.01: return "NEAR"
     return "WATCHING"
 
 STATUS_LABEL = {
-    "WATCHING":  "Watching",
-    "NEAR":      "Near Entry",
-    "TRIGGERED": "Entry Triggered",
-    "SL_HIT":    "SL Hit",
-    "TARGET1":   "T1 Hit",
-    "TARGET2":   "T2 Hit"
+    "WATCHING": "Watching", "NEAR": "Near Entry",
+    "TRIGGERED": "Entry Triggered", "SL_HIT": "SL Hit",
+    "TARGET1": "T1 Hit", "TARGET2": "T2 Hit"
 }
 STATUS_COLOR = {
-    "WATCHING":  "#f59e0b",
-    "NEAR":      "#f59e0b",
-    "TRIGGERED": "#00a854",
-    "SL_HIT":    "#e53935",
-    "TARGET1":   "#2563eb",
-    "TARGET2":   "#7c3aed"
+    "WATCHING": "#f59e0b", "NEAR": "#f59e0b",
+    "TRIGGERED": "#00a854", "SL_HIT": "#e53935",
+    "TARGET1": "#2563eb", "TARGET2": "#7c3aed"
 }
 
 def fmt(v) -> str:
@@ -285,11 +274,8 @@ def fmt(v) -> str:
     except: return "---"
 
 SOURCE_ICON = {
-    "websocket":   "🟢",
-    "http":        "🟡",
-    "yfinance":    "🟠",
-    "close_price": "🟠",
-    "offline":     "⚪"
+    "websocket": "🟢", "http": "🟡",
+    "yfinance": "🟠", "close_price": "🟠", "offline": "⚪"
 }
 
 
@@ -303,17 +289,37 @@ for k, v in [
     ("edit_idx", None), ("edit_tab", None), ("sort_by", "default"),
     ("sort_open", False), ("sound_enabled", True), ("selected_symbol", ""),
     ("selected_exchange", "NS"), ("show_add_form", False),
-    ("prices", {}),
+    ("prices", {}), ("last_fetch_time", None), ("fetching", False),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Load price cache from db.py (replaces load_external_price_cache)
-ext_cache = load_external_price_cache()
+
+# ══════════════════════════════════════════
+#   AUTO REFRESH LOGIC
+#   Fetch on page load if prices empty or stale
+# ══════════════════════════════════════════
+
+def should_auto_refresh() -> bool:
+    if not st.session_state.prices:
+        return True
+    if st.session_state.last_fetch_time is None:
+        return True
+    elapsed = (now_ist() - st.session_state.last_fetch_time).total_seconds()
+    return elapsed >= AUTO_REFRESH_SECS
+
+def do_price_fetch(watchlist: list):
+    if not watchlist:
+        return
+    st.session_state.fetching = True
+    prices = fetch_all_prices(watchlist)
+    st.session_state.prices.update(prices)
+    st.session_state.last_fetch_time = now_ist()
+    st.session_state.fetching = False
 
 
 # ══════════════════════════════════════════
-#   TERMINAL LAYOUT
+#   MAIN LAYOUT
 # ══════════════════════════════════════════
 
 left_col, right_col = st.columns([3, 7], gap="small")
@@ -370,8 +376,7 @@ with left_col:
                     if len(nums) >= 3: st.session_state.f_t1    = nums[2]
                     if len(nums) >= 4: st.session_state.f_t2    = nums[3]
 
-            # Always clean symbol before saving
-            symbol = st.session_state.f_symbol.lstrip("$").replace(".NS","").replace(".BO","").upper().strip()
+            symbol = clean_symbol(st.session_state.f_symbol)
 
             st.markdown('<div class="ts-section-label" style="margin-top:10px">Exchange</div>', unsafe_allow_html=True)
             ex1, ex2 = st.columns(2)
@@ -423,23 +428,22 @@ with left_col:
                         st.error(f"⚠ {symbol} {st.session_state.direction} already exists")
                     else:
                         lst.append({
-                            "symbol":    symbol,
-                            "exchange":  st.session_state.exchange,
+                            "symbol": symbol, "exchange": st.session_state.exchange,
                             "direction": st.session_state.direction,
-                            "entry":     entry_val,
-                            "sl":        sl_val    if sl_val  > 0 else None,
-                            "target1":   t1_val    if t1_val  > 0 else None,
-                            "target2":   t2_val    if t2_val  > 0 else None,
-                            "note":      note_val.strip() or None,
-                            "sector":    get_stock_sector(symbol),
-                            "status":    "WATCHING",
-                            "lastPrice": None,
-                            "added_at":  datetime.now().isoformat(),
+                            "entry": entry_val,
+                            "sl":      sl_val  if sl_val  > 0 else None,
+                            "target1": t1_val  if t1_val  > 0 else None,
+                            "target2": t2_val  if t2_val  > 0 else None,
+                            "note": note_val.strip() or None,
+                            "sector": get_stock_sector(symbol),
+                            "status": "WATCHING", "lastPrice": None,
+                            "added_at": datetime.now().isoformat(),
                         })
-                        set_list(st.session_state.current_tab, lst)  # saves + commits to GitHub
+                        set_list(st.session_state.current_tab, lst)
                         for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
-                            st.session_state[k] = "" if k == "f_symbol" else 0.0
+                            st.session_state[k] = "" if k=="f_symbol" else 0.0
                         st.session_state.show_add_form = False
+                        st.session_state.prices = {}  # clear cache so new stock gets fetched
                         st.success(f"✅ {symbol} added!")
                         st.rerun()
 
@@ -453,6 +457,7 @@ with left_col:
                          key=f"tab_{WATCHLIST_NAMES[i]}", use_container_width=True,
                          type="primary" if is_active else "secondary"):
                 st.session_state.current_tab = WATCHLIST_NAMES[i]
+                st.session_state.prices = {}  # clear on tab switch
                 st.rerun()
 
     st.markdown('<hr style="margin:6px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
@@ -474,6 +479,7 @@ with left_col:
         if st.button("🗑", use_container_width=True, help="Clear all", key="clear_btn"):
             if watchlist:
                 set_list(current_tab, [])
+                st.session_state.prices = {}
                 st.rerun()
 
     if st.session_state.sort_open:
@@ -483,23 +489,39 @@ with left_col:
             with btn:
                 key = lbl.lower()
                 if st.button(lbl, use_container_width=True, key=f"sort_{key}",
-                             type="primary" if st.session_state.sort_by == key else "secondary"):
+                             type="primary" if st.session_state.sort_by==key else "secondary"):
                     st.session_state.sort_by = key
                     st.rerun()
 
-    # ── SOURCE STATUS ──
+    # ── SOURCE STATUS + NEXT REFRESH ──
     market_now = is_market_open()
     src_label  = "🟢 Live" if market_now else "🟠 Close Price"
+
+    # Show next auto-refresh countdown
+    if st.session_state.last_fetch_time:
+        elapsed  = (now_ist() - st.session_state.last_fetch_time).total_seconds()
+        mins_left = max(0, int((AUTO_REFRESH_SECS - elapsed) / 60))
+        secs_left = max(0, int((AUTO_REFRESH_SECS - elapsed) % 60))
+        refresh_info = f" · Next refresh in {mins_left}m {secs_left}s"
+    else:
+        refresh_info = " · Fetching..."
+
     st.markdown(
         f'<div style="font-size:10px;font-weight:600;margin:6px 0;padding:4px 8px;'
         f'background:#f5f5f5;border-radius:4px;color:{"#00a854" if market_now else "#ff6b35"};">'
-        f'{src_label}</div>',
+        f'{src_label}{refresh_info}</div>',
         unsafe_allow_html=True
     )
 
-    # ── FETCH PRICES ON REFRESH ──
+    # ── AUTO FETCH ON PAGE LOAD / STALE ──
+    if watchlist and should_auto_refresh() and not refresh:
+        with st.spinner("Loading prices..."):
+            do_price_fetch(watchlist)
+
+    # ── MANUAL REFRESH ──
     if watchlist and refresh:
-        progress = st.progress(0, text="Fetching prices...")
+        st.session_state.prices = {}  # clear old prices
+        progress = st.progress(0, text="Refreshing prices...")
         for i, stock in enumerate(watchlist):
             sym  = stock.get("symbol", "")
             exch = stock.get("exchange", "NS")
@@ -507,27 +529,27 @@ with left_col:
             price, source = fetch_price(sym, exch)
             if price:
                 st.session_state.prices[key] = {
-                    "price":  price,
-                    "source": source,
-                    "time":   now_ist().strftime("%H:%M:%S")
+                    "price": price, "source": source,
+                    "time":  now_ist().strftime("%H:%M:%S")
                 }
-            progress.progress((i+1)/len(watchlist), text=f"Fetching {sym}...")
+            progress.progress((i+1)/len(watchlist), text=f"Fetching {clean_symbol(sym)}...")
+            time.sleep(0.5)
+        st.session_state.last_fetch_time = now_ist()
         progress.empty()
 
     # ── SORT ──
     def sort_list(lst, by):
         order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
         if by == "status":
-            return sorted(lst, key=lambda s: order.get(s.get("status","WATCHING"), 9))
+            return sorted(lst, key=lambda s: order.get(s.get("status","WATCHING"),9))
         if by == "symbol":
             return sorted(lst, key=lambda s: s.get("symbol",""))
         if by == "distance":
             def dist(s):
-                sym_code = s.get("symbol","")
-                k        = f"{sym_code}_{s.get('exchange','NS')}"
-                data     = st.session_state.prices.get(k) or ext_cache.get(sym_code, {})
-                ltp      = data.get("price")
-                e        = s.get("entry")
+                k    = f"{s.get('symbol','')}_{s.get('exchange','NS')}"
+                data = st.session_state.prices.get(k, {})
+                ltp  = data.get("price")
+                e    = s.get("entry")
                 return abs(ltp-e)/e if ltp and e else 999
             return sorted(lst, key=dist)
         return lst
@@ -555,18 +577,9 @@ with left_col:
             exchange = stock.get("exchange","NS")
 
             price_key  = f"{sym}_{exchange}"
-            price_data = st.session_state.prices.get(price_key)
-
-            if not price_data and sym in ext_cache:
-                price_data = {
-                    "price":  ext_cache[sym].get("price"),
-                    "source": ext_cache[sym].get("source", "close_price")
-                }
-            elif not price_data:
-                price_data = {}
-
-            ltp    = price_data.get("price")
-            source = price_data.get("source", "offline")
+            price_data = st.session_state.prices.get(price_key, {})
+            ltp        = price_data.get("price")
+            source     = price_data.get("source", "offline")
 
             pct_val   = ""
             pct_color = "#7a8394"
@@ -581,9 +594,9 @@ with left_col:
                 stock["status"]    = compute_status(stock, ltp)
                 new_status         = stock["status"]
                 if st.session_state.sound_enabled and new_status != old_status:
-                    if new_status == "SL_HIT":                    play_alert_sound("sl_hit")
-                    elif new_status in ["TARGET1","TARGET2"]:     play_alert_sound("target")
-                    elif new_status == "TRIGGERED":               play_alert_sound("triggered")
+                    if new_status == "SL_HIT":                play_alert_sound("sl_hit")
+                    elif new_status in ["TARGET1","TARGET2"]: play_alert_sound("target")
+                    elif new_status == "TRIGGERED":           play_alert_sound("triggered")
 
             status       = stock.get("status","WATCHING")
             status_color = STATUS_COLOR.get(status,"#f59e0b")
@@ -600,8 +613,8 @@ with left_col:
                 with st.container(border=True):
                     e1, e2 = st.columns(2)
                     with e1:
-                        ne = st.number_input("Entry", value=int(stock.get("entry") or 0), format="%d", key=f"e_en_{stock_idx}")
-                        ns = st.number_input("SL",    value=int(stock.get("sl")    or 0), format="%d", key=f"e_sl_{stock_idx}")
+                        ne  = st.number_input("Entry", value=int(stock.get("entry") or 0), format="%d", key=f"e_en_{stock_idx}")
+                        ns  = st.number_input("SL",    value=int(stock.get("sl")    or 0), format="%d", key=f"e_sl_{stock_idx}")
                     with e2:
                         nt1 = st.number_input("T1", value=int(stock.get("target1") or 0), format="%d", key=f"e_t1_{stock_idx}")
                         nt2 = st.number_input("T2", value=int(stock.get("target2") or 0), format="%d", key=f"e_t2_{stock_idx}")
@@ -694,6 +707,7 @@ with left_col:
                         lst = get_list(current_tab)
                         lst.pop(stock_idx)
                         set_list(current_tab, lst)
+                        st.session_state.prices.pop(f"{sym}_{exchange}", None)
                         st.rerun()
 
                 if note:
@@ -703,8 +717,7 @@ with left_col:
                         unsafe_allow_html=True
                     )
 
-        # Save updated statuses back (no GitHub commit — just disk + session)
-        set_watchlist(current_tab, watchlist, commit=False)
+        set_list(current_tab, watchlist)
 
     st.markdown('<hr style="margin:8px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
     mkt_label = "🟢 Market Open" if market_now else "🔴 Market Closed"
@@ -716,7 +729,7 @@ with left_col:
 
 
 # ══════════════════════════════════════════
-#   RIGHT PANEL — PLOTLY CHART
+#   RIGHT PANEL — CHART
 # ══════════════════════════════════════════
 
 with right_col:
@@ -736,7 +749,6 @@ with right_col:
         symbol     = st.session_state.selected_symbol
         exchange   = st.session_state.selected_exchange
         exch_label = "NSE" if exchange == "NS" else "BSE"
-
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;margin-bottom:12px;">'
             f'<span style="font-family:monospace;font-weight:700;font-size:18px;color:#0f1117;">{symbol}</span>'
@@ -745,5 +757,4 @@ with right_col:
             f'</div>',
             unsafe_allow_html=True
         )
-
         render_chart_plotly(symbol, exchange)
