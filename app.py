@@ -263,10 +263,62 @@ def run_http_polling(angel_obj):
         time.sleep(1)
 
 def run_yfinance_fallback():
-    print("[yfinance Fallback] Fetching comprehensive cloud data feed...")
+    """Batch fetch all stocks at once using yfinance.download() — fast."""
+    import yfinance as yf
+    print("[yfinance Fallback] Batch fetching all stocks...")
     stocks = get_all_watchlist_stocks()
+    if not stocks:
+        return
+
+    # Build ticker list
+    ns_tickers = []
+    bo_tickers = []
+    ticker_map = {}  # "TCS.NS" → (symbol, exchange)
+
     for stock in stocks:
-        run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
+        sym    = stock.get("symbol", "").lstrip("$").strip().upper().replace(".NS","").replace(".BO","")
+        exch   = stock.get("exchange", "NS")
+        suffix = ".NS" if exch == "NS" else ".BO"
+        t      = f"{sym}{suffix}"
+        ticker_map[t] = (stock.get("symbol", sym), exch)
+        if exch == "NS": ns_tickers.append(t)
+        else:            bo_tickers.append(t)
+
+    all_tickers = ns_tickers + bo_tickers
+    if not all_tickers:
+        return
+
+    try:
+        print(f"[yfinance Batch] Downloading {len(all_tickers)} tickers...")
+        data = yf.download(
+            tickers=" ".join(all_tickers),
+            period="2d",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=True
+        )
+
+        fetched = 0
+        for ticker, (orig_symbol, exch) in ticker_map.items():
+            try:
+                if len(all_tickers) == 1:
+                    price = float(data["Close"].iloc[-1])
+                else:
+                    price = float(data["Close"][ticker].dropna().iloc[-1])
+                if price:
+                    update_price(orig_symbol, exch, price, "yfinance")
+                    fetched += 1
+            except:
+                # Single stock fallback
+                run_single_yfinance_patch(orig_symbol, exch)
+
+        print(f"[yfinance Batch] Done — {fetched}/{len(all_tickers)} prices fetched.")
+
+    except Exception as e:
+        print(f"[yfinance Batch] Failed: {e} — falling back to one by one...")
+        for stock in stocks:
+            run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
 def run_single_yfinance_patch(symbol: str, exchange: str):
     """Fetch price from yfinance using history() — more reliable than fast_info."""
