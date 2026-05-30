@@ -255,20 +255,25 @@ def run_yfinance_fallback():
         run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
 def run_single_yfinance_patch(symbol: str, exchange: str):
-    """Safely patches missing token data slots using a public web interface"""
+    """Fetch price from yfinance. Strips $ prefix and exchange suffixes."""
     import yfinance as yf
     try:
-        ticker_symbol = symbol
-        if symbol.upper() == "BSE":
-            ticker_symbol = "BSE" if exchange == "NS" else "540073"
-            
+        # Strip $ prefix and .NS/.BO suffix if present
+        clean = symbol.lstrip("$").strip().upper()
+        clean = clean.replace(".NS", "").replace(".BO", "")
+
+        if clean == "BSE":
+            clean = "BSE" if exchange == "NS" else "540073"
+
         suffix = ".NS" if exchange == "NS" else ".BO"
-        ticker = yf.Ticker(f"{ticker_symbol}{suffix}")
-        price = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
+        ticker = yf.Ticker(f"{clean}{suffix}")
+        price  = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
         if price:
             update_price(symbol, exchange, float(price), "yfinance")
+        else:
+            print(f"[yfinance] No price for {clean}{suffix}")
     except Exception as e:
-        print(f"[yfinance Patch Error] Failed to resolve value for {symbol}: {e}")
+        print(f"[yfinance Patch Error] {symbol}: {e}")
 
 
 # ══════════════════════════════════════════
@@ -343,105 +348,114 @@ class PriceStreamer:
         self.is_ws_connected = False
 
     def start_websocket(self):
-        """Supervisor loop carrying overriden SDK configuration properties"""
+        """
+        Master supervisor loop.
 
-        # ── OFFLINE REFRESH STATE ──────────────────────────────────────────
-        # Tracks when we last ran yfinance during market-closed hours.
-        # Stored here (in-process) so we don't hammer yfinance every 60s.
-        # This variable is intentionally LOCAL to the thread — it resets
-        # on every app restart which is fine; yfinance will just run once
-        # on startup and then every OFFLINE_REFRESH_MINS minutes.
-        last_offline_refresh_time = None
-        OFFLINE_REFRESH_MINS = 60   # refresh EOD prices once per hour
+        Market hours  (9:15 – 3:30):  WebSocket → HTTP → yfinance
+        Outside hours (after 3:30,
+                       before 9:15,
+                       weekends):      yfinance every 15 minutes
+        """
+
+        # Tracks last yfinance run (outside market hours)
+        last_yf_refresh   = None
+        YF_REFRESH_MINS   = 15   # fetch fresh EOD prices every 15 min after close
 
         while True:
             try:
+
                 # ══════════════════════════════════════════════════════════
-                #  OFFLINE BLOCK  (market closed or weekend)
-                #  ── ONLY this block was changed. ──
-                #  Everything below the offline block is original, untouched.
+                #  OUTSIDE MARKET HOURS
+                #  → yfinance only, every 15 minutes
+                #  → no WebSocket attempt at all
                 # ══════════════════════════════════════════════════════════
                 if not is_market_open():
                     self.is_ws_connected = False
-                    # NOTE: do NOT force_set_mode("offline") here —
-                    # update_price() will set mode to "yfinance" when it fetches,
-                    # so the badge correctly shows 🟠 yfinance during offline refresh.
-                    # We only set offline if yfinance itself fails (no data at all).
 
-                    now = now_ist()
+                    now         = now_ist()
+                    should_fetch = (
+                        last_yf_refresh is None or
+                        (now - last_yf_refresh).total_seconds() / 60 >= YF_REFRESH_MINS
+                    )
 
-                    # Decide whether enough time has passed to refresh again
-                    should_refresh = False
-
-                    if last_offline_refresh_time is None:
-                        # First iteration after startup — always refresh once
-                        should_refresh = True
-                    else:
-                        mins_since = (now - last_offline_refresh_time).total_seconds() / 60
-                        if mins_since >= OFFLINE_REFRESH_MINS:
-                            should_refresh = True
-
-                    if should_refresh:
-                        print(f"[Offline EOD] Market closed — refreshing EOD prices via yfinance at {ist_time_str()}")
-                        try:
-                            run_yfinance_fallback()
-                            # mode is now "yfinance" (set by update_price inside run_yfinance_fallback)
-                            last_offline_refresh_time = now
-                            print(f"[Offline EOD] Refresh complete. Next refresh in {OFFLINE_REFRESH_MINS} min.")
-                        except Exception as yf_err:
-                            # yfinance fully crashed — nothing fetched — show offline
+                    if should_fetch:
+                        stocks = get_all_watchlist_stocks()
+                        if stocks:
+                            print(f"[After Hours] Fetching EOD prices via yfinance at {ist_time_str()}")
+                            try:
+                                run_yfinance_fallback()
+                                last_yf_refresh = now
+                                print(f"[After Hours] Done. Next fetch in {YF_REFRESH_MINS} min.")
+                            except Exception as e:
+                                force_set_mode("offline")
+                                print(f"[After Hours] yfinance failed: {e}")
+                        else:
+                            # No stocks in watchlist yet
                             force_set_mode("offline")
-                            print(f"[Offline EOD] yfinance refresh failed: {yf_err}. Will retry next cycle.")
                     else:
-                        mins_left = int(OFFLINE_REFRESH_MINS - (now - last_offline_refresh_time).total_seconds() / 60)
-                        print(f"[Offline EOD] Sleeping... next refresh in ~{mins_left} min.")
+                        mins_left = int(YF_REFRESH_MINS - (now - last_yf_refresh).total_seconds() / 60)
+                        print(f"[After Hours] Next yfinance fetch in {mins_left} min.")
 
-                    time.sleep(60)
+                    time.sleep(60)   # check every 60s, fetch every 15 min
                     continue
+
                 # ══════════════════════════════════════════════════════════
-                #  END OFFLINE BLOCK — everything below is original & untouched
+                #  MARKET HOURS (9:15 – 3:30)
+                #  → WebSocket primary
+                #  → HTTP fallback if WS fails
+                #  → yfinance fallback if HTTP also fails
                 # ══════════════════════════════════════════════════════════
+
+                # Reset yfinance timer when market opens
+                # so we fetch immediately after close
+                last_yf_refresh = None
 
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
                     time.sleep(10)
                     continue
 
-                # ── FILE PERMANENT STATE BLOCK CHECK ──
+                # ── Circuit breaker check ──
                 cache = load_cache()
                 if cache.get("circuit_broken", False):
-                    print("[ANTI-BAN ACTIVATED] Polling safely via HTTP...")
-                    run_http_polling(self.angel_obj)
+                    print("[Anti-Ban] Circuit broken — using HTTP polling...")
+                    try:
+                        run_http_polling(self.angel_obj)
+                    except Exception as e:
+                        print(f"[Anti-Ban] HTTP also failed: {e}")
+                        run_yfinance_fallback()
                     time.sleep(15)
                     continue
 
-                # Prepare assets and capture unmapped tickers
+                # ── Build token map ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
-                
-                # Check for unmapped assets like 'BSE' to run parallel yfinance patches
+
+                # ── Patch unmapped tokens via yfinance in parallel ──
+                from stocks import get_stock_token
                 for stock in stocks:
-                    from stocks import get_stock_token
-                    try: t = get_stock_token(stock.get("symbol"))
+                    try:    t = get_stock_token(stock.get("symbol", "").lstrip("$").strip().upper())
                     except: t = None
                     if not t:
                         run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
+                # ── No mapped tokens at all → full yfinance ──
                 if not self.token_map:
+                    print("[Market Hours] No mapped tokens — using yfinance for all stocks")
                     run_yfinance_fallback()
                     time.sleep(15)
                     continue
 
+                # ── Refresh Angel One session ──
                 self.refresh_angel_session()
 
-                # ── Attempt WebSocket (failure count NOT incremented yet) ──
-                print(f"[WS Engine] Attempting WebSocket connection...")
+                # ── Attempt WebSocket ──
+                print(f"[WS Engine] Connecting WebSocket at {ist_time_str()}...")
                 self.sws = SmartWebSocketV2(
                     self.auth_token,
                     self.api_key,
                     self.client_code,
                     self.feed_token
                 )
-
                 self.sws.max_retry_attempt = 1
                 self.sws.on_open  = self.on_open
                 self.sws.on_data  = self.on_data
@@ -450,32 +464,33 @@ class PriceStreamer:
 
                 network_worker = threading.Thread(target=self.sws.connect, daemon=True)
                 network_worker.start()
-                time.sleep(5)   # give WS time to handshake
+                time.sleep(5)   # wait for handshake
 
-                # ── Wait while WS is healthy ──
+                # ── Stay here while WS is healthy ──
                 while self.is_ws_connected and is_market_open():
                     time.sleep(1)
 
-                # ── WS dropped during market hours → count as real failure ──
+                # ── WS dropped mid-session → fallback ──
                 if is_market_open() and not self.is_ws_connected:
-                    current_fail_count = increment_failure_count()
-                    print(f"[WS Engine] WebSocket lost. Failure count: {current_fail_count}/2. Running fallback...")
+                    fail_count = increment_failure_count()
+                    print(f"[WS Engine] WebSocket dropped. Failures: {fail_count}/2")
 
-                    # Tier 1 fallback → HTTP polling
+                    # Tier 1 → HTTP
                     http_ok = False
                     try:
                         run_http_polling(self.angel_obj)
                         http_ok = True
-                    except Exception as http_err:
-                        print(f"[WS Engine] HTTP fallback also failed: {http_err}")
+                        print("[WS Engine] HTTP fallback succeeded.")
+                    except Exception as e:
+                        print(f"[WS Engine] HTTP fallback failed: {e}")
 
-                    # Tier 2 fallback → yfinance (only if HTTP failed)
+                    # Tier 2 → yfinance (only if HTTP failed)
                     if not http_ok:
-                        print("[WS Engine] Falling back to yfinance...")
                         try:
                             run_yfinance_fallback()
-                        except Exception as yf_err:
-                            print(f"[WS Engine] yfinance fallback failed too: {yf_err}")
+                            print("[WS Engine] yfinance fallback succeeded.")
+                        except Exception as e:
+                            print(f"[WS Engine] yfinance fallback also failed: {e}")
 
                 time.sleep(15)
 
