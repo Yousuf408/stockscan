@@ -269,140 +269,241 @@ def fetch_all_prices(watchlist: list) -> dict:
 #   CHART
 # ══════════════════════════════════════════
 
-@st.cache_data(ttl=3600)
-def fetch_chart_data(symbol: str, exchange: str):
+# ── Timeframe config ──
+TIMEFRAMES = {
+    "5m":  {"period": "5d",  "interval": "5m",  "label": "5 Min"},
+    "15m": {"period": "10d", "interval": "15m", "label": "15 Min"},
+    "1h":  {"period": "60d", "interval": "1h",  "label": "1 Hour"},
+    "4h":  {"period": "60d", "interval": "1h",  "label": "4 Hour"},  # plotly will resample
+    "1d":  {"period": "1y",  "interval": "1d",  "label": "1 Day"},
+    "1wk": {"period": "5y",  "interval": "1wk", "label": "1 Week"},
+    "1mo": {"period": "10y", "interval": "1mo", "label": "1 Month"},
+}
+
+@st.cache_data(ttl=300)
+def fetch_chart_data(symbol: str, exchange: str, interval: str, period: str):
     try:
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        return yf.Ticker(f"{sym}{suffix}").history(period="1y", interval="1d")
+        df = yf.Ticker(f"{sym}{suffix}").history(period=period, interval=interval)
+        return df
     except:
         return None
 
 def render_chart_plotly(symbol: str, exchange: str):
-    """TradingView-style dark chart with Volume + EMA20 + EMA50"""
+    """Premium TradingView-style chart — white bg, right-side price, timeframe selector"""
     exch_label = "NSE" if exchange == "NS" else "BSE"
 
-    with st.spinner(f"Loading {symbol} chart..."):
-        hist = fetch_chart_data(symbol, exchange)
+    # ── Timeframe selector ──
+    tf_keys   = list(TIMEFRAMES.keys())
+    tf_labels = [TIMEFRAMES[k]["label"] for k in tf_keys]
+
+    tf_cols = st.columns(len(tf_keys))
+    if "chart_tf" not in st.session_state:
+        st.session_state.chart_tf = "1d"
+
+    for i, col in enumerate(tf_cols):
+        with col:
+            is_active = st.session_state.chart_tf == tf_keys[i]
+            if st.button(
+                tf_labels[i],
+                key=f"tf_{tf_keys[i]}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary"
+            ):
+                st.session_state.chart_tf = tf_keys[i]
+                st.rerun()
+
+    selected_tf = st.session_state.chart_tf
+    tf_config   = TIMEFRAMES[selected_tf]
+
+    with st.spinner(f"Loading {symbol} · {tf_config['label']}..."):
+        hist = fetch_chart_data(
+            symbol, exchange,
+            tf_config["interval"],
+            tf_config["period"]
+        )
 
     if hist is None or hist.empty:
-        st.error(f"❌ No chart data for {symbol}")
+        st.error(f"❌ No data for {symbol} on {tf_config['label']} timeframe")
         return
 
-    # ── Compute EMAs ──
-    hist["EMA20"] = hist["Close"].ewm(span=20, adjust=False).mean()
-    hist["EMA50"] = hist["Close"].ewm(span=50, adjust=False).mean()
+    # ── 4H resampling ──
+    if selected_tf == "4h":
+        hist = hist.resample("4h").agg({
+            "Open":   "first",
+            "High":   "max",
+            "Low":    "min",
+            "Close":  "last",
+            "Volume": "sum"
+        }).dropna()
 
-    # ── Colors ──
-    BG       = "#0d1117"
-    GRID     = "#1e2530"
-    UP       = "#26a69a"
-    DOWN     = "#ef5350"
-    TEXT     = "#c9d1d9"
-    EMA20_C  = "#f59e0b"
-    EMA50_C  = "#3b82f6"
+    # ── EMAs ──
+    hist["EMA20"]  = hist["Close"].ewm(span=20,  adjust=False).mean()
+    hist["EMA200"] = hist["Close"].ewm(span=200, adjust=False).mean()
 
-    # ── Figure with 2 rows: Candles + Volume ──
+    # ── Colors — clean white theme ──
+    BG      = "#ffffff"
+    PLOT_BG = "#ffffff"
+    GRID    = "#f0f0f0"
+    TEXT    = "#1a1a2e"
+    UP      = "#089981"
+    DOWN    = "#f23645"
+    EMA20C  = "#f59e0b"
+    EMA200C = "#3b82f6"
+    BORDER  = "#e5e7eb"
+
+    # ── Figure — 2 rows ──
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.75, 0.25]
+        vertical_spacing=0.02,
+        row_heights=[0.78, 0.22]
     )
 
-    # Candlestick
+    # ── Candlesticks ──
     fig.add_trace(go.Candlestick(
         x=hist.index,
-        open=hist["Open"], high=hist["High"],
-        low=hist["Low"],   close=hist["Close"],
+        open=hist["Open"],  high=hist["High"],
+        low=hist["Low"],    close=hist["Close"],
         name=symbol,
-        increasing_line_color=UP,   increasing_fillcolor=UP,
-        decreasing_line_color=DOWN, decreasing_fillcolor=DOWN,
-        line=dict(width=1),
-        whiskerwidth=0.3,
+        increasing=dict(line=dict(color=UP,   width=1), fillcolor=UP),
+        decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN),
+        whiskerwidth=0.5,
     ), row=1, col=1)
 
-    # EMA 20
+    # ── EMA 20 ──
     fig.add_trace(go.Scatter(
         x=hist.index, y=hist["EMA20"],
-        name="EMA 20", line=dict(color=EMA20_C, width=1.5),
-        opacity=0.9
+        name="EMA 20",
+        line=dict(color=EMA20C, width=1.8, dash="solid"),
+        opacity=0.95,
+        hovertemplate="EMA20: ₹%{y:,.2f}<extra></extra>"
     ), row=1, col=1)
 
-    # EMA 50
+    # ── EMA 200 ──
     fig.add_trace(go.Scatter(
-        x=hist.index, y=hist["EMA50"],
-        name="EMA 50", line=dict(color=EMA50_C, width=1.5),
-        opacity=0.9
+        x=hist.index, y=hist["EMA200"],
+        name="EMA 200",
+        line=dict(color=EMA200C, width=1.8, dash="solid"),
+        opacity=0.95,
+        hovertemplate="EMA200: ₹%{y:,.2f}<extra></extra>"
     ), row=1, col=1)
 
-    # Volume bars
-    colors = [UP if c >= o else DOWN
-              for c, o in zip(hist["Close"], hist["Open"])]
+    # ── Volume ──
+    vol_colors = [UP if c >= o else DOWN
+                  for c, o in zip(hist["Close"], hist["Open"])]
     fig.add_trace(go.Bar(
         x=hist.index, y=hist["Volume"],
         name="Volume",
-        marker_color=colors,
-        marker_opacity=0.6,
+        marker_color=vol_colors,
+        marker_opacity=0.5,
         showlegend=False,
+        hovertemplate="Vol: %{y:,.0f}<extra></extra>"
     ), row=2, col=1)
 
+    # ── Last price line ──
+    last_price = hist["Close"].iloc[-1]
+    fig.add_hline(
+        y=last_price,
+        line_dash="dot",
+        line_color="#6366f1",
+        line_width=1.2,
+        annotation_text=f"  ₹{last_price:,.2f}",
+        annotation_position="right",
+        annotation_font=dict(color="#6366f1", size=11),
+        row=1, col=1
+    )
+
     # ── Layout ──
+    chg  = hist["Close"].iloc[-1] - hist["Close"].iloc[-2]
+    chgp = chg / hist["Close"].iloc[-2] * 100
+    chg_color = UP if chg >= 0 else DOWN
+
     fig.update_layout(
         paper_bgcolor=BG,
-        plot_bgcolor=BG,
-        font=dict(color=TEXT, family="monospace", size=11),
-        margin=dict(l=10, r=10, t=40, b=10),
-        height=620,
+        plot_bgcolor=PLOT_BG,
+        font=dict(color=TEXT, family="Inter, sans-serif", size=11),
+        margin=dict(l=0, r=80, t=50, b=0),
+        height=640,
         hovermode="x unified",
-        hoverlabel=dict(bgcolor="#161b22", font_color=TEXT),
+        hoverlabel=dict(
+            bgcolor="#1a1a2e",
+            font_color="#ffffff",
+            font_size=11,
+            bordercolor="#333"
+        ),
         legend=dict(
-            bgcolor="#161b22",
-            bordercolor=GRID,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor=BORDER,
             borderwidth=1,
-            font=dict(size=11),
-            x=0.01, y=0.99
+            font=dict(size=11, color=TEXT),
+            orientation="h",
+            x=0, y=1.02,
+            xanchor="left"
         ),
         title=dict(
-            text=f"<b>{symbol}</b> · {exch_label} · 1 Year Daily",
-            font=dict(size=16, color=TEXT),
-            x=0.5, xanchor="center"
+            text=(f"<b style='font-size:16px'>{symbol}</b>"
+                  f"  <span style='color:#888;font-size:12px'>{exch_label}</span>"
+                  f"  <span style='color:{chg_color};font-size:13px'>"
+                  f"₹{last_price:,.2f}  {chg:+.2f} ({chgp:+.2f}%)</span>"),
+            x=0.01, xanchor="left",
+            font=dict(size=14, color=TEXT)
         ),
         xaxis_rangeslider_visible=False,
+        xaxis2_rangeslider_visible=False,
     )
 
-    # Grid styling
-    axis_style = dict(
-        gridcolor=GRID, gridwidth=1,
-        zerolinecolor=GRID,
-        tickfont=dict(color=TEXT, size=10),
-        showgrid=True,
+    # ── Axes ──
+    common_x = dict(
+        showgrid=True, gridcolor=GRID, gridwidth=1,
+        zeroline=False,
+        tickfont=dict(color="#888", size=10),
+        showline=True, linecolor=BORDER, linewidth=1,
+        showspikes=True, spikecolor="#aaa",
+        spikethickness=1, spikedash="dot",
     )
-    fig.update_xaxes(**axis_style)
-    fig.update_yaxes(**axis_style)
-    fig.update_yaxes(title_text="Price (₹)", row=1, col=1,
-                     title_font=dict(color=TEXT, size=11))
-    fig.update_yaxes(title_text="Volume",    row=2, col=1,
-                     title_font=dict(color=TEXT, size=11))
+    common_y = dict(
+        showgrid=True, gridcolor=GRID, gridwidth=1,
+        zeroline=False,
+        tickfont=dict(color="#888", size=10),
+        side="right",
+        showline=True, linecolor=BORDER,
+        tickprefix="₹",
+        showspikes=True, spikecolor="#aaa",
+        spikethickness=1, spikedash="dot",
+    )
 
-    st.plotly_chart(fig, use_container_width=True,
-                    config={"displayModeBar": True,
-                            "displaylogo": False,
-                            "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
+    fig.update_xaxes(**common_x)
+    fig.update_yaxes(**common_y)
+    fig.update_yaxes(tickprefix="",  row=2, col=1)  # volume — no ₹
+    fig.update_xaxes(showticklabels=True, row=2, col=1)
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "displayModeBar": True,
+            "displaylogo":    False,
+            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+            "modeBarButtonsToAdd":    ["drawline", "drawopenpath", "eraseshape"],
+            "scrollZoom": True,
+        }
+    )
 
     # ── Stats row ──
-    last  = hist["Close"].iloc[-1]
-    high  = hist["High"].max()
-    low   = hist["Low"].min()
-    chg   = hist["Close"].iloc[-1] - hist["Close"].iloc[-2]
-    chgp  = chg / hist["Close"].iloc[-2] * 100
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Last Close", f"₹{last:,.2f}",
-                         delta=f"{chg:+.2f} ({chgp:+.2f}%)")
-    with col2: st.metric("52W High",  f"₹{high:,.2f}")
-    with col3: st.metric("52W Low",   f"₹{low:,.2f}")
-    with col4: st.metric("EMA 20",    f"₹{hist['EMA20'].iloc[-1]:,.2f}")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Close", f"₹{last_price:,.2f}",
+                  delta=f"{chg:+.2f} ({chgp:+.2f}%)")
+    with col2:
+        st.metric("52W High", f"₹{hist['High'].max():,.2f}")
+    with col3:
+        st.metric("52W Low",  f"₹{hist['Low'].min():,.2f}")
+    with col4:
+        st.metric("EMA 20",   f"₹{hist['EMA20'].iloc[-1]:,.2f}")
+    with col5:
+        st.metric("EMA 200",  f"₹{hist['EMA200'].iloc[-1]:,.2f}")
 
 
 # ══════════════════════════════════════════
