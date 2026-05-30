@@ -9,7 +9,6 @@
 import streamlit as st
 import json, os, pytz, yfinance as yf, time
 from datetime import datetime
-import plotly.graph_objects as go
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -268,51 +267,62 @@ def fetch_all_prices(watchlist: list) -> dict:
 #   CHART
 # ══════════════════════════════════════════
 
-@st.cache_data(ttl=300)
-def fetch_chart_data(symbol: str, exchange: str):
+def get_tv_symbol(symbol: str, exchange: str) -> str:
+    """Convert to TradingView symbol format — NSE:TCS, BSE:RELIANCE"""
+    clean = clean_symbol(symbol)
+    prefix = "NSE" if exchange == "NS" else "BSE"
+    return f"{prefix}:{clean}"
+
+def render_chart_plotly(symbol: str, exchange: str):
+    """Render TradingView professional chart + 52W stats from yfinance"""
+    exch_label = "NSE" if exchange == "NS" else "BSE"
+    tv_symbol  = get_tv_symbol(symbol, exchange)
+
+    # ── TradingView Widget ──
+    tv_html = f"""
+    <div id="tradingview_chart" style="height:600px;border-radius:12px;overflow:hidden;">
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script type="text/javascript">
+    new TradingView.widget({{
+        "autosize":        true,
+        "symbol":          "{tv_symbol}",
+        "interval":        "D",
+        "timezone":        "Asia/Kolkata",
+        "theme":           "light",
+        "style":           "1",
+        "locale":          "en",
+        "toolbar_bg":      "#f1f3f6",
+        "enable_publishing": false,
+        "hide_top_toolbar":  false,
+        "hide_legend":       false,
+        "save_image":        true,
+        "container_id":      "tradingview_chart",
+        "studies": [
+            "MASimple@tv-basicstudies",
+            "RSI@tv-basicstudies",
+            "Volume@tv-basicstudies"
+        ],
+        "show_popup_button": true,
+        "popup_width":       "1000",
+        "popup_height":      "650"
+    }});
+    </script>
+    </div>
+    """
+    st.components.v1.html(tv_html, height=620, scrolling=False)
+
+    # ── 52W Stats from yfinance (below chart) ──
     try:
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        return yf.Ticker(f"{sym}{suffix}").history(period="1y")
+        hist   = yf.Ticker(f"{sym}{suffix}").history(period="1y")
+        if hist is not None and not hist.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1: st.metric("Last Close", f"₹{hist['Close'].iloc[-1]:,.2f}")
+            with col2: st.metric("52W High",   f"₹{hist['High'].max():,.2f}")
+            with col3: st.metric("52W Low",    f"₹{hist['Low'].min():,.2f}")
     except:
-        return None
-
-def render_chart_plotly(symbol: str, exchange: str):
-    exch_label = "NSE" if exchange == "NS" else "BSE"
-    with st.spinner(f"📈 Loading {symbol} chart..."):
-        hist = fetch_chart_data(symbol, exchange)
-    if hist is None or hist.empty:
-        st.error(f"❌ No chart data for {symbol} ({exch_label})")
-        return
-    try:
-        fig = go.Figure(data=[go.Candlestick(
-            x=hist.index,
-            open=hist['Open'], high=hist['High'],
-            low=hist['Low'],   close=hist['Close'],
-            name=symbol,
-            increasing_line_color='#00a854',
-            decreasing_line_color='#e53935',
-        )])
-        fig.update_layout(
-            title={'text': f"<b>{symbol}</b> · {exch_label} · Last 1 Year",
-                   'x': 0.5, 'xanchor': 'center',
-                   'font': {'size': 18, 'color': '#0f1117'}},
-            yaxis_title="Price (₹)", xaxis_title="Date",
-            template="plotly_white", height=650,
-            hovermode='x unified', xaxis_rangeslider_visible=False,
-            font=dict(family="monospace", size=11, color="#0f1117"),
-            plot_bgcolor='#fafafa', paper_bgcolor='#ffffff',
-            margin=dict(l=50, r=50, t=80, b=50),
-            xaxis=dict(showgrid=True, gridwidth=1, gridcolor='#e0e3e8'),
-            yaxis=dict(showgrid=True, gridwidth=1, gridcolor='#e0e3e8')
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
-        col1, col2, col3 = st.columns(3)
-        with col1: st.metric("Current",  f"₹{hist['Close'].iloc[-1]:,.0f}")
-        with col2: st.metric("52W High", f"₹{hist['High'].max():,.0f}")
-        with col3: st.metric("52W Low",  f"₹{hist['Low'].min():,.0f}")
-    except Exception as e:
-        st.error(f"❌ Chart error: {e}")
+        pass
 
 
 # ══════════════════════════════════════════
