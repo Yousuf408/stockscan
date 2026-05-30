@@ -272,14 +272,76 @@ const vs = chart.addHistogramSeries({{ priceScaleId:'vol' }});
 chart.priceScale('vol').applyOptions({{ scaleMargins:{{top:0.8,bottom:0}} }});
 vs.setData({volumes_js});
 
-const e20s = chart.addLineSeries({{ color:'#f59e0b', lineWidth:1.5, priceLineVisible:false, lastValueVisible:false }});
+// ── EMA 20 — with price label on right axis ──
+const e20s = chart.addLineSeries({{
+  color: '#f59e0b',
+  lineWidth: 1.5,
+  priceLineVisible: true,
+  lastValueVisible: true,
+  priceLineStyle: 2,
+  priceLineColor: '#f59e0b',
+  priceLineWidth: 1,
+  lastPriceAnimation: 0,
+  title: 'EMA 20',
+}});
 e20s.setData({ema20_js});
 
-const e200s = chart.addLineSeries({{ color:'#3b82f6', lineWidth:1.5, priceLineVisible:false, lastValueVisible:false }});
+// ── EMA 200 — with price label on right axis ──
+const e200s = chart.addLineSeries({{
+  color: '#3b82f6',
+  lineWidth: 1.5,
+  priceLineVisible: true,
+  lastValueVisible: true,
+  priceLineStyle: 2,
+  priceLineColor: '#3b82f6',
+  priceLineWidth: 1,
+  lastPriceAnimation: 0,
+  title: 'EMA 200',
+}});
 e200s.setData({ema200_js});
 
 chart.timeScale().fitContent();
 
+// ── Zoom buttons ──
+const btnStyle = `
+  background:#fff; border:1px solid #e5e7eb;
+  border-radius:4px; padding:4px 10px;
+  font-size:14px; cursor:pointer; color:#374151;
+  font-weight:600; margin-left:4px;
+  transition: background 0.15s;
+`;
+const toolbar = document.createElement('div');
+toolbar.style.cssText = 'position:absolute;top:10px;right:10px;z-index:20;display:flex;align-items:center;';
+
+const btnZoomIn  = document.createElement('button');
+const btnZoomOut = document.createElement('button');
+const btnReset   = document.createElement('button');
+
+btnZoomIn.innerHTML  = '+';
+btnZoomOut.innerHTML = '−';
+btnReset.innerHTML   = '⟳';
+btnReset.title       = 'Reset view';
+
+[btnZoomIn, btnZoomOut, btnReset].forEach(b => {{
+  b.style.cssText = btnStyle;
+  b.onmouseover = () => b.style.background = '#f9fafb';
+  b.onmouseout  = () => b.style.background = '#fff';
+}});
+
+btnZoomIn.onclick  = () => chart.timeScale().scrollToPosition(
+  chart.timeScale().scrollPosition() + 5, true
+);
+btnZoomOut.onclick = () => chart.timeScale().scrollToPosition(
+  chart.timeScale().scrollPosition() - 5, true
+);
+btnReset.onclick   = () => chart.timeScale().fitContent();
+
+toolbar.appendChild(btnZoomIn);
+toolbar.appendChild(btnZoomOut);
+toolbar.appendChild(btnReset);
+document.getElementById('wrap').appendChild(toolbar);
+
+// ── Crosshair legend update ──
 chart.subscribeCrosshairMove(p => {{
   if (!p.time || !p.point) return;
   const b = p.seriesData.get(cs);
