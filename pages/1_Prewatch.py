@@ -211,7 +211,7 @@ col_info.markdown(
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════
-#  FULL WIDTH (100%) COMPACT CONTAINER - MINIMIZED HEIGHT
+#  FULL WIDTH REFINEMENT BOX - NO HEADLINES & ZERO PADDING GAP
 # ══════════════════════════════════════════════════════════
 with st.container(border=True):
     # --- 1st Portion: Numeric Data Threshold Inputs ---
@@ -223,19 +223,16 @@ with st.container(border=True):
     with p1_col3:
         filter_volume = st.number_input("Volume Size (Min Limit)", min_value=0.0, value=0.0, step=50000.0)
         
-    st.markdown("<div style='margin: 8px 0; border-top: 1px dashed #ddd;'></div>", unsafe_allow_html=True)
-    
-    # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters ---
+    # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters (Placed directly next line to save height) ---
     p2_col1, p2_col2 = st.columns([3.0, 9.0])
     with p2_col1:
-        # Reduced gap completely to drop overall height
-        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True) 
         body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
     with p2_col2:
         sort_strategy = st.radio(
             "Matrix Evaluation Strategy Vector:", 
             ["EMA20", "Absolute Volume Size", "Confidence Score"], 
-            horizontal=True
+            horizontal=True,
+            label_visibility="collapsed" # Complete clean look for radio strategy options
         )
 
 # --- DATA PROCESSING FLOW ENGINE ---
