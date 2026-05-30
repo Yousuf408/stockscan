@@ -608,7 +608,7 @@ ro.observe(container);
 </html>
 """
 
-    st.iframe(chart_html, height=600, scrolling=False)
+    st.components.v1.html(chart_html, height=600, scrolling=False)
 
     # ── Stats row ──
     high52 = df["high"].max()
