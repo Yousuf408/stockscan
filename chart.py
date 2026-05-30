@@ -302,16 +302,31 @@ e200s.setData({ema200_js});
 
 chart.timeScale().fitContent();
 
-// ── Zoom buttons ──
+// ── Zoom buttons — bottom right like TradingView ──
 const btnStyle = `
-  background:#fff; border:1px solid #e5e7eb;
-  border-radius:4px; padding:4px 10px;
-  font-size:14px; cursor:pointer; color:#374151;
-  font-weight:600; margin-left:4px;
-  transition: background 0.15s;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:4px;
+  padding:5px 12px;
+  font-size:15px;
+  cursor:pointer;
+  color:#374151;
+  font-weight:600;
+  margin-left:4px;
+  transition:background 0.15s;
+  line-height:1;
 `;
+
 const toolbar = document.createElement('div');
-toolbar.style.cssText = 'position:absolute;top:10px;right:10px;z-index:20;display:flex;align-items:center;';
+toolbar.style.cssText = [
+  'position:absolute',
+  'bottom:40px',
+  'right:60px',
+  'z-index:20',
+  'display:flex',
+  'align-items:center',
+  'gap:4px',
+].join(';');
 
 const btnZoomIn  = document.createElement('button');
 const btnZoomOut = document.createElement('button');
@@ -324,17 +339,21 @@ btnReset.title       = 'Reset view';
 
 [btnZoomIn, btnZoomOut, btnReset].forEach(b => {{
   b.style.cssText = btnStyle;
-  b.onmouseover = () => b.style.background = '#f9fafb';
+  b.onmouseover = () => b.style.background = '#f3f4f6';
   b.onmouseout  = () => b.style.background = '#fff';
 }});
 
-btnZoomIn.onclick  = () => chart.timeScale().scrollToPosition(
-  chart.timeScale().scrollPosition() + 5, true
-);
-btnZoomOut.onclick = () => chart.timeScale().scrollToPosition(
-  chart.timeScale().scrollPosition() - 5, true
-);
-btnReset.onclick   = () => chart.timeScale().fitContent();
+// ── Correct zoom: applyOptions barSpacing ──
+// scrollToPosition moves the chart — we need to change barSpacing for true zoom
+btnZoomIn.onclick = () => {{
+  const cur = chart.timeScale().options().barSpacing || 6;
+  chart.timeScale().applyOptions({{ barSpacing: Math.min(cur * 1.3, 50) }});
+}};
+btnZoomOut.onclick = () => {{
+  const cur = chart.timeScale().options().barSpacing || 6;
+  chart.timeScale().applyOptions({{ barSpacing: Math.max(cur * 0.7, 1) }});
+}};
+btnReset.onclick = () => chart.timeScale().fitContent();
 
 toolbar.appendChild(btnZoomIn);
 toolbar.appendChild(btnZoomOut);
