@@ -210,21 +210,36 @@ col_info.markdown(
 
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# --- REFINED COMPACT GRID: CLEAN FROM ANY INDICATORS ---
+# ══════════════════════════════════════════
+#  TWO-PORTION SINGLE DIV REFINEMENT BOX
+# ══════════════════════════════════════════
 with st.container(border=True):
-    f_col1, f_col2, f_col3 = st.columns([4.0, 4.0, 4.0])
-    
-    with f_col1:
-        filter_price = st.number_input("Min Price (₹)", min_value=0.0, value=0.0, step=50.0)
-        filter_volume = st.number_input("Min Volume Size", min_value=0.0, value=0.0, step=50000.0)
-            
-    with f_col2:
-        filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
+    # --- 1st Portion: Numeric Data Threshold Inputs ---
+    st.markdown("<b style='font-size:12px; color:#555;'>1st: NUMERIC THRESHOLDS</b>", unsafe_allow_html=True)
+    p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
+    with p1_col1:
+        filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
+    with p1_col2:
+        filter_ema20_pct = st.number_input("EMA Gap % (Max Dist)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
+    with p1_col3:
+        filter_volume = st.number_input("Volume Size (Min Limit)", min_value=0.0, value=0.0, step=50000.0)
         
-    with f_col3:
-        sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
+    st.markdown("<div style='margin: 10px 0; border-top: 1px dashed #ddd;'></div>", unsafe_allow_html=True)
+    
+    # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters ---
+    st.markdown("<b style='font-size:12px; color:#555;'>2nd: FILTERS & MATRIX SORTING</b>", unsafe_allow_html=True)
+    p2_col1, p2_col2 = st.columns([4.0, 8.0])
+    with p2_col1:
+        st.markdown("<div style='margin-top:25px;'></div>", unsafe_allow_html=True) # visual padding shift to align with radio label
+        body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
+    with p2_col2:
+        sort_strategy = st.radio(
+            "Matrix Evaluation Strategy Vector:", 
+            ["EMA20", "Absolute Volume Size", "Confidence Score"], 
+            horizontal=True
+        )
 
-# --- DATA PROCESSOR FLOW ---
+# --- DATA PROCESSING FLOW ENGINE ---
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
@@ -233,6 +248,7 @@ if st.session_state.ts_prewatch:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
         if r["abs_dist_pct"] > filter_ema20_pct: continue
+        if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
     processed_cards_list = []
@@ -243,20 +259,7 @@ if st.session_state.ts_prewatch:
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
     # ══════════════════════════════════════════
-    #  DOWN SIDE STANDALONE AREA
-    # ══════════════════════════════════════════
-    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-    
-    # Pure layout, all extra trailing indicators are completely removed here.
-    down_col1, _ = st.columns([2.0, 10.0])
-    with down_col1:
-        body_filter_on = st.toggle("Body > Wick", value=False)
-
-    if body_filter_on:
-        processed_cards_list = [x for x in processed_cards_list if x["body_gt_wick"]]
-
-    # ══════════════════════════════════════════
-    #  SECTOR & WATCHLIST INJECTION
+    #  SECTOR & SELECTION MATRIX
     # ══════════════════════════════════════════
     available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
     sector_counts = {}
@@ -271,7 +274,7 @@ if st.session_state.ts_prewatch:
         pill_options.append(label)
         display_label_to_prefixed[label] = sector
             
-    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     sector_selection_label = st.pills("Filter Matrix by Sector Footprint:", pill_options, default="ALL")
     
     if sector_selection_label != "ALL":
@@ -279,10 +282,14 @@ if st.session_state.ts_prewatch:
         if prefixed_selected_sector:
             processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
 
-    if sort_strategy == "Distance to EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
+    # Map selected string accurately to sorting strategy keys
+    if sort_strategy == "EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
     elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
+    # ══════════════════════════════════════════
+    #  BATCH WATCHLIST PANEL & CARD RENDERING
+    # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([5, 3])
