@@ -103,11 +103,9 @@ def run_fast_prewatch_scan():
     status_text = st.empty()
     status_text.text("⚡ Activating High-Speed Engine Batch Downloads...")
     
-    # ── STEP 1: CHECK FOR LIVE BROKER CONNECTION FIRST ──
     api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
     
     if api_obj:
-        # Multithreaded Worker Pool for Angel One API Calls
         status_text.text("🔌 Processing Parallel Worker Streams (Angel One)...")
         def fetch_angel_data(symbol, info):
             try:
@@ -134,39 +132,32 @@ def run_fast_prewatch_scan():
                 if df_stock is not None and len(df_stock) >= 5:
                     process_individual_dataframe(sym, df_stock, live_p, results)
 
-    # ── STEP 2: FALLBACK TO BULK YAHOO DOWNLOAD (1 SINGLE BULK HIT) ──
     elif YFINANCE_AVAILABLE:
         try:
             ticker_map = {f"{sym}.NS": sym for sym, _ in all_stocks}
             ticker_space_string = " ".join(ticker_map.keys())
             
-            # Single hit API request for all tickers combined
             bulk_df = yf.download(ticker_space_string, period="1y", interval="1d", group_by='ticker', progress=False)
             
             for ns_ticker, sym in ticker_map.items():
                 if ns_ticker in bulk_df.columns.levels[0]:
                     df_stock = bulk_df[ns_ticker].dropna(subset=["Close"])
                     if not df_stock.empty and len(df_stock) >= 5:
-                        # Extract fast standalone price ticker fallback
-                        try:
-                            live_p = float(df_stock["Close"].iloc[-1])
-                        except:
-                            live_p = None
+                        try: live_p = float(df_stock["Close"].iloc[-1])
+                        except: live_p = None
                         process_individual_dataframe(sym, df_stock, live_p, results)
         except Exception as e:
             st.error(f"Bulk download runtime failure: {e}")
             
     status_text.empty()
-    st.session_state.ts_prewatch = sorted(results, key=lambda x: x["abs_dist"])
+    st.session_state.ts_prewatch = sorted(results, key=lambda x: x["abs_dist_pct"])
     st.session_state.ts_prewatch_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
 def process_individual_dataframe(sym, df_stock, live_price, results_list):
     last_row = df_stock.iloc[-1]
     volume = float(last_row["Volume"])
     
-    # 1 Lakh liquidity checkpoint filter
-    if volume < 100000 or pd.isna(volume) or math.isnan(volume): 
-        return
+    if volume < 100000 or pd.isna(volume) or math.isnan(volume): return
 
     ema20 = calculate_ema(df_stock["Close"], 20)
     ema200 = calculate_ema(df_stock["Close"], 200)
@@ -174,7 +165,11 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
     if ema20 is None: return
     
     ltp = live_price if (live_price is not None and not pd.isna(live_price)) else float(last_row["Close"])
+    
+    # Mathematical conversion to baseline percentage gap
     abs_dist = float(abs(ltp - ema20))
+    abs_dist_pct = float((abs_dist / ema20) * 100.0)
+    
     abs_dist_200 = float(abs(ltp - ema200)) if ema200 is not None else None
     
     body = abs(float(last_row["Close"]) - float(last_row["Open"]))
@@ -184,7 +179,7 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
     
     results_list.append({
         "sym": sym, "sector": STOCK_UNIVERSE.get(sym, {}).get("sector", "GENERAL SECTOR"), "ltp": ltp,
-        "ema20": ema20, "ema200": ema200, "dist_pct": ema20, "abs_dist": abs_dist, "abs_dist_200": abs_dist_200,
+        "ema20": ema20, "ema200": ema200, "abs_dist_pct": abs_dist_pct, "abs_dist": abs_dist, "abs_dist_200": abs_dist_200,
         "body_gt_wick": body_gt_wick, "volume": volume, "vol_median": vol_median,
         "last_candle": {"o": float(last_row["Open"]), "h": float(last_row["High"]), "l": float(last_row["Low"]), "c": float(last_row["Close"])},
     })
@@ -224,7 +219,8 @@ with st.container(border=True):
     with f_col2:
         filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
     with f_col3:
-        filter_ema20 = st.number_input("Max Dist from EMA20 (₹ Gap)", min_value=0.0, max_value=5000.0, value=15.0, step=1.0)
+        # --- MODIFIED: INPUT IS NOW PARAMETERIZED IN PERCENTAGE (%) ---
+        filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
     with f_col4:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
@@ -235,7 +231,8 @@ if st.session_state.ts_prewatch:
     for r in raw_data:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
-        if r["abs_dist"] > filter_ema20: continue
+        # Apply the Percentage checking conditional logic boundary
+        if r["abs_dist_pct"] > filter_ema20_pct: continue
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
@@ -243,7 +240,7 @@ if st.session_state.ts_prewatch:
     for r in filtered_data:
         sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
-        conf = calculate_confidence(r["abs_dist"], r["body_gt_wick"], r["abs_dist_200"])
+        conf = calculate_confidence(r["abs_dist_pct"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
         
     available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
@@ -267,7 +264,7 @@ if st.session_state.ts_prewatch:
         if prefixed_selected_sector:
             processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
 
-    if sort_strategy == "Distance to EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist"])
+    if sort_strategy == "Distance to EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
     elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
@@ -319,7 +316,8 @@ if st.session_state.ts_prewatch:
                 h_left, h_right = st.columns([8, 4])
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
-                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR</span>" if stock["abs_dist"] <= 5.0 else ""
+                    # Dynamic badge can shift to evaluate based on % limits if required
+                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR ({stock['abs_dist_pct']:.2f}%)</span>" if stock["abs_dist_pct"] <= 0.5 else ""
                     strong_badge = f"<span style='background: rgba(0,170,59,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
                     st.markdown(f"<div style='display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span><span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>{near_badge}{strong_badge}</div>", unsafe_allow_html=True)
                 with h_right:
@@ -330,7 +328,8 @@ if st.session_state.ts_prewatch:
                 
                 with m1:
                     ema20_color, ema20_arrow = ("#00AA3B", "▲ ") if stock['ltp'] >= stock['ema20'] else ("#D32F2F", "▼ ")
-                    st.markdown(f"<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE</p><p style='font-size:16px; font-weight:700; color:{ema20_color}; margin:2px 0 0 0;'>{ema20_arrow}₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
+                    # --- OUTPUT DISPLAY SHOWS THE ACTUAL VALUE (₹) ---
+                    st.markdown(f"<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE (Gap: ₹{stock['abs_dist']:.2f})</p><p style='font-size:16px; font-weight:700; color:{ema20_color}; margin:2px 0 0 0;'>{ema20_arrow}₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
                 with m2:
                     m2_html = f"<span style='color: #111111;'>₹{stock['ema200']:.2f}</span>" if (stock['ema200'] is not None and not math.isnan(stock['ema200'])) else "<span style='color: #888888;'>No Data</span>"
                     st.markdown(f"<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>200 EMA PRICE</p><p style='font-size:16px; font-weight:700; margin:2px 0 0 0;'>{m2_html}</p>", unsafe_allow_html=True)
