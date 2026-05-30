@@ -270,44 +270,113 @@ def fetch_all_prices(watchlist: list) -> dict:
 # ══════════════════════════════════════════
 
 # ── Timeframe config ──
+# Angel One interval → (label, days_back)
 TIMEFRAMES = {
-    "5m":  {"period": "5d",  "interval": "5m",  "label": "5 Min"},
-    "15m": {"period": "10d", "interval": "15m", "label": "15 Min"},
-    "1h":  {"period": "60d", "interval": "1h",  "label": "1 Hour"},
-    "4h":  {"period": "60d", "interval": "1h",  "label": "4 Hour"},  # plotly will resample
-    "1d":  {"period": "1y",  "interval": "1d",  "label": "1 Day"},
-    "1wk": {"period": "5y",  "interval": "1wk", "label": "1 Week"},
-    "1mo": {"period": "10y", "interval": "1mo", "label": "1 Month"},
+    "FIVE_MINUTE":    {"label": "5m",  "days": 5,   "angel": "FIVE_MINUTE"},
+    "FIFTEEN_MINUTE": {"label": "15m", "days": 15,  "angel": "FIFTEEN_MINUTE"},
+    "ONE_HOUR":       {"label": "1h",  "days": 60,  "angel": "ONE_HOUR"},
+    "ONE_DAY":        {"label": "1D",  "days": 365, "angel": "ONE_DAY"},
+    "ONE_WEEK":       {"label": "1W",  "days": 730, "angel": "ONE_WEEK"},
+    "ONE_MONTH":      {"label": "1M",  "days": 1825,"angel": "ONE_MONTH"},
 }
 
 @st.cache_data(ttl=300)
-def fetch_chart_data(symbol: str, exchange: str, interval: str, period: str):
+def fetch_chart_data_angel(symbol: str, exchange: str, interval: str) -> list:
+    """
+    Fetch OHLCV from Angel One getCandleData().
+    Returns list of [timestamp, open, high, low, close, volume]
+    Falls back to yfinance if Angel One fails.
+    """
+    import pyotp
+    from SmartApi import SmartConnect
+    from datetime import timedelta
+
+    days     = TIMEFRAMES[interval]["days"]
+    to_dt    = datetime.now(IST)
+    from_dt  = to_dt - timedelta(days=days)
+    fromdate = from_dt.strftime("%Y-%m-%d 09:15")
+    todate   = to_dt.strftime("%Y-%m-%d 15:30")
+    exch     = "NSE" if exchange == "NS" else "BSE"
+    token    = get_stock_token(clean_symbol(symbol))
+
+    # ── Try Angel One first ──
+    if token:
+        try:
+            obj  = SmartConnect(api_key=st.secrets["API_KEY"])
+            totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
+            sess = obj.generateSession(
+                st.secrets["CLIENT_CODE"],
+                st.secrets["PASSWORD"], totp
+            )
+            if sess.get("status"):
+                params = {
+                    "exchange":    exch,
+                    "symboltoken": str(token),
+                    "interval":    interval,
+                    "fromdate":    fromdate,
+                    "todate":      todate,
+                }
+                resp = obj.getCandleData(params)
+                if resp and resp.get("status") and resp.get("data"):
+                    print(f"[Chart] Angel One data fetched for {symbol} — {len(resp['data'])} candles")
+                    return resp["data"]
+        except Exception as e:
+            print(f"[Chart] Angel One failed: {e} — falling back to yfinance")
+
+    # ── Fallback: yfinance ──
+    yf_map = {
+        "FIVE_MINUTE":    ("5d",   "5m"),
+        "FIFTEEN_MINUTE": ("15d",  "15m"),
+        "ONE_HOUR":       ("60d",  "1h"),
+        "ONE_DAY":        ("1y",   "1d"),
+        "ONE_WEEK":       ("5y",   "1wk"),
+        "ONE_MONTH":      ("10y",  "1mo"),
+    }
+    period, yf_interval = yf_map.get(interval, ("1y", "1d"))
     try:
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        df = yf.Ticker(f"{sym}{suffix}").history(period=period, interval=interval)
-        return df
-    except:
-        return None
+        hist   = yf.Ticker(f"{sym}{suffix}").history(period=period, interval=yf_interval)
+        if hist is not None and not hist.empty:
+            rows = []
+            for ts, row in hist.iterrows():
+                rows.append([
+                    str(ts),
+                    round(float(row["Open"]),  2),
+                    round(float(row["High"]),  2),
+                    round(float(row["Low"]),   2),
+                    round(float(row["Close"]), 2),
+                    int(row["Volume"])
+                ])
+            print(f"[Chart] yfinance fallback — {len(rows)} candles")
+            return rows
+    except Exception as e:
+        print(f"[Chart] yfinance also failed: {e}")
+
+    return []
 
 def render_chart_plotly(symbol: str, exchange: str):
-    """Premium TradingView-style chart — white bg, right-side price, timeframe selector"""
+    """
+    Premium chart — Angel One OHLCV data + Lightweight Charts (TradingView open source)
+    Timeframes: 5m, 15m, 1h, 1D, 1W, 1M
+    Indicators:  EMA 20 (orange), EMA 200 (blue), Volume
+    """
     exch_label = "NSE" if exchange == "NS" else "BSE"
 
     # ── Timeframe selector ──
+    if "chart_tf" not in st.session_state:
+        st.session_state.chart_tf = "ONE_DAY"
+
     tf_keys   = list(TIMEFRAMES.keys())
     tf_labels = [TIMEFRAMES[k]["label"] for k in tf_keys]
 
     tf_cols = st.columns(len(tf_keys))
-    if "chart_tf" not in st.session_state:
-        st.session_state.chart_tf = "1d"
-
     for i, col in enumerate(tf_cols):
         with col:
             is_active = st.session_state.chart_tf == tf_keys[i]
             if st.button(
                 tf_labels[i],
-                key=f"tf_{tf_keys[i]}",
+                key=f"tf_{tf_keys[i]}_{symbol}",
                 use_container_width=True,
                 type="primary" if is_active else "secondary"
             ):
@@ -315,195 +384,243 @@ def render_chart_plotly(symbol: str, exchange: str):
                 st.rerun()
 
     selected_tf = st.session_state.chart_tf
-    tf_config   = TIMEFRAMES[selected_tf]
 
-    with st.spinner(f"Loading {symbol} · {tf_config['label']}..."):
-        hist = fetch_chart_data(
-            symbol, exchange,
-            tf_config["interval"],
-            tf_config["period"]
-        )
+    with st.spinner(f"Loading {symbol} · {TIMEFRAMES[selected_tf]['label']}..."):
+        raw = fetch_chart_data_angel(symbol, exchange, selected_tf)
 
-    if hist is None or hist.empty:
-        st.error(f"❌ No data for {symbol} on {tf_config['label']} timeframe")
+    if not raw:
+        st.error(f"❌ No data for {symbol}")
         return
 
-    # ── 4H resampling ──
-    if selected_tf == "4h":
-        hist = hist.resample("4h").agg({
-            "Open":   "first",
-            "High":   "max",
-            "Low":    "min",
-            "Close":  "last",
-            "Volume": "sum"
-        }).dropna()
+    import json as _json
+    import pandas as _pd
+    import numpy as _np
 
-    # ── EMAs ──
-    hist["EMA20"]  = hist["Close"].ewm(span=20,  adjust=False).mean()
-    hist["EMA200"] = hist["Close"].ewm(span=200, adjust=False).mean()
+    # ── Build DataFrame ──
+    df = _pd.DataFrame(raw, columns=["time","open","high","low","close","volume"])
+    df["time"]   = _pd.to_datetime(df["time"]).astype("int64") // 10**9
+    df["close"]  = df["close"].astype(float)
+    df["open"]   = df["open"].astype(float)
+    df["high"]   = df["high"].astype(float)
+    df["low"]    = df["low"].astype(float)
+    df["volume"] = df["volume"].astype(float)
+    df = df.drop_duplicates("time").sort_values("time").reset_index(drop=True)
 
-    # ── Colors — clean white theme ──
-    BG      = "#ffffff"
-    PLOT_BG = "#ffffff"
-    GRID    = "#f0f0f0"
-    TEXT    = "#1a1a2e"
-    UP      = "#089981"
-    DOWN    = "#f23645"
-    EMA20C  = "#f59e0b"
-    EMA200C = "#3b82f6"
-    BORDER  = "#e5e7eb"
+    # ── EMA calculation ──
+    def ema(series, span):
+        return series.ewm(span=span, adjust=False).mean().round(2)
 
-    # ── Figure — 2 rows ──
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.02,
-        row_heights=[0.78, 0.22]
-    )
+    df["ema20"]  = ema(df["close"], 20)
+    df["ema200"] = ema(df["close"], 200)
 
-    # ── Candlesticks ──
-    fig.add_trace(go.Candlestick(
-        x=hist.index,
-        open=hist["Open"],  high=hist["High"],
-        low=hist["Low"],    close=hist["Close"],
-        name=symbol,
-        increasing=dict(line=dict(color=UP,   width=1), fillcolor=UP),
-        decreasing=dict(line=dict(color=DOWN, width=1), fillcolor=DOWN),
-        whiskerwidth=0.5,
-    ), row=1, col=1)
+    last  = df["close"].iloc[-1]
+    prev  = df["close"].iloc[-2] if len(df) > 1 else last
+    chg   = last - prev
+    chgp  = (chg / prev * 100) if prev else 0
+    chg_color = "#089981" if chg >= 0 else "#f23645"
 
-    # ── EMA 20 ──
-    fig.add_trace(go.Scatter(
-        x=hist.index, y=hist["EMA20"],
-        name="EMA 20",
-        line=dict(color=EMA20C, width=1.8, dash="solid"),
-        opacity=0.95,
-        hovertemplate="EMA20: ₹%{y:,.2f}<extra></extra>"
-    ), row=1, col=1)
+    # ── Prepare JSON for Lightweight Charts ──
+    candles = df[["time","open","high","low","close"]].to_dict("records")
+    volumes = [{"time": r["time"], "value": r["volume"],
+                "color": "#089981" if r["close"] >= r["open"] else "#f23645"}
+               for _, r in df.iterrows()]
+    ema20_data  = [{"time": r["time"], "value": r["ema20"]}
+                   for _, r in df.iterrows() if not _np.isnan(r["ema20"])]
+    ema200_data = [{"time": r["time"], "value": r["ema200"]}
+                   for _, r in df.iterrows() if not _np.isnan(r["ema200"])]
 
-    # ── EMA 200 ──
-    fig.add_trace(go.Scatter(
-        x=hist.index, y=hist["EMA200"],
-        name="EMA 200",
-        line=dict(color=EMA200C, width=1.8, dash="solid"),
-        opacity=0.95,
-        hovertemplate="EMA200: ₹%{y:,.2f}<extra></extra>"
-    ), row=1, col=1)
+    candles_js  = _json.dumps(candles)
+    volumes_js  = _json.dumps(volumes)
+    ema20_js    = _json.dumps(ema20_data)
+    ema200_js   = _json.dumps(ema200_data)
 
-    # ── Volume ──
-    vol_colors = [UP if c >= o else DOWN
-                  for c, o in zip(hist["Close"], hist["Open"])]
-    fig.add_trace(go.Bar(
-        x=hist.index, y=hist["Volume"],
-        name="Volume",
-        marker_color=vol_colors,
-        marker_opacity=0.5,
-        showlegend=False,
-        hovertemplate="Vol: %{y:,.0f}<extra></extra>"
-    ), row=2, col=1)
+    # ── Lightweight Charts HTML ──
+    chart_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:#ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; }}
+  #chart-container {{
+    position: relative;
+    width: 100%;
+    height: 580px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #ffffff;
+  }}
+  #chart {{ width:100%; height:100%; }}
+  #legend {{
+    position: absolute;
+    top: 12px; left: 12px;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #374151;
+    z-index: 10;
+    min-width: 200px;
+    backdrop-filter: blur(4px);
+  }}
+  #legend .sym {{ font-weight:700; font-size:14px; color:#111; }}
+  #legend .price {{ font-size:18px; font-weight:700; margin: 2px 0; }}
+  #legend .chg {{ font-size:12px; }}
+  #legend .indicators {{ margin-top:6px; font-size:11px; color:#666; }}
+  #legend .ind-row {{ display:flex; align-items:center; gap:6px; margin-top:2px; }}
+  #legend .dot {{ width:10px; height:3px; border-radius:2px; display:inline-block; }}
+</style>
+</head>
+<body>
+<div id="chart-container">
+  <div id="chart"></div>
+  <div id="legend">
+    <div class="sym">{symbol} <span style="color:#888;font-size:11px;font-weight:400">{exch_label}</span></div>
+    <div class="price" id="leg-price" style="color:{chg_color}">₹{last:,.2f}</div>
+    <div class="chg" id="leg-chg" style="color:{chg_color}">{chg:+.2f} ({chgp:+.2f}%)</div>
+    <div class="indicators">
+      <div class="ind-row"><span class="dot" style="background:#f59e0b"></span><span id="leg-ema20">EMA 20: ₹{df['ema20'].iloc[-1]:,.2f}</span></div>
+      <div class="ind-row"><span class="dot" style="background:#3b82f6"></span><span id="leg-ema200">EMA 200: ₹{df['ema200'].iloc[-1]:,.2f}</span></div>
+    </div>
+  </div>
+</div>
 
-    # ── Last price line ──
-    last_price = hist["Close"].iloc[-1]
-    fig.add_hline(
-        y=last_price,
-        line_dash="dot",
-        line_color="#6366f1",
-        line_width=1.2,
-        annotation_text=f"  ₹{last_price:,.2f}",
-        annotation_position="right",
-        annotation_font=dict(color="#6366f1", size=11),
-        row=1, col=1
-    )
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const {{ createChart }} = LightweightCharts;
 
-    # ── Layout ──
-    chg  = hist["Close"].iloc[-1] - hist["Close"].iloc[-2]
-    chgp = chg / hist["Close"].iloc[-2] * 100
-    chg_color = UP if chg >= 0 else DOWN
+const container = document.getElementById('chart');
+const chart = createChart(container, {{
+  width:  container.offsetWidth,
+  height: 580,
+  layout: {{
+    background: {{ color: '#ffffff' }},
+    textColor:  '#374151',
+    fontSize:   12,
+    fontFamily: '-apple-system, BlinkMacSystemFont, Inter, sans-serif',
+  }},
+  grid: {{
+    vertLines: {{ color: '#f3f4f6', style: 0 }},
+    horzLines: {{ color: '#f3f4f6', style: 0 }},
+  }},
+  crosshair: {{
+    mode: 1,
+    vertLine:  {{ color: '#9ca3af', width: 1, style: 2 }},
+    horzLine:  {{ color: '#9ca3af', width: 1, style: 2 }},
+  }},
+  rightPriceScale: {{
+    borderColor:    '#e5e7eb',
+    scaleMargins:   {{ top: 0.1, bottom: 0.25 }},
+    textColor:      '#6b7280',
+  }},
+  timeScale: {{
+    borderColor:    '#e5e7eb',
+    timeVisible:    true,
+    secondsVisible: false,
+    tickMarkFormatter: (t) => {{
+      const d = new Date(t * 1000);
+      return d.toLocaleDateString('en-IN', {{day:'2-digit', month:'short'}});
+    }},
+  }},
+  watermark: {{
+    visible: false,
+  }},
+}});
 
-    fig.update_layout(
-        paper_bgcolor=BG,
-        plot_bgcolor=PLOT_BG,
-        font=dict(color=TEXT, family="Inter, sans-serif", size=11),
-        margin=dict(l=0, r=80, t=50, b=0),
-        height=640,
-        hovermode="x unified",
-        hoverlabel=dict(
-            bgcolor="#1a1a2e",
-            font_color="#ffffff",
-            font_size=11,
-            bordercolor="#333"
-        ),
-        legend=dict(
-            bgcolor="rgba(255,255,255,0.9)",
-            bordercolor=BORDER,
-            borderwidth=1,
-            font=dict(size=11, color=TEXT),
-            orientation="h",
-            x=0, y=1.02,
-            xanchor="left"
-        ),
-        title=dict(
-            text=(f"<b style='font-size:16px'>{symbol}</b>"
-                  f"  <span style='color:#888;font-size:12px'>{exch_label}</span>"
-                  f"  <span style='color:{chg_color};font-size:13px'>"
-                  f"₹{last_price:,.2f}  {chg:+.2f} ({chgp:+.2f}%)</span>"),
-            x=0.01, xanchor="left",
-            font=dict(size=14, color=TEXT)
-        ),
-        xaxis_rangeslider_visible=False,
-        xaxis2_rangeslider_visible=False,
-    )
+// ── Candlestick series ──
+const candleSeries = chart.addCandlestickSeries({{
+  upColor:         '#089981',
+  downColor:       '#f23645',
+  borderUpColor:   '#089981',
+  borderDownColor: '#f23645',
+  wickUpColor:     '#089981',
+  wickDownColor:   '#f23645',
+}});
+candleSeries.setData({candles_js});
 
-    # ── Axes ──
-    common_x = dict(
-        showgrid=True, gridcolor=GRID, gridwidth=1,
-        zeroline=False,
-        tickfont=dict(color="#888", size=10),
-        showline=True, linecolor=BORDER, linewidth=1,
-        showspikes=True, spikecolor="#aaa",
-        spikethickness=1, spikedash="dot",
-    )
-    common_y = dict(
-        showgrid=True, gridcolor=GRID, gridwidth=1,
-        zeroline=False,
-        tickfont=dict(color="#888", size=10),
-        side="right",
-        showline=True, linecolor=BORDER,
-        tickprefix="₹",
-        showspikes=True, spikecolor="#aaa",
-        spikethickness=1, spikedash="dot",
-    )
+// ── Volume series ──
+const volumeSeries = chart.addHistogramSeries({{
+  priceFormat:    {{ type: 'volume' }},
+  priceScaleId:   'vol',
+  scaleMargins:   {{ top: 0.8, bottom: 0 }},
+}});
+chart.priceScale('vol').applyOptions({{
+  scaleMargins: {{ top: 0.8, bottom: 0 }},
+}});
+volumeSeries.setData({volumes_js});
 
-    fig.update_xaxes(**common_x)
-    fig.update_yaxes(**common_y)
-    fig.update_yaxes(tickprefix="",  row=2, col=1)  # volume — no ₹
-    fig.update_xaxes(showticklabels=True, row=2, col=1)
+// ── EMA 20 ──
+const ema20Series = chart.addLineSeries({{
+  color:       '#f59e0b',
+  lineWidth:   1.5,
+  priceLineVisible: false,
+  lastValueVisible: false,
+}});
+ema20Series.setData({ema20_js});
 
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={
-            "displayModeBar": True,
-            "displaylogo":    False,
-            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
-            "modeBarButtonsToAdd":    ["drawline", "drawopenpath", "eraseshape"],
-            "scrollZoom": True,
-        }
-    )
+// ── EMA 200 ──
+const ema200Series = chart.addLineSeries({{
+  color:       '#3b82f6',
+  lineWidth:   1.5,
+  priceLineVisible: false,
+  lastValueVisible: false,
+}});
+ema200Series.setData({ema200_js});
+
+// ── Fit all content ──
+chart.timeScale().fitContent();
+
+// ── Crosshair legend update ──
+chart.subscribeCrosshairMove(param => {{
+  if (!param.time || !param.point) return;
+  const bar = param.seriesData.get(candleSeries);
+  if (!bar) return;
+
+  const {{ open, high, low, close }} = bar;
+  const chg  = close - open;
+  const pct  = (chg / open * 100).toFixed(2);
+  const col  = close >= open ? '#089981' : '#f23645';
+
+  document.getElementById('leg-price').style.color = col;
+  document.getElementById('leg-price').textContent = '₹' + close.toLocaleString('en-IN', {{minimumFractionDigits:2, maximumFractionDigits:2}});
+  document.getElementById('leg-chg').style.color   = col;
+  document.getElementById('leg-chg').textContent   = (chg>=0?'+':'') + chg.toFixed(2) + ' (' + (chg>=0?'+':'') + pct + '%)';
+
+  // EMA values on hover
+  const e20  = param.seriesData.get(ema20Series);
+  const e200 = param.seriesData.get(ema200Series);
+  if (e20)  document.getElementById('leg-ema20').textContent  = 'EMA 20: ₹'  + e20.value.toLocaleString('en-IN',  {{minimumFractionDigits:2}});
+  if (e200) document.getElementById('leg-ema200').textContent = 'EMA 200: ₹' + e200.value.toLocaleString('en-IN', {{minimumFractionDigits:2}});
+}});
+
+// ── Resize ──
+const ro = new ResizeObserver(() => {{
+  chart.applyOptions({{ width: container.offsetWidth }});
+}});
+ro.observe(container);
+</script>
+</body>
+</html>
+"""
+
+    st.iframe(chart_html, height=600, scrolling=False)
 
     # ── Stats row ──
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Close", f"₹{last_price:,.2f}",
-                  delta=f"{chg:+.2f} ({chgp:+.2f}%)")
-    with col2:
-        st.metric("52W High", f"₹{hist['High'].max():,.2f}")
-    with col3:
-        st.metric("52W Low",  f"₹{hist['Low'].min():,.2f}")
-    with col4:
-        st.metric("EMA 20",   f"₹{hist['EMA20'].iloc[-1]:,.2f}")
-    with col5:
-        st.metric("EMA 200",  f"₹{hist['EMA200'].iloc[-1]:,.2f}")
+    high52 = df["high"].max()
+    low52  = df["low"].min()
+    e20    = df["ema20"].iloc[-1]
+    e200   = df["ema200"].iloc[-1]
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: st.metric("Last Close", f"₹{last:,.2f}",
+                        delta=f"{chg:+.2f} ({chgp:+.2f}%)")
+    with c2: st.metric("Period High", f"₹{high52:,.2f}")
+    with c3: st.metric("Period Low",  f"₹{low52:,.2f}")
+    with c4: st.metric("EMA 20",      f"₹{e20:,.2f}")
+    with c5: st.metric("EMA 200",     f"₹{e200:,.2f}")
 
 
 # ══════════════════════════════════════════
