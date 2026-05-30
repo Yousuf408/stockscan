@@ -176,20 +176,91 @@ def fetch_price(symbol: str, exchange: str):
     return price, source
 
 def fetch_all_prices(watchlist: list) -> dict:
-    """Fetch prices for all stocks. Returns {sym_exch: {price, source, time}}"""
+    """
+    Batch fetch all prices at once using yfinance.download()
+    Much faster than fetching one by one.
+    Market Open  → Angel One HTTP → yfinance batch fallback
+    Market Closed → yfinance batch directly
+    """
     prices = {}
-    for i, stock in enumerate(watchlist):
+    if not watchlist:
+        return prices
+
+    # ── Market Open: try Angel One HTTP first ──
+    if is_market_open():
+        for stock in watchlist:
+            sym  = stock.get("symbol", "")
+            exch = stock.get("exchange", "NS")
+            key  = f"{sym}_{exch}"
+            price, source = fetch_price_angel(sym, exch)
+            if price:
+                prices[key] = {
+                    "price":  price,
+                    "source": source,
+                    "time":   now_ist().strftime("%H:%M:%S")
+                }
+
+    # ── Build list of symbols that still need price ──
+    missing = []
+    for stock in watchlist:
         sym  = stock.get("symbol", "")
         exch = stock.get("exchange", "NS")
         key  = f"{sym}_{exch}"
-        price, source = fetch_price(sym, exch)
-        if price:
-            prices[key] = {
-                "price":  price,
-                "source": source,
-                "time":   now_ist().strftime("%H:%M:%S")
-            }
-        time.sleep(0.5)  # rate limit protection
+        if key not in prices:
+            missing.append((sym, exch))
+
+    if not missing:
+        return prices
+
+    # ── Batch fetch via yfinance.download() — fast! ──
+    try:
+        ns_syms = [f"{clean_symbol(s)}.NS" for s, e in missing if e == "NS"]
+        bo_syms = [f"{clean_symbol(s)}.BO" for s, e in missing if e == "BO"]
+        all_syms = ns_syms + bo_syms
+
+        if all_syms:
+            data = yf.download(
+                tickers=" ".join(all_syms),
+                period="2d",
+                interval="1d",
+                progress=False,
+                auto_adjust=True,
+                threads=True
+            )
+
+            for sym, exch in missing:
+                key      = f"{sym}_{exch}"
+                ticker   = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
+                try:
+                    if len(all_syms) == 1:
+                        # Single ticker — data is flat DataFrame
+                        price = float(data["Close"].iloc[-1])
+                    else:
+                        # Multiple tickers — data has MultiIndex columns
+                        price = float(data["Close"][ticker].dropna().iloc[-1])
+
+                    if price:
+                        prices[key] = {
+                            "price":  price,
+                            "source": "yfinance",
+                            "time":   now_ist().strftime("%H:%M:%S")
+                        }
+                except Exception as e:
+                    print(f"[Batch] Could not extract {ticker}: {e}")
+
+    except Exception as e:
+        print(f"[Batch yfinance] Failed: {e}")
+        # Last resort — fetch one by one
+        for sym, exch in missing:
+            key = f"{sym}_{exch}"
+            price, source = fetch_price_yfinance(sym, exch)
+            if price:
+                prices[key] = {
+                    "price":  price,
+                    "source": source,
+                    "time":   now_ist().strftime("%H:%M:%S")
+                }
+
     return prices
 
 
