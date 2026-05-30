@@ -233,7 +233,8 @@ with st.container(border=True):
         body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
     with p2_col2:
         sort_strategy = st.radio(
-                    ["EMA20", "Absolute Volume Size", "Confidence Score"], 
+            "Matrix Evaluation Strategy Vector:", 
+            ["EMA20", "Absolute Volume Size", "Confidence Score"], 
             horizontal=True
         )
 
