@@ -270,7 +270,7 @@ if st.session_state.ts_prewatch:
         pill_options.append(label)
         display_label_to_prefixed[label] = sector
             
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
     sector_selection_label = st.pills("Filter Matrix by Sector Footprint:", pill_options, default="ALL")
     
     if sector_selection_label != "ALL":
