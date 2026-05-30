@@ -88,7 +88,7 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     else: return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
 def calculate_confidence(abs_dist_pct: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    score = 100.0 - (float(abs_dist_pct) * 10.0)  # Standardized tracking weight for % distance
+    score = 100.0 - (float(abs_dist_pct) * 10.0)
     if body_gt_wick: score += 20.0
     if abs_dist_200 is not None and abs_dist_200 < 50.0: score += 10.0
     return int(min(100, max(0, round(score))))
@@ -168,7 +168,6 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
     
     abs_dist = float(abs(ltp - ema20))
     abs_dist_pct = float((abs_dist / ema20) * 100.0)
-    
     abs_dist_200 = float(abs(ltp - ema200)) if ema200 is not None else None
     
     body = abs(float(last_row["Close"]) - float(last_row["Open"]))
@@ -209,18 +208,37 @@ col_info.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown("<h3 style='font-size: 14px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
+
+# --- REFINED & REDUCED MAIN WIDTH: Shifted from 4 columns to 3 tight grid layout columns ---
 with st.container(border=True):
-    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+    f_col1, f_col2, f_col3 = st.columns([4.5, 3.5, 4.0])
+    
     with f_col1:
-        filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
-        body_filter_on = st.toggle("Filter Body > Wick (💪 STRONG)", value=False)
+        # Dynamic Multi-Input Stack Row 1
+        sub_p1, sub_p2 = st.columns(2)
+        with sub_p1:
+            filter_price = st.number_input("Min Price (₹)", min_value=0.0, value=0.0, step=50.0)
+        with sub_p2:
+            filter_volume = st.number_input("Min Volume Size", min_value=0.0, value=0.0, step=50000.0)
+            
+        # --- NEW INLINE ALIGNMENT: Toggle Button and Indicators on the Same Row ---
+        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
+        t_col1, t_col2, t_col3, t_col4 = st.columns([2.5, 1.2, 1.2, 1.1])
+        with t_col1:
+            body_filter_on = st.toggle("Body > Wick", value=False)
+        with t_col2:
+            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>EMA</span>", unsafe_allow_html=True)
+        with t_col3:
+            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>VOL</span>", unsafe_allow_html=True)
+        with t_col4:
+            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>CNF</span>", unsafe_allow_html=True)
+            
     with f_col2:
-        filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
-    with f_col3:
         filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
-    with f_col4:
-        sort_strategy = st.radio("Sort Strategies Matrix:", ["EMA20 Gap", "Volume", "CNF Score"], horizontal=False)
+        
+    with f_col3:
+        sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
@@ -261,9 +279,9 @@ if st.session_state.ts_prewatch:
         if prefixed_selected_sector:
             processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
 
-    if sort_strategy == "EMA20 Gap": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
-    elif sort_strategy == "Volume": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
-    elif sort_strategy == "CNF Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
+    if sort_strategy == "Distance to EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
+    elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
+    elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
@@ -314,7 +332,7 @@ if st.session_state.ts_prewatch:
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
                     near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR ({stock['abs_dist_pct']:.2f}%)</span>" if stock["abs_dist_pct"] <= 0.5 else ""
-                    strong_badge = f"<span style='background: rgba(0,170,59,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
+                    strong_badge = f"<span style='background: rgba(0,170,0,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
                     st.markdown(f"<div style='display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span><span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>{near_badge}{strong_badge}</div>", unsafe_allow_html=True)
                 with h_right:
                     st.markdown(f"<div style='text-align: right;'><span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}40;'>{stock['sig']['label']}</span></div>", unsafe_allow_html=True)
