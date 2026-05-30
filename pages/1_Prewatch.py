@@ -87,8 +87,8 @@ def calculate_signals(ltp: float, ema20: float, close: float, open_p: float) -> 
     elif not is_above and not is_green: return {"label": "▼ STRONG SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
     else: return {"label": "▼ SELL", "color": "#D32F2F", "bg": "rgba(211,47,47,0.08)"}
 
-def calculate_confidence(abs_dist: float, body_gt_wick: bool, abs_dist_200: float) -> int:
-    score = 100.0 - (float(abs_dist) * 2.0)
+def calculate_confidence(abs_dist_pct: float, body_gt_wick: bool, abs_dist_200: float) -> int:
+    score = 100.0 - (float(abs_dist_pct) * 10.0)  # Standardized tracking weight for % distance
     if body_gt_wick: score += 20.0
     if abs_dist_200 is not None and abs_dist_200 < 50.0: score += 10.0
     return int(min(100, max(0, round(score))))
@@ -166,7 +166,6 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
     
     ltp = live_price if (live_price is not None and not pd.isna(live_price)) else float(last_row["Close"])
     
-    # Mathematical conversion to baseline percentage gap
     abs_dist = float(abs(ltp - ema20))
     abs_dist_pct = float((abs_dist / ema20) * 100.0)
     
@@ -219,7 +218,6 @@ with st.container(border=True):
     with f_col2:
         filter_volume = st.number_input("Minimum Volume Size", min_value=0.0, value=0.0, step=50000.0)
     with f_col3:
-        # --- MODIFIED: INPUT IS NOW PARAMETERIZED IN PERCENTAGE (%) ---
         filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
     with f_col4:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
@@ -231,7 +229,6 @@ if st.session_state.ts_prewatch:
     for r in raw_data:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
-        # Apply the Percentage checking conditional logic boundary
         if r["abs_dist_pct"] > filter_ema20_pct: continue
         if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
@@ -316,7 +313,6 @@ if st.session_state.ts_prewatch:
                 h_left, h_right = st.columns([8, 4])
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
-                    # Dynamic badge can shift to evaluate based on % limits if required
                     near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR ({stock['abs_dist_pct']:.2f}%)</span>" if stock["abs_dist_pct"] <= 0.5 else ""
                     strong_badge = f"<span style='background: rgba(0,170,59,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
                     st.markdown(f"<div style='display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span><span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>{near_badge}{strong_badge}</div>", unsafe_allow_html=True)
@@ -328,7 +324,6 @@ if st.session_state.ts_prewatch:
                 
                 with m1:
                     ema20_color, ema20_arrow = ("#00AA3B", "▲ ") if stock['ltp'] >= stock['ema20'] else ("#D32F2F", "▼ ")
-                    # --- OUTPUT DISPLAY SHOWS THE ACTUAL VALUE (₹) ---
                     st.markdown(f"<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE (Gap: ₹{stock['abs_dist']:.2f})</p><p style='font-size:16px; font-weight:700; color:{ema20_color}; margin:2px 0 0 0;'>{ema20_arrow}₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
                 with m2:
                     m2_html = f"<span style='color: #111111;'>₹{stock['ema200']:.2f}</span>" if (stock['ema200'] is not None and not math.isnan(stock['ema200'])) else "<span style='color: #888888;'>No Data</span>"
