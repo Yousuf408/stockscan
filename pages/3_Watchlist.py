@@ -601,21 +601,11 @@ with left_col:
     # ── MANUAL REFRESH ──
     if watchlist and refresh:
         st.session_state.prices = {}  # clear old prices
-        progress = st.progress(0, text="Refreshing prices...")
-        for i, stock in enumerate(watchlist):
-            sym  = stock.get("symbol", "")
-            exch = stock.get("exchange", "NS")
-            key  = f"{sym}_{exch}"
-            price, source = fetch_price(sym, exch)
-            if price:
-                st.session_state.prices[key] = {
-                    "price": price, "source": source,
-                    "time":  now_ist().strftime("%H:%M:%S")
-                }
-            progress.progress((i+1)/len(watchlist), text=f"Fetching {clean_symbol(sym)}...")
-            time.sleep(0.5)
-        st.session_state.last_fetch_time = now_ist()
-        progress.empty()
+        with st.spinner(f"Fetching {len(watchlist)} stocks in batch..."):
+            new_prices = fetch_all_prices(watchlist)
+            st.session_state.prices.update(new_prices)
+            st.session_state.last_fetch_time = now_ist()
+        st.success(f"✅ {len(new_prices)} prices updated!")
 
     # ── SORT ──
     def sort_list(lst, by):
