@@ -1,20 +1,5 @@
 {
-  "watchlist_Today": [
-    {
-      "symbol": "RELIANCE",
-      "exchange": "NS",
-      "direction": "BUY",
-      "entry": 2300.0,
-      "sl": null,
-      "target1": null,
-      "target2": null,
-      "note": null,
-      "sector": "ENERGY",
-      "status": "WATCHING",
-      "lastPrice": null,
-      "added_at": "2026-05-30T13:02:17.206706"
-    }
-  ],
+  "watchlist_Today": [],
   "watchlist_Yesterday": [],
   "watchlist_New": [
     {
