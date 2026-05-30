@@ -268,50 +268,68 @@ def fetch_all_prices(watchlist: list) -> dict:
 # ══════════════════════════════════════════
 
 def get_tv_symbol(symbol: str, exchange: str) -> str:
-    """Convert to TradingView symbol format — NSE:TCS, BSE:RELIANCE"""
-    clean = clean_symbol(symbol)
+    """Convert to TradingView symbol format for Indian stocks"""
+    clean  = clean_symbol(symbol)
     prefix = "NSE" if exchange == "NS" else "BSE"
     return f"{prefix}:{clean}"
 
 def render_chart_plotly(symbol: str, exchange: str):
-    """Render TradingView professional chart + 52W stats from yfinance"""
+    """Render TradingView Advanced Chart + 52W stats"""
     exch_label = "NSE" if exchange == "NS" else "BSE"
     tv_symbol  = get_tv_symbol(symbol, exchange)
+    unique_id  = f"tv_{clean_symbol(symbol)}_{exchange}"
 
-    # ── TradingView Widget ──
     tv_html = f"""
-    <div id="tradingview_chart" style="height:600px;border-radius:12px;overflow:hidden;">
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ margin: 0; padding: 0; background: #fff; }}
+            #tradingview_container {{
+                width: 100%;
+                height: 600px;
+                border-radius: 10px;
+                overflow: hidden;
+            }}
+        </style>
+    </head>
+    <body>
+    <div id="tradingview_container">
+        <div id="{unique_id}"></div>
+    </div>
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script type="text/javascript">
     new TradingView.widget({{
-        "autosize":        true,
+        "width":           "100%",
+        "height":          600,
         "symbol":          "{tv_symbol}",
         "interval":        "D",
         "timezone":        "Asia/Kolkata",
         "theme":           "light",
         "style":           "1",
         "locale":          "en",
-        "toolbar_bg":      "#f1f3f6",
+        "toolbar_bg":      "#f8f9fa",
         "enable_publishing": false,
-        "hide_top_toolbar":  false,
-        "hide_legend":       false,
-        "save_image":        true,
-        "container_id":      "tradingview_chart",
-        "studies": [
-            "MASimple@tv-basicstudies",
-            "RSI@tv-basicstudies",
-            "Volume@tv-basicstudies"
-        ],
+        "withdateranges":  true,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "save_image":      true,
+        "container_id":    "{unique_id}",
+        "studies":         ["Volume@tv-basicstudies", "MASimple@tv-basicstudies"],
         "show_popup_button": true,
-        "popup_width":       "1000",
-        "popup_height":      "650"
+        "popup_width":     "1200",
+        "popup_height":    "700",
+        "no_referral_id":  true,
+        "referral_id":     ""
     }});
     </script>
-    </div>
+    </body>
+    </html>
     """
     st.components.v1.html(tv_html, height=620, scrolling=False)
 
-    # ── 52W Stats from yfinance (below chart) ──
+    # ── 52W Stats from yfinance ──
     try:
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
