@@ -210,29 +210,13 @@ col_info.markdown(
 
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# --- REFINED & REDUCED MAIN WIDTH: Shifted from 4 columns to 3 tight grid layout columns ---
+# --- COMPLETELY CLEAN & REDUCED REFINEMENT BOX ---
 with st.container(border=True):
-    f_col1, f_col2, f_col3 = st.columns([4.5, 3.5, 4.0])
+    f_col1, f_col2, f_col3 = st.columns([4.0, 4.0, 4.0])
     
     with f_col1:
-        # Dynamic Multi-Input Stack Row 1
-        sub_p1, sub_p2 = st.columns(2)
-        with sub_p1:
-            filter_price = st.number_input("Min Price (₹)", min_value=0.0, value=0.0, step=50.0)
-        with sub_p2:
-            filter_volume = st.number_input("Min Volume Size", min_value=0.0, value=0.0, step=50000.0)
-            
-        # --- NEW INLINE ALIGNMENT: Toggle Button and Indicators on the Same Row ---
-        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
-        t_col1, t_col2, t_col3, t_col4 = st.columns([2.5, 1.2, 1.2, 1.1])
-        with t_col1:
-            body_filter_on = st.toggle("Body > Wick", value=False)
-        with t_col2:
-            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>EMA</span>", unsafe_allow_html=True)
-        with t_col3:
-            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>VOL</span>", unsafe_allow_html=True)
-        with t_col4:
-            st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:3px 6px; border-radius:3px; display:inline-block; border:1px solid #dee2e6; margin-top:4px;'>CNF</span>", unsafe_allow_html=True)
+        filter_price = st.number_input("Min Price (₹)", min_value=0.0, value=0.0, step=50.0)
+        filter_volume = st.number_input("Min Volume Size", min_value=0.0, value=0.0, step=50000.0)
             
     with f_col2:
         filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
@@ -240,15 +224,16 @@ with st.container(border=True):
     with f_col3:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
+# --- INTERMEDIATE EXECUTION LOGIC FOR METRICS & BADGES ---
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
     
+    # We apply background calculation, but Body > Wick filter will now be handled below the box dynamically!
     for r in raw_data:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
         if r["abs_dist_pct"] > filter_ema20_pct: continue
-        if body_filter_on and not r["body_gt_wick"]: continue
         filtered_data.append(r)
 
     processed_cards_list = []
@@ -257,7 +242,29 @@ if st.session_state.ts_prewatch:
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
         conf = calculate_confidence(r["abs_dist_pct"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
-        
+
+    # ══════════════════════════════════════════
+    #  DOWN SIDE OPTIONS: WICK TOGGLE & INDICATORS ROW
+    # ══════════════════════════════════════════
+    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+    
+    down_col1, down_col2, down_col3, down_col4, _ = st.columns([2.0, 1.0, 1.0, 1.0, 7.0])
+    with down_col1:
+        body_filter_on = st.toggle("Body > Wick", value=False)
+    with down_col2:
+        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>EMA</span>", unsafe_allow_html=True)
+    with down_col3:
+        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>VOL</span>", unsafe_allow_html=True)
+    with down_col4:
+        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>CNF</span>", unsafe_allow_html=True)
+
+    # Apply the Body > Wick filter here if the toggle on the downside row is turned active
+    if body_filter_on:
+        processed_cards_list = [x for x in processed_cards_list if x["body_gt_wick"]]
+
+    # ══════════════════════════════════════════
+    #  SECTOR PILLS & SORTING MATRIX
+    # ══════════════════════════════════════════
     available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
     sector_counts = {}
     for r in processed_cards_list:
@@ -271,7 +278,7 @@ if st.session_state.ts_prewatch:
         pill_options.append(label)
         display_label_to_prefixed[label] = sector
             
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
     sector_selection_label = st.pills("Filter Matrix by Sector Footprint:", pill_options, default="ALL")
     
     if sector_selection_label != "ALL":
@@ -283,6 +290,9 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
+    # ══════════════════════════════════════════
+    #  BATCH WATCHLIST PANEL & CARD RENDERING
+    # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([5, 3])
