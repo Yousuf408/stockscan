@@ -220,7 +220,7 @@ with st.container(border=True):
     with f_col3:
         filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
     with f_col4:
-        sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
+        sort_strategy = st.radio("Sort Strategies Matrix:", ["EMA20 Gap", "Volume", "Confidence Score"], horizontal=False)
 
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
@@ -261,8 +261,8 @@ if st.session_state.ts_prewatch:
         if prefixed_selected_sector:
             processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
 
-    if sort_strategy == "Distance to EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
-    elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
+    if sort_strategy == "EMA20 Gap": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
+    elif sort_strategy == "Volume": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     with st.container(border=True):
