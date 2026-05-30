@@ -364,7 +364,9 @@ def render_chart_plotly(symbol: str, exchange: str):
     exch_label = "NSE" if exchange == "NS" else "BSE"
 
     # ── Timeframe selector ──
-    if "chart_tf" not in st.session_state:
+    # Reset if old value format (e.g. "1d", "1mo") is stored in session
+    valid_tfs = list(TIMEFRAMES.keys())
+    if "chart_tf" not in st.session_state or st.session_state.chart_tf not in valid_tfs:
         st.session_state.chart_tf = "ONE_DAY"
 
     tf_keys   = list(TIMEFRAMES.keys())
