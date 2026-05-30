@@ -4,6 +4,7 @@
 #  With Unmapped Token UI Fallback Core Engine
 # ══════════════════════════════════════════
 
+import sys
 import streamlit as st
 import pyotp
 import json
@@ -13,12 +14,25 @@ import time
 import struct
 import pytz
 from datetime import datetime
-from SmartApi import SmartConnect
-from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-import sys
-sys.path.append(os.path.dirname(__file__))
-from styles import apply_styles, sidebar_brand, page_header
+print(f"[BOOT] Python {sys.version}")
+print("[BOOT] app.py loading...")
+
+try:
+    from SmartApi import SmartConnect
+    from SmartApi.smartWebSocketV2 import SmartWebSocketV2
+    print("[BOOT] SmartApi OK")
+except Exception as _e:
+    print(f"[BOOT] SmartApi FAILED: {_e}")
+    SmartConnect = None
+    SmartWebSocketV2 = None
+
+try:
+    sys.path.append(os.path.dirname(__file__))
+    from styles import apply_styles, sidebar_brand, page_header
+    print("[BOOT] styles OK")
+except Exception as _e:
+    print(f"[BOOT] styles FAILED: {_e}")
 
 st.set_page_config(
     page_title="TradeSentry",
