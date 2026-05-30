@@ -8,6 +8,8 @@
 
 import streamlit as st
 import json, os, pytz, yfinance as yf, time
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime
 
 import sys
@@ -267,80 +269,140 @@ def fetch_all_prices(watchlist: list) -> dict:
 #   CHART
 # ══════════════════════════════════════════
 
-def get_tv_symbol(symbol: str, exchange: str) -> str:
-    """Convert to TradingView symbol format for Indian stocks"""
-    clean  = clean_symbol(symbol)
-    prefix = "NSE" if exchange == "NS" else "BSE"
-    return f"{prefix}:{clean}"
-
-def render_chart_plotly(symbol: str, exchange: str):
-    """Render TradingView Advanced Chart + 52W stats"""
-    exch_label = "NSE" if exchange == "NS" else "BSE"
-    tv_symbol  = get_tv_symbol(symbol, exchange)
-    unique_id  = f"tv_{clean_symbol(symbol)}_{exchange}"
-
-    tv_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body {{ margin: 0; padding: 0; background: #fff; }}
-            #tradingview_container {{
-                width: 100%;
-                height: 600px;
-                border-radius: 10px;
-                overflow: hidden;
-            }}
-        </style>
-    </head>
-    <body>
-    <div id="tradingview_container">
-        <div id="{unique_id}"></div>
-    </div>
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-    <script type="text/javascript">
-    new TradingView.widget({{
-        "width":           "100%",
-        "height":          600,
-        "symbol":          "{tv_symbol}",
-        "interval":        "D",
-        "timezone":        "Asia/Kolkata",
-        "theme":           "light",
-        "style":           "1",
-        "locale":          "en",
-        "toolbar_bg":      "#f8f9fa",
-        "enable_publishing": false,
-        "withdateranges":  true,
-        "hide_side_toolbar": false,
-        "allow_symbol_change": true,
-        "save_image":      true,
-        "container_id":    "{unique_id}",
-        "studies":         ["Volume@tv-basicstudies", "MASimple@tv-basicstudies"],
-        "show_popup_button": true,
-        "popup_width":     "1200",
-        "popup_height":    "700",
-        "no_referral_id":  true,
-        "referral_id":     ""
-    }});
-    </script>
-    </body>
-    </html>
-    """
-    st.components.v1.html(tv_html, height=620, scrolling=False)
-
-    # ── 52W Stats from yfinance ──
+@st.cache_data(ttl=3600)
+def fetch_chart_data(symbol: str, exchange: str):
     try:
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
-        hist   = yf.Ticker(f"{sym}{suffix}").history(period="1y")
-        if hist is not None and not hist.empty:
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("Last Close", f"₹{hist['Close'].iloc[-1]:,.2f}")
-            with col2: st.metric("52W High",   f"₹{hist['High'].max():,.2f}")
-            with col3: st.metric("52W Low",    f"₹{hist['Low'].min():,.2f}")
+        return yf.Ticker(f"{sym}{suffix}").history(period="1y", interval="1d")
     except:
-        pass
+        return None
+
+def render_chart_plotly(symbol: str, exchange: str):
+    """TradingView-style dark chart with Volume + EMA20 + EMA50"""
+    exch_label = "NSE" if exchange == "NS" else "BSE"
+
+    with st.spinner(f"Loading {symbol} chart..."):
+        hist = fetch_chart_data(symbol, exchange)
+
+    if hist is None or hist.empty:
+        st.error(f"❌ No chart data for {symbol}")
+        return
+
+    # ── Compute EMAs ──
+    hist["EMA20"] = hist["Close"].ewm(span=20, adjust=False).mean()
+    hist["EMA50"] = hist["Close"].ewm(span=50, adjust=False).mean()
+
+    # ── Colors ──
+    BG       = "#0d1117"
+    GRID     = "#1e2530"
+    UP       = "#26a69a"
+    DOWN     = "#ef5350"
+    TEXT     = "#c9d1d9"
+    EMA20_C  = "#f59e0b"
+    EMA50_C  = "#3b82f6"
+
+    # ── Figure with 2 rows: Candles + Volume ──
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.75, 0.25]
+    )
+
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=hist.index,
+        open=hist["Open"], high=hist["High"],
+        low=hist["Low"],   close=hist["Close"],
+        name=symbol,
+        increasing_line_color=UP,   increasing_fillcolor=UP,
+        decreasing_line_color=DOWN, decreasing_fillcolor=DOWN,
+        line=dict(width=1),
+        whiskerwidth=0.3,
+    ), row=1, col=1)
+
+    # EMA 20
+    fig.add_trace(go.Scatter(
+        x=hist.index, y=hist["EMA20"],
+        name="EMA 20", line=dict(color=EMA20_C, width=1.5),
+        opacity=0.9
+    ), row=1, col=1)
+
+    # EMA 50
+    fig.add_trace(go.Scatter(
+        x=hist.index, y=hist["EMA50"],
+        name="EMA 50", line=dict(color=EMA50_C, width=1.5),
+        opacity=0.9
+    ), row=1, col=1)
+
+    # Volume bars
+    colors = [UP if c >= o else DOWN
+              for c, o in zip(hist["Close"], hist["Open"])]
+    fig.add_trace(go.Bar(
+        x=hist.index, y=hist["Volume"],
+        name="Volume",
+        marker_color=colors,
+        marker_opacity=0.6,
+        showlegend=False,
+    ), row=2, col=1)
+
+    # ── Layout ──
+    fig.update_layout(
+        paper_bgcolor=BG,
+        plot_bgcolor=BG,
+        font=dict(color=TEXT, family="monospace", size=11),
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=620,
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#161b22", font_color=TEXT),
+        legend=dict(
+            bgcolor="#161b22",
+            bordercolor=GRID,
+            borderwidth=1,
+            font=dict(size=11),
+            x=0.01, y=0.99
+        ),
+        title=dict(
+            text=f"<b>{symbol}</b> · {exch_label} · 1 Year Daily",
+            font=dict(size=16, color=TEXT),
+            x=0.5, xanchor="center"
+        ),
+        xaxis_rangeslider_visible=False,
+    )
+
+    # Grid styling
+    axis_style = dict(
+        gridcolor=GRID, gridwidth=1,
+        zerolinecolor=GRID,
+        tickfont=dict(color=TEXT, size=10),
+        showgrid=True,
+    )
+    fig.update_xaxes(**axis_style)
+    fig.update_yaxes(**axis_style)
+    fig.update_yaxes(title_text="Price (₹)", row=1, col=1,
+                     title_font=dict(color=TEXT, size=11))
+    fig.update_yaxes(title_text="Volume",    row=2, col=1,
+                     title_font=dict(color=TEXT, size=11))
+
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": True,
+                            "displaylogo": False,
+                            "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
+
+    # ── Stats row ──
+    last  = hist["Close"].iloc[-1]
+    high  = hist["High"].max()
+    low   = hist["Low"].min()
+    chg   = hist["Close"].iloc[-1] - hist["Close"].iloc[-2]
+    chgp  = chg / hist["Close"].iloc[-2] * 100
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("Last Close", f"₹{last:,.2f}",
+                         delta=f"{chg:+.2f} ({chgp:+.2f}%)")
+    with col2: st.metric("52W High",  f"₹{high:,.2f}")
+    with col3: st.metric("52W Low",   f"₹{low:,.2f}")
+    with col4: st.metric("EMA 20",    f"₹{hist['EMA20'].iloc[-1]:,.2f}")
 
 
 # ══════════════════════════════════════════
