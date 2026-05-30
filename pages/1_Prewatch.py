@@ -220,7 +220,7 @@ with st.container(border=True):
     with f_col3:
         filter_ema20_pct = st.number_input("Max Dist from EMA20 (% Gap)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
     with f_col4:
-        sort_strategy = st.radio("Sort Strategies Matrix:", ["EMA20 Gap", "Volume", "Confidence Score"], horizontal=False)
+        sort_strategy = st.radio("Sort Strategies Matrix:", ["EMA20 Gap", "Volume", "CNF Score"], horizontal=False)
 
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
@@ -263,7 +263,7 @@ if st.session_state.ts_prewatch:
 
     if sort_strategy == "EMA20 Gap": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
     elif sort_strategy == "Volume": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
-    elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
+    elif sort_strategy == "CNF Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
