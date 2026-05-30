@@ -269,23 +269,31 @@ def run_yfinance_fallback():
         run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
 def run_single_yfinance_patch(symbol: str, exchange: str):
-    """Fetch price from yfinance. Strips $ prefix and exchange suffixes."""
+    """Fetch price from yfinance using history() — more reliable than fast_info."""
     import yfinance as yf
     try:
-        # Strip $ prefix and .NS/.BO suffix if present
         clean = symbol.lstrip("$").strip().upper()
         clean = clean.replace(".NS", "").replace(".BO", "")
-
         if clean == "BSE":
             clean = "BSE" if exchange == "NS" else "540073"
-
         suffix = ".NS" if exchange == "NS" else ".BO"
         ticker = yf.Ticker(f"{clean}{suffix}")
-        price  = (ticker.fast_info.get("last_price") or ticker.fast_info.get("regularMarketPrice"))
+
+        # Try fast_info first
+        price = (ticker.fast_info.get("last_price") or
+                 ticker.fast_info.get("regularMarketPrice"))
+
+        # Fallback to history if fast_info returns nothing
+        if not price:
+            hist = ticker.history(period="2d")
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+
         if price:
             update_price(symbol, exchange, float(price), "yfinance")
+            print(f"[yfinance] ✅ {clean} = {price}")
         else:
-            print(f"[yfinance] No price for {clean}{suffix}")
+            print(f"[yfinance] ❌ No price for {clean}{suffix}")
     except Exception as e:
         print(f"[yfinance Patch Error] {symbol}: {e}")
 
