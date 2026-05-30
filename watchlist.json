@@ -1,35 +1,6 @@
 {
   "watchlist_Today": [],
-  "watchlist_Yesterday": [
-    {
-      "symbol": "ANGELONE",
-      "exchange": "NS",
-      "direction": "BUY",
-      "entry": 800.0,
-      "sl": null,
-      "target1": null,
-      "target2": null,
-      "note": null,
-      "sector": "FINSERV",
-      "status": "WATCHING",
-      "lastPrice": null,
-      "added_at": "2026-05-29T04:52:37.032495"
-    },
-    {
-      "symbol": "BHEL",
-      "exchange": "NS",
-      "direction": "BUY",
-      "entry": 500.0,
-      "sl": null,
-      "target1": null,
-      "target2": null,
-      "note": null,
-      "sector": "INFRA",
-      "status": "WATCHING",
-      "lastPrice": null,
-      "added_at": "2026-05-29T04:54:07.832920"
-    }
-  ],
+  "watchlist_Yesterday": [],
   "watchlist_New": [
     {
       "symbol": "TCS",
