@@ -363,6 +363,7 @@ class PriceStreamer:
 
         while True:
             try:
+                print(f"[LOOP] tick at {ist_time_str()} | market_open={is_market_open()}")
 
                 # ══════════════════════════════════════════════════════════
                 #  OUTSIDE MARKET HOURS
@@ -506,6 +507,11 @@ class PriceStreamer:
 
 @st.cache_resource
 def init_price_streamer():
+    print("[STARTUP] init_price_streamer() called")
+    print(f"[STARTUP] WATCHLIST_FILE = {WATCHLIST_FILE}")
+    print(f"[STARTUP] File exists = {os.path.exists(WATCHLIST_FILE)}")
+    stocks_check = get_all_watchlist_stocks()
+    print(f"[STARTUP] Stocks found = {[s.get('symbol') for s in stocks_check]}")
     status = {"connected": False, "error": ""}
     try:
         api_key     = st.secrets["API_KEY"]
