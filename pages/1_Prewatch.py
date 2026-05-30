@@ -210,7 +210,7 @@ col_info.markdown(
 
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# --- COMPLETELY CLEAN & REDUCED REFINEMENT BOX ---
+# --- REFINED COMPACT GRID: CLEAN FROM ANY INDICATORS ---
 with st.container(border=True):
     f_col1, f_col2, f_col3 = st.columns([4.0, 4.0, 4.0])
     
@@ -224,12 +224,11 @@ with st.container(border=True):
     with f_col3:
         sort_strategy = st.radio("Sort Strategies Matrix:", ["Distance to EMA20", "Absolute Volume Size", "Confidence Score"], horizontal=False)
 
-# --- INTERMEDIATE EXECUTION LOGIC FOR METRICS & BADGES ---
+# --- DATA PROCESSOR FLOW ---
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
     
-    # We apply background calculation, but Body > Wick filter will now be handled below the box dynamically!
     for r in raw_data:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
@@ -244,26 +243,20 @@ if st.session_state.ts_prewatch:
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
     # ══════════════════════════════════════════
-    #  DOWN SIDE OPTIONS: WICK TOGGLE & INDICATORS ROW
+    #  DOWN SIDE STANDALONE AREA
     # ══════════════════════════════════════════
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
     
-    down_col1, down_col2, down_col3, down_col4, _ = st.columns([2.0, 1.0, 1.0, 1.0, 7.0])
+    # Pure layout, all extra trailing indicators are completely removed here.
+    down_col1, _ = st.columns([2.0, 10.0])
     with down_col1:
         body_filter_on = st.toggle("Body > Wick", value=False)
-    with down_col2:
-        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>EMA</span>", unsafe_allow_html=True)
-    with down_col3:
-        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>VOL</span>", unsafe_allow_html=True)
-    with down_col4:
-        st.markdown("<span style='background:#f1f3f5; color:#495057; font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; display:inline-block; border:1px solid #dee2e6;'>CNF</span>", unsafe_allow_html=True)
 
-    # Apply the Body > Wick filter here if the toggle on the downside row is turned active
     if body_filter_on:
         processed_cards_list = [x for x in processed_cards_list if x["body_gt_wick"]]
 
     # ══════════════════════════════════════════
-    #  SECTOR PILLS & SORTING MATRIX
+    #  SECTOR & WATCHLIST INJECTION
     # ══════════════════════════════════════════
     available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
     sector_counts = {}
@@ -290,9 +283,6 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
-    # ══════════════════════════════════════════
-    #  BATCH WATCHLIST PANEL & CARD RENDERING
-    # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([5, 3])
