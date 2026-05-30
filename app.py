@@ -519,7 +519,7 @@ class PriceStreamer:
 #  INIT ENGINE RESOURCE
 # ══════════════════════════════════════════
 
-@st.cache_resource
+
 def init_price_streamer():
     print("[STARTUP] init_price_streamer() called")
     print(f"[STARTUP] WATCHLIST_FILE = {WATCHLIST_FILE}")
