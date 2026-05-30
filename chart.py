@@ -302,62 +302,178 @@ e200s.setData({ema200_js});
 
 chart.timeScale().fitContent();
 
-// ── Zoom buttons — bottom right like TradingView ──
-const btnStyle = `
-  background:#fff;
-  border:1px solid #e5e7eb;
-  border-radius:4px;
-  padding:5px 12px;
-  font-size:15px;
-  cursor:pointer;
-  color:#374151;
-  font-weight:600;
-  margin-left:4px;
-  transition:background 0.15s;
-  line-height:1;
-`;
+// ══════════════════════════════════════════
+// TOOLBAR — Bottom center (TradingView style)
+// Buttons: [−] [+] [<] [>] [⟳] [📅]
+// ══════════════════════════════════════════
 
 const toolbar = document.createElement('div');
-toolbar.style.cssText = [
-  'position:absolute',
-  'bottom:40px',
-  'right:60px',
-  'z-index:20',
-  'display:flex',
-  'align-items:center',
-  'gap:4px',
-].join(';');
+toolbar.style.cssText = `
+  position:absolute;
+  bottom:36px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:20;
+  display:flex;
+  align-items:center;
+  gap:2px;
+  background:rgba(255,255,255,0.95);
+  border:1px solid #e5e7eb;
+  border-radius:6px;
+  padding:4px 6px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.08);
+`;
 
-const btnZoomIn  = document.createElement('button');
-const btnZoomOut = document.createElement('button');
-const btnReset   = document.createElement('button');
-
-btnZoomIn.innerHTML  = '+';
-btnZoomOut.innerHTML = '−';
-btnReset.innerHTML   = '⟳';
-btnReset.title       = 'Reset view';
-
-[btnZoomIn, btnZoomOut, btnReset].forEach(b => {{
-  b.style.cssText = btnStyle;
+function makeBtn(html, title) {{
+  const b = document.createElement('button');
+  b.innerHTML = html;
+  b.title = title;
+  b.style.cssText = `
+    background:transparent;
+    border:none;
+    border-radius:4px;
+    padding:4px 10px;
+    font-size:14px;
+    cursor:pointer;
+    color:#374151;
+    font-weight:600;
+    transition:background 0.12s;
+    line-height:1;
+    min-width:28px;
+  `;
   b.onmouseover = () => b.style.background = '#f3f4f6';
-  b.onmouseout  = () => b.style.background = '#fff';
-}});
+  b.onmouseout  = () => b.style.background = 'transparent';
+  return b;
+}}
 
-// ── Correct zoom: applyOptions barSpacing ──
-// scrollToPosition moves the chart — we need to change barSpacing for true zoom
+// Separator
+function makeSep() {{
+  const s = document.createElement('div');
+  s.style.cssText = 'width:1px;height:16px;background:#e5e7eb;margin:0 2px;';
+  return s;
+}}
+
+const btnZoomOut = makeBtn('&#8722;', 'Zoom out');
+const btnZoomIn  = makeBtn('&#43;',   'Zoom in');
+const btnPanL    = makeBtn('&#8249;', 'Scroll left');
+const btnPanR    = makeBtn('&#8250;', 'Scroll right');
+const btnReset   = makeBtn('&#8634;', 'Reset view');
+const btnCal     = makeBtn('&#128197;', 'Go to date');
+
+// Zoom using barSpacing
 btnZoomIn.onclick = () => {{
   const cur = chart.timeScale().options().barSpacing || 6;
-  chart.timeScale().applyOptions({{ barSpacing: Math.min(cur * 1.3, 50) }});
+  chart.timeScale().applyOptions({{ barSpacing: Math.min(cur * 1.3, 60) }});
 }};
 btnZoomOut.onclick = () => {{
   const cur = chart.timeScale().options().barSpacing || 6;
-  chart.timeScale().applyOptions({{ barSpacing: Math.max(cur * 0.7, 1) }});
+  chart.timeScale().applyOptions({{ barSpacing: Math.max(cur * 0.77, 1) }});
 }};
+
+// Pan left/right
+btnPanL.onclick = () => chart.timeScale().scrollToPosition(
+  chart.timeScale().scrollPosition() + 10, true
+);
+btnPanR.onclick = () => chart.timeScale().scrollToPosition(
+  chart.timeScale().scrollPosition() - 10, true
+);
+
+// Reset
 btnReset.onclick = () => chart.timeScale().fitContent();
 
-toolbar.appendChild(btnZoomIn);
+// ── Date picker modal ──
+const modal = document.createElement('div');
+modal.style.cssText = `
+  display:none;
+  position:absolute;
+  bottom:80px;
+  left:50%;
+  transform:translateX(-50%);
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:20px;
+  z-index:100;
+  box-shadow:0 8px 24px rgba(0,0,0,0.12);
+  min-width:260px;
+  text-align:center;
+  font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;
+`;
+
+modal.innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <span style="font-weight:700;font-size:14px;color:#111">Go to Date</span>
+    <button id="modal-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888;padding:0 4px;">&#215;</button>
+  </div>
+  <input type="date" id="date-input" style="
+    width:100%;padding:8px 12px;
+    border:1px solid #e5e7eb;border-radius:6px;
+    font-size:14px;color:#111;
+    margin-bottom:14px;outline:none;
+    font-family:inherit;
+  "/>
+  <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <button id="modal-cancel" style="
+      padding:7px 16px;border-radius:6px;
+      border:1px solid #e5e7eb;background:#fff;
+      font-size:13px;cursor:pointer;color:#374151;
+      font-family:inherit;
+    ">Cancel</button>
+    <button id="modal-go" style="
+      padding:7px 16px;border-radius:6px;
+      border:none;background:#111;
+      font-size:13px;cursor:pointer;color:#fff;
+      font-weight:600;font-family:inherit;
+    ">Go to &#8594;</button>
+  </div>
+`;
+
+document.getElementById('wrap').appendChild(modal);
+
+// Set default date to today
+const today = new Date().toISOString().split('T')[0];
+modal.querySelector('#date-input').value = today;
+
+btnCal.onclick = () => {{
+  modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
+}};
+modal.querySelector('#modal-close').onclick  = () => modal.style.display = 'none';
+modal.querySelector('#modal-cancel').onclick = () => modal.style.display = 'none';
+
+modal.querySelector('#modal-go').onclick = () => {{
+  const val = modal.querySelector('#date-input').value;
+  if (!val) return;
+  const ts = Math.floor(new Date(val).getTime() / 1000);
+  chart.timeScale().scrollToPosition(0, false);
+  chart.timeScale().scrollToRealTime();
+  // Find closest bar and scroll to it
+  try {{
+    chart.timeScale().scrollToPosition(
+      chart.timeScale().coordinateToLogical(0), false
+    );
+  }} catch(e) {{}}
+  // Use setVisibleRange to jump to date
+  const targetDate = new Date(val);
+  const endDate    = new Date(targetDate);
+  endDate.setMonth(endDate.getMonth() + 3);
+  chart.timeScale().setVisibleRange({{
+    from: Math.floor(targetDate.getTime() / 1000),
+    to:   Math.floor(endDate.getTime()    / 1000),
+  }});
+  modal.style.display = 'none';
+}};
+
+// Assemble toolbar
 toolbar.appendChild(btnZoomOut);
+toolbar.appendChild(btnZoomIn);
+toolbar.appendChild(makeSep());
+toolbar.appendChild(btnPanL);
+toolbar.appendChild(btnPanR);
+toolbar.appendChild(makeSep());
 toolbar.appendChild(btnReset);
+toolbar.appendChild(makeSep());
+toolbar.appendChild(btnCal);
+
 document.getElementById('wrap').appendChild(toolbar);
 
 // ── Crosshair legend update ──
