@@ -4,9 +4,55 @@ import numpy as np
 import json
 import os
 import math
-from datetime import datetime, time
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from styles import apply_compact_theme
+
+# ══════════════════════════════════════════
+#  EMBEDDED STYLING ENGINE (No Styles.py Needed)
+# ══════════════════════════════════════════
+def apply_compact_theme_directly():
+    """
+    Applies custom CSS injects to reduce maximum vertical height leaks,
+    tightens element margins, and forces extreme compact layouts.
+    """
+    st.markdown("""
+        <style>
+            /* Main container tight padding */
+            .block-container {
+                padding-top: 1rem !important;
+                padding-bottom: 0rem !important;
+                padding-left: 1.5rem !important;
+                padding-right: 1.5rem !important;
+            }
+            
+            /* Remove margins from custom streamlit metric headers & containers */
+            div[data-testid="stVerticalBlock"] > div {
+                margin-bottom: -0.25rem !important;
+                padding-bottom: 0rem !important;
+            }
+            
+            /* Compact padding inside border boxes */
+            div[data-testid="stElementContainer"] div[class*="st-emotion-cache"] {
+                gap: 0.4rem !important;
+            }
+            
+            /* Force horizontal radio component to look flat and tight */
+            div[data-testid="stRadio"] > div {
+                gap: 10px !important;
+                padding: 0px !important;
+            }
+            
+            /* Custom utility classes for minimal rows */
+            .compact-header {
+                font-size: 13px; 
+                font-weight: 700; 
+                margin-top: 5px; 
+                margin-bottom: 2px;
+                color: #000000; 
+                letter-spacing:0.3px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
 # --- External Backup Dependency Engine ---
 try:
@@ -31,7 +77,7 @@ except ImportError:
     def get_stock_token(sym): return STOCK_UNIVERSE.get(sym, {}).get("token", None)
 
 # Database Management Definitions
-WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 def load_watchlist_db() -> dict:
@@ -63,11 +109,9 @@ def evaluate_915_candle_and_indicators(df_5min: pd.DataFrame, df_daily_backlog: 
     """
     if df_5min.empty or len(df_5min) < 1: return None
     
-    # Isolate first 5-min candle (09:15 AM session start reference)
     candle_915 = df_5min.iloc[0]
     c_open, c_high, c_low, c_close = float(candle_915['Open']), float(candle_915['High']), float(candle_915['Low']), float(candle_915['Close'])
     
-    # Calculate historical backdrop close data vector for compounding EMAs
     combined_closes = pd.concat([df_daily_backlog['Close'], df_5min['Close']]).reset_index(drop=True)
     
     ema20 = compute_ema_vector(combined_closes, 20)
@@ -78,23 +122,19 @@ def evaluate_915_candle_and_indicators(df_5min: pd.DataFrame, df_daily_backlog: 
     current_ltp = float(df_5min['Close'].iloc[-1])
     current_vol = float(df_5min['Volume'].iloc[-1])
     
-    # Calculate gaps and mathematical dimensions
     abs_dist = abs(current_ltp - ema20)
     abs_dist_pct = (abs_dist / ema20) * 100.0
     
-    # Proximity checking constraints (≤1.5% from EMA200 framework)
     is_ema200_proximate = False
     if ema200 is not None:
         prox_dist_pct = (abs(ema20 - ema200) / ema200) * 100.0
         if prox_dist_pct <= 1.5:
             is_ema200_proximate = True
 
-    # Section 5: Body vs Wick Validation Logic
     body_size = abs(c_close - c_open)
     total_wick_size = (c_high - c_low) - body_size
     body_gt_wick = body_size > total_wick_size
     
-    # Direction identification vector based on 9:15 stack structures
     is_above = current_ltp > ema20
     is_green = c_close > c_open
     
@@ -107,7 +147,6 @@ def evaluate_915_candle_and_indicators(df_5min: pd.DataFrame, df_daily_backlog: 
     else:
         signal, color, bg_alpha = "▼ SELL", "#D32F2F", "rgba(211,47,47,0.08)"
         
-    # Section 6: Mathematical Confidence scoring formulation matrix
     score = 100.0 - (abs_dist_pct * 10.0)
     if body_gt_wick: score += 20.0
     if is_ema200_proximate: score += 10.0
@@ -130,19 +169,16 @@ def run_web_app_intraday_scan(watchlist_scope: str):
     status_msg = st.empty()
     status_msg.info(f"⚡ Processing active workers stream. Downloading 5-Min profiles for target {watchlist_scope} Watchlist...")
     
-    # Check if Angel One live smartApi connector object profile exists inside context
     api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
     
     if api_obj:
         def fetch_and_evaluate_angel(symbol, info):
             try:
                 token = info.get("token") or get_stock_token(symbol)
-                # Fetch 5-Minute Intra-session stream profile records
                 params_5m = {
                     "exchange": "NSE", "symboltoken": str(token), "interval": "FIVE_MINUTE",
                     "fromdate": datetime.now().strftime("%Y-%m-%d 09:15"), "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-                # Backlog Daily Data stream vector profile for historical computing frames
                 params_daily = {
                     "exchange": "NSE", "symboltoken": str(token), "interval": "ONE_DAY",
                     "fromdate": (pd.Timestamp.now() - pd.Timedelta(days=50)).strftime("%Y-%m-%d %H:%M"),
@@ -169,11 +205,9 @@ def run_web_app_intraday_scan(watchlist_scope: str):
                 if res_block: results.append(res_block)
                 
     elif YFINANCE_AVAILABLE:
-        # Fallback to lightning parallel processing frames using structured yahoo engine
         for sym, info in all_stocks:
             try:
                 ticker = yf.Ticker(f"{sym}.NS")
-                # Downloader stream blocks
                 df_5m = ticker.history(period="1d", interval="5m")
                 df_d = ticker.history(period="3mo", interval="1d")
                 
@@ -195,9 +229,8 @@ def run_web_app_intraday_scan(watchlist_scope: str):
 #  UI INTERFACE PIPELINE RENDER ENGINE
 # ══════════════════════════════════════════
 st.set_page_config(layout="wide")
-apply_compact_theme() # Trigger the custom sizing override system
+apply_compact_theme_directly() # Instantly apply from local file context without import leaks
 
-# Setup Header Block Actions
 col_btn1, col_btn2, col_watchlist_sel, col_info = st.columns([1.5, 1.5, 2.0, 4.0])
 with col_btn1:
     target_scope = col_watchlist_sel.selectbox("Watchlist Target Scope Source:", ["Today", "Yesterday", "New"], label_visibility="collapsed")
@@ -209,7 +242,6 @@ with col_btn2:
         st.session_state.last_scan_timestamp = None
         st.rerun()
 
-# Metadata Information Rendering Strip
 total_records = len(st.session_state.intraday_scan_cache) if st.session_state.intraday_scan_cache else 0
 ts_str = st.session_state.last_scan_timestamp if st.session_state.last_scan_timestamp else "None"
 col_info.markdown(
@@ -222,11 +254,7 @@ col_info.markdown(
 
 st.markdown("<h3 class='compact-header'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════
-#  HIGH-SPEED REDUCED HEIGHT FULL-WIDTH CONFIGURATION CONTAINER
-# ══════════════════════════════════════════════════════════
 with st.container(border=True):
-    # Dynamic side-by-side positioning mapping to force zero leakage height profile frames
     p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
     with p1_col1:
         filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
@@ -235,7 +263,6 @@ with st.container(border=True):
     with p1_col3:
         filter_volume = st.number_input("Volume Floor Boundary", min_value=0.0, value=0.0, step=10000.0)
         
-    # Structural configuration parameters line block
     p2_col1, p2_col2 = st.columns([3.0, 9.0])
     with p2_col1:
         toggle_body_wick = st.toggle("Body > Wick Setup Only", value=False)
@@ -244,10 +271,9 @@ with st.container(border=True):
             "Matrix Processing Order Strategy Vector Selector:",
             ["EMA20 Proximity Gap", "Absolute Volume Size", "Performance Confidence Score"],
             horizontal=True,
-            label_visibility="collapsed" # Hides the strategy title text layer entirely to maintain zero horizontal noise
+            label_visibility="collapsed"
         )
 
-# --- ENGINE DATA STREAM FILTER COMPILER ---
 if st.session_state.intraday_scan_cache:
     working_dataset = st.session_state.intraday_scan_cache
     compiled_dataset = []
@@ -259,7 +285,6 @@ if st.session_state.intraday_scan_cache:
         if toggle_body_wick and not row["body_gt_wick"]: continue
         compiled_dataset.append(row)
 
-    # Sector Filter Multi-pill Matrix Allocation Layer
     unique_sectors = sorted(list(set([r["sector"] for r in compiled_dataset])))
     sector_tally = {}
     for r in compiled_dataset: sector_tally[r["sector"]] = sector_tally.get(r["sector"], 0) + 1
@@ -271,7 +296,6 @@ if st.session_state.intraday_scan_cache:
     if selected_pill_node != "ALL SECTORS":
         compiled_dataset = [x for x in compiled_dataset if x["sector"].replace('NIFTY ', '') in selected_pill_node]
 
-    # Process Sorting Frameworks Sequence Matched to UI Toggles
     if sorting_vector == "EMA20 Proximity Gap":
         compiled_dataset.sort(key=lambda x: x["abs_dist_pct"])
     elif sorting_vector == "Absolute Volume Size":
@@ -279,9 +303,6 @@ if st.session_state.intraday_scan_cache:
     elif sorting_vector == "Performance Confidence Score":
         compiled_dataset.sort(key=lambda x: x["confidence"], reverse=True)
 
-    # ══════════════════════════════════════════
-    #  DATABASE INJECTOR ACCESS PANEL BLOCK
-    # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 8px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([8, 4])
@@ -313,9 +334,6 @@ if st.session_state.intraday_scan_cache:
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 15px; color: #000000;'>📊 Showing {len(compiled_dataset)} Matching Setups</h3>", unsafe_allow_html=True)
     
-    # ══════════════════════════════════════════
-    #  COMPACT MATRIX SIGNAL CARD RENDERING
-    # ══════════════════════════════════════════
     for stock in compiled_dataset:
         with st.container(border=True):
             h_left, h_right = st.columns([8, 4])
