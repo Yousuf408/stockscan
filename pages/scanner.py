@@ -7,6 +7,14 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ══════════════════════════════════════════
+#  INITIALIZE COMPACT SESSION ENGINE SAFELY
+# ══════════════════════════════════════════
+if "intraday_scan_cache" not in st.session_state:
+    st.session_state["intraday_scan_cache"] = None
+if "last_scan_timestamp" not in st.session_state:
+    st.session_state["last_scan_timestamp"] = None
+
+# ══════════════════════════════════════════
 #  EMBEDDED FLAT TERMINAL STYLING ENGINE
 # ══════════════════════════════════════════
 def apply_terminal_theme():
@@ -59,7 +67,7 @@ def load_selected_watchlist_stocks(bucket_name: str) -> list:
         target_key = f"watchlist_{bucket_name}"
         items = db.get(target_key, [])
         # Return unique list of symbols found in that specific watchlist
-        return list(set([item["symbol"].upper().strip() for item in items if "symbol" in item]))
+        return [item for item in items if isinstance(item, dict) and "symbol" in item]
     except Exception as e:
         st.error(f"Error reading watchlist database: {e}")
         return []
@@ -133,26 +141,29 @@ def evaluate_intraday_915_setup(df_5min: pd.DataFrame, df_daily: pd.DataFrame) -
 # ══════════════════════════════════════════
 #  HIGH-SPEED RUNTIME CONCURRENT LOADER
 # ══════════════════════════════════════════
-def run_live_terminal_scan(symbols_list: list):
+def run_live_terminal_scan(stocks_list: list):
     results = []
-    if not symbols_list: return results
+    if not stocks_list: return results
     
     status_placeholder = st.empty()
-    status_placeholder.info(f"🚀 Streaming 5-Min multi-bars for {len(symbols_list)} target watchlist items...")
+    status_placeholder.info(f"🚀 Streaming 5-Min multi-bars for {len(stocks_list)} items from selected watchlist...")
     
     # Check if active connection sequence object resides in memory
     api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
     
     if api_obj:
-        def fetch_angel(sym):
+        def fetch_angel(stock_item):
             try:
-                # Local fallback check if token maps inside standard lists or use dynamic search
+                sym = stock_item["symbol"].upper().strip()
+                token = stock_item.get("token") or stock_item.get("symboltoken")
+                if not token: return None
+                
                 params_5m = {
-                    "exchange": "NSE", "symboltoken": str(sym), "interval": "FIVE_MINUTE",
+                    "exchange": "NSE", "symboltoken": str(token), "interval": "FIVE_MINUTE",
                     "fromdate": datetime.now().strftime("%Y-%m-%d 09:15"), "todate": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
                 params_d = {
-                    "exchange": "NSE", "symboltoken": str(sym), "interval": "ONE_DAY",
+                    "exchange": "NSE", "symboltoken": str(token), "interval": "ONE_DAY",
                     "fromdate": (pd.Timestamp.now() - pd.Timedelta(days=50)).strftime("%Y-%m-%d %H:%M"),
                     "todate": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
                 }
@@ -162,19 +173,23 @@ def run_live_terminal_scan(symbols_list: list):
                     df_5m = pd.DataFrame(res_5m["data"], columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"])
                     df_d = pd.DataFrame(res_d["data"], columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"])
                     res = evaluate_intraday_915_setup(df_5m, df_d)
-                    if res: res["sym"] = sym; return res
+                    if res: 
+                        res["sym"] = sym
+                        res["sector"] = stock_item.get("sector", "GENERAL")
+                        return res
             except: pass
             return None
 
         with ThreadPoolExecutor(max_workers=5) as exec:
-            futures = [exec.submit(fetch_angel, s) for s in symbols_list]
+            futures = [exec.submit(fetch_angel, s) for s in stocks_list]
             for f in as_completed(futures):
                 r = f.result()
                 if r: results.append(r)
                 
     elif YFINANCE_AVAILABLE:
-        def fetch_yf(sym):
+        def fetch_yf(stock_item):
             try:
+                sym = stock_item["symbol"].upper().strip()
                 t = yf.Ticker(f"{sym}.NS")
                 df_5m = t.history(period="1d", interval="5m")
                 df_d = t.history(period="3mo", interval="1d")
@@ -182,12 +197,15 @@ def run_live_terminal_scan(symbols_list: list):
                     df_5m = df_5m.reset_index().rename(columns={"Date":"Timestamp", "Datetime":"Timestamp"})
                     df_d = df_d.reset_index().rename(columns={"Date":"Timestamp"})
                     res = evaluate_intraday_915_setup(df_5m, df_d)
-                    if res: res["sym"] = sym; return res
+                    if res: 
+                        res["sym"] = sym
+                        res["sector"] = stock_item.get("sector", "GENERAL")
+                        return res
             except: pass
             return None
 
         with ThreadPoolExecutor(max_workers=8) as exec:
-            futures = [exec.submit(fetch_yf, s) for s in symbols_list]
+            futures = [exec.submit(fetch_yf, s) for s in stocks_list]
             for f in as_completed(futures):
                 r = f.result()
                 if r: results.append(r)
@@ -212,13 +230,13 @@ with ctrl_col1:
         label_visibility="collapsed"
     )
 
-# Load target stocks immediately to show context metrics
-active_symbols = load_selected_watchlist_stocks(selected_bucket)
+# Load target watchlist stocks structure maps directly
+active_stocks_metadata = load_selected_watchlist_stocks(selected_bucket)
 
 with ctrl_col2:
     if st.button("🔴 RUN INTRADAY SCAN", use_container_width=True, type="primary"):
-        if active_symbols:
-            run_live_terminal_scan(active_symbols)
+        if active_stocks_metadata:
+            run_live_terminal_scan(active_stocks_metadata)
         else:
             st.error("Selected Watchlist is completely empty!")
 
@@ -228,12 +246,13 @@ with ctrl_col3:
         st.session_state.last_scan_timestamp = None
         st.rerun()
 
-# Real-time Pulse Strip Indicators
-cache_count = len(st.session_state.intraday_scan_cache) if st.session_state.intraday_scan_cache else 0
-last_ts = st.session_state.last_scan_timestamp if st.session_state.last_scan_timestamp else "None"
+# Real-time Pulse Strip Indicators (Safe state checking via dictionary handlers)
+cache_count = len(st.session_state["intraday_scan_cache"]) if st.session_state.get("intraday_scan_cache") else 0
+last_ts = st.session_state["last_scan_timestamp"] if st.session_state.get("last_scan_timestamp") else "None"
+
 ctrl_col4.markdown(
-    f"<div style='padding-top: 6px; font-size: 13px; color: #555555;'>"
-    f"📋 <b>Watchlist Size:</b> <span style='color:#111111; font-weight:700;'>{len(active_symbols)} Items</span> | "
+    f"<div style='padding-top: 6px; font-size: 13px; color: #555555;'> "
+    f"📋 <b>Watchlist Size:</b> <span style='color:#111111; font-weight:700;'>{len(active_stocks_metadata)} Items</span> | "
     f"⏱️ <b>Last Run:</b> <span style='color:#111111; font-weight:700;'>{last_ts}</span> | "
     f"⚡ <b>Monitored:</b> <span style='color:#111111; font-weight:700;'>{cache_count} Live Signals</span>"
     f"</div>",
@@ -262,8 +281,8 @@ with st.container(border=True):
     )
 
 # --- PROCESS FILTER STACK & PRESENTATION ---
-if st.session_state.intraday_scan_cache:
-    raw_data = st.session_state.intraday_scan_cache
+if st.session_state.get("intraday_scan_cache"):
+    raw_data = st.session_state["intraday_scan_cache"]
     filtered_data = []
     
     for row in raw_data:
@@ -273,6 +292,20 @@ if st.session_state.intraday_scan_cache:
         if f_valid_candle and not row["body_gt_wick"]: continue
         filtered_data.append(row)
         
+    # Sector Pills Allocation Stream Layer
+    unique_sectors = sorted(list(set([r.get("sector", "GENERAL") for r in filtered_data])))
+    sector_tally = {}
+    for r in filtered_data: 
+        s_name = r.get("sector", "GENERAL")
+        sector_tally[s_name] = sector_tally.get(s_name, 0) + 1
+    
+    pill_nodes = ["ALL SECTORS"] + [f"{s.replace('NIFTY ', '')} ({sector_tally.get(s, 0)})" for s in unique_sectors]
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+    selected_pill_node = st.pills("Active Sector Filter Track:", pill_nodes, default="ALL SECTORS")
+    
+    if selected_pill_node != "ALL SECTORS":
+        filtered_data = [x for x in filtered_data if x.get("sector", "GENERAL").replace('NIFTY ', '') in selected_pill_node]
+
     # Sorting Arrays Matrix Execution
     if sort_strategy == "EMA20 Gap Proximity":
         filtered_data.sort(key=lambda x: x["abs_dist_pct"])
@@ -290,7 +323,7 @@ if st.session_state.intraday_scan_cache:
             with h_l:
                 prox_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700; border: 1px solid rgba(255,153,0,0.2); margin-left:8px;'>⭐ EMA200 ALIGNED</span>" if s_node["is_proximate"] else ""
                 candle_badge = f"<span style='background: rgba(0,170,0,0.1); color: #007A2B; font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700; border: 1px solid rgba(0,170,59,0.2); margin-left:8px;'>💪 CONFIRMED CANDLE</span>" if s_node["body_gt_wick"] else ""
-                st.markdown(f"<div style='display: flex; align-items: center;'><span style='font-size: 16px; font-weight: 800; color:#111111;'>{s_node['sym']}</span>{prox_badge}{candle_badge}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='display: flex; align-items: center;'><span style='font-size: 16px; font-weight: 800; color:#111111;'>{s_node['sym']}</span><span style='font-size: 12px; color:#666666; margin-left:10px;'>| 📁 {s_node.get('sector','').replace('NIFTY ', '')}</span>{prox_badge}{candle_badge}</div>", unsafe_allow_html=True)
             with h_r:
                 st.markdown(f"<div style='text-align: right;'><span style='background: {s_node['bg']}; color: {s_node['color']}; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; border: 1px solid {s_node['color']}33;'>{s_node['signal']}</span></div>", unsafe_allow_html=True)
                 
