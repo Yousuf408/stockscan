@@ -415,7 +415,6 @@ def run_refresh_scan(watchlist_stocks):
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry - Scanner Dashboard", layout="wide")
-st.title("🛡️ TRADE SENTRY — SCANNER ENGINE")
 
 # Watchlist Definition Resolvers
 watchlist_options = ["Today", "Yesterday", "New"]
