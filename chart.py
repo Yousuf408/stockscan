@@ -303,6 +303,113 @@ e200s.setData({ema200_js});
 chart.timeScale().fitContent();
 
 // ══════════════════════════════════════════
+// HIGH / LOW LABELS on right price axis
+// ══════════════════════════════════════════
+const allData = {candles_js};
+const closes  = allData.map(d => d.close);
+const highs   = allData.map(d => d.high);
+const lows    = allData.map(d => d.low);
+const periodHigh = Math.max(...highs);
+const periodLow  = Math.min(...lows);
+
+// High label — orange dotted line
+cs.createPriceLine({{
+  price:       periodHigh,
+  color:       '#f59e0b',
+  lineWidth:   1,
+  lineStyle:   2,
+  axisLabelVisible: true,
+  title:       'High',
+}});
+
+// Low label — red dotted line
+cs.createPriceLine({{
+  price:       periodLow,
+  color:       '#ef4444',
+  lineWidth:   1,
+  lineStyle:   2,
+  axisLabelVisible: true,
+  title:       'Low',
+}});
+
+// ══════════════════════════════════════════
+// QUICK DATE RANGES — bottom left
+// [1M] [3M] [6M] [1Y] [All]
+// ══════════════════════════════════════════
+const rangeBar = document.createElement('div');
+rangeBar.style.cssText = `
+  position:absolute;
+  bottom:36px;
+  left:10px;
+  z-index:20;
+  display:flex;
+  align-items:center;
+  gap:2px;
+  background:rgba(255,255,255,0.95);
+  border:1px solid #e5e7eb;
+  border-radius:6px;
+  padding:4px 6px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.08);
+`;
+
+const ranges = [
+  {{ label:'1M',  months:1  }},
+  {{ label:'3M',  months:3  }},
+  {{ label:'6M',  months:6  }},
+  {{ label:'1Y',  months:12 }},
+  {{ label:'All', months:0  }},
+];
+
+let activeRange = null;
+
+ranges.forEach(r => {{
+  const b = document.createElement('button');
+  b.textContent = r.label;
+  b.style.cssText = `
+    background:transparent;
+    border:none;
+    border-radius:4px;
+    padding:4px 8px;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+    color:#6b7280;
+    transition:all 0.12s;
+    font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;
+  `;
+  b.onmouseover = () => {{ if(b !== activeRange) b.style.color = '#111'; }};
+  b.onmouseout  = () => {{ if(b !== activeRange) b.style.color = '#6b7280'; }};
+
+  b.onclick = () => {{
+    // Reset all buttons
+    rangeBar.querySelectorAll('button').forEach(btn => {{
+      btn.style.color      = '#6b7280';
+      btn.style.background = 'transparent';
+    }});
+    // Highlight active
+    b.style.color      = '#111';
+    b.style.background = '#f3f4f6';
+    activeRange = b;
+
+    if (r.months === 0) {{
+      chart.timeScale().fitContent();
+    }} else {{
+      const now  = new Date();
+      const from = new Date();
+      from.setMonth(from.getMonth() - r.months);
+      chart.timeScale().setVisibleRange({{
+        from: Math.floor(from.getTime() / 1000),
+        to:   Math.floor(now.getTime()  / 1000),
+      }});
+    }}
+  }};
+
+  rangeBar.appendChild(b);
+}});
+
+document.getElementById('wrap').appendChild(rangeBar);
+
+// ══════════════════════════════════════════
 // TOOLBAR — Bottom center (TradingView style)
 // Buttons: [−] [+] [<] [>] [⟳] [📅]
 // ══════════════════════════════════════════
@@ -443,22 +550,17 @@ modal.querySelector('#modal-cancel').onclick = () => modal.style.display = 'none
 modal.querySelector('#modal-go').onclick = () => {{
   const val = modal.querySelector('#date-input').value;
   if (!val) return;
-  const ts = Math.floor(new Date(val).getTime() / 1000);
-  chart.timeScale().scrollToPosition(0, false);
-  chart.timeScale().scrollToRealTime();
-  // Find closest bar and scroll to it
-  try {{
-    chart.timeScale().scrollToPosition(
-      chart.timeScale().coordinateToLogical(0), false
-    );
-  }} catch(e) {{}}
-  // Use setVisibleRange to jump to date
+
+  // Jump to selected date — show 3 months around it
   const targetDate = new Date(val);
-  const endDate    = new Date(targetDate);
-  endDate.setMonth(endDate.getMonth() + 3);
+  const fromDate   = new Date(targetDate);
+  const toDate     = new Date(targetDate);
+  fromDate.setMonth(fromDate.getMonth() - 1);  // 1 month before
+  toDate.setMonth(toDate.getMonth()   + 2);    // 2 months after
+
   chart.timeScale().setVisibleRange({{
-    from: Math.floor(targetDate.getTime() / 1000),
-    to:   Math.floor(endDate.getTime()    / 1000),
+    from: Math.floor(fromDate.getTime() / 1000),
+    to:   Math.floor(toDate.getTime()   / 1000),
   }});
   modal.style.display = 'none';
 }};
