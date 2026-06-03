@@ -484,6 +484,10 @@ def run_refresh_scan(watchlist_stocks: list):
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
 
+from styles import apply_styles, sidebar_brand
+apply_styles()
+sidebar_brand()
+
 st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
 
 # ── Watchlist selector on main page (not sidebar) ──
