@@ -8,6 +8,13 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ══════════════════════════════════════════
+#  CORE ENGINE IMPORT
+# ══════════════════════════════════════════
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from core import calc_ema_from_series, load_watchlist, save_watchlist
+
+# ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
 # ══════════════════════════════════════════
 try:
@@ -32,31 +39,18 @@ except ImportError:
     def get_stock_sector(sym): return STOCK_UNIVERSE.get(sym, {}).get("sector", "GENERAL")
     def get_stock_token(sym): return STOCK_UNIVERSE.get(sym, {}).get("token", None)
 
-WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
-WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
-
-def load_all_watchlist_data() -> dict:
-    if not os.path.exists(WATCHLIST_FILE): return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
-    try:
-        with open(WATCHLIST_FILE, "r") as f: return json.load(f)
-    except: return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
-
-def save_all_watchlist_data(data: dict):
-    try:
-        with open(WATCHLIST_FILE, "w") as f: json.dump(data, f, indent=2)
-    except Exception as e: st.error(f"Failed to sync database: {e}")
-
+# ══════════════════════════════════════════
+#  SESSION STATE
+# ══════════════════════════════════════════
 if "ts_prewatch" not in st.session_state: st.session_state.ts_prewatch = None
 if "ts_prewatch_time" not in st.session_state: st.session_state.ts_prewatch_time = None
 
 # ══════════════════════════════════════════
 #  CORE MATHEMATICS LOGIC
+#  NOTE: calculate_ema() REMOVED — now using calc_ema_from_series() from core.py
+#        load_all_watchlist_data() REMOVED — now using load_watchlist() from core.py
+#        save_all_watchlist_data() REMOVED — now using save_watchlist() from core.py
 # ══════════════════════════════════════════
-def calculate_ema(prices: pd.Series, period: int) -> float:
-    if len(prices) < period: return None
-    ema = prices.ewm(span=period, adjust=False).mean()
-    val = ema.iloc[-1]
-    return None if (pd.isna(val) or math.isnan(val)) else float(val)
 
 def calculate_volume_median(volumes: pd.Series) -> float:
     clean_vols = volumes.dropna().tail(5).tolist()
@@ -99,12 +93,12 @@ def calculate_confidence(abs_dist_pct: float, body_gt_wick: bool, abs_dist_200: 
 def run_fast_prewatch_scan():
     results = []
     all_stocks = list(STOCK_UNIVERSE.items())
-    
+
     status_text = st.empty()
     status_text.text("⚡ Activating High-Speed Engine Batch Downloads...")
-    
+
     api_obj = globals().get("smartApi") or st.session_state.get("smartApi")
-    
+
     if api_obj:
         status_text.text("🔌 Processing Parallel Worker Streams (Angel One)...")
         def fetch_angel_data(symbol, info):
@@ -136,9 +130,9 @@ def run_fast_prewatch_scan():
         try:
             ticker_map = {f"{sym}.NS": sym for sym, _ in all_stocks}
             ticker_space_string = " ".join(ticker_map.keys())
-            
+
             bulk_df = yf.download(ticker_space_string, period="1y", interval="1d", group_by='ticker', progress=False)
-            
+
             for ns_ticker, sym in ticker_map.items():
                 if ns_ticker in bulk_df.columns.levels[0]:
                     df_stock = bulk_df[ns_ticker].dropna(subset=["Close"])
@@ -148,33 +142,36 @@ def run_fast_prewatch_scan():
                         process_individual_dataframe(sym, df_stock, live_p, results)
         except Exception as e:
             st.error(f"Bulk download runtime failure: {e}")
-            
+
     status_text.empty()
     st.session_state.ts_prewatch = sorted(results, key=lambda x: x["abs_dist_pct"])
     st.session_state.ts_prewatch_time = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
 
+
 def process_individual_dataframe(sym, df_stock, live_price, results_list):
     last_row = df_stock.iloc[-1]
     volume = float(last_row["Volume"])
-    
+
     if volume < 100000 or pd.isna(volume) or math.isnan(volume): return
 
-    ema20 = calculate_ema(df_stock["Close"], 20)
-    ema200 = calculate_ema(df_stock["Close"], 200)
-    
+    # ── EMA via core.py (canonical, matches TradingView) ──
+    closes = df_stock["Close"].tolist()
+    ema20  = calc_ema_from_series(closes, 20)
+    ema200 = calc_ema_from_series(closes, 200)
+
     if ema20 is None: return
-    
+
     ltp = live_price if (live_price is not None and not pd.isna(live_price)) else float(last_row["Close"])
-    
-    abs_dist = float(abs(ltp - ema20))
+
+    abs_dist     = float(abs(ltp - ema20))
     abs_dist_pct = float((abs_dist / ema20) * 100.0)
     abs_dist_200 = float(abs(ltp - ema200)) if ema200 is not None else None
-    
-    body = abs(float(last_row["Close"]) - float(last_row["Open"]))
-    wick = (float(last_row["High"]) - float(last_row["Low"])) - body
+
+    body         = abs(float(last_row["Close"]) - float(last_row["Open"]))
+    wick         = (float(last_row["High"]) - float(last_row["Low"])) - body
     body_gt_wick = bool(body > wick)
-    vol_median = calculate_volume_median(df_stock["Volume"])
-    
+    vol_median   = calculate_volume_median(df_stock["Volume"])
+
     results_list.append({
         "sym": sym, "sector": STOCK_UNIVERSE.get(sym, {}).get("sector", "GENERAL SECTOR"), "ltp": ltp,
         "ema20": ema20, "ema200": ema200, "abs_dist_pct": abs_dist_pct, "abs_dist": abs_dist, "abs_dist_200": abs_dist_200,
@@ -211,10 +208,9 @@ col_info.markdown(
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════
-#  FULL WIDTH REFINEMENT BOX - NO HEADLINES & ZERO PADDING GAP
+#  FULL WIDTH REFINEMENT BOX
 # ══════════════════════════════════════════════════════════
 with st.container(border=True):
-    # --- 1st Portion: Numeric Data Threshold Inputs ---
     p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
     with p1_col1:
         filter_price = st.number_input("Minimum Price (₹)", min_value=0.0, value=0.0, step=50.0)
@@ -222,24 +218,23 @@ with st.container(border=True):
         filter_ema20_pct = st.number_input("EMA Gap % (Max Dist)", min_value=0.0, max_value=100.0, value=2.0, step=0.1)
     with p1_col3:
         filter_volume = st.number_input("Volume Size (Min Limit)", min_value=0.0, value=0.0, step=50000.0)
-        
-    # --- 2nd Portion: Conditional Filter & Sorting Matrix Parameters (Placed directly next line to save height) ---
+
     p2_col1, p2_col2 = st.columns([3.0, 9.0])
     with p2_col1:
         body_filter_on = st.toggle("Body > Wick Setup Only", value=False)
     with p2_col2:
         sort_strategy = st.radio(
-            "Matrix Evaluation Strategy Vector:", 
-            ["EMA20", "Absolute Volume Size", "Confidence Score"], 
+            "Matrix Evaluation Strategy Vector:",
+            ["EMA20", "Absolute Volume Size", "Confidence Score"],
             horizontal=True,
-            label_visibility="collapsed" # Complete clean look for radio strategy options
+            label_visibility="collapsed"
         )
 
-# --- DATA PROCESSING FLOW ENGINE ---
+# ── DATA PROCESSING FLOW ENGINE ──
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
-    
+
     for r in raw_data:
         if filter_price and r["ltp"] < filter_price: continue
         if filter_volume and r["volume"] < filter_volume: continue
@@ -249,9 +244,9 @@ if st.session_state.ts_prewatch:
 
     processed_cards_list = []
     for r in filtered_data:
-        sig = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
+        sig        = calculate_signals(r["ltp"], r["ema20"], r["last_candle"]["c"], r["last_candle"]["o"])
         v_strength = get_volume_strength(r["volume"], r["vol_median"])
-        conf = calculate_confidence(r["abs_dist_pct"], r["body_gt_wick"], r["abs_dist_200"])
+        conf       = calculate_confidence(r["abs_dist_pct"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
     # ══════════════════════════════════════════
@@ -261,7 +256,7 @@ if st.session_state.ts_prewatch:
     sector_counts = {}
     for r in processed_cards_list:
         sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
-        
+
     pill_options = ["ALL"]
     display_label_to_prefixed = {}
     for sector in available_sectors:
@@ -269,22 +264,21 @@ if st.session_state.ts_prewatch:
         label = f"{clean_name} ({sector_counts.get(sector, 0)})"
         pill_options.append(label)
         display_label_to_prefixed[label] = sector
-            
+
     st.markdown("<div style='margin-top: 5px;'></div>", unsafe_allow_html=True)
     sector_selection_label = st.pills("Filter Matrix by Sector Footprint:", pill_options, default="ALL")
-    
+
     if sector_selection_label != "ALL":
         prefixed_selected_sector = display_label_to_prefixed.get(sector_selection_label)
         if prefixed_selected_sector:
             processed_cards_list = [x for x in processed_cards_list if x["sector"] == prefixed_selected_sector]
 
-    # Map selected string accurately to sorting strategy keys
     if sort_strategy == "EMA20": processed_cards_list.sort(key=lambda x: x["abs_dist_pct"])
     elif sort_strategy == "Absolute Volume Size": processed_cards_list.sort(key=lambda x: x["volume"], reverse=True)
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ══════════════════════════════════════════
-    #  BATCH WATCHLIST PANEL & CARD RENDERING
+    #  BATCH WATCHLIST PANEL
     # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
@@ -296,36 +290,48 @@ if st.session_state.ts_prewatch:
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
-                    current_json_db = load_all_watchlist_data()
-                    db_target_key = f"watchlist_{target_list_id}"
-                    if db_target_key not in current_json_db: current_json_db[db_target_key] = []
-                    
+                    # ── load_watchlist() from core.py — no tab = full dict ──
+                    current_json_db = load_watchlist()
+                    db_target_key   = f"watchlist_{target_list_id}"
+                    if db_target_key not in current_json_db:
+                        current_json_db[db_target_key] = []
+
                     added_counter = 0
                     for item in processed_cards_list:
-                        clean_sym = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
-                        trade_dir = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
-                        
-                        already_present = any(x.get("symbol") == clean_sym and x.get("exchange") == "NS" and x.get("direction") == trade_dir for x in current_json_db[db_target_key])
-                        
+                        clean_sym  = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
+                        trade_dir  = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
+
+                        already_present = any(
+                            x.get("symbol") == clean_sym and
+                            x.get("exchange") == "NS" and
+                            x.get("direction") == trade_dir
+                            for x in current_json_db[db_target_key]
+                        )
+
                         if not already_present:
-                            raw_ltp = item.get("ltp", 0.0)
+                            raw_ltp      = item.get("ltp", 0.0)
                             parsed_entry = 0.0 if (pd.isna(raw_ltp) or math.isnan(raw_ltp)) else float(round(raw_ltp))
 
                             current_json_db[db_target_key].append({
                                 "symbol": clean_sym, "exchange": "NS", "direction": trade_dir, "entry": parsed_entry,
                                 "sl": None, "target1": None, "target2": None, "note": "EMA 20 Automated Scan",
-                                "sector": get_stock_sector(clean_sym), "status": "WATCHING", "lastPrice": None, "added_at": datetime.now().isoformat()
+                                "sector": get_stock_sector(clean_sym), "status": "WATCHING", "lastPrice": None,
+                                "added_at": datetime.now().isoformat()
                             })
                             added_counter += 1
-                    
+
                     if added_counter > 0:
-                        save_all_watchlist_data(current_json_db)
-                        st.toast(f"⚡ Injected {added_counter} Stocks directly into '{target_list_id}' Watchlist!", icon="✅")
+                        # ── save_watchlist() from core.py ──
+                        try:
+                            save_watchlist(current_json_db)
+                            st.toast(f"⚡ Injected {added_counter} Stocks directly into '{target_list_id}' Watchlist!", icon="✅")
+                        except RuntimeError as e:
+                            st.error(str(e))
                     else:
                         st.info("Selected setups are already active inside that watchlist container.")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
-    
+
     if not processed_cards_list:
         st.info("No stock setups configured matching filters.")
     else:
@@ -334,15 +340,15 @@ if st.session_state.ts_prewatch:
                 h_left, h_right = st.columns([8, 4])
                 with h_left:
                     clean_sector = stock['sector'].replace('NIFTY ', '')
-                    near_badge = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR ({stock['abs_dist_pct']:.2f}%)</span>" if stock["abs_dist_pct"] <= 0.5 else ""
+                    near_badge   = f"<span style='background: rgba(255,153,0,0.1); color: #B36200; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(255,153,0,0.25); margin-left:10px;'>⭐ NEAR ({stock['abs_dist_pct']:.2f}%)</span>" if stock["abs_dist_pct"] <= 0.5 else ""
                     strong_badge = f"<span style='background: rgba(0,170,0,0.1); color: #007A2B; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(0,170,59,0.25); margin-left:10px;'>💪 STRG</span>" if stock["body_gt_wick"] else ""
                     st.markdown(f"<div style='display: flex; align-items: center; gap: 8px;'><span style='font-size: 18px; font-weight: 800; color: #111111;'>{stock['sym']}</span><span style='font-size: 14px; color: #888888; font-weight: 400; margin-left: 5px;'>| &nbsp; 📁 {clean_sector}</span>{near_badge}{strong_badge}</div>", unsafe_allow_html=True)
                 with h_right:
                     st.markdown(f"<div style='text-align: right;'><span style='background: {stock['sig']['bg']}; color: {stock['sig']['color']}; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 4px; border: 1px solid {stock['sig']['color']}40;'>{stock['sig']['label']}</span></div>", unsafe_allow_html=True)
-                
+
                 st.markdown("<div style='margin-top: 10px; border-bottom: 1px solid #f0f0f0;'></div>", unsafe_allow_html=True)
                 m1, m2, m3, m4, m5 = st.columns([2, 2, 2, 2, 4])
-                
+
                 with m1:
                     ema20_color, ema20_arrow = ("#00AA3B", "▲ ") if stock['ltp'] >= stock['ema20'] else ("#D32F2F", "▼ ")
                     st.markdown(f"<p style='font-size:10px; color:#777777; font-weight:700; margin:0;'>20 EMA PRICE (Gap: ₹{stock['abs_dist']:.2f})</p><p style='font-size:16px; font-weight:700; color:{ema20_color}; margin:2px 0 0 0;'>{ema20_arrow}₹{stock['ema20']:.2f}</p>", unsafe_allow_html=True)
