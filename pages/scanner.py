@@ -1,12 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scan.py  v1.9
+#  TRADE SENTRY — scan.py  v2.0
 #  INTRADAY MOMENTUM SCANNER — Python port of scanner.js v1.6
-#  Exact logic mirror of JS extension:
-#    - min 800 candles total
-#    - min 200 candles before 9:15 (previous days history)
-#    - Yahoo range=20d (same as JS)
-#    - Opening candle: exact 09:15 IST match, with robust timestamp parsing
-#    - Reads stocks from watchlist.json (same file as Watchlist page)
+#  Now uses core.py for EMA + watchlist — no duplicate logic
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -19,8 +14,11 @@ import pytz
 import time
 from datetime import datetime, timedelta
 
-# ── Import from stocks.py ──
+# ── Core engine import ──
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from core import calc_ema, load_watchlist, save_watchlist
+
+# ── Import from stocks.py ──
 try:
     from stocks import get_stock_token, get_stock_sector
 except ImportError:
@@ -31,19 +29,13 @@ except ImportError:
 # SECTION 1: WATCHLIST FILE INTEGRATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
 def load_watchlist_stocks(tab: str) -> list:
-    """Load stocks from watchlist.json for the given tab."""
+    """Load and normalise stocks from watchlist.json for the given tab."""
     try:
-        if not os.path.exists(WATCHLIST_FILE):
-            st.warning(f"watchlist.json not found at: {WATCHLIST_FILE}")
-            return []
-        with open(WATCHLIST_FILE, "r") as f:
-            data = json.load(f)
-        raw = data.get(f"watchlist_{tab}", [])
+        raw = load_watchlist(tab)   # core.py — returns [] if missing
         if not raw:
             return []
         stocks = []
@@ -51,7 +43,6 @@ def load_watchlist_stocks(tab: str) -> list:
             sym = s.get("symbol", "").strip().upper()
             if not sym:
                 continue
-            # Strip .NS / .BO like the JS does
             sym    = sym.replace(".NS", "").replace(".BO", "").split("-")[0].split(".")[0].strip()
             token  = s.get("token")  or get_stock_token(sym)  or ""
             sector = s.get("sector") or get_stock_sector(sym) or "GENERAL"
@@ -62,9 +53,6 @@ def load_watchlist_stocks(tab: str) -> list:
                 "exchange": s.get("exchange", "NS"),
             })
         return stocks
-    except json.JSONDecodeError as e:
-        st.error(f"watchlist.json corrupted: {e}")
-        return []
     except Exception as e:
         st.error(f"Watchlist load error: {e}")
         return []
@@ -99,7 +87,7 @@ def get_ist_today_str() -> str:
 def get_last_trading_day_str() -> str:
     """Skip weekends — mirrors getLastTradingDayIST() in JS."""
     dt = get_ist_now() - timedelta(days=1)
-    while dt.weekday() >= 5:   # 5=Sat, 6=Sun
+    while dt.weekday() >= 5:
         dt -= timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
 
@@ -123,10 +111,10 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
     Returns list of [timestamp_str, open, high, low, close, volume]
     where timestamp_str is always 'YYYY-MM-DD HH:MM:SS' in IST.
     """
-    is_open      = is_market_open()
-    end_date     = get_ist_today_str() if is_open else get_last_trading_day_str()
-    start_date   = (get_ist_now() - timedelta(days=20)).strftime("%Y-%m-%d")
-    clean_sym    = symbol.split("-")[0].split(".")[0].strip()
+    is_open    = is_market_open()
+    end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
+    start_date = (get_ist_now() - timedelta(days=20)).strftime("%Y-%m-%d")
+    clean_sym  = symbol.split("-")[0].split(".")[0].strip()
 
     # ── Angel One ──
     if angel_auth and angel_auth.get("session"):
@@ -155,7 +143,6 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                     rows = []
                     for c in data["data"]:
                         if isinstance(c, list) and len(c) >= 6:
-                            # Angel One timestamps are already IST strings
                             rows.append([str(c[0]), float(c[1]), float(c[2]),
                                          float(c[3]), float(c[4]), float(c[5])])
                     if rows:
@@ -163,7 +150,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
         except Exception:
             pass
 
-    # ── Yahoo Finance fallback — range=20d mirrors JS exactly ──
+    # ── Yahoo Finance fallback ──
     return fetch_yahoo_fallback_candles(clean_sym)
 
 
@@ -196,7 +183,6 @@ def fetch_yahoo_fallback_candles(symbol: str):
             v = quote.get("volume", [0])[i] or 0
             if None in (o, h, l, c):
                 continue
-            # Convert UTC epoch → IST datetime string
             dt_ist = datetime.fromtimestamp(ts, tz=pytz.utc).astimezone(IST)
             ts_str = dt_ist.strftime("%Y-%m-%d %H:%M:%S")
             rows.append([ts_str, float(o), float(h), float(l), float(c), float(v)])
@@ -208,7 +194,7 @@ def fetch_yahoo_fallback_candles(symbol: str):
 
 @st.cache_data(ttl=1800)
 def fetch_daily_prev_close(symbol: str):
-    """Yahoo 1d — for % change display only, same as JS fetchYahooFallbackDailyCandle."""
+    """Yahoo 1d — for % change display only."""
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=1d&range=10d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
@@ -226,25 +212,9 @@ def fetch_daily_prev_close(symbol: str):
         return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5: TECHNICAL INDICATORS — mirrors JS calcEMA + calcVWAP
+# SECTION 5: TECHNICAL INDICATORS
+# NOTE: calc_ema() now comes from core.py — no local duplicate
 # ─────────────────────────────────────────────────────────────────────────────
-
-def calc_ema(candles: list, period: int):
-    """
-    Mirrors JS calcEMA exactly:
-      1. SMA of first `period` closes
-      2. EMA forward from there
-    """
-    if not candles or len(candles) < period:
-        return None
-    closes     = [float(c[4]) for c in candles]
-    sma        = sum(closes[:period]) / period
-    multiplier = 2 / (period + 1)
-    ema        = sma
-    for close in closes[period:]:
-        ema = (close - ema) * multiplier + ema
-    return ema
-
 
 def calc_vwap(candles: list):
     """
@@ -255,7 +225,7 @@ def calc_vwap(candles: list):
         return None
 
     last_ts      = str(candles[-1][0])
-    session_date = last_ts.split(" ")[0]   # 'YYYY-MM-DD'
+    session_date = last_ts.split(" ")[0]
 
     tpv_sum = vol_sum = 0.0
     session_count = 0
@@ -269,7 +239,6 @@ def calc_vwap(candles: list):
             vol_sum += vol
             session_count += 1
 
-    # Fallback — last 75 candles (mirrors JS)
     if vol_sum == 0 or session_count == 0:
         for c in candles[-75:]:
             h, l, close, vol = float(c[2]), float(c[3]), float(c[4]), float(c[5])
@@ -280,17 +249,12 @@ def calc_vwap(candles: list):
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5.9: FIND OPENING CANDLE — mirrors JS findOpeningCandleIndex exactly
+# SECTION 5.9: FIND OPENING CANDLE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_opening_candle_index(candles: list) -> int:
     """
     Finds index of 9:15 IST candle for today (or last trading day if market closed).
-    
-    All timestamps are normalised to 'YYYY-MM-DD HH:MM:SS' IST in our fetch functions,
-    so we simply check date == target_date AND time starts with '09:15'.
-    
-    Mirrors JS findOpeningCandleIndex exactly.
     Returns index or -1.
     """
     if not candles:
@@ -299,8 +263,8 @@ def find_opening_candle_index(candles: list) -> int:
     target_date = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
 
     for i, c in enumerate(candles):
-        ts        = str(c[0])               # 'YYYY-MM-DD HH:MM:SS'
-        date_part = ts.split(" ")[0]        # 'YYYY-MM-DD'
+        ts        = str(c[0])
+        date_part = ts.split(" ")[0]
         time_part = ts.split(" ")[1] if " " in ts else ""
         if date_part == target_date and time_part.startswith("09:15"):
             return i
@@ -322,21 +286,21 @@ def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
 
     candle_range = ((high - low) / low) * 100
     if candle_range > 2.2:
-        return False                           # volatile open
+        return False
 
     if ema200 >= ema20:
-        return False                           # wrong stack (not bullish)
+        return False
     pct_ema_gap = ((ema20 - ema200) / ema200) * 100
     if pct_ema_gap > 1.5:
-        return False                           # too far from EMA200
+        return False
 
     if close <= vwap:
-        return False                           # below VWAP
+        return False
     if close <= ema20:
-        return False                           # below EMA20
+        return False
     pct_from_ema20 = ((close - ema20) / ema20) * 100
     if pct_from_ema20 > 2.0:
-        return False                           # overextended above EMA20
+        return False
 
     return True
 
@@ -355,7 +319,7 @@ def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
         return False
 
     if ema200 <= ema20:
-        return False                           # wrong stack (not bearish)
+        return False
     pct_ema_gap = ((ema200 - ema20) / ema200) * 100
     if pct_ema_gap > 1.5:
         return False
@@ -395,12 +359,12 @@ def should_remove_stock(signal, latest_close, ema20_live) -> bool:
     return False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7: ANALYSIS ENGINE — mirrors JS analyzeStock exactly
+# SECTION 7: ANALYSIS ENGINE
+# NOTE: calc_ema() calls now use core.py's canonical implementation
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Mirrors JS thresholds exactly
-MIN_CANDLES_TOTAL   = 800   # same as JS: candles.length < 800
-MIN_CANDLES_AT_OPEN = 200   # same as JS: candlesAtOpen.length < 200
+MIN_CANDLES_TOTAL   = 800
+MIN_CANDLES_AT_OPEN = 200
 
 
 def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
@@ -417,7 +381,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         log.append(f"❌ {symbol}: Only {total} candles — need ≥ {MIN_CANDLES_TOTAL} (20 trading days)")
         return None
 
-    # ── LIVE indicators (full array) — for card display ──
+    # ── LIVE indicators (full array) — core.py EMA ──
     ema20_live  = calc_ema(candles, 20)
     ema200_live = calc_ema(candles, 200)
     vwap_live   = calc_vwap(candles)
@@ -433,7 +397,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     prev_close  = fetch_daily_prev_close(symbol)
     pct_change  = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-    # ── REFRESH PATH — mirrors JS refreshScan ──
+    # ── REFRESH PATH ──
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
@@ -451,9 +415,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 return r
         return None
 
-    # ── INITIAL SCAN PATH — mirrors JS analyzeStock initial scan ──
-
-    # Find 9:15 opening candle
+    # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
     if opening_idx < 0:
         target = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
@@ -461,7 +423,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         return None
 
     open_candle     = candles[opening_idx]
-    candles_at_open = candles[:opening_idx + 1]   # slice up to AND including 9:15
+    candles_at_open = candles[:opening_idx + 1]
 
     if len(candles_at_open) < MIN_CANDLES_AT_OPEN:
         log.append(
@@ -470,7 +432,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         )
         return None
 
-    # AT-OPEN indicators — calculated at 9:15 state, not live
+    # ── AT-OPEN indicators — core.py EMA ──
     ema20_at_open  = calc_ema(candles_at_open, 20)
     ema200_at_open = calc_ema(candles_at_open, 200)
     vwap_at_open   = calc_vwap(candles_at_open)
@@ -493,7 +455,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         signal = "SELL"
 
     if not signal:
-        # Log why it failed (mirrors JS console.log messages)
         reasons = []
         h, l, c = float(open_candle[2]), float(open_candle[3]), float(open_candle[4])
         rng = ((h - l) / l * 100) if l > 0 else 0
@@ -528,7 +489,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
-    # Deduplicate
     st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
     st.session_state.results.append(result)
     return result
@@ -549,7 +509,6 @@ def run_full_scan(watchlist_stocks: list):
         candles = fetch_candles_5min(stock["token"], stock["symbol"])
         analyze_stock(stock, candles, is_refresh=False)
 
-    # Sort: BUY first, then by score desc — mirrors JS sort
     if st.session_state.results:
         st.session_state.results.sort(
             key=lambda x: (0 if x["signal"] == "BUY" else 1, -x["score"])
@@ -569,12 +528,12 @@ def run_refresh_scan(watchlist_stocks: list):
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI — mirrors extension scan tab layout
+# SECTION 8: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
 
-# ── SIDEBAR: selector only ──
+# ── SIDEBAR ──
 st.sidebar.markdown("### 📋 Watchlist Source")
 selected_wl = st.sidebar.selectbox(
     "Target Scanning Watchlist",
@@ -593,14 +552,13 @@ st.sidebar.markdown(f"**{len(stocks_to_scan)} stocks** in **{st.session_state.se
 # ── MAIN PAGE ──
 st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
 
-mkt_open = is_market_open()
+mkt_open  = is_market_open()
 mkt_label = "🟢 Market Open" if mkt_open else "🔴 Market Closed"
 st.markdown(
     f"Scanning **{st.session_state.selected_watchlist}** watchlist · "
     f"`{len(stocks_to_scan)}` stocks · {mkt_label} · {get_ist_now().strftime('%I:%M %p IST')}"
 )
 
-# ── Loaded stocks on main page ──
 if stocks_to_scan:
     with st.expander(f"📋 {len(stocks_to_scan)} stocks loaded", expanded=False):
         cols = st.columns(5)
@@ -637,7 +595,7 @@ if clear_clicked:
 if len(stocks_to_scan) == 0:
     st.info(f"⚠️ **{st.session_state.selected_watchlist}** watchlist is empty. Add stocks from the Watchlist page.")
 
-# ── ⚙ REFINE FILTERS — mirrors JS ScannerRefineState ──
+# ── REFINE FILTERS ──
 st.write("### ⚙ REFINE CONFIGURATION FILTERS")
 col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
 with col_f1:  filter_sig       = st.selectbox("Signal", ["ALL", "BUY", "SELL"])
@@ -681,13 +639,13 @@ if toggle_body_wick:
         and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
     ]
 
-# ── Results summary bar — mirrors extension N: 30/347 display ──
+# ── Results summary ──
 st.markdown(
     f"#### 🎯 N: `{len(view)}` / `{len(st.session_state.results)}` signals  "
     f"· WL: **{st.session_state.selected_watchlist}**"
 )
 
-# ── Debug log — auto-opens when 0 signals ──
+# ── Debug log ──
 if st.session_state.scan_log:
     signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
     with st.expander(
@@ -698,7 +656,7 @@ if st.session_state.scan_log:
         for line in st.session_state.scan_log:
             st.markdown(line)
 
-# ── Signal cards — mirrors extension card HTML ──
+# ── Signal cards ──
 if not view:
     if st.session_state.results:
         st.info("🔍 No signals match your current filters.")
@@ -706,7 +664,6 @@ if not view:
         st.info("🔍 Run a scan to see results.")
 else:
     for item in view:
-        accent     = "🟢 BUY" if item["signal"] == "BUY" else "🔴 SELL"
         border_clr = "#00e676" if item["signal"] == "BUY" else "#ff4444"
         pct_clr    = "#00e676" if item["pctChange"] >= 0 else "#ff4444"
         mins_ago   = int((time.time() - item["timestamp"]) // 60)
