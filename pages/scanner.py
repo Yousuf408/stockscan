@@ -1,9 +1,9 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.1🛡 Trade Sentry 
-#  Changes from v2.0:
-#    - Sector radio → pills with per-sector signal count
-#    - Card UI → white background (fields unchanged)
-#    - Watchlist selector moved from sidebar to main page
+#  TRADE SENTRY — scanner.py  v2.2
+#  Changes from v2.1:
+#    - SL Hit logic: 2 consecutive candles on wrong side of EMA20
+#    - Toggle to hide SL Hit cards in refine filters
+#    - Fixed auto-refresh (no more time.sleep(300))
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -64,11 +64,12 @@ def load_watchlist_stocks(tab: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 for _k, _v in [
-    ("results",            []),
-    ("is_scanning",        False),
-    ("selected_watchlist", "Today"),
-    ("auto_refresh",       False),
-    ("scan_log",           []),
+    ("results",              []),
+    ("is_scanning",          False),
+    ("selected_watchlist",   "Today"),
+    ("auto_refresh",         False),
+    ("scan_log",             []),
+    ("last_auto_refresh",    0),      # timestamp of last auto-refresh
 ]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -268,7 +269,7 @@ def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
     if pct_ema_gap > 1.5: return False
     if close <= vwap: return False
     if close <= ema20: return False
-    if close <= ema200: return False   # price must be above EMA200 too
+    if close <= ema200: return False
     pct_from_ema20 = ((close - ema20) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
@@ -289,7 +290,7 @@ def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
     if pct_ema_gap > 1.5: return False
     if close >= vwap: return False
     if close >= ema20: return False
-    if close >= ema200: return False   # price must be below EMA200 too
+    if close >= ema200: return False
     pct_from_ema20 = ((ema20 - close) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
@@ -308,12 +309,24 @@ def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
     return min(score, 6)
 
 
-def should_remove_stock(signal, latest_close, ema20_live) -> bool:
-    if not signal or not latest_close or not ema20_live:
+def check_sl_hit(signal: str, candles: list, ema20_live: float) -> bool:
+    """
+    Returns True if last 2 consecutive candles closed on the wrong side of EMA20.
+    BUY signal  → SL hit if last 2 closes < EMA20
+    SELL signal → SL hit if last 2 closes > EMA20
+    """
+    if not signal or not ema20_live or not candles or len(candles) < 2:
         return False
-    if signal == "BUY"  and latest_close < ema20_live: return True
-    if signal == "SELL" and latest_close > ema20_live: return True
+
+    last_two_closes = [float(c[4]) for c in candles[-2:]]
+
+    if signal == "BUY":
+        return all(c < ema20_live for c in last_two_closes)
+    if signal == "SELL":
+        return all(c > ema20_live for c in last_two_closes)
+
     return False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
@@ -352,23 +365,26 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     prev_close  = fetch_daily_prev_close(symbol)
     pct_change  = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
+    # ── REFRESH PATH ──
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
-                if should_remove_stock(r["signal"], ltp, ema20_live):
-                    st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
-                    log.append(f"🗑 {symbol}: Removed — candle closed on wrong side of EMA20")
-                    return None
+                # Check SL Hit — 2 consecutive candles on wrong side of EMA20
+                sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
                 r.update({
                     "ltp":       round(ltp, 2),
                     "ema20":     round(ema20_live, 2),
                     "ema200":    round(ema200_live, 2),
                     "vwap":      round(vwap_live, 2),
                     "pctChange": round(pct_change, 2),
+                    "sl_hit":    sl_hit,
                 })
+                if sl_hit:
+                    log.append(f"🔴 {symbol}: SL Hit — 2 consecutive candles crossed EMA20")
                 return r
         return None
 
+    # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
     if opening_idx < 0:
         target = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
@@ -437,6 +453,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "highPrice":  round(float(open_candle[2]), 2),
         "lowPrice":   round(float(open_candle[3]), 2),
         "closePrice": round(float(open_candle[4]), 2),
+        "sl_hit":     False,   # fresh signal — not SL hit yet
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -482,15 +499,15 @@ def run_refresh_scan(watchlist_stocks: list):
 # SECTION 8: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="", layout="wide")
+st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
 
 from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand()
 
-st.markdown("")
+st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
 
-# ── Watchlist selector on main page (not sidebar) ──
+# ── Watchlist selector on main page ──
 wl_col1, wl_col2 = st.columns([3, 9])
 with wl_col1:
     selected_wl = st.selectbox(
@@ -555,9 +572,14 @@ with col_f2:  filter_min_vol   = st.text_input("VOL ≥", value="")
 with col_f3:  filter_ema20     = st.text_input("EMA20 %", value="")
 with col_f4:  filter_ema200    = st.text_input("EMA200 %", value="")
 with col_f5:  filter_min_score = st.text_input("SCORE ≥", value="")
-toggle_body_wick = st.toggle("BODY > WICK (Body > 50% of Range)")
 
-# ── Apply all filters except sector ──
+tog_col1, tog_col2 = st.columns([3, 9])
+with tog_col1:
+    toggle_body_wick = st.toggle("BODY > WICK (Body > 50% of Range)")
+with tog_col2:
+    toggle_hide_sl   = st.toggle("Hide SL Hit Stocks", value=False)
+
+# ── Apply all filters ──
 view = list(st.session_state.results)
 
 if filter_sig != "ALL":
@@ -580,6 +602,8 @@ if toggle_body_wick:
         if (r["highPrice"] - r["lowPrice"]) > 0
         and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
     ]
+if toggle_hide_sl:
+    view = [r for r in view if not r.get("sl_hit", False)]
 
 # ── SECTOR PILLS with per-sector signal count ──
 all_sectors = sorted(set(r["sector"] for r in view))
@@ -603,9 +627,11 @@ if selected_sector_label and selected_sector_label != "ALL":
         view = [r for r in view if r["sector"] == mapped_sector]
 
 # ── Results summary ──
+sl_hit_count = len([r for r in st.session_state.results if r.get("sl_hit", False)])
 st.markdown(
     f"#### 🎯 N: `{len(view)}` / `{len(st.session_state.results)}` signals  "
     f"· WL: **{st.session_state.selected_watchlist}**"
+    + (f"  · 🔴 `{sl_hit_count}` SL Hit" if sl_hit_count > 0 else "")
 )
 
 # ── Debug log ──
@@ -619,7 +645,7 @@ if st.session_state.scan_log:
         for line in st.session_state.scan_log:
             st.markdown(line)
 
-# ── Signal cards — WHITE background, same fields ──
+# ── Signal cards — WHITE background ──
 if not view:
     if st.session_state.results:
         st.info("🔍 No signals match your current filters.")
@@ -627,15 +653,29 @@ if not view:
         st.info("🔍 Run a scan to see results.")
 else:
     for item in view:
-        signal_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
-        border_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
-        pct_clr    = "#00AA3B" if item["pctChange"] >= 0 else "#D32F2F"
-        mins_ago   = int((time.time() - item["timestamp"]) // 60)
-        age_str    = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
+        is_sl_hit  = item.get("sl_hit", False)
+
+        # SL Hit cards get orange/grey treatment, active cards stay green/red
+        if is_sl_hit:
+            signal_clr = "#FF6B35"
+            border_clr = "#FF6B35"
+            card_bg    = "#FFF8F5"
+            inner_bg   = "#FFF0E8"
+            sl_badge   = "<span style='font-size:10px;font-weight:700;color:#FF6B35;background:#FF6B3520;padding:2px 7px;border-radius:3px;border:1px solid #FF6B3540;margin-left:6px;'>🔴 SL HIT</span>"
+        else:
+            signal_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
+            border_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
+            card_bg    = "#ffffff"
+            inner_bg   = "#f8f8f8"
+            sl_badge   = ""
+
+        pct_clr  = "#00AA3B" if item["pctChange"] >= 0 else "#D32F2F"
+        mins_ago = int((time.time() - item["timestamp"]) // 60)
+        age_str  = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
         st.markdown(
             f"""<div style="border-left:4px solid {border_clr};
-                           background:#ffffff;
+                           background:{card_bg};
                            border:1px solid #e8e8e8;
                            border-left:4px solid {border_clr};
                            padding:10px 14px;
@@ -646,6 +686,7 @@ else:
                         <span style="font-size:15px;font-weight:800;color:#111111;font-family:monospace;">{item['symbol']}</span>
                         <span style="font-size:10px;background:#f2f2f2;padding:2px 7px;border-radius:3px;
                                      color:#555555;font-weight:600;">{item['sector'].replace('NIFTY ','')}</span>
+                        {sl_badge}
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <span style="font-size:10px;color:#999999;font-family:monospace;">{age_str}</span>
@@ -656,7 +697,7 @@ else:
                     </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;
-                            background:#f8f8f8;padding:6px 8px;border-radius:4px;
+                            background:{inner_bg};padding:6px 8px;border-radius:4px;
                             margin-top:8px;">
                     <div style="font-size:13px;color:#111111;">
                         LTP: <b style="font-family:monospace;">&#8377;{item['ltp']}</b>
@@ -677,8 +718,11 @@ else:
             unsafe_allow_html=True,
         )
 
-# ── Auto-Refresh ──
+# ── Auto-Refresh — FIXED (no time.sleep(300)) ──
 if st.session_state.auto_refresh:
-    time.sleep(300)
-    run_refresh_scan(stocks_to_scan)
+    last = st.session_state.get("last_auto_refresh", 0)
+    if time.time() - last >= 300:
+        run_refresh_scan(stocks_to_scan)
+        st.session_state.last_auto_refresh = time.time()
+    time.sleep(5)
     st.rerun()
