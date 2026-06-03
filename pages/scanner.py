@@ -1,7 +1,9 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scan.py  v2.0
-#  INTRADAY MOMENTUM SCANNER — Python port of scanner.js v1.6
-#  Now uses core.py for EMA + watchlist — no duplicate logic
+#  TRADE SENTRY — scanner.py  v2.1
+#  Changes from v2.0:
+#    - Sector radio → pills with per-sector signal count
+#    - Card UI → white background (fields unchanged)
+#    - Watchlist selector moved from sidebar to main page
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -33,9 +35,8 @@ WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
 def load_watchlist_stocks(tab: str) -> list:
-    """Load and normalise stocks from watchlist.json for the given tab."""
     try:
-        raw = load_watchlist(tab)   # core.py — returns [] if missing
+        raw = load_watchlist(tab)
         if not raw:
             return []
         stocks = []
@@ -73,7 +74,7 @@ for _k, _v in [
         st.session_state[_k] = _v
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3: DATE & TIME — mirrors JS exactly
+# SECTION 3: DATE & TIME
 # ─────────────────────────────────────────────────────────────────────────────
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -85,7 +86,6 @@ def get_ist_today_str() -> str:
     return get_ist_now().strftime("%Y-%m-%d")
 
 def get_last_trading_day_str() -> str:
-    """Skip weekends — mirrors getLastTradingDayIST() in JS."""
     dt = get_ist_now() - timedelta(days=1)
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
@@ -100,23 +100,16 @@ def get_ist_time_now() -> str:
     return get_ist_now().strftime("%H:%M")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4: DATA FETCH — mirrors JS fetchCandles5Min + fetchYahooFallbackCandles
+# SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
-    """
-    Angel One → Yahoo fallback.
-    Same 20-day lookback as JS (range=20d).
-    Returns list of [timestamp_str, open, high, low, close, volume]
-    where timestamp_str is always 'YYYY-MM-DD HH:MM:SS' in IST.
-    """
     is_open    = is_market_open()
     end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (get_ist_now() - timedelta(days=20)).strftime("%Y-%m-%d")
     clean_sym  = symbol.split("-")[0].split(".")[0].strip()
 
-    # ── Angel One ──
     if angel_auth and angel_auth.get("session"):
         try:
             headers = {
@@ -150,15 +143,10 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
         except Exception:
             pass
 
-    # ── Yahoo Finance fallback ──
     return fetch_yahoo_fallback_candles(clean_sym)
 
 
 def fetch_yahoo_fallback_candles(symbol: str):
-    """
-    Mirrors fetchYahooFallbackCandles in JS.
-    Converts UTC epoch → IST datetime string 'YYYY-MM-DD HH:MM:SS'.
-    """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=5m&range=20d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -194,7 +182,6 @@ def fetch_yahoo_fallback_candles(symbol: str):
 
 @st.cache_data(ttl=1800)
 def fetch_daily_prev_close(symbol: str):
-    """Yahoo 1d — for % change display only."""
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=1d&range=10d"
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
@@ -213,14 +200,9 @@ def fetch_daily_prev_close(symbol: str):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5: TECHNICAL INDICATORS
-# NOTE: calc_ema() now comes from core.py — no local duplicate
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calc_vwap(candles: list):
-    """
-    Mirrors JS calcVWAP — restricts to current session date only.
-    Falls back to last 75 candles if date matching fails.
-    """
     if not candles:
         return None
 
@@ -253,10 +235,6 @@ def calc_vwap(candles: list):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_opening_candle_index(candles: list) -> int:
-    """
-    Finds index of 9:15 IST candle for today (or last trading day if market closed).
-    Returns index or -1.
-    """
     if not candles:
         return -1
 
@@ -272,7 +250,7 @@ def find_opening_candle_index(candles: list) -> int:
     return -1
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6: SIGNAL LOGIC — exact mirror of JS isBuySignal / isSellSignal
+# SECTION 6: SIGNAL LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
@@ -283,25 +261,15 @@ def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
     close = float(open_candle[4])
     if low == 0:
         return False
-
     candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2:
-        return False
-
-    if ema200 >= ema20:
-        return False
+    if candle_range > 2.2: return False
+    if ema200 >= ema20: return False
     pct_ema_gap = ((ema20 - ema200) / ema200) * 100
-    if pct_ema_gap > 1.5:
-        return False
-
-    if close <= vwap:
-        return False
-    if close <= ema20:
-        return False
+    if pct_ema_gap > 1.5: return False
+    if close <= vwap: return False
+    if close <= ema20: return False
     pct_from_ema20 = ((close - ema20) / ema20) * 100
-    if pct_from_ema20 > 2.0:
-        return False
-
+    if pct_from_ema20 > 2.0: return False
     return True
 
 
@@ -313,33 +281,21 @@ def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
     close = float(open_candle[4])
     if low == 0:
         return False
-
     candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2:
-        return False
-
-    if ema200 <= ema20:
-        return False
+    if candle_range > 2.2: return False
+    if ema200 <= ema20: return False
     pct_ema_gap = ((ema200 - ema20) / ema200) * 100
-    if pct_ema_gap > 1.5:
-        return False
-
-    if close >= vwap:
-        return False
-    if close >= ema20:
-        return False
+    if pct_ema_gap > 1.5: return False
+    if close >= vwap: return False
+    if close >= ema20: return False
     pct_from_ema20 = ((ema20 - close) / ema20) * 100
-    if pct_from_ema20 > 2.0:
-        return False
-
+    if pct_from_ema20 > 2.0: return False
     return True
 
 
 def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
-    """Mirrors JS calcScore exactly — max 6 points."""
     score = 2
-    if volume and avg_volume and volume > avg_volume * 1.2:
-        score += 1
+    if volume and avg_volume and volume > avg_volume * 1.2: score += 1
     change_val = float(pct_change or 0)
     if signal == "BUY"  and change_val >  0.5: score += 1
     elif signal == "SELL" and change_val < -0.5: score += 1
@@ -351,7 +307,6 @@ def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
 
 
 def should_remove_stock(signal, latest_close, ema20_live) -> bool:
-    """Mirrors JS shouldRemoveStock — candle CLOSE breach only."""
     if not signal or not latest_close or not ema20_live:
         return False
     if signal == "BUY"  and latest_close < ema20_live: return True
@@ -360,7 +315,6 @@ def should_remove_stock(signal, latest_close, ema20_live) -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
-# NOTE: calc_ema() calls now use core.py's canonical implementation
 # ─────────────────────────────────────────────────────────────────────────────
 
 MIN_CANDLES_TOTAL   = 800
@@ -381,7 +335,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         log.append(f"❌ {symbol}: Only {total} candles — need ≥ {MIN_CANDLES_TOTAL} (20 trading days)")
         return None
 
-    # ── LIVE indicators (full array) — core.py EMA ──
     ema20_live  = calc_ema(candles, 20)
     ema200_live = calc_ema(candles, 200)
     vwap_live   = calc_vwap(candles)
@@ -397,7 +350,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     prev_close  = fetch_daily_prev_close(symbol)
     pct_change  = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-    # ── REFRESH PATH ──
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
@@ -415,7 +367,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 return r
         return None
 
-    # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
     if opening_idx < 0:
         target = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
@@ -432,7 +383,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         )
         return None
 
-    # ── AT-OPEN indicators — core.py EMA ──
     ema20_at_open  = calc_ema(candles_at_open, 20)
     ema200_at_open = calc_ema(candles_at_open, 200)
     vwap_at_open   = calc_vwap(candles_at_open)
@@ -447,7 +397,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         f"VWAP:{vwap_at_open:.2f} Close:{float(open_candle[4]):.2f}"
     )
 
-    # ── Signal check ──
     signal = None
     if is_buy_signal(open_candle, ema20_at_open, vwap_at_open, ema200_at_open):
         signal = "BUY"
@@ -533,13 +482,16 @@ def run_refresh_scan(watchlist_stocks: list):
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
 
-# ── SIDEBAR ──
-st.sidebar.markdown("### 📋 Watchlist Source")
-selected_wl = st.sidebar.selectbox(
-    "Target Scanning Watchlist",
-    WATCHLIST_NAMES,
-    index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
-)
+st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
+
+# ── Watchlist selector on main page (not sidebar) ──
+wl_col1, wl_col2 = st.columns([3, 9])
+with wl_col1:
+    selected_wl = st.selectbox(
+        "📋 Target Scanning Watchlist",
+        WATCHLIST_NAMES,
+        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+    )
 if selected_wl != st.session_state.selected_watchlist:
     st.session_state.selected_watchlist = selected_wl
     st.session_state.results            = []
@@ -547,10 +499,6 @@ if selected_wl != st.session_state.selected_watchlist:
     st.rerun()
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
-st.sidebar.markdown(f"**{len(stocks_to_scan)} stocks** in **{st.session_state.selected_watchlist}**")
-
-# ── MAIN PAGE ──
-st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
 
 mkt_open  = is_market_open()
 mkt_label = "🟢 Market Open" if mkt_open else "🔴 Market Closed"
@@ -583,10 +531,8 @@ with col4:
 
 if scan_clicked:
     run_full_scan(stocks_to_scan)
-
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
-
 if clear_clicked:
     st.session_state.results  = []
     st.session_state.scan_log = []
@@ -605,39 +551,50 @@ with col_f4:  filter_ema200    = st.text_input("EMA200 %", value="")
 with col_f5:  filter_min_score = st.text_input("SCORE ≥", value="")
 toggle_body_wick = st.toggle("BODY > WICK (Body > 50% of Range)")
 
-# ── Apply filters ──
+# ── Apply all filters except sector ──
 view = list(st.session_state.results)
-
-all_sectors     = sorted(set(r["sector"] for r in view))
-selected_sector = st.radio("Sector", ["ALL"] + all_sectors, horizontal=True)
-if selected_sector != "ALL":
-    view = [r for r in view if r["sector"] == selected_sector]
 
 if filter_sig != "ALL":
     view = [r for r in view if r["signal"] == filter_sig]
-
 if filter_min_vol.strip():
     try:    view = [r for r in view if r["volume"] >= float(filter_min_vol)]
     except: pass
-
 if filter_ema20.strip():
     try:    view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
     except: pass
-
 if filter_ema200.strip():
     try:    view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
     except: pass
-
 if filter_min_score.strip():
     try:    view = [r for r in view if r["score"] >= float(filter_min_score)]
     except: pass
-
 if toggle_body_wick:
     view = [
         r for r in view
         if (r["highPrice"] - r["lowPrice"]) > 0
         and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
     ]
+
+# ── SECTOR PILLS with per-sector signal count ──
+all_sectors = sorted(set(r["sector"] for r in view))
+sector_counts = {}
+for r in view:
+    sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
+
+pill_options = ["ALL"]
+display_label_to_sector = {}
+for sector in all_sectors:
+    clean = sector.replace("NIFTY ", "")
+    label = f"{clean} ({sector_counts.get(sector, 0)})"
+    pill_options.append(label)
+    display_label_to_sector[label] = sector
+
+selected_sector_label = st.pills("Sector", pill_options, default="ALL")
+
+if selected_sector_label and selected_sector_label != "ALL":
+    mapped_sector = display_label_to_sector.get(selected_sector_label)
+    if mapped_sector:
+        view = [r for r in view if r["sector"] == mapped_sector]
 
 # ── Results summary ──
 st.markdown(
@@ -656,7 +613,7 @@ if st.session_state.scan_log:
         for line in st.session_state.scan_log:
             st.markdown(line)
 
-# ── Signal cards ──
+# ── Signal cards — WHITE background, same fields ──
 if not view:
     if st.session_state.results:
         st.info("🔍 No signals match your current filters.")
@@ -664,41 +621,51 @@ if not view:
         st.info("🔍 Run a scan to see results.")
 else:
     for item in view:
-        border_clr = "#00e676" if item["signal"] == "BUY" else "#ff4444"
-        pct_clr    = "#00e676" if item["pctChange"] >= 0 else "#ff4444"
+        signal_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
+        border_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
+        pct_clr    = "#00AA3B" if item["pctChange"] >= 0 else "#D32F2F"
         mins_ago   = int((time.time() - item["timestamp"]) // 60)
         age_str    = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
         st.markdown(
-            f"""<div style="border-left:4px solid {border_clr};background:#1a1a1a;
-                           padding:8px 10px;margin-bottom:8px;border-radius:3px;">
+            f"""<div style="border-left:4px solid {border_clr};
+                           background:#ffffff;
+                           border:1px solid #e8e8e8;
+                           border-left:4px solid {border_clr};
+                           padding:10px 14px;
+                           margin-bottom:10px;
+                           border-radius:6px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
-                        <span style="font-size:14px;font-weight:700;color:#fff;font-family:monospace;">{item['symbol']}</span>
-                        <span style="font-size:9px;background:#262626;padding:1px 5px;border-radius:2px;
-                                     color:#aaa;margin-left:6px;">{item['sector']}</span>
-                    </div>
                     <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:8px;color:#666;font-family:monospace;">{age_str}</span>
-                        <span style="font-size:11px;font-weight:800;color:{border_clr};font-family:monospace;">{item['signal']}</span>
+                        <span style="font-size:15px;font-weight:800;color:#111111;font-family:monospace;">{item['symbol']}</span>
+                        <span style="font-size:10px;background:#f2f2f2;padding:2px 7px;border-radius:3px;
+                                     color:#555555;font-weight:600;">{item['sector'].replace('NIFTY ','')}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:10px;color:#999999;font-family:monospace;">{age_str}</span>
+                        <span style="font-size:12px;font-weight:800;color:{signal_clr};
+                                     background:{signal_clr}15;padding:2px 10px;
+                                     border-radius:4px;border:1px solid {signal_clr}40;
+                                     font-family:monospace;">{item['signal']}</span>
                     </div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;
-                            background:rgba(0,0,0,0.3);padding:4px 6px;border-radius:3px;
-                            margin-top:6px;font-size:11px;">
-                    <div>LTP: <b style="color:#fff;font-family:monospace;">₹{item['ltp']}</b>
-                         <span style="color:{pct_clr};font-weight:700;margin-left:6px;">{item['pctChange']}%</span>
+                            background:#f8f8f8;padding:6px 8px;border-radius:4px;
+                            margin-top:8px;">
+                    <div style="font-size:13px;color:#111111;">
+                        LTP: <b style="font-family:monospace;">&#8377;{item['ltp']}</b>
+                        <span style="color:{pct_clr};font-weight:700;margin-left:6px;">{item['pctChange']}%</span>
                     </div>
-                    <div style="font-size:9px;color:#666;font-family:monospace;">
-                        EMA20:<span style="color:#aaa;"> {item['ema20']}</span> |
-                        VWAP:<span style="color:#ffb300;"> {item['vwap']}</span> |
-                        EMA200:<span style="color:#aaa;"> {item['ema200']}</span>
+                    <div style="font-size:11px;color:#666666;font-family:monospace;">
+                        EMA20: <span style="color:#333333;">{item['ema20']}</span> &nbsp;|&nbsp;
+                        VWAP: <span style="color:#B36200;">{item['vwap']}</span> &nbsp;|&nbsp;
+                        EMA200: <span style="color:#333333;">{item['ema200']}</span>
                     </div>
                 </div>
-                <div style="display:flex;justify-content:space-between;font-size:9px;
-                            color:#555;margin-top:5px;">
+                <div style="display:flex;justify-content:space-between;font-size:10px;
+                            color:#999999;margin-top:6px;">
                     <span>Matrix Conviction Score</span>
-                    <span style="color:{border_clr};font-weight:700;font-family:monospace;">{item['score']}/6</span>
+                    <span style="color:{signal_clr};font-weight:700;font-family:monospace;">{item['score']}/6</span>
                 </div>
             </div>""",
             unsafe_allow_html=True,
