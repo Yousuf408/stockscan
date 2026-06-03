@@ -482,7 +482,7 @@ def run_refresh_scan(watchlist_stocks: list):
 # SECTION 8: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
+st.set_page_config(page_title="", layout="wide")
 
 from styles import apply_styles, sidebar_brand
 apply_styles()
