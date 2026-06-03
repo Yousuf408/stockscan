@@ -131,8 +131,8 @@ def run_fast_prewatch_scan():
             ticker_map = {f"{sym}.NS": sym for sym, _ in all_stocks}
             ticker_space_string = " ".join(ticker_map.keys())
 
-            bulk_df = yf.download(ticker_space_string, period="1y", interval="1d", group_by='ticker', progress=False)
-
+           
+            bulk_df = yf.download(ticker_space_string, period="2y", interval="1d", group_by='ticker', auto_adjust=False, progress=False)
             for ns_ticker, sym in ticker_map.items():
                 if ns_ticker in bulk_df.columns.levels[0]:
                     df_stock = bulk_df[ns_ticker].dropna(subset=["Close"])
