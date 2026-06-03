@@ -653,70 +653,81 @@ if not view:
         st.info("🔍 Run a scan to see results.")
 else:
     for item in view:
-        is_sl_hit  = item.get("sl_hit", False)
+        is_sl_hit    = item.get("sl_hit", False)
+        sym          = item["symbol"]
+        sig          = item["signal"]
+        sector_clean = item["sector"].replace("NIFTY ", "")
+        ltp          = item["ltp"]
+        pct          = item["pctChange"]
+        ema20        = item["ema20"]
+        vwap         = item["vwap"]
+        ema200       = item["ema200"]
+        score        = item["score"]
+        mins_ago     = int((time.time() - item["timestamp"]) // 60)
+        age_str      = "just now" if mins_ago < 1 else str(mins_ago) + "m ago"
 
-        # SL Hit cards get orange/grey treatment, active cards stay green/red
         if is_sl_hit:
             signal_clr = "#FF6B35"
             border_clr = "#FF6B35"
             card_bg    = "#FFF8F5"
             inner_bg   = "#FFF0E8"
-            sl_badge   = "<span style='font-size:10px;font-weight:700;color:#FF6B35;background:#FF6B3520;padding:2px 7px;border-radius:3px;border:1px solid #FF6B3540;margin-left:6px;'>🔴 SL HIT</span>"
+            sl_badge   = (
+                '<span style="font-size:10px;font-weight:700;color:#FF6B35;'
+                'background:#FF6B3520;padding:2px 7px;border-radius:3px;'
+                'border:1px solid #FF6B3540;margin-left:6px;">🔴 SL HIT</span>'
+            )
         else:
-            signal_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
-            border_clr = "#00AA3B" if item["signal"] == "BUY" else "#D32F2F"
+            signal_clr = "#00AA3B" if sig == "BUY" else "#D32F2F"
+            border_clr = "#00AA3B" if sig == "BUY" else "#D32F2F"
             card_bg    = "#ffffff"
             inner_bg   = "#f8f8f8"
             sl_badge   = ""
 
-        pct_clr  = "#00AA3B" if item["pctChange"] >= 0 else "#D32F2F"
-        mins_ago = int((time.time() - item["timestamp"]) // 60)
-        age_str  = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
+        pct_clr = "#00AA3B" if pct >= 0 else "#D32F2F"
 
-        st.markdown(
-            f"""<div style="border-left:4px solid {border_clr};
-                           background:{card_bg};
-                           border:1px solid #e8e8e8;
-                           border-left:4px solid {border_clr};
-                           padding:10px 14px;
-                           margin-bottom:10px;
-                           border-radius:6px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:15px;font-weight:800;color:#111111;font-family:monospace;">{item['symbol']}</span>
-                        <span style="font-size:10px;background:#f2f2f2;padding:2px 7px;border-radius:3px;
-                                     color:#555555;font-weight:600;">{item['sector'].replace('NIFTY ','')}</span>
-                        {sl_badge}
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:10px;color:#999999;font-family:monospace;">{age_str}</span>
-                        <span style="font-size:12px;font-weight:800;color:{signal_clr};
-                                     background:{signal_clr}15;padding:2px 10px;
-                                     border-radius:4px;border:1px solid {signal_clr}40;
-                                     font-family:monospace;">{item['signal']}</span>
-                    </div>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;
-                            background:{inner_bg};padding:6px 8px;border-radius:4px;
-                            margin-top:8px;">
-                    <div style="font-size:13px;color:#111111;">
-                        LTP: <b style="font-family:monospace;">&#8377;{item['ltp']}</b>
-                        <span style="color:{pct_clr};font-weight:700;margin-left:6px;">{item['pctChange']}%</span>
-                    </div>
-                    <div style="font-size:11px;color:#666666;font-family:monospace;">
-                        EMA20: <span style="color:#333333;">{item['ema20']}</span> &nbsp;|&nbsp;
-                        VWAP: <span style="color:#B36200;">{item['vwap']}</span> &nbsp;|&nbsp;
-                        EMA200: <span style="color:#333333;">{item['ema200']}</span>
-                    </div>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;
-                            color:#999999;margin-top:6px;">
-                    <span>Matrix Conviction Score</span>
-                    <span style="color:{signal_clr};font-weight:700;font-family:monospace;">{item['score']}/6</span>
-                </div>
-            </div>""",
-            unsafe_allow_html=True,
+        card_html = (
+            '<div style="border-left:4px solid ' + border_clr + ';'
+            'background:' + card_bg + ';'
+            'border:1px solid #e8e8e8;'
+            'border-left:4px solid ' + border_clr + ';'
+            'padding:10px 14px;margin-bottom:10px;border-radius:6px;">'
+
+            '<div style="display:flex;justify-content:space-between;align-items:center;">'
+            '<div style="display:flex;align-items:center;gap:8px;">'
+            '<span style="font-size:15px;font-weight:800;color:#111111;font-family:monospace;">' + sym + '</span>'
+            '<span style="font-size:10px;background:#f2f2f2;padding:2px 7px;border-radius:3px;'
+            'color:#555555;font-weight:600;">' + sector_clean + '</span>'
+            + sl_badge +
+            '</div>'
+            '<div style="display:flex;align-items:center;gap:10px;">'
+            '<span style="font-size:10px;color:#999999;font-family:monospace;">' + age_str + '</span>'
+            '<span style="font-size:12px;font-weight:800;color:' + signal_clr + ';'
+            'background:' + signal_clr + '15;padding:2px 10px;border-radius:4px;'
+            'border:1px solid ' + signal_clr + '40;font-family:monospace;">' + sig + '</span>'
+            '</div>'
+            '</div>'
+
+            '<div style="display:flex;justify-content:space-between;align-items:center;'
+            'background:' + inner_bg + ';padding:6px 8px;border-radius:4px;margin-top:8px;">'
+            '<div style="font-size:13px;color:#111111;">'
+            'LTP: <b style="font-family:monospace;">&#8377;' + str(ltp) + '</b>'
+            '<span style="color:' + pct_clr + ';font-weight:700;margin-left:6px;">' + str(pct) + '%</span>'
+            '</div>'
+            '<div style="font-size:11px;color:#666666;font-family:monospace;">'
+            'EMA20: <span style="color:#333333;">' + str(ema20) + '</span> &nbsp;|&nbsp;'
+            'VWAP: <span style="color:#B36200;">' + str(vwap) + '</span> &nbsp;|&nbsp;'
+            'EMA200: <span style="color:#333333;">' + str(ema200) + '</span>'
+            '</div>'
+            '</div>'
+
+            '<div style="display:flex;justify-content:space-between;font-size:10px;'
+            'color:#999999;margin-top:6px;">'
+            '<span>Matrix Conviction Score</span>'
+            '<span style="color:' + signal_clr + ';font-weight:700;font-family:monospace;">' + str(score) + '/6</span>'
+            '</div>'
+            '</div>'
         )
+        st.markdown(card_html, unsafe_allow_html=True)
 
 # ── Auto-Refresh — FIXED (no time.sleep(300)) ──
 if st.session_state.auto_refresh:
