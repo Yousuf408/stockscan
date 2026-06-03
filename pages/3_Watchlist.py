@@ -100,9 +100,6 @@ def play_alert_sound(alert_type="triggered"):
 
 # ══════════════════════════════════════════
 #   PRICE FETCH — SELF CONTAINED
-#   No app.py dependency at all
-#   Market Open  → Angel One HTTP → yfinance
-#   Market Closed → yfinance directly
 # ══════════════════════════════════════════
 
 AUTO_REFRESH_SECS = 300  # 5 minutes
@@ -123,7 +120,6 @@ def get_angel_session():
         return None
 
 def clean_symbol(symbol: str) -> str:
-    """Strip $ prefix and exchange suffixes"""
     return symbol.lstrip("$").strip().upper().replace(".NS", "").replace(".BO", "")
 
 def fetch_price_angel(symbol: str, exchange: str):
@@ -146,11 +142,9 @@ def fetch_price_yfinance(symbol: str, exchange: str):
         suffix = ".NS" if exchange == "NS" else ".BO"
         ticker = yf.Ticker(f"{sym}{suffix}")
 
-        # Try fast_info first
         price = (ticker.fast_info.get("last_price") or
                  ticker.fast_info.get("regularMarketPrice"))
 
-        # Fallback to history() if fast_info returns nothing
         if not price:
             hist = ticker.history(period="2d")
             if not hist.empty:
@@ -163,30 +157,19 @@ def fetch_price_yfinance(symbol: str, exchange: str):
     return None, "yfinance_failed"
 
 def fetch_price(symbol: str, exchange: str):
-    """
-    Market Open  → Angel One HTTP → yfinance fallback
-    Market Closed → yfinance directly
-    """
     if is_market_open():
         price, source = fetch_price_angel(symbol, exchange)
         if price:
             return price, source
-        time.sleep(0.3)  # small delay before yfinance fallback
+        time.sleep(0.3)
     price, source = fetch_price_yfinance(symbol, exchange)
     return price, source
 
 def fetch_all_prices(watchlist: list) -> dict:
-    """
-    Batch fetch all prices at once using yfinance.download()
-    Much faster than fetching one by one.
-    Market Open  → Angel One HTTP → yfinance batch fallback
-    Market Closed → yfinance batch directly
-    """
     prices = {}
     if not watchlist:
         return prices
 
-    # ── Market Open: try Angel One HTTP first ──
     if is_market_open():
         for stock in watchlist:
             sym  = stock.get("symbol", "")
@@ -200,7 +183,6 @@ def fetch_all_prices(watchlist: list) -> dict:
                     "time":   now_ist().strftime("%H:%M:%S")
                 }
 
-    # ── Build list of symbols that still need price ──
     missing = []
     for stock in watchlist:
         sym  = stock.get("symbol", "")
@@ -212,10 +194,9 @@ def fetch_all_prices(watchlist: list) -> dict:
     if not missing:
         return prices
 
-    # ── Batch fetch via yfinance.download() — fast! ──
     try:
-        ns_syms = [f"{clean_symbol(s)}.NS" for s, e in missing if e == "NS"]
-        bo_syms = [f"{clean_symbol(s)}.BO" for s, e in missing if e == "BO"]
+        ns_syms  = [f"{clean_symbol(s)}.NS" for s, e in missing if e == "NS"]
+        bo_syms  = [f"{clean_symbol(s)}.BO" for s, e in missing if e == "BO"]
         all_syms = ns_syms + bo_syms
 
         if all_syms:
@@ -229,14 +210,12 @@ def fetch_all_prices(watchlist: list) -> dict:
             )
 
             for sym, exch in missing:
-                key      = f"{sym}_{exch}"
-                ticker   = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
+                key    = f"{sym}_{exch}"
+                ticker = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
                 try:
                     if len(all_syms) == 1:
-                        # Single ticker — data is flat DataFrame
                         price = float(data["Close"].iloc[-1])
                     else:
-                        # Multiple tickers — data has MultiIndex columns
                         price = float(data["Close"][ticker].dropna().iloc[-1])
 
                     if price:
@@ -250,7 +229,6 @@ def fetch_all_prices(watchlist: list) -> dict:
 
     except Exception as e:
         print(f"[Batch yfinance] Failed: {e}")
-        # Last resort — fetch one by one
         for sym, exch in missing:
             key = f"{sym}_{exch}"
             price, source = fetch_price_yfinance(sym, exch)
@@ -262,12 +240,6 @@ def fetch_all_prices(watchlist: list) -> dict:
                 }
 
     return prices
-
-
-# ══════════════════════════════════════════
-#   CHART
-# ══════════════════════════════════════════
-
 
 
 # ══════════════════════════════════════════
@@ -332,7 +304,6 @@ for k, v in [
 
 # ══════════════════════════════════════════
 #   AUTO REFRESH LOGIC
-#   Fetch on page load if prices empty or stale
 # ══════════════════════════════════════════
 
 def should_auto_refresh() -> bool:
@@ -478,7 +449,7 @@ with left_col:
                         for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
                             st.session_state[k] = "" if k=="f_symbol" else 0.0
                         st.session_state.show_add_form = False
-                        st.session_state.prices = {}  # clear cache so new stock gets fetched
+                        st.session_state.prices = {}
                         st.success(f"✅ {symbol} added!")
                         st.rerun()
 
@@ -492,7 +463,7 @@ with left_col:
                          key=f"tab_{WATCHLIST_NAMES[i]}", use_container_width=True,
                          type="primary" if is_active else "secondary"):
                 st.session_state.current_tab = WATCHLIST_NAMES[i]
-                st.session_state.prices = {}  # clear on tab switch
+                st.session_state.prices = {}
                 st.rerun()
 
     st.markdown('<hr style="margin:6px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
@@ -532,9 +503,8 @@ with left_col:
     market_now = is_market_open()
     src_label  = "🟢 Live" if market_now else "🟠 Close Price"
 
-    # Show next auto-refresh countdown
     if st.session_state.last_fetch_time:
-        elapsed  = (now_ist() - st.session_state.last_fetch_time).total_seconds()
+        elapsed   = (now_ist() - st.session_state.last_fetch_time).total_seconds()
         mins_left = max(0, int((AUTO_REFRESH_SECS - elapsed) / 60))
         secs_left = max(0, int((AUTO_REFRESH_SECS - elapsed) % 60))
         refresh_info = f" · Next refresh in {mins_left}m {secs_left}s"
@@ -555,7 +525,7 @@ with left_col:
 
     # ── MANUAL REFRESH ──
     if watchlist and refresh:
-        st.session_state.prices = {}  # clear old prices
+        st.session_state.prices = {}
         with st.spinner(f"Fetching {len(watchlist)} stocks in batch..."):
             new_prices = fetch_all_prices(watchlist)
             st.session_state.prices.update(new_prices)
@@ -591,6 +561,9 @@ with left_col:
             unsafe_allow_html=True
         )
     else:
+        # ── status updates stored separately, written only when changed ──
+        status_updates = {}
+
         for stock_idx, stock in enumerate(watchlist):
             sym      = stock.get("symbol","")
             dirn     = stock.get("direction","BUY")
@@ -614,16 +587,22 @@ with left_col:
                 pct_color = "#00a854" if p >= 0 else "#e53935"
 
             old_status = stock.get("status","WATCHING")
-            if ltp:
-                stock["lastPrice"] = ltp
-                stock["status"]    = compute_status(stock, ltp)
-                new_status         = stock["status"]
-                if st.session_state.sound_enabled and new_status != old_status:
-                    if new_status == "SL_HIT":                play_alert_sound("sl_hit")
-                    elif new_status in ["TARGET1","TARGET2"]: play_alert_sound("target")
-                    elif new_status == "TRIGGERED":           play_alert_sound("triggered")
+            new_status = old_status
 
-            status       = stock.get("status","WATCHING")
+            if ltp:
+                new_status = compute_status(stock, ltp)
+                # Only write back to JSON if status actually changed
+                if new_status != old_status:
+                    status_updates[stock_idx] = {
+                        "status":    new_status,
+                        "lastPrice": ltp,
+                    }
+                    if st.session_state.sound_enabled:
+                        if new_status == "SL_HIT":                play_alert_sound("sl_hit")
+                        elif new_status in ["TARGET1","TARGET2"]: play_alert_sound("target")
+                        elif new_status == "TRIGGERED":           play_alert_sound("triggered")
+
+            status       = new_status
             status_color = STATUS_COLOR.get(status,"#f59e0b")
             status_text  = STATUS_LABEL.get(status,"")
             buy_color    = "#00a854" if dirn=="BUY" else "#e53935"
@@ -742,7 +721,14 @@ with left_col:
                         unsafe_allow_html=True
                     )
 
-        set_list(current_tab, watchlist)
+        # ── Write status updates to JSON only when status actually changed ──
+        # Replaces the old: set_list(current_tab, watchlist)
+        if status_updates:
+            lst = get_list(current_tab)
+            for idx, updates in status_updates.items():
+                if idx < len(lst):
+                    lst[idx].update(updates)
+            set_list(current_tab, lst)
 
     st.markdown('<hr style="margin:8px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
     mkt_label = "🟢 Market Open" if market_now else "🔴 Market Closed"
