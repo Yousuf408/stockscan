@@ -268,6 +268,7 @@ def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
     if pct_ema_gap > 1.5: return False
     if close <= vwap: return False
     if close <= ema20: return False
+    if close <= ema200: return False   # price must be above EMA200 too
     pct_from_ema20 = ((close - ema20) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
@@ -288,6 +289,7 @@ def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
     if pct_ema_gap > 1.5: return False
     if close >= vwap: return False
     if close >= ema20: return False
+    if close >= ema200: return False   # price must be below EMA200 too
     pct_from_ema20 = ((ema20 - close) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
