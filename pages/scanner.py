@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.1
+#  TRADE SENTRY — scanner.py  v2.1🛡 Trade Sentry 
 #  Changes from v2.0:
 #    - Sector radio → pills with per-sector signal count
 #    - Card UI → white background (fields unchanged)
@@ -488,7 +488,7 @@ from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand()
 
-st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
+st.markdown("")
 
 # ── Watchlist selector on main page (not sidebar) ──
 wl_col1, wl_col2 = st.columns([3, 9])
