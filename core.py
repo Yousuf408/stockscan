@@ -213,7 +213,7 @@ def save_watchlist(data: dict):
 def add_to_watchlist(tab: str, stock: dict):
     """
     Add a single stock — efficient single INSERT.
-    Used by watchlist add form and prewatch batch inject.
+    Used by watchlist add form.
     """
     try:
         row = _stock_to_row(stock, tab)
@@ -221,6 +221,21 @@ def add_to_watchlist(tab: str, stock: dict):
         return res[0] if res else None
     except Exception as e:
         raise RuntimeError(f"Supabase insert failed: {e}")
+
+
+def insert_many_to_watchlist(tab: str, stocks: list):
+    """
+    Insert multiple stocks in ONE single API call.
+    Used by prewatch batch inject — much faster than per-stock inserts.
+    89 stocks = 1 HTTP request instead of 89.
+    """
+    if not stocks:
+        return []
+    try:
+        rows = [_stock_to_row(s, tab) for s in stocks]
+        return _sb_insert(rows)
+    except Exception as e:
+        raise RuntimeError(f"Supabase batch insert failed: {e}")
 
 
 def delete_from_watchlist(db_id: int):
