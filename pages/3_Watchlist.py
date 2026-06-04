@@ -1,4 +1,4 @@
-    # ══════════════════════════════════════════
+# ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py  v2.0
 #   Supabase replaces watchlist.json
 #   All UI, price fetch, sound, chart — unchanged
@@ -158,6 +158,7 @@ def fetch_all_prices(watchlist: list) -> dict:
     if not watchlist:
         return prices
 
+    # ── Angel One attempt during market hours ──
     if is_market_open():
         for stock in watchlist:
             sym  = stock.get("symbol", "")
@@ -179,35 +180,60 @@ def fetch_all_prices(watchlist: list) -> dict:
     if not missing:
         return prices
 
+    # ── Single stock — use individual fetch, more reliable than batch ──
+    if len(missing) == 1:
+        sym, exch = missing[0]
+        key = f"{sym}_{exch}"
+        price, source = fetch_price_yfinance(sym, exch)
+        if price:
+            prices[key] = {"price": price, "source": source,
+                           "time": now_ist().strftime("%H:%M:%S")}
+        return prices
+
+    # ── Multiple stocks — use bulk download ──
     try:
         ns_syms  = [f"{clean_symbol(s)}.NS" for s, e in missing if e == "NS"]
         bo_syms  = [f"{clean_symbol(s)}.BO" for s, e in missing if e == "BO"]
         all_syms = ns_syms + bo_syms
 
         if all_syms:
-            # Use 1m interval during market hours for near-live prices
-            # Use 1d after market close (1m data not available post-close)
+            # Market open  → 1m interval (near-live, ~1-2 min delay)
+            # Market closed → 1d interval (previous close, 1m unavailable)
             if is_market_open():
                 dl_period, dl_interval = "1d", "1m"
             else:
                 dl_period, dl_interval = "2d", "1d"
+
             data = yf.download(
                 tickers=" ".join(all_syms), period=dl_period, interval=dl_interval,
                 progress=False, auto_adjust=True, threads=True
             )
+
             for sym, exch in missing:
                 key    = f"{sym}_{exch}"
                 ticker = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
                 try:
-                    price = float(data["Close"].iloc[-1]) if len(all_syms) == 1 \
-                            else float(data["Close"][ticker].dropna().iloc[-1])
+                    # MultiIndex columns for multiple tickers
+                    if hasattr(data.columns, "levels"):
+                        price = float(data["Close"][ticker].dropna().iloc[-1])
+                    else:
+                        price = float(data["Close"].dropna().iloc[-1])
                     if price:
                         prices[key] = {"price": price, "source": "yfinance",
                                        "time": now_ist().strftime("%H:%M:%S")}
                 except Exception as e:
-                    print(f"[Batch] Could not extract {ticker}: {e}")
+                    # Fallback to individual fetch if batch extraction fails
+                    try:
+                        price, source = fetch_price_yfinance(sym, exch)
+                        if price:
+                            prices[key] = {"price": price, "source": source,
+                                           "time": now_ist().strftime("%H:%M:%S")}
+                    except Exception:
+                        print(f"[Fallback] Could not fetch {sym}: {e}")
+
     except Exception as e:
         print(f"[Batch yfinance] Failed: {e}")
+        # Full fallback — fetch each stock individually
         for sym, exch in missing:
             key = f"{sym}_{exch}"
             price, source = fetch_price_yfinance(sym, exch)
@@ -752,6 +778,7 @@ with right_col:
         render_chart(symbol, exchange)
 
 # ── Auto-refresh during market hours — refreshes every 60 seconds ──
-if is_market_open():
+# Pauses if user is editing a stock to avoid losing their input
+if is_market_open() and st.session_state.edit_idx is None:
     time.sleep(60)
     st.rerun()
