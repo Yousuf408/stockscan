@@ -1,104 +1,127 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — core.py  v2.0
+#  TRADE SENTRY — core.py  v2.1
 #  SHARED ENGINE — imported by prewatch.py and scanner.py
-#  v2.0: Supabase replaces watchlist.json — persistent across redeploys
-#  EMA calculation unchanged — same canonical implementation
+#  v2.1: Supabase via plain requests (no supabase client — works on Streamlit Cloud)
+#  EMA calculation unchanged
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os
 import json
+import requests
 
 WATCHLIST_TABS = ["Today", "Yesterday", "New"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 1: SUPABASE CLIENT
-# Initialised once, reused across all calls.
-# Falls back gracefully if credentials are missing (local dev).
+# SECTION 1: SUPABASE REST API HELPERS
+# Uses plain HTTPS requests — no supabase Python client needed
+# Works on Streamlit Cloud without any network config changes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_supabase():
-    """
-    Returns a Supabase client using st.secrets (Streamlit Cloud)
-    or environment variables (local dev).
-    Never raises — returns None if credentials missing.
-    """
+def _get_supabase_config():
+    """Get Supabase URL and API key from Streamlit secrets or env vars."""
     try:
-        from supabase import create_client
-        try:
-            import streamlit as st
-            url = st.secrets["SUPABASE_URL"]
-            key = st.secrets["SUPABASE_KEY"]
-        except Exception:
-            url = os.environ.get("SUPABASE_URL", "")
-            key = os.environ.get("SUPABASE_KEY", "")
-        if not url or not key:
-            return None
-        return create_client(url, key)
+        import streamlit as st
+        url = st.secrets["SUPABASE_URL"].rstrip("/")
+        key = st.secrets["SUPABASE_KEY"]
+        return url, key
     except Exception:
-        return None
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        return url, key
+
+
+def _headers():
+    """Standard Supabase REST API headers."""
+    _, key = _get_supabase_config()
+    return {
+        "apikey":        key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation",
+    }
+
+
+def _table_url():
+    """Base URL for watchlist table REST endpoint."""
+    url, _ = _get_supabase_config()
+    return f"{url}/rest/v1/watchlist"
+
+
+def _sb_select(filters: dict = None) -> list:
+    """SELECT rows from watchlist table with optional filters."""
+    params = {"select": "*", "order": "id.asc"}
+    if filters:
+        params.update(filters)
+    res = requests.get(_table_url(), headers=_headers(), params=params, timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
+def _sb_insert(rows: list) -> list:
+    """INSERT rows into watchlist table. Returns inserted rows."""
+    if not rows:
+        return []
+    res = requests.post(_table_url(), headers=_headers(), json=rows, timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
+def _sb_update(db_id: int, updates: dict):
+    """UPDATE a single row by id."""
+    url = f"{_table_url()}?id=eq.{db_id}"
+    res = requests.patch(url, headers=_headers(), json=updates, timeout=10)
+    res.raise_for_status()
+    return res.json()
+
+
+def _sb_delete(filter_str: str):
+    """DELETE rows matching a filter string e.g. 'tab=eq.Today'."""
+    url = f"{_table_url()}?{filter_str}"
+    res = requests.delete(url, headers=_headers(), timeout=10)
+    res.raise_for_status()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 2: EMA — single canonical implementation (unchanged from v1.0)
-#
-# Algorithm mirrors TradingView / Zerodha exactly:
-#   1. Seed with SMA of the first `period` closes
-#   2. Roll EMA forward using standard multiplier
+# SECTION 2: EMA — unchanged from v1.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calc_ema(candles: list, period: int):
     """
-    Canonical EMA used by both prewatch.py and scanner.py.
-    Matches TradingView/Zerodha EMA exactly.
-
+    Canonical EMA — matches TradingView/Zerodha exactly.
     candles: list of rows, close price at index [4]
-    period:  EMA period (e.g. 20, 200)
     """
     if not candles or len(candles) < period:
         return None
-
     closes     = [float(c[4]) for c in candles]
     sma        = sum(closes[:period]) / period
     multiplier = 2 / (period + 1)
     ema        = sma
-
     for close in closes[period:]:
         ema = (close - ema) * multiplier + ema
-
     return ema
 
 
 def calc_ema_from_series(closes: list, period: int):
     """
-    Same algorithm but accepts a plain list of floats directly.
-    Used by prewatch.py after doing df["Close"].tolist().
+    Same algorithm but accepts a plain list of floats.
+    Used by prewatch.py after df["Close"].tolist().
     """
     if not closes or len(closes) < period:
         return None
-
     sma        = sum(closes[:period]) / period
     multiplier = 2 / (period + 1)
     ema        = sma
-
     for close in closes[period:]:
         ema = (close - ema) * multiplier + ema
-
     return ema
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3: WATCHLIST — Supabase persistent storage
-#
-# Replaces watchlist.json completely.
-# Same interface as v1.0 — callers don't need to change.
-#
-# DB schema (watchlist table):
-#   id, tab, symbol, exchange, direction, entry, sl, target1, target2,
-#   note, sector, status, last_price, added_at, token
+# SECTION 3: ROW CONVERTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _row_to_stock(row: dict) -> dict:
-    """Convert a Supabase DB row → stock dict used by the app."""
+    """Supabase DB row → app stock dict."""
     return {
         "symbol":    row.get("symbol", ""),
         "exchange":  row.get("exchange", "NS"),
@@ -113,12 +136,12 @@ def _row_to_stock(row: dict) -> dict:
         "lastPrice": row.get("last_price"),
         "added_at":  row.get("added_at", ""),
         "token":     row.get("token", ""),
-        "_db_id":    row.get("id"),       # internal — used for updates/deletes
+        "_db_id":    row.get("id"),
     }
 
 
 def _stock_to_row(stock: dict, tab: str) -> dict:
-    """Convert a stock dict → Supabase DB row."""
+    """App stock dict → Supabase DB row."""
     return {
         "tab":        tab,
         "symbol":     stock.get("symbol", "").upper().strip(),
@@ -136,30 +159,26 @@ def _stock_to_row(stock: dict, tab: str) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4: WATCHLIST CRUD — same interface as v1.0
+# ─────────────────────────────────────────────────────────────────────────────
+
 def load_watchlist(tab: str = None):
     """
     Load watchlist from Supabase.
 
-    If tab is given (e.g. "Today"):
-        Returns list of stock dicts for that tab.
-
-    If tab is None:
-        Returns full dict: {"watchlist_Today": [...], "watchlist_Yesterday": [...], ...}
-        Same structure as old watchlist.json — callers stay compatible.
+    tab given  → returns list of stock dicts for that tab
+    tab None   → returns full dict {"watchlist_Today": [...], ...}
+                 same structure as old watchlist.json
     """
-    sb = _get_supabase()
-    if sb is None:
-        return [] if tab else {f"watchlist_{t}": [] for t in WATCHLIST_TABS}
-
     try:
         if tab:
-            res = sb.table("watchlist").select("*").eq("tab", tab).order("id").execute()
-            return [_row_to_stock(r) for r in (res.data or [])]
+            rows = _sb_select({"tab": f"eq.{tab}"})
+            return [_row_to_stock(r) for r in rows]
         else:
-            # Load all tabs at once
-            res = sb.table("watchlist").select("*").order("id").execute()
+            rows   = _sb_select()
             result = {f"watchlist_{t}": [] for t in WATCHLIST_TABS}
-            for row in (res.data or []):
+            for row in rows:
                 key = f"watchlist_{row.get('tab', '')}"
                 if key in result:
                     result[key].append(_row_to_stock(row))
@@ -171,37 +190,21 @@ def load_watchlist(tab: str = None):
 def save_watchlist(data: dict):
     """
     Save full watchlist dict to Supabase.
-
-    Accepts same format as old watchlist.json:
-    {
-        "watchlist_Today":     [...],
-        "watchlist_Yesterday": [...],
-        "watchlist_New":       [...],
-    }
-
-    Strategy: delete all rows for each tab present in data, then re-insert.
-    This keeps it simple and consistent — no partial update complexity.
+    Deletes existing rows for each tab then re-inserts.
+    Same interface as old watchlist.json save.
     """
-    sb = _get_supabase()
-    if sb is None:
-        raise RuntimeError("Supabase not configured — check SUPABASE_URL and SUPABASE_KEY in secrets")
-
     try:
         for tab in WATCHLIST_TABS:
-            key = f"watchlist_{tab}"
-            if key not in data:
+            key    = f"watchlist_{tab}"
+            stocks = data.get(key)
+            if stocks is None:
                 continue
-
-            stocks = data[key]
-
             # Delete existing rows for this tab
-            sb.table("watchlist").delete().eq("tab", tab).execute()
-
+            _sb_delete(f"tab=eq.{tab}")
             # Re-insert all stocks
             if stocks:
                 rows = [_stock_to_row(s, tab) for s in stocks]
-                sb.table("watchlist").insert(rows).execute()
-
+                _sb_insert(rows)
         return True
     except Exception as e:
         raise RuntimeError(f"Supabase save failed: {e}")
@@ -209,33 +212,21 @@ def save_watchlist(data: dict):
 
 def add_to_watchlist(tab: str, stock: dict):
     """
-    Add a single stock to a tab — more efficient than save_watchlist for single inserts.
-    Used by prewatch batch inject and watchlist add form.
-    Returns the inserted row or None on failure.
+    Add a single stock — efficient single INSERT.
+    Used by watchlist add form and prewatch batch inject.
     """
-    sb = _get_supabase()
-    if sb is None:
-        raise RuntimeError("Supabase not configured")
-
     try:
         row = _stock_to_row(stock, tab)
-        res = sb.table("watchlist").insert(row).execute()
-        return res.data[0] if res.data else None
+        res = _sb_insert([row])
+        return res[0] if res else None
     except Exception as e:
         raise RuntimeError(f"Supabase insert failed: {e}")
 
 
 def delete_from_watchlist(db_id: int):
-    """
-    Delete a single stock by its database ID.
-    More efficient than save_watchlist for single deletes.
-    """
-    sb = _get_supabase()
-    if sb is None:
-        raise RuntimeError("Supabase not configured")
-
+    """Delete a single stock by its DB id."""
     try:
-        sb.table("watchlist").delete().eq("id", db_id).execute()
+        _sb_delete(f"id=eq.{db_id}")
         return True
     except Exception as e:
         raise RuntimeError(f"Supabase delete failed: {e}")
@@ -243,16 +234,10 @@ def delete_from_watchlist(db_id: int):
 
 def update_watchlist_stock(db_id: int, updates: dict):
     """
-    Update a single stock's fields by database ID.
-    Used for status updates, price updates, edit form saves.
+    Update a single stock's fields by DB id.
+    Used for status updates, edit form saves, reset.
     """
-    sb = _get_supabase()
-    if sb is None:
-        raise RuntimeError("Supabase not configured")
-
     try:
-        # Map app field names → DB column names
-        db_updates = {}
         field_map = {
             "status":    "status",
             "lastPrice": "last_price",
@@ -262,12 +247,9 @@ def update_watchlist_stock(db_id: int, updates: dict):
             "target2":   "target2",
             "note":      "note",
         }
-        for app_key, db_col in field_map.items():
-            if app_key in updates:
-                db_updates[db_col] = updates[app_key]
-
+        db_updates = {field_map[k]: v for k, v in updates.items() if k in field_map}
         if db_updates:
-            sb.table("watchlist").update(db_updates).eq("id", db_id).execute()
+            _sb_update(db_id, db_updates)
         return True
     except Exception as e:
         raise RuntimeError(f"Supabase update failed: {e}")
@@ -275,27 +257,23 @@ def update_watchlist_stock(db_id: int, updates: dict):
 
 def clear_watchlist_tab(tab: str):
     """Delete all stocks in a tab."""
-    sb = _get_supabase()
-    if sb is None:
-        raise RuntimeError("Supabase not configured")
-
     try:
-        sb.table("watchlist").delete().eq("tab", tab).execute()
+        _sb_delete(f"tab=eq.{tab}")
         return True
     except Exception as e:
         raise RuntimeError(f"Supabase clear failed: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4: SELF-TEST
+# SECTION 5: SELF-TEST
 # Run: python core.py
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     # EMA smoke test
-    dummy_closes = [100, 102, 101, 103, 104, 105, 103, 106, 107, 108,
-                    107, 109, 110, 111, 110, 112, 113, 114, 113, 115,
-                    116, 117, 116, 118, 119]
+    dummy_closes  = [100, 102, 101, 103, 104, 105, 103, 106, 107, 108,
+                     107, 109, 110, 111, 110, 112, 113, 114, 113, 115,
+                     116, 117, 116, 118, 119]
     dummy_candles = [["2024-01-01", 0, 0, 0, c, 0] for c in dummy_closes]
 
     ema20        = calc_ema(dummy_candles, 20)
@@ -308,12 +286,14 @@ if __name__ == "__main__":
     print("Insufficient data guard: OK")
 
     # Supabase connection test
-    sb = _get_supabase()
-    if sb:
-        print("\nSupabase connection: OK")
-        rows = sb.table("watchlist").select("id").limit(1).execute()
-        print(f"Watchlist table reachable: OK ({len(rows.data)} rows sampled)")
-    else:
-        print("\nSupabase: not configured (set SUPABASE_URL + SUPABASE_KEY)")
+    try:
+        url, key = _get_supabase_config()
+        if url and key:
+            rows = _sb_select({"limit": "1"})
+            print(f"\nSupabase REST connection: OK")
+        else:
+            print("\nSupabase: credentials not set")
+    except Exception as e:
+        print(f"\nSupabase connection failed: {e}")
 
-    print("\ncore.py v2.0 — all checks passed ✅")
+    print("\ncore.py v2.1 — all checks passed ✅")
