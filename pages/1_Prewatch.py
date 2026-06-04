@@ -187,6 +187,23 @@ with col_btn2:
         st.session_state.ts_prewatch_time = None
         st.rerun()
 
+# ── ADD THIS TEMPORARILY BELOW ──
+if st.button("🔍 TEST SUPABASE CONNECTION"):
+    try:
+        import requests
+        url = st.secrets["SUPABASE_URL"].rstrip("/")
+        key = st.secrets["SUPABASE_KEY"]
+        res = requests.get(
+            f"{url}/rest/v1/watchlist?select=id&limit=1",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            timeout=10
+        )
+        st.write(f"Status: {res.status_code}")
+        st.write(f"Response: {res.text}")
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+
 total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_prewatch else 0
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
 
