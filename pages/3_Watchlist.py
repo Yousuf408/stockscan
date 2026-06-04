@@ -1,13 +1,11 @@
 # ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py
-#   Self-contained price fetching
-#   No app.py / price_cache.json dependency
-#   Direct: Angel One HTTP → yfinance fallback
-#   Auto-refresh every 5 minutes
+#   TRADESENTRY — pages/3_Watchlist.py  v2.0
+#   Supabase replaces watchlist.json
+#   All UI, price fetch, sound, chart — unchanged
 # ══════════════════════════════════════════
 
 import streamlit as st
-import json, os, pytz, yfinance as yf, time
+import os, pytz, yfinance as yf, time
 from datetime import datetime
 
 import sys
@@ -15,6 +13,14 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from stocks import get_stock_token, get_stock_sector
 from styles import apply_styles, sidebar_brand, page_header
 from chart import render_chart
+from core import (
+    load_watchlist,
+    save_watchlist,
+    add_to_watchlist,
+    delete_from_watchlist,
+    update_watchlist_stock,
+    clear_watchlist_tab,
+)
 
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
@@ -45,38 +51,32 @@ def is_market_open():
 
 
 # ══════════════════════════════════════════
-#   WATCHLIST STORAGE (JSON file based)
+#   WATCHLIST STORAGE — Supabase via core.py
+#   get_list / set_list replaced with direct
+#   Supabase calls for efficiency
 # ══════════════════════════════════════════
 
-WATCHLIST_FILE  = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
-def load_all() -> dict:
-    if not os.path.exists(WATCHLIST_FILE):
-        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
-    try:
-        with open(WATCHLIST_FILE, "r") as f:
-            data = json.load(f)
-            for n in WATCHLIST_NAMES:
-                data.setdefault(f"watchlist_{n}", [])
-            return data
-    except:
-        return {f"watchlist_{n}": [] for n in WATCHLIST_NAMES}
-
-def save_all(data: dict):
-    try:
-        with open(WATCHLIST_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        st.error(f"Save error: {e}")
-
 def get_list(tab: str) -> list:
-    return load_all().get(f"watchlist_{tab}", [])
+    """Load stocks for a tab from Supabase."""
+    try:
+        return load_watchlist(tab)
+    except Exception as e:
+        st.error(f"Load error: {e}")
+        return []
 
 def set_list(tab: str, lst: list):
-    data = load_all()
-    data[f"watchlist_{tab}"] = lst
-    save_all(data)
+    """
+    Save full list for a tab to Supabase.
+    Used for bulk operations like sort reorder.
+    """
+    try:
+        all_data = load_watchlist()
+        all_data[f"watchlist_{tab}"] = lst
+        save_watchlist(all_data)
+    except Exception as e:
+        st.error(f"Save error: {e}")
 
 
 # ══════════════════════════════════════════
@@ -99,10 +99,10 @@ def play_alert_sound(alert_type="triggered"):
 
 
 # ══════════════════════════════════════════
-#   PRICE FETCH — SELF CONTAINED
+#   PRICE FETCH — unchanged
 # ══════════════════════════════════════════
 
-AUTO_REFRESH_SECS = 300  # 5 minutes
+AUTO_REFRESH_SECS = 300
 
 @st.cache_resource
 def get_angel_session():
@@ -141,29 +141,17 @@ def fetch_price_yfinance(symbol: str, exchange: str):
         sym    = clean_symbol(symbol)
         suffix = ".NS" if exchange == "NS" else ".BO"
         ticker = yf.Ticker(f"{sym}{suffix}")
-
-        price = (ticker.fast_info.get("last_price") or
-                 ticker.fast_info.get("regularMarketPrice"))
-
+        price  = (ticker.fast_info.get("last_price") or
+                  ticker.fast_info.get("regularMarketPrice"))
         if not price:
             hist = ticker.history(period="2d")
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
-
         if price:
             return float(price), "yfinance"
     except:
         pass
     return None, "yfinance_failed"
-
-def fetch_price(symbol: str, exchange: str):
-    if is_market_open():
-        price, source = fetch_price_angel(symbol, exchange)
-        if price:
-            return price, source
-        time.sleep(0.3)
-    price, source = fetch_price_yfinance(symbol, exchange)
-    return price, source
 
 def fetch_all_prices(watchlist: list) -> dict:
     prices = {}
@@ -177,11 +165,8 @@ def fetch_all_prices(watchlist: list) -> dict:
             key  = f"{sym}_{exch}"
             price, source = fetch_price_angel(sym, exch)
             if price:
-                prices[key] = {
-                    "price":  price,
-                    "source": source,
-                    "time":   now_ist().strftime("%H:%M:%S")
-                }
+                prices[key] = {"price": price, "source": source,
+                               "time": now_ist().strftime("%H:%M:%S")}
 
     missing = []
     for stock in watchlist:
@@ -201,49 +186,33 @@ def fetch_all_prices(watchlist: list) -> dict:
 
         if all_syms:
             data = yf.download(
-                tickers=" ".join(all_syms),
-                period="2d",
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-                threads=True
+                tickers=" ".join(all_syms), period="2d", interval="1d",
+                progress=False, auto_adjust=True, threads=True
             )
-
             for sym, exch in missing:
                 key    = f"{sym}_{exch}"
                 ticker = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
                 try:
-                    if len(all_syms) == 1:
-                        price = float(data["Close"].iloc[-1])
-                    else:
-                        price = float(data["Close"][ticker].dropna().iloc[-1])
-
+                    price = float(data["Close"].iloc[-1]) if len(all_syms) == 1 \
+                            else float(data["Close"][ticker].dropna().iloc[-1])
                     if price:
-                        prices[key] = {
-                            "price":  price,
-                            "source": "yfinance",
-                            "time":   now_ist().strftime("%H:%M:%S")
-                        }
+                        prices[key] = {"price": price, "source": "yfinance",
+                                       "time": now_ist().strftime("%H:%M:%S")}
                 except Exception as e:
                     print(f"[Batch] Could not extract {ticker}: {e}")
-
     except Exception as e:
         print(f"[Batch yfinance] Failed: {e}")
         for sym, exch in missing:
             key = f"{sym}_{exch}"
             price, source = fetch_price_yfinance(sym, exch)
             if price:
-                prices[key] = {
-                    "price":  price,
-                    "source": source,
-                    "time":   now_ist().strftime("%H:%M:%S")
-                }
-
+                prices[key] = {"price": price, "source": source,
+                               "time": now_ist().strftime("%H:%M:%S")}
     return prices
 
 
 # ══════════════════════════════════════════
-#   STATUS LOGIC
+#   STATUS LOGIC — unchanged
 # ══════════════════════════════════════════
 
 def compute_status(stock: dict, ltp: float) -> str:
@@ -433,25 +402,31 @@ with left_col:
                     if dup:
                         st.error(f"⚠ {symbol} {st.session_state.direction} already exists")
                     else:
-                        lst.append({
-                            "symbol": symbol, "exchange": st.session_state.exchange,
+                        new_stock = {
+                            "symbol":    symbol,
+                            "exchange":  st.session_state.exchange,
                             "direction": st.session_state.direction,
-                            "entry": entry_val,
-                            "sl":      sl_val  if sl_val  > 0 else None,
-                            "target1": t1_val  if t1_val  > 0 else None,
-                            "target2": t2_val  if t2_val  > 0 else None,
-                            "note": note_val.strip() or None,
-                            "sector": get_stock_sector(symbol),
-                            "status": "WATCHING", "lastPrice": None,
-                            "added_at": datetime.now().isoformat(),
-                        })
-                        set_list(st.session_state.current_tab, lst)
-                        for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
-                            st.session_state[k] = "" if k=="f_symbol" else 0.0
-                        st.session_state.show_add_form = False
-                        st.session_state.prices = {}
-                        st.success(f"✅ {symbol} added!")
-                        st.rerun()
+                            "entry":     entry_val,
+                            "sl":        sl_val  if sl_val  > 0 else None,
+                            "target1":   t1_val  if t1_val  > 0 else None,
+                            "target2":   t2_val  if t2_val  > 0 else None,
+                            "note":      note_val.strip() or None,
+                            "sector":    get_stock_sector(symbol),
+                            "status":    "WATCHING",
+                            "lastPrice": None,
+                            "added_at":  datetime.now().isoformat(),
+                        }
+                        try:
+                            # ── Single insert to Supabase ──
+                            add_to_watchlist(st.session_state.current_tab, new_stock)
+                            for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
+                                st.session_state[k] = "" if k=="f_symbol" else 0.0
+                            st.session_state.show_add_form = False
+                            st.session_state.prices = {}
+                            st.success(f"✅ {symbol} added!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to add: {e}")
 
     # ── TABS ──
     tc1, tc2, tc3 = st.columns(3)
@@ -484,9 +459,12 @@ with left_col:
     with sc3:
         if st.button("🗑", use_container_width=True, help="Clear all", key="clear_btn"):
             if watchlist:
-                set_list(current_tab, [])
-                st.session_state.prices = {}
-                st.rerun()
+                try:
+                    clear_watchlist_tab(current_tab)
+                    st.session_state.prices = {}
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Clear failed: {e}")
 
     if st.session_state.sort_open:
         s1, s2 = st.columns(2)
@@ -561,9 +539,6 @@ with left_col:
             unsafe_allow_html=True
         )
     else:
-        # ── status updates stored separately, written only when changed ──
-        status_updates = {}
-
         for stock_idx, stock in enumerate(watchlist):
             sym      = stock.get("symbol","")
             dirn     = stock.get("direction","BUY")
@@ -573,6 +548,7 @@ with left_col:
             t2       = stock.get("target2")
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
+            db_id    = stock.get("_db_id")   # Supabase row ID
 
             price_key  = f"{sym}_{exchange}"
             price_data = st.session_state.prices.get(price_key, {})
@@ -591,12 +567,15 @@ with left_col:
 
             if ltp:
                 new_status = compute_status(stock, ltp)
-                # Only write back to JSON if status actually changed
-                if new_status != old_status:
-                    status_updates[stock_idx] = {
-                        "status":    new_status,
-                        "lastPrice": ltp,
-                    }
+                # ── Write to Supabase only when status changed ──
+                if new_status != old_status and db_id:
+                    try:
+                        update_watchlist_stock(db_id, {
+                            "status":    new_status,
+                            "lastPrice": ltp,
+                        })
+                    except Exception as e:
+                        print(f"Status update failed for {sym}: {e}")
                     if st.session_state.sound_enabled:
                         if new_status == "SL_HIT":                play_alert_sound("sl_hit")
                         elif new_status in ["TARGET1","TARGET2"]: play_alert_sound("target")
@@ -626,18 +605,20 @@ with left_col:
                     sv1, sv2 = st.columns(2)
                     with sv1:
                         if st.button("💾 Save", use_container_width=True, type="primary", key=f"save_{stock_idx}"):
-                            lst = get_list(current_tab)
-                            lst[stock_idx].update({
-                                "entry":   ne  if ne  > 0 else stock.get("entry"),
-                                "sl":      ns  if ns  > 0 else None,
-                                "target1": nt1 if nt1 > 0 else None,
-                                "target2": nt2 if nt2 > 0 else None,
-                                "note":    nn.strip() or None,
-                            })
-                            set_list(current_tab, lst)
-                            st.session_state.edit_idx = None
-                            st.session_state.edit_tab = None
-                            st.rerun()
+                            if db_id:
+                                try:
+                                    update_watchlist_stock(db_id, {
+                                        "entry":   ne  if ne  > 0 else stock.get("entry"),
+                                        "sl":      ns  if ns  > 0 else None,
+                                        "target1": nt1 if nt1 > 0 else None,
+                                        "target2": nt2 if nt2 > 0 else None,
+                                        "note":    nn.strip() or None,
+                                    })
+                                    st.session_state.edit_idx = None
+                                    st.session_state.edit_tab = None
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Save failed: {e}")
                     with sv2:
                         if st.button("Cancel", use_container_width=True, key=f"cancel_{stock_idx}"):
                             st.session_state.edit_idx = None
@@ -695,12 +676,13 @@ with left_col:
                         st.rerun()
                 with btn_cols[1]:
                     if st.button("↺", key=f"rst_{stock_idx}", use_container_width=True, help="Reset"):
-                        lst = get_list(current_tab)
-                        lst[stock_idx]["status"]    = "WATCHING"
-                        lst[stock_idx]["lastPrice"] = None
-                        set_list(current_tab, lst)
-                        st.session_state.prices.pop(f"{sym}_{exchange}", None)
-                        st.rerun()
+                        if db_id:
+                            try:
+                                update_watchlist_stock(db_id, {"status": "WATCHING", "lastPrice": None})
+                                st.session_state.prices.pop(f"{sym}_{exchange}", None)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Reset failed: {e}")
                 with btn_cols[2]:
                     if st.button("✏", key=f"edt_{stock_idx}", use_container_width=True, help="Edit"):
                         st.session_state.edit_idx = stock_idx
@@ -708,11 +690,13 @@ with left_col:
                         st.rerun()
                 with btn_cols[3]:
                     if st.button("✕", key=f"del_{stock_idx}", use_container_width=True, help="Delete"):
-                        lst = get_list(current_tab)
-                        lst.pop(stock_idx)
-                        set_list(current_tab, lst)
-                        st.session_state.prices.pop(f"{sym}_{exchange}", None)
-                        st.rerun()
+                        if db_id:
+                            try:
+                                delete_from_watchlist(db_id)
+                                st.session_state.prices.pop(f"{sym}_{exchange}", None)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Delete failed: {e}")
 
                 if note:
                     st.markdown(
@@ -720,15 +704,6 @@ with left_col:
                         f'margin-top:-4px;margin-bottom:4px;">📝 {note}</div>',
                         unsafe_allow_html=True
                     )
-
-        # ── Write status updates to JSON only when status actually changed ──
-        # Replaces the old: set_list(current_tab, watchlist)
-        if status_updates:
-            lst = get_list(current_tab)
-            for idx, updates in status_updates.items():
-                if idx < len(lst):
-                    lst[idx].update(updates)
-            set_list(current_tab, lst)
 
     st.markdown('<hr style="margin:8px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
     mkt_label = "🟢 Market Open" if market_now else "🔴 Market Closed"
