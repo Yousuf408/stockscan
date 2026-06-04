@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ══════════════════════════════════════════
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from core import calc_ema_from_series, load_watchlist, add_to_watchlist
+from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_many_to_watchlist
 
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
@@ -301,21 +301,19 @@ if st.session_state.ts_prewatch:
                         for x in existing
                     )
 
-                    added_counter  = 0
-                    failed_counter = 0
-
+                    # ── Build list of new stocks skipping duplicates ──
+                    new_stocks_to_insert = []
                     for item in processed_cards_list:
                         clean_sym  = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir  = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
 
-                        # Skip duplicates
                         if (clean_sym, "NS", trade_dir) in existing_keys:
                             continue
 
                         raw_ltp      = item.get("ltp", 0.0)
                         parsed_entry = 0.0 if (pd.isna(raw_ltp) or math.isnan(raw_ltp)) else float(round(raw_ltp))
 
-                        new_stock = {
+                        new_stocks_to_insert.append({
                             "symbol":    clean_sym,
                             "exchange":  "NS",
                             "direction": trade_dir,
@@ -328,22 +326,17 @@ if st.session_state.ts_prewatch:
                             "status":    "WATCHING",
                             "lastPrice": None,
                             "added_at":  datetime.now().isoformat(),
-                        }
+                        })
 
+                    if new_stocks_to_insert:
                         try:
-                            # ── Single INSERT per stock to Supabase ──
-                            add_to_watchlist(target_list_id, new_stock)
-                            existing_keys.add((clean_sym, "NS", trade_dir))
-                            added_counter += 1
+                            # ── ONE batch INSERT for all stocks ──
+                            with st.spinner(f"Saving {len(new_stocks_to_insert)} stocks to database..."):
+                                insert_many_to_watchlist(target_list_id, new_stocks_to_insert)
+                            st.toast(f"⚡ Injected {len(new_stocks_to_insert)} Stocks into '{target_list_id}' Watchlist!", icon="✅")
                         except Exception as e:
-                            print(f"Failed to add {clean_sym}: {e}")
-                            failed_counter += 1
-
-                    if added_counter > 0:
-                        st.toast(f"⚡ Injected {added_counter} Stocks into '{target_list_id}' Watchlist!", icon="✅")
-                    if failed_counter > 0:
-                        st.warning(f"{failed_counter} stocks failed to save — check connection.")
-                    if added_counter == 0 and failed_counter == 0:
+                            st.error(f"Batch save failed: {e}")
+                    else:
                         st.info("Selected setups are already active inside that watchlist container.")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
