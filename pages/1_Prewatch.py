@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import json
 import os
 import math
 from datetime import datetime
@@ -12,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ══════════════════════════════════════════
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from core import calc_ema_from_series, load_watchlist, save_watchlist
+from core import calc_ema_from_series, load_watchlist, add_to_watchlist
 
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
@@ -47,9 +46,6 @@ if "ts_prewatch_time" not in st.session_state: st.session_state.ts_prewatch_time
 
 # ══════════════════════════════════════════
 #  CORE MATHEMATICS LOGIC
-#  NOTE: calculate_ema() REMOVED — now using calc_ema_from_series() from core.py
-#        load_all_watchlist_data() REMOVED — now using load_watchlist() from core.py
-#        save_all_watchlist_data() REMOVED — now using save_watchlist() from core.py
 # ══════════════════════════════════════════
 
 def calculate_volume_median(volumes: pd.Series) -> float:
@@ -130,8 +126,6 @@ def run_fast_prewatch_scan():
         try:
             ticker_map = {f"{sym}.NS": sym for sym, _ in all_stocks}
             ticker_space_string = " ".join(ticker_map.keys())
-
-           
             bulk_df = yf.download(ticker_space_string, period="2y", interval="1d", group_by='ticker', auto_adjust=False, progress=False)
             for ns_ticker, sym in ticker_map.items():
                 if ns_ticker in bulk_df.columns.levels[0]:
@@ -154,7 +148,6 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
 
     if volume < 100000 or pd.isna(volume) or math.isnan(volume): return
 
-    # ── EMA via core.py (canonical, matches TradingView) ──
     closes = df_stock["Close"].tolist()
     ema20  = calc_ema_from_series(closes, 20)
     ema200 = calc_ema_from_series(closes, 200)
@@ -207,9 +200,6 @@ col_info.markdown(
 
 st.markdown("<h3 style='font-size: 13px; font-weight: 700; margin-top: 15px; color: #000000; letter-spacing:0.5px;'>⚙️ REFINEMENT OPTIONS</h3>", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════
-#  FULL WIDTH REFINEMENT BOX
-# ══════════════════════════════════════════════════════════
 with st.container(border=True):
     p1_col1, p1_col2, p1_col3 = st.columns([4.0, 4.0, 4.0])
     with p1_col1:
@@ -230,7 +220,6 @@ with st.container(border=True):
             label_visibility="collapsed"
         )
 
-# ── DATA PROCESSING FLOW ENGINE ──
 if st.session_state.ts_prewatch:
     raw_data = st.session_state.ts_prewatch
     filtered_data = []
@@ -249,9 +238,6 @@ if st.session_state.ts_prewatch:
         conf       = calculate_confidence(r["abs_dist_pct"], r["body_gt_wick"], r["abs_dist_200"])
         processed_cards_list.append({**r, "sig": sig, "v_strength": v_strength, "confidence": conf})
 
-    # ══════════════════════════════════════════
-    #  SECTOR & SELECTION MATRIX
-    # ══════════════════════════════════════════
     available_sectors = sorted(list(set([info.get("sector", "GENERAL SECTOR") for sym, info in STOCK_UNIVERSE.items()])))
     sector_counts = {}
     for r in processed_cards_list:
@@ -278,7 +264,8 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ══════════════════════════════════════════
-    #  BATCH WATCHLIST PANEL
+    #  BATCH WATCHLIST PANEL — uses add_to_watchlist() per stock
+    #  No full delete+reinsert — efficient single INSERTs to Supabase
     # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
@@ -290,44 +277,56 @@ if st.session_state.ts_prewatch:
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
-                    # ── load_watchlist() from core.py — no tab = full dict ──
-                    current_json_db = load_watchlist()
-                    db_target_key   = f"watchlist_{target_list_id}"
-                    if db_target_key not in current_json_db:
-                        current_json_db[db_target_key] = []
+                    # ── Load existing stocks for duplicate check ──
+                    existing = load_watchlist(target_list_id)
+                    existing_keys = set(
+                        (x.get("symbol"), x.get("exchange"), x.get("direction"))
+                        for x in existing
+                    )
 
-                    added_counter = 0
+                    added_counter  = 0
+                    failed_counter = 0
+
                     for item in processed_cards_list:
                         clean_sym  = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir  = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
 
-                        already_present = any(
-                            x.get("symbol") == clean_sym and
-                            x.get("exchange") == "NS" and
-                            x.get("direction") == trade_dir
-                            for x in current_json_db[db_target_key]
-                        )
+                        # Skip duplicates
+                        if (clean_sym, "NS", trade_dir) in existing_keys:
+                            continue
 
-                        if not already_present:
-                            raw_ltp      = item.get("ltp", 0.0)
-                            parsed_entry = 0.0 if (pd.isna(raw_ltp) or math.isnan(raw_ltp)) else float(round(raw_ltp))
+                        raw_ltp      = item.get("ltp", 0.0)
+                        parsed_entry = 0.0 if (pd.isna(raw_ltp) or math.isnan(raw_ltp)) else float(round(raw_ltp))
 
-                            current_json_db[db_target_key].append({
-                                "symbol": clean_sym, "exchange": "NS", "direction": trade_dir, "entry": parsed_entry,
-                                "sl": None, "target1": None, "target2": None, "note": "EMA 20 Automated Scan",
-                                "sector": get_stock_sector(clean_sym), "status": "WATCHING", "lastPrice": None,
-                                "added_at": datetime.now().isoformat()
-                            })
+                        new_stock = {
+                            "symbol":    clean_sym,
+                            "exchange":  "NS",
+                            "direction": trade_dir,
+                            "entry":     parsed_entry,
+                            "sl":        None,
+                            "target1":   None,
+                            "target2":   None,
+                            "note":      "EMA 20 Automated Scan",
+                            "sector":    get_stock_sector(clean_sym),
+                            "status":    "WATCHING",
+                            "lastPrice": None,
+                            "added_at":  datetime.now().isoformat(),
+                        }
+
+                        try:
+                            # ── Single INSERT per stock to Supabase ──
+                            add_to_watchlist(target_list_id, new_stock)
+                            existing_keys.add((clean_sym, "NS", trade_dir))
                             added_counter += 1
+                        except Exception as e:
+                            print(f"Failed to add {clean_sym}: {e}")
+                            failed_counter += 1
 
                     if added_counter > 0:
-                        # ── save_watchlist() from core.py ──
-                        try:
-                            save_watchlist(current_json_db)
-                            st.toast(f"⚡ Injected {added_counter} Stocks directly into '{target_list_id}' Watchlist!", icon="✅")
-                        except RuntimeError as e:
-                            st.error(str(e))
-                    else:
+                        st.toast(f"⚡ Injected {added_counter} Stocks into '{target_list_id}' Watchlist!", icon="✅")
+                    if failed_counter > 0:
+                        st.warning(f"{failed_counter} stocks failed to save — check connection.")
+                    if added_counter == 0 and failed_counter == 0:
                         st.info("Selected setups are already active inside that watchlist container.")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
