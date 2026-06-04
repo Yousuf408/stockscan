@@ -1,4 +1,4 @@
-# ══════════════════════════════════════════
+    # ══════════════════════════════════════════
 #   TRADESENTRY — pages/3_Watchlist.py  v2.0
 #   Supabase replaces watchlist.json
 #   All UI, price fetch, sound, chart — unchanged
@@ -185,8 +185,14 @@ def fetch_all_prices(watchlist: list) -> dict:
         all_syms = ns_syms + bo_syms
 
         if all_syms:
+            # Use 1m interval during market hours for near-live prices
+            # Use 1d after market close (1m data not available post-close)
+            if is_market_open():
+                dl_period, dl_interval = "1d", "1m"
+            else:
+                dl_period, dl_interval = "2d", "1d"
             data = yf.download(
-                tickers=" ".join(all_syms), period="2d", interval="1d",
+                tickers=" ".join(all_syms), period=dl_period, interval=dl_interval,
                 progress=False, auto_adjust=True, threads=True
             )
             for sym, exch in missing:
@@ -744,3 +750,8 @@ with right_col:
             unsafe_allow_html=True
         )
         render_chart(symbol, exchange)
+
+# ── Auto-refresh during market hours — refreshes every 60 seconds ──
+if is_market_open():
+    time.sleep(60)
+    st.rerun()
