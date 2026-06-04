@@ -187,7 +187,7 @@ with col_btn2:
         st.session_state.ts_prewatch_time = None
         st.rerun()
 
-# ── ADD THIS TEMPORARILY BELOW ──
+# ── TEMPORARY: Supabase connection test — remove after debugging ──
 if st.button("🔍 TEST SUPABASE CONNECTION"):
     try:
         import requests
@@ -198,11 +198,11 @@ if st.button("🔍 TEST SUPABASE CONNECTION"):
             headers={"apikey": key, "Authorization": f"Bearer {key}"},
             timeout=10
         )
-        st.write(f"Status: {res.status_code}")
+        st.write(f"Status Code: {res.status_code}")
         st.write(f"Response: {res.text}")
+        st.write(f"URL used: {url}")
     except Exception as e:
-        st.error(f"Error: {e}")
-
+        st.error(f"Connection Error: {e}")
 
 total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_prewatch else 0
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
