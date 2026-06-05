@@ -135,16 +135,17 @@ tab_login, tab_signup, tab_reset = st.tabs(["Login", "Sign Up", "Forgot Password
 
 # ── LOGIN ──
 with tab_login:
-    email    = st.text_input("Email", key="li_email", placeholder="you@email.com")
-    password = st.text_input("Password", type="password", key="li_pass", placeholder="••••••••")
+    with st.form("login_form"):
+        email    = st.text_input("Email",    placeholder="you@email.com")
+        password = st.text_input("Password", placeholder="••••••••", type="password")
+        li_btn   = st.form_submit_button("Login", use_container_width=True)
 
-    if st.button("Login", use_container_width=True, key="li_btn"):
+    if li_btn:
         if not email or not password:
             st.error("Enter email and password.")
         else:
             with st.spinner("Signing in..."):
                 data = auth_sign_in(email.strip(), password.strip())
-
             if data.get("access_token"):
                 _set_session(data)
                 st.success("Logged in!")
@@ -155,11 +156,13 @@ with tab_login:
 
 # ── SIGN UP ──
 with tab_signup:
-    su_email = st.text_input("Email",            key="su_email", placeholder="you@email.com")
-    su_pass  = st.text_input("Password",         key="su_pass",  placeholder="Min 6 characters", type="password")
-    su_pass2 = st.text_input("Confirm Password", key="su_pass2", placeholder="Repeat password",  type="password")
+    with st.form("signup_form"):
+        su_email = st.text_input("Email",            placeholder="you@email.com")
+        su_pass  = st.text_input("Password",         placeholder="Min 6 characters", type="password")
+        su_pass2 = st.text_input("Confirm Password", placeholder="Repeat password",  type="password")
+        su_btn   = st.form_submit_button("Create Account", use_container_width=True)
 
-    if st.button("Create Account", use_container_width=True, key="su_btn"):
+    if su_btn:
         if not su_email or not su_pass:
             st.error("Fill in all fields.")
         elif su_pass != su_pass2:
@@ -169,18 +172,19 @@ with tab_signup:
         else:
             with st.spinner("Creating account..."):
                 data = auth_sign_up(su_email.strip(), su_pass.strip())
-
             if data.get("id") or data.get("access_token"):
-                st.success("Account created! Check your email to confirm, then login.")
+                st.success("Account created! Please login below.")
             else:
                 msg = data.get("error_description") or data.get("msg") or "Signup failed."
                 st.error(msg)
 
 # ── FORGOT PASSWORD ──
 with tab_reset:
-    rp_email = st.text_input("Email", key="rp_email", placeholder="you@email.com")
+    with st.form("reset_form"):
+        rp_email = st.text_input("Email", placeholder="you@email.com")
+        rp_btn   = st.form_submit_button("Send Reset Link", use_container_width=True)
 
-    if st.button("Send Reset Link", use_container_width=True, key="rp_btn"):
+    if rp_btn:
         if not rp_email:
             st.error("Enter your email.")
         else:
