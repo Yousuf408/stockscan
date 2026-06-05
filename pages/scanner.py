@@ -657,8 +657,8 @@ if toggle_hide_sl:
 # ─────────────────────────────────────────────────────────────────────────────
 # CALCULATE HEADER COUNTS FROM FILTERED VIEW (after all filters applied)
 # ─────────────────────────────────────────────────────────────────────────────
-buy_count   = len([r for r in view if r["signal"] == "BUY"])
-sell_count  = len([r for r in view if r["signal"] == "SELL"])
+buy_count   = len([r for r in view if r["signal"] == "BUY" and not r.get("sl_hit", False)])
+sell_count  = len([r for r in view if r["signal"] == "SELL" and not r.get("sl_hit", False)])
 sl_hit_count = len([r for r in view if r.get("sl_hit", False)])
 total_count = len(view)
 
