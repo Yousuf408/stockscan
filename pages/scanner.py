@@ -368,53 +368,35 @@ def calc_entry_target(signal: str, opening_candle: list) -> dict:
     }
 
 
-def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, entry: float, target: float, 
-                          candles: list, ema20_live: float, t1_already_achieved: bool = False, 
-                          opening_timestamp: float = None) -> dict:
+def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float, 
+                          candles: list, ema20_live: float, t1_already_achieved: bool = False) -> dict:
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
-    T1 ACHIEVE: Check if ANY candle HIGH/LOW from 9:15 AM opening onwards hit target
-    SL HIT: Only check if T1 was NEVER achieved (2 consecutive candles wrong side of EMA20)
     Once T1 is achieved, it's LOCKED - no further status changes.
     
     Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
     """
-    if not signal or entry is None or target is None or not candles:
+    if not signal or ltp is None or entry is None or target is None:
         return {"status": "ACTIVE", "triggered": False}
     
     # If T1 already achieved, KEEP IT LOCKED - don't change
     if t1_already_achieved:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Step 1: Filter candles strictly from 9:15 AM opening onwards
-    if opening_timestamp:
-        candles_after_open = [
-            c for c in candles
-            if float(c[0]) >= opening_timestamp
-        ]
-    else:
-        candles_after_open = candles  # Fallback if no timestamp
-    
-    if not candles_after_open:
-        return {"status": "ACTIVE", "triggered": False}
-    
-    # Step 2: Check if ANY candle after 9:15 AM hit target (HIGH for BUY, LOW for SELL)
-    max_high_after_open = max(float(c[2]) for c in candles_after_open)
-    min_low_after_open  = min(float(c[3]) for c in candles_after_open)
-    
-    if signal == "BUY" and max_high_after_open >= target:
+    # Check if target is hit NOW (1:1 achieved)
+    if signal == "BUY" and ltp >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "SELL" and min_low_after_open <= target:
+    if signal == "SELL" and ltp <= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Step 3: Only check SL HIT if T1 was NEVER achieved
-    if len(candles_after_open) < 2:
+    # Only check SL HIT if T1 NOT yet achieved
+    if not candles or len(candles) < 2:
         return {"status": "ACTIVE", "triggered": False}
     
-    last_two_closes = [float(c[4]) for c in candles_after_open[-2:]]
+    last_two_closes = [float(c[4]) for c in candles[-2:]]
     
-    # 2 consecutive candles closed wrong side of EMA20
+    # Check if SL is hit (2 consecutive candles closed wrong side of EMA20)
     if signal == "BUY":
         if all(c < ema20_live for c in last_two_closes):
             return {"status": "SL_HIT", "triggered": True}
@@ -468,20 +450,14 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             if r["symbol"] == symbol:
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
                 
-                # Get current candle HIGH and LOW
-                current_candle = candles[-1]
-                current_high = float(current_candle[2])
-                current_low = float(current_candle[3])
-                
                 # Check if signal has reached T1, SL hit, or still active
                 # Pass t1_already_achieved flag to LOCK T1 once achieved
                 exit_status = check_exit_or_sl_hit(
-                    r["signal"], current_high, current_low,
+                    r["signal"], ltp,
                     r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
                     r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
                     candles, ema20_live,
-                    t1_already_achieved=r.get("t1_achieved", False),  # ← LOCK if already achieved
-                    opening_timestamp=r.get("opening_timestamp")  # ← Pass opening timestamp from result
+                    t1_already_achieved=r.get("t1_achieved", False)  # ← LOCK if already achieved
                 )
                 
                 r.update({
@@ -556,24 +532,13 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     # Calculate entry and target prices
     entry_target = calc_entry_target(signal, open_candle)
     
-    # Get current candle HIGH and LOW
-    current_candle = candles[-1]
-    current_high = float(current_candle[2])
-    current_low = float(current_candle[3])
-    
-    # Check exit or SL hit status (using candle HIGH/LOW, not LTP)
-    try:
-        opening_ts = float(open_candle[0]) if open_candle and len(open_candle) > 0 else None
-    except (ValueError, TypeError, IndexError):
-        opening_ts = None
-    
+    # Check exit or SL hit status
     exit_status = check_exit_or_sl_hit(
-        signal, current_high, current_low,
+        signal, ltp, 
         entry_target["entry"] if entry_target else None,
         entry_target["target"] if entry_target else None,
         candles, ema20_live,
-        t1_already_achieved=False,  # First time, not achieved yet
-        opening_timestamp=opening_ts  # ← Pass opening timestamp safely
+        t1_already_achieved=False  # First time, not achieved yet
     )
     
     result = {
@@ -595,8 +560,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "sl_hit":     False,
         "entry_target": entry_target,
         "exit_status": exit_status.get("status", "ACTIVE"),
-        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",
-        "opening_timestamp": opening_ts,  # ← Safe timestamp storage
+        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Lock T1 once achieved
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
