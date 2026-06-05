@@ -88,7 +88,18 @@ def get_ist_today_str() -> str:
     return get_ist_now().strftime("%Y-%m-%d")
 
 def get_last_trading_day_str() -> str:
-    dt = get_ist_now() - timedelta(days=1)
+    """
+    Returns the most recent trading day as YYYY-MM-DD.
+    
+    KEY FIX: If today is a weekday (Mon-Fri), return TODAY — the market
+    just closed but we still want today's 9:15 candle, not yesterday's.
+    Only go back to a previous day if today is Saturday or Sunday.
+    """
+    dt = get_ist_now()
+    # Today is a weekday — market ran today, return today's date
+    if dt.weekday() < 5:
+        return dt.strftime("%Y-%m-%d")
+    # Today is weekend — walk back to last Friday
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
