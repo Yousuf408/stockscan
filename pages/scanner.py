@@ -624,23 +624,16 @@ sl_hit_count = 0
 total_count = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COLLAPSIBLE FILTER PANEL (place before header so filters are available)
+# INITIALIZE FILTER VARIABLES (defaults if filters not open)
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.show_filters:
-    with st.container(border=True):
-        st.markdown("**⚙ Refine Filters**")
-        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
-        with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
-        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="",               key="f_vol")
-        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="",   key="f_e20")
-        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="",  key="f_e200")
-        with col_f5:  filter_min_score = st.text_input("Score ≥", value="",              key="f_score")
-        tog1, tog2, tog3 = st.columns(3)
-        with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
-        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
-        with tog3: auto_on          = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
-        if auto_on != st.session_state.auto_refresh:
-            st.session_state.auto_refresh = auto_on
+    filter_sig       = "ALL"
+    filter_min_vol   = ""
+    filter_ema20     = ""
+    filter_ema200    = ""
+    filter_min_score = ""
+    toggle_body_wick = False
+    toggle_hide_sl   = False
 else:
     filter_sig       = "ALL"
     filter_min_vol   = ""
