@@ -29,14 +29,29 @@ except ImportError:
     def get_stock_sector(sym): return "GENERAL"
 
 # ── Auth — soft check only, scanner accessible to all ──
-try:
-    from login import is_logged_in, auth_sign_in, _set_session
-except ImportError:
-    def is_logged_in(): return False
-    def auth_sign_in(e, p): return {}
-    def _set_session(d): pass
+def _auth_sign_in(email: str, password: str) -> dict:
+    try:
+        import os
+        url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", "")).rstrip("/")
+        key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        import requests as _req
+        res = _req.post(
+            f"{url}/auth/v1/token?grant_type=password",
+            headers={"apikey": key, "Content-Type": "application/json"},
+            json={"email": email, "password": password},
+            timeout=10,
+        )
+        return res.json()
+    except Exception as e:
+        return {"error": str(e)}
 
-# Always read live from session — updates after inline login
+def _set_session(data: dict):
+    user = data.get("user") or {}
+    st.session_state["user_id"]      = user.get("id", "")
+    st.session_state["user_email"]   = user.get("email", "")
+    st.session_state["access_token"] = data.get("access_token", "")
+
+# Always read live from session
 _user_logged_in = bool(st.session_state.get("user_id"))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1028,8 +1043,7 @@ if not _user_logged_in:
                     st.error("Enter email and password.")
                 else:
                     with st.spinner("Signing in..."):
-                        data = auth_sign_in(il_email.strip(), il_pass.strip())
-                    st.write("DEBUG:", data)  # temporary debug
+                        data = _auth_sign_in(il_email.strip(), il_pass.strip())
                     if data.get("access_token"):
                         _set_session(data)
                         st.session_state["show_inline_login"] = False
