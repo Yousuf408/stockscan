@@ -460,8 +460,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "sl_hit":    sl_hit,
                     "exit_status": exit_status.get("status", "ACTIVE"),
                 })
-                    "sl_hit":    sl_hit,
-                })
                 if sl_hit:
                     log.append(f"🔴 {symbol}: SL Hit — 2 consecutive candles crossed EMA20")
                 return r
