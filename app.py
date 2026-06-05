@@ -41,6 +41,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ──────────────────────────────────────────────────────────────────
+# HIDE STREAMLIT TOOLBAR (Share, Edit, Menu buttons)
+# ──────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Hide the entire Streamlit toolbar */
+[data-testid="stToolbar"] { 
+    display: none !important; 
+}
+
+/* Hide header decoration elements */
+[data-testid="stDecoration"] { 
+    display: none !important; 
+}
+</style>
+""", unsafe_allow_html=True)
+
 apply_styles()
 sidebar_brand()
 page_header("Live Market Dashboard")
