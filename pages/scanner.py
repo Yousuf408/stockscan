@@ -628,6 +628,9 @@ filter_min_score = ""
 toggle_body_wick = False
 toggle_hide_sl   = False
 
+# Initialize view with all results
+view = list(st.session_state.results)
+
 if filter_sig != "ALL":
     view = [r for r in view if r["signal"] == filter_sig]
 if filter_min_vol.strip():
