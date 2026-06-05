@@ -779,6 +779,11 @@ if clear_clicked:
     st.session_state.scan_log  = []
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTOR PILLS
+# ─────────────────────────────────────────────────────────────────────────────
+all_sectors = sorted(set(r["sector"] for r in view))
 sector_counts = {}
 for r in view:
     sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
