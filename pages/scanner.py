@@ -373,7 +373,8 @@ def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, ent
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
-    T1 ACHIEVE: Check if target was EVER touched in ANY candle (past or current)
+    T1 ACHIEVE: Check if target was EVER touched in ANY candle from TODAY's TRADING DAY
+    (Filters by latest trading day in data to handle weekends/holidays)
     Once T1 is achieved, it's LOCKED - no further status changes.
     SL HIT: Only check if T1 was NEVER achieved
     
@@ -386,21 +387,42 @@ def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, ent
     if t1_already_achieved:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Step 1: Check if target was EVER touched in ANY candle (even past ones)
-    # This handles late refresh cases where target was hit in a previous candle
-    max_high_all = max(float(c[2]) for c in candles)  # Maximum HIGH across all candles
-    min_low_all = min(float(c[3]) for c in candles)   # Minimum LOW across all candles
+    # Step 1: Find LATEST TRADING DAY in the candles data
+    # This handles weekends/holidays - always uses the most recent trading day
+    from datetime import datetime
     
-    if signal == "BUY" and max_high_all >= target:
-        return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "SELL" and min_low_all <= target:
-        return {"status": "T1_ACHIEVE", "triggered": True}
+    latest_trading_day = None
+    today_candles = []
     
-    # Step 2: Only check SL HIT if target was NEVER touched
-    if len(candles) < 2:
+    if candles:
+        try:
+            # Get the latest timestamp from candles
+            latest_timestamp = max(float(c[0]) for c in candles)
+            latest_trading_day = datetime.fromtimestamp(latest_timestamp).date()
+            
+            # Filter candles to only those from the latest trading day
+            today_candles = [
+                c for c in candles 
+                if datetime.fromtimestamp(float(c[0])).date() == latest_trading_day
+            ]
+        except:
+            today_candles = candles  # Fallback to all candles if error
+    
+    # Step 2: Check if target was EVER touched on TODAY'S TRADING DAY
+    if today_candles:
+        max_high_today = max(float(c[2]) for c in today_candles)
+        min_low_today = min(float(c[3]) for c in today_candles)
+        
+        if signal == "BUY" and max_high_today >= target:
+            return {"status": "T1_ACHIEVE", "triggered": True}
+        if signal == "SELL" and min_low_today <= target:
+            return {"status": "T1_ACHIEVE", "triggered": True}
+    
+    # Step 3: Only check SL HIT if target was NEVER touched
+    if len(today_candles) < 2:
         return {"status": "ACTIVE", "triggered": False}
     
-    last_two_closes = [float(c[4]) for c in candles[-2:]]
+    last_two_closes = [float(c[4]) for c in today_candles[-2:]]
     
     # Check if SL is hit (2 consecutive candles closed wrong side of EMA20)
     if signal == "BUY":
