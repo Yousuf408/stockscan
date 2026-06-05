@@ -378,15 +378,18 @@ def save_scanner_result(result: dict, watchlist_tab: str):
 
 
 def clear_scanner_results(watchlist_tab: str):
-    """Delete all scanner results for current user today."""
+    """Delete all scanner results for current user and watchlist tab."""
     try:
         user_id = _get_user_id()
         if not user_id:
+            print("[clear_scanner_results] No user_id — skipping")
             return
-        _sb_delete("scanner_results",
-                   f"user_id=eq.{user_id}&scan_date=eq.{date.today()}&watchlist_tab=eq.{watchlist_tab}")
-    except Exception:
-        pass
+        filter_str = f"user_id=eq.{user_id}&watchlist_tab=eq.{watchlist_tab}"
+        print(f"[clear_scanner_results] Deleting: {filter_str}")
+        _sb_delete("scanner_results", filter_str)
+        print("[clear_scanner_results] Done")
+    except Exception as e:
+        print(f"[clear_scanner_results] ERROR: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
