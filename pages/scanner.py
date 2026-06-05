@@ -33,6 +33,8 @@ try:
     from login import is_logged_in, auth_sign_in, _set_session
 except ImportError:
     def is_logged_in(): return False
+    def auth_sign_in(e, p): return {}
+    def _set_session(d): pass
 
 # Always read live from session — updates after inline login
 _user_logged_in = bool(st.session_state.get("user_id"))
