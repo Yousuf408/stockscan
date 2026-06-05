@@ -41,30 +41,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ──────────────────────────────────────────────────────────────────
-# HIDE STREAMLIT TOOLBAR (Share, Edit, Menu buttons ONLY)
-# ──────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* Hide share, edit, and menu buttons - more specific targeting */
-header[data-testid="stHeader"] div:last-child button {
-    display: none !important;
-}
-
-/* Alternative: Hide by button content/svg icons */
-button[title="Share"],
-button[title="Edit"],
-button[title="Settings"] {
-    display: none !important;
-}
-
-/* Hide toolbar right side buttons only */
-[data-testid="stToolbar"] > div:last-child button {
-    display: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 apply_styles()
 sidebar_brand()
 page_header("Live Market Dashboard")
