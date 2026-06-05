@@ -525,6 +525,11 @@ def check_historical_status(signal: str, candles_from_open: list,
     )
 
     if not entry_hit:
+        # Check if LTP is within 0.5% of entry price — NEAR_ENTRY
+        last_ltp = float(candles_to_check[-1][4])
+        pct_from_entry = abs(last_ltp - entry_price) / entry_price * 100
+        if pct_from_entry <= 0.5:
+            return "NEAR_ENTRY"
         return "NO_ENTRY"
 
     # Entry triggered — now check T1 and SL candle by candle
@@ -584,6 +589,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 et        = r.get("entry_target") or {}
                 sl_price  = et.get("sl")
                 t1_val    = et.get("target")
+                signal    = r.get("signal")          # ← read signal from stored result
 
                 current_status = r.get("exit_status", "ACTIVE")
 
@@ -774,7 +780,7 @@ def run_full_scan(watchlist_stocks: list):
         analyze_stock(stock, candles, is_refresh=False)
 
     if st.session_state.results:
-        status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "SL_HIT": 2, "NO_ENTRY": 3}
+        status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "NEAR_ENTRY": 2, "NO_ENTRY": 3, "SL_HIT": 4}
         st.session_state.results.sort(
             key=lambda x: (
                 status_order.get(x.get("exit_status", "ACTIVE"), 1),
@@ -866,12 +872,13 @@ div[data-testid="stPills"] button {
     font-size:10px; font-weight:700; padding:2px 8px;
     border-radius:5px; font-family:monospace;
 }
-.ts-badge-buy     { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
-.ts-badge-sell    { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
+.ts-badge-buy       { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
+.ts-badge-sell      { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
 .ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
-.ts-badge-slhit   { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
-.ts-badge-exit    { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
-.ts-badge-noentry { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
+.ts-badge-slhit     { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
+.ts-badge-exit      { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
+.ts-badge-noentry   { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
+.ts-badge-nearentry { color:#b36200; background:#fff8ec; border:1px solid #ffd599; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
 .ts-meta  {
@@ -1036,7 +1043,7 @@ buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit
 sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
 sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
-no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") == "NO_ENTRY"])
+no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") in ("NO_ENTRY", "NEAR_ENTRY")])
 total_count      = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1172,6 +1179,12 @@ else:
             badge_label = "SL HIT ✕"
             bar_color   = "#e87040"
             pct_clr     = "#d04a00"
+        elif exit_status == "NEAR_ENTRY":
+            border_clr  = "#e6a020"
+            badge_cls   = "ts-badge-nearentry"
+            badge_label = "Near Entry 🔔"
+            bar_color   = "#e6a020"
+            pct_clr     = "#b36200"
         elif exit_status == "NO_ENTRY":
             border_clr  = "#cccccc"
             badge_cls   = "ts-badge-noentry"
