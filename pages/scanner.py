@@ -614,41 +614,14 @@ ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER CARD — title + subtitle LEFT | counters RIGHT
+# NOTE: Counters will be updated AFTER filters are applied (see below)
 # ─────────────────────────────────────────────────────────────────────────────
-buy_count   = len([r for r in st.session_state.results if r["signal"] == "BUY"  and not r.get("sl_hit")])
-sell_count  = len([r for r in st.session_state.results if r["signal"] == "SELL" and not r.get("sl_hit")])
-total_count = len(st.session_state.results)
 
-st.markdown(f"""
-<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
-  
-  <div style="flex:1;">
-    <p class="ts-header-title">Momentum scanner</p>
-    <p class="ts-header-sub">
-      {st.session_state.selected_watchlist}
-      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
-      &nbsp;·&nbsp; {mkt_label}
-      &nbsp;·&nbsp; {ist_time_str}
-    </p>
-  </div>
-
-  <div style="display:flex;gap:40px;margin-top:2px;">
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
-      <div class="ts-counter-lbl">Buy</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
-      <div class="ts-counter-lbl">Sell</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
-      <div class="ts-counter-lbl">Total</div>
-    </div>
-  </div>
-
-</div>
-""", unsafe_allow_html=True)
+# Placeholder - will be calculated after filters
+buy_count   = 0
+sell_count  = 0
+sl_hit_count = 0
+total_count = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTION BUTTON ROW — with watchlist selector
@@ -762,8 +735,50 @@ if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTOR PILLS
+# CALCULATE HEADER COUNTS FROM FILTERED VIEW (after all filters applied)
 # ─────────────────────────────────────────────────────────────────────────────
+buy_count   = len([r for r in view if r["signal"] == "BUY"])
+sell_count  = len([r for r in view if r["signal"] == "SELL"])
+sl_hit_count = len([r for r in view if r.get("sl_hit", False)])
+total_count = len(view)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REDRAW HEADER WITH UPDATED COUNTS
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
+  
+  <div style="flex:1;">
+    <p class="ts-header-title">Momentum scanner</p>
+    <p class="ts-header-sub">
+      {st.session_state.selected_watchlist}
+      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
+      &nbsp;·&nbsp; {mkt_label}
+      &nbsp;·&nbsp; {ist_time_str}
+    </p>
+  </div>
+
+  <div style="display:flex;gap:35px;margin-top:2px;">
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
+      <div class="ts-counter-lbl">Buy</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
+      <div class="ts-counter-lbl">Sell</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
+      <div class="ts-counter-lbl">SL Hit</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
+      <div class="ts-counter-lbl">Total</div>
+    </div>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
 all_sectors = sorted(set(r["sector"] for r in view))
 sector_counts = {}
 for r in view:
