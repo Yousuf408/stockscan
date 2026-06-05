@@ -497,6 +497,79 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
     return {"status": "ACTIVE", "triggered": False}
 
 
+def check_historical_status(signal: str, candles_from_open: list,
+                             target: float, sl_price: float,
+                             ema20_live: float,
+                             trading_date: str) -> str:
+    """
+    Scans ALL candles from 9:15 onwards — SAME DAY ONLY — to determine
+    the correct trade status historically.
+
+    This fixes the issue where:
+    - T1 was hit at 10:30 AM but LTP came back below T1 by end of day
+    - EXIT was triggered at 11:00 AM but scanner only sees current LTP
+
+    Logic:
+    1. Walk every candle from 9:15 to last candle of the day
+    2. Check if T1 was ever hit using candle HIGH (BUY) or LOW (SELL)
+    3. Check if SL was ever hit using candle LOW (BUY) or HIGH (SELL)
+       — only BEFORE T1 is hit
+    4. After T1 hit — check if any candle CLOSED on wrong side of EMA20
+       → EXIT
+
+    Safety: only processes candles whose date matches trading_date
+    so previous day candles are NEVER included even if slicing is off.
+    """
+    if not candles_from_open or not signal or not target or not sl_price:
+        return "ACTIVE"
+
+    t1_hit_idx = None
+    sl_hit_idx = None
+
+    for i, c in enumerate(candles_from_open):
+        # ── Safety: same day only ──
+        candle_date = str(c[0]).split(" ")[0]
+        if candle_date != trading_date:
+            continue
+
+        high  = float(c[2])
+        low   = float(c[3])
+        close = float(c[4])
+
+        # ── Check SL first — only before T1 ──
+        if t1_hit_idx is None and sl_hit_idx is None:
+            if signal == "BUY"  and low  <= sl_price:
+                sl_hit_idx = i
+            if signal == "SELL" and high >= sl_price:
+                sl_hit_idx = i
+
+        # ── Check T1 hit using candle extremes ──
+        if t1_hit_idx is None:
+            if signal == "BUY"  and high >= target:
+                t1_hit_idx = i
+            if signal == "SELL" and low  <= target:
+                t1_hit_idx = i
+
+    # ── T1 was hit — now check for EXIT ──
+    if t1_hit_idx is not None:
+        for c in candles_from_open[t1_hit_idx:]:
+            candle_date = str(c[0]).split(" ")[0]
+            if candle_date != trading_date:
+                continue
+            close = float(c[4])
+            if signal == "BUY"  and close < ema20_live:
+                return "EXIT"
+            if signal == "SELL" and close > ema20_live:
+                return "EXIT"
+        return "T1_ACHIEVE"
+
+    # ── SL hit before T1 ──
+    if sl_hit_idx is not None:
+        return "SL_HIT"
+
+    return "ACTIVE"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -650,21 +723,22 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             f"T1={entry_target['target']}"
         )
 
-    # Check T1/SL/EXIT status using LTP
-    exit_status = check_exit_or_sl_hit(
-        signal, ltp,
-        entry_target["entry"]  if entry_target else None,
+    # ── All candles from 9:15 onwards — same day only ──
+    candles_from_open = candles[opening_idx:]
+    trading_date      = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+
+    # Historical status — scans entire day's candles to find T1/SL/EXIT
+    historical_status = check_historical_status(
+        signal,
+        candles_from_open,
         entry_target["target"] if entry_target else None,
         entry_target["sl"]     if entry_target else None,
-        candles, ema20_live,
-        t1_already_achieved=False,
-        exit_already_triggered=False,
+        ema20_live,
+        trading_date,
     )
 
-    sl_hit_now = check_sl_hit(signal, ltp, entry_target["sl"] if entry_target else None)
-
-    new_status  = exit_status.get("status", "ACTIVE")
-    t1_achieved = new_status in ("T1_ACHIEVE", "EXIT")
+    sl_hit_now  = historical_status == "SL_HIT"
+    t1_achieved = historical_status in ("T1_ACHIEVE", "EXIT")
 
     result = {
         "symbol":       symbol,
@@ -684,7 +758,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "closePrice":   round(float(open_candle[4]), 2),
         "sl_hit":       sl_hit_now,
         "entry_target": entry_target,
-        "exit_status":  new_status,
+        "exit_status":  historical_status,
         "t1_achieved":  t1_achieved,
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
