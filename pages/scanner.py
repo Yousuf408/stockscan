@@ -577,13 +577,18 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     current_low = float(current_candle[3])
     
     # Check exit or SL hit status (using candle HIGH/LOW, not LTP)
+    try:
+        opening_ts = float(open_candle[0]) if open_candle and len(open_candle) > 0 else None
+    except (ValueError, TypeError, IndexError):
+        opening_ts = None
+    
     exit_status = check_exit_or_sl_hit(
         signal, current_high, current_low,
         entry_target["entry"] if entry_target else None,
         entry_target["target"] if entry_target else None,
         candles, ema20_live,
         t1_already_achieved=False,  # First time, not achieved yet
-        opening_timestamp=float(open_candle[0])  # ← Pass opening timestamp
+        opening_timestamp=opening_ts  # ← Pass opening timestamp safely
     )
     
     result = {
@@ -606,7 +611,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "entry_target": entry_target,
         "exit_status": exit_status.get("status", "ACTIVE"),
         "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",
-        "opening_timestamp": float(open_candle[0]),  # ← Store opening candle timestamp
+        "opening_timestamp": opening_ts,  # ← Safe timestamp storage
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
