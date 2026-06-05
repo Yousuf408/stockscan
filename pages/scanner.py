@@ -33,10 +33,10 @@ try:
     from login import is_logged_in
     if not is_logged_in():
         st.warning("Please login to access the scanner.")
-        st.switch_page("login.py")
+        st.switch_page("../login.py")
         st.stop()
-except ImportError:
-    pass  # login.py not found — allow access (dev mode)
+except (ImportError, Exception):
+    pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: WATCHLIST FILE INTEGRATION
