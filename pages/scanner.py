@@ -369,27 +369,34 @@ def calc_entry_target(signal: str, opening_candle: list) -> dict:
 
 
 def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float, 
-                          candles: list, ema20_live: float) -> dict:
+                          candles: list, ema20_live: float, t1_already_achieved: bool = False) -> dict:
     """
-    Check if signal has EXIT (hit 1:1 target) or SL HIT (closed below/above EMA20).
+    Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
-    Returns: {status: "EXIT" | "SL_HIT" | "ACTIVE", triggered: True/False}
+    Once T1 is achieved, it's LOCKED - no further status changes.
+    
+    Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
     """
     if not signal or ltp is None or entry is None or target is None:
         return {"status": "ACTIVE", "triggered": False}
     
-    # Check if target is hit (1:1 achieved)
-    if signal == "BUY" and ltp >= target:
-        return {"status": "EXIT", "triggered": True}
-    if signal == "SELL" and ltp <= target:
-        return {"status": "EXIT", "triggered": True}
+    # If T1 already achieved, KEEP IT LOCKED - don't change
+    if t1_already_achieved:
+        return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Check if SL is hit (closed below/above EMA20)
+    # Check if target is hit NOW (1:1 achieved)
+    if signal == "BUY" and ltp >= target:
+        return {"status": "T1_ACHIEVE", "triggered": True}
+    if signal == "SELL" and ltp <= target:
+        return {"status": "T1_ACHIEVE", "triggered": True}
+    
+    # Only check SL HIT if T1 NOT yet achieved
     if not candles or len(candles) < 2:
         return {"status": "ACTIVE", "triggered": False}
     
     last_two_closes = [float(c[4]) for c in candles[-2:]]
     
+    # Check if SL is hit (2 consecutive candles closed wrong side of EMA20)
     if signal == "BUY":
         if all(c < ema20_live for c in last_two_closes):
             return {"status": "SL_HIT", "triggered": True}
@@ -443,12 +450,14 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             if r["symbol"] == symbol:
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
                 
-                # Check if signal has exited or hit SL
+                # Check if signal has reached T1, SL hit, or still active
+                # Pass t1_already_achieved flag to LOCK T1 once achieved
                 exit_status = check_exit_or_sl_hit(
                     r["signal"], ltp,
                     r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
                     r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
-                    candles, ema20_live
+                    candles, ema20_live,
+                    t1_already_achieved=r.get("t1_achieved", False)  # ← LOCK if already achieved
                 )
                 
                 r.update({
@@ -459,6 +468,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "pctChange": round(pct_change, 2),
                     "sl_hit":    sl_hit,
                     "exit_status": exit_status.get("status", "ACTIVE"),
+                    "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Update T1 flag
                 })
                 if sl_hit:
                     log.append(f"🔴 {symbol}: SL Hit — 2 consecutive candles crossed EMA20")
@@ -527,7 +537,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         signal, ltp, 
         entry_target["entry"] if entry_target else None,
         entry_target["target"] if entry_target else None,
-        candles, ema20_live
+        candles, ema20_live,
+        t1_already_achieved=False  # First time, not achieved yet
     )
     
     result = {
@@ -549,6 +560,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "sl_hit":     False,
         "entry_target": entry_target,
         "exit_status": exit_status.get("status", "ACTIVE"),
+        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Lock T1 once achieved
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -668,7 +680,7 @@ div[data-testid="stPills"] button {
 }
 .ts-badge-buy  { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
 .ts-badge-sell { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
-.ts-badge-exit { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
+.ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
 .ts-badge-slhit{ color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
@@ -828,7 +840,7 @@ if toggle_hide_sl:
 # ─────────────────────────────────────────────────────────────────────────────
 buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
-exit_count  = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
+t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
 sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
 total_count = len(view)
 
@@ -859,8 +871,8 @@ with header_container:
       <div class="ts-counter-lbl">Sell</div>
     </div>
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{exit_count}</div>
-      <div class="ts-counter-lbl">EXIT</div>
+      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{t1_achieve_count}</div>
+      <div class="ts-counter-lbl">T1 Achieve</div>
     </div>
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
@@ -945,10 +957,10 @@ else:
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
         # Determine badge based on exit_status
-        if exit_status == "EXIT":
+        if exit_status == "T1_ACHIEVE":
             border_clr   = "#27ae60"
-            badge_cls    = "ts-badge-exit"
-            badge_label  = "EXIT ✓"
+            badge_cls    = "ts-badge-t1achieve"
+            badge_label  = "T1 Achieve ✅"
             bar_color    = "#27ae60"
             pct_clr      = "#27ae60" if pct >= 0 else "#c0392b"
         elif exit_status == "SL_HIT":
