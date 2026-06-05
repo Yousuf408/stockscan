@@ -34,6 +34,8 @@ try:
     from login import is_logged_in
     if not is_logged_in():
         st.warning("Please login to access the scanner.")
+        if st.button("Go to Login →", type="primary"):
+            st.switch_page("pages/login.py")
         st.stop()
 except ImportError:
     pass
