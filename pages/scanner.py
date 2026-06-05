@@ -580,7 +580,7 @@ div[data-testid="stPills"] button {
 .ts-price { font-size:15px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:13px; font-weight:700; margin-left:5px; }
 .ts-meta  {
-    font-size:11px; color:#888888; font-family:monospace;
+    font-size:13px; color:#888888; font-family:monospace;
     display:flex; gap:14px; align-items:center;
     margin-bottom:10px;
 }
@@ -604,24 +604,8 @@ div[data-testid="stPills"] button {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Watchlist selector - VISIBLE & PROMINENT
+# Watchlist selector will be in button row (see below)
 # ─────────────────────────────────────────────────────────────────────────────
-wl_col1, wl_col2 = st.columns([2, 8])
-with wl_col1:
-    st.markdown("<span style='font-size:12px;font-weight:600;color:#666;'>📋 Watchlist</span>", 
-                unsafe_allow_html=True)
-    selected_wl = st.selectbox(
-        "Watchlist",
-        WATCHLIST_NAMES,
-        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
-        label_visibility="collapsed",
-    )
-    
-if selected_wl != st.session_state.selected_watchlist:
-    st.session_state.selected_watchlist = selected_wl
-    st.session_state.results            = []
-    st.session_state.scan_log           = []
-    st.rerun()
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
 mkt_open       = is_market_open()
@@ -667,23 +651,37 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACTION BUTTON ROW
+# ACTION BUTTON ROW — with watchlist selector
 # ─────────────────────────────────────────────────────────────────────────────
-btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.6, 1.6, 1.4, 1.4, 5])
+btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
+
 with btn_col1:
+    selected_wl = st.selectbox(
+        "Watchlist",
+        WATCHLIST_NAMES,
+        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+        label_visibility="collapsed",
+    )
+    if selected_wl != st.session_state.selected_watchlist:
+        st.session_state.selected_watchlist = selected_wl
+        st.session_state.results            = []
+        st.session_state.scan_log           = []
+        st.rerun()
+
+with btn_col2:
     scan_clicked    = st.button("▷  Run scan",   use_container_width=True,
                                  disabled=len(stocks_to_scan) == 0)
-with btn_col2:
+with btn_col3:
     refresh_clicked = st.button("↺  Refresh",    use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
-with btn_col3:
-    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
 with btn_col4:
+    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
+with btn_col5:
     filter_toggle   = st.button(
         ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
         use_container_width=True,
     )
-with btn_col5:
+with btn_col6:
     sig_display     = len([r for r in st.session_state.results])
     wl_total        = len(stocks_to_scan)
     st.markdown(
