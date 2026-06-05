@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 
 # ── Core engine import ──
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from core import calc_ema, load_watchlist, save_watchlist
+from core import calc_ema, load_watchlist, save_watchlist, \
+                 load_scanner_results, save_scanner_result, clear_scanner_results
 
 # ── Import from stocks.py ──
 try:
@@ -26,6 +27,16 @@ try:
 except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
+
+# ── Auth guard — redirect to login if not logged in ──
+try:
+    from login import is_logged_in
+    if not is_logged_in():
+        st.warning("Please login to access the scanner.")
+        st.switch_page("login.py")
+        st.stop()
+except ImportError:
+    pass  # login.py not found — allow access (dev mode)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: WATCHLIST FILE INTEGRATION
@@ -71,9 +82,17 @@ for _k, _v in [
     ("scan_log",             []),
     ("last_auto_refresh",    0),
     ("show_filters",         False),
+    ("db_results_loaded",    False),
 ]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+# ── Load today's results from Supabase on first page load ──
+if not st.session_state["db_results_loaded"]:
+    db_results = load_scanner_results(st.session_state["selected_watchlist"])
+    if db_results:
+        st.session_state["results"] = db_results
+    st.session_state["db_results_loaded"] = True
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3: DATE & TIME
@@ -248,32 +267,36 @@ def calc_vwap(candles: list):
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5.9: FIND OPENING CANDLE (FIXED FOR EXACT PRICE MATCH)
+# SECTION 5.9: FIND OPENING CANDLE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_opening_candle_index(candles: list) -> int:
     if not candles:
         return -1
 
-    # Get target date string (YYYY-MM-DD)
     target_date = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
 
     for i, c in enumerate(candles):
-        ts        = str(c[0])  # Format: "YYYY-MM-DD HH:MM:SS"
+        ts        = str(c[0])
         date_part = ts.split(" ")[0]
         time_part = ts.split(" ")[1] if " " in ts else ""
-        
-        # STRICT MATCH: Ensure it is exactly the 09:15:00 candle of the current session
-        if date_part == target_date and (time_part.startswith("09:15:00") or time_part == "09:15"):
+        if date_part == target_date and time_part.startswith("09:15"):
             return i
 
     return -1
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5.10: DEBUG — OPENING CANDLE INSPECTOR (STRICT DATA CHECK)
+# SECTION 5.10: DEBUG — OPENING CANDLE INSPECTOR
 # ─────────────────────────────────────────────────────────────────────────────
 
 def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
+    """
+    Logs full details of the detected 9:15 opening candle and the
+    Entry / SL / T1 values that will be used for this stock.
+
+    Called inside analyze_stock() right after find_opening_candle_index().
+    Results appear in the Scan Log expander on the scanner page.
+    """
     log = st.session_state.get("scan_log", [])
 
     if opening_idx < 0:
@@ -289,7 +312,6 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
     close = float(open_candle[4])
     vol   = float(open_candle[5])
 
-    # STRATEGY FIX: Ensure we use the absolute mathematical limits of that 5m structural window
     risk             = round(high - low, 2)
     candle_range_pct = round((risk / low * 100) if low > 0 else 0, 3)
 
@@ -306,16 +328,31 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
     log.append("━" * 55)
     log.append(f"🐛 DEBUG [{symbol}]  opening_idx={opening_idx}")
     log.append(f"   Timestamp   : {ts}")
-    log.append(f"   O={o:.2f}  H={high:.2f}  L={low:.2f}  C={close:.2f}  Vol={vol:,.0f}")
+    log.append(f"   O={o}  H={high}  L={low}  C={close}  Vol={vol:,.0f}")
     log.append(f"   Candle range: {risk}  ({candle_range_pct}%)")
     log.append(f"   ── BUY scenario ──────────────────")
-    log.append(f"      Entry  = HIGH         = {entry_buy:.2f}")
-    log.append(f"      SL     = LOW          = {sl_buy:.2f}")
-    log.append(f"      T1     = {entry_buy:.2f} + {risk} = {target_buy:.2f}")
+    log.append(f"      Entry  = HIGH        = {entry_buy}")
+    log.append(f"      SL     = LOW         = {sl_buy}")
+    log.append(f"      Risk   = H - L       = {risk}")
+    log.append(f"      T1     = {entry_buy} + {risk} = {target_buy}")
     log.append(f"   ── SELL scenario ─────────────────")
-    log.append(f"      Entry  = LOW          = {entry_sell:.2f}")
-    log.append(f"      SL     = HIGH         = {sl_sell:.2f}")
-    log.append(f"      T1     = {entry_sell:.2f} - {risk} = {target_sell:.2f}")
+    log.append(f"      Entry  = LOW         = {entry_sell}")
+    log.append(f"      SL     = HIGH        = {sl_sell}")
+    log.append(f"      Risk   = H - L       = {risk}")
+    log.append(f"      T1     = {entry_sell} - {risk} = {target_sell}")
+    log.append(f"   ── Candles around opening_idx ────")
+
+    start = max(0, opening_idx - 2)
+    end   = min(len(candles), opening_idx + 3)
+    for i in range(start, end):
+        c      = candles[i]
+        marker = "  ◀ OPENING CANDLE" if i == opening_idx else ""
+        log.append(
+            f"   [{i:>4}] {c[0]}  "
+            f"O={float(c[1]):.2f}  H={float(c[2]):.2f}  "
+            f"L={float(c[3]):.2f}  C={float(c[4]):.2f}"
+            f"{marker}"
+        )
     log.append("━" * 55)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -723,6 +760,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
     st.session_state.results.append(result)
+    # Persist to Supabase immediately
+    save_scanner_result(result, st.session_state.get("selected_watchlist", "Today"))
     return result
 
 
@@ -911,6 +950,7 @@ with btn_col1:
         st.session_state.selected_watchlist = selected_wl
         st.session_state.results            = []
         st.session_state.scan_log           = []
+        st.session_state.db_results_loaded  = False
         st.rerun()
 
 with btn_col2:
@@ -946,6 +986,7 @@ if scan_clicked:
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
 if clear_clicked:
+    clear_scanner_results(st.session_state.selected_watchlist)
     st.session_state.results      = []
     st.session_state.scan_log     = []
     st.session_state.show_filters = False
