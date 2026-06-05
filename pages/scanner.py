@@ -29,13 +29,13 @@ except ImportError:
     def get_stock_sector(sym): return "GENERAL"
 
 # ── Auth guard — redirect to login if not logged in ──
+# ── Auth guard ──
 try:
     from login import is_logged_in
     if not is_logged_in():
         st.warning("Please login to access the scanner.")
-        st.switch_page("../login.py")
         st.stop()
-except (ImportError, Exception):
+except ImportError:
     pass
 
 # ─────────────────────────────────────────────────────────────────────────────
