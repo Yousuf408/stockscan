@@ -332,6 +332,74 @@ def check_sl_hit(signal: str, candles: list, ema20_live: float) -> bool:
     return False
 
 
+def calc_entry_target(signal: str, opening_candle: list) -> dict:
+    """
+    Calculate entry price and 1:1 target for BUY/SELL signals.
+    
+    BUY:  Entry = HIGH, SL = LOW, Target = Entry + (Entry - SL)
+    SELL: Entry = LOW, SL = HIGH, Target = Entry - (SL - Entry)
+    
+    Returns: {entry, sl, target, risk}
+    """
+    if not signal or not opening_candle:
+        return None
+    
+    high = float(opening_candle[2])
+    low = float(opening_candle[3])
+    
+    if signal == "BUY":
+        entry = high
+        sl = low
+        risk = entry - sl
+        target = entry + risk
+    elif signal == "SELL":
+        entry = low
+        sl = high
+        risk = sl - entry
+        target = entry - risk
+    else:
+        return None
+    
+    return {
+        "entry": round(entry, 2),
+        "sl": round(sl, 2),
+        "target": round(target, 2),
+        "risk": round(risk, 2)
+    }
+
+
+def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float, 
+                          candles: list, ema20_live: float) -> dict:
+    """
+    Check if signal has EXIT (hit 1:1 target) or SL HIT (closed below/above EMA20).
+    
+    Returns: {status: "EXIT" | "SL_HIT" | "ACTIVE", triggered: True/False}
+    """
+    if not signal or ltp is None or entry is None or target is None:
+        return {"status": "ACTIVE", "triggered": False}
+    
+    # Check if target is hit (1:1 achieved)
+    if signal == "BUY" and ltp >= target:
+        return {"status": "EXIT", "triggered": True}
+    if signal == "SELL" and ltp <= target:
+        return {"status": "EXIT", "triggered": True}
+    
+    # Check if SL is hit (closed below/above EMA20)
+    if not candles or len(candles) < 2:
+        return {"status": "ACTIVE", "triggered": False}
+    
+    last_two_closes = [float(c[4]) for c in candles[-2:]]
+    
+    if signal == "BUY":
+        if all(c < ema20_live for c in last_two_closes):
+            return {"status": "SL_HIT", "triggered": True}
+    elif signal == "SELL":
+        if all(c > ema20_live for c in last_two_closes):
+            return {"status": "SL_HIT", "triggered": True}
+    
+    return {"status": "ACTIVE", "triggered": False}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -374,12 +442,24 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         for r in st.session_state.results:
             if r["symbol"] == symbol:
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
+                
+                # Check if signal has exited or hit SL
+                exit_status = check_exit_or_sl_hit(
+                    r["signal"], ltp,
+                    r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
+                    r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
+                    candles, ema20_live
+                )
+                
                 r.update({
                     "ltp":       round(ltp, 2),
                     "ema20":     round(ema20_live, 2),
                     "ema200":    round(ema200_live, 2),
                     "vwap":      round(vwap_live, 2),
                     "pctChange": round(pct_change, 2),
+                    "sl_hit":    sl_hit,
+                    "exit_status": exit_status.get("status", "ACTIVE"),
+                })
                     "sl_hit":    sl_hit,
                 })
                 if sl_hit:
@@ -440,6 +520,18 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         return None
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
+    
+    # Calculate entry and target prices
+    entry_target = calc_entry_target(signal, open_candle)
+    
+    # Check exit or SL hit status
+    exit_status = check_exit_or_sl_hit(
+        signal, ltp, 
+        entry_target["entry"] if entry_target else None,
+        entry_target["target"] if entry_target else None,
+        candles, ema20_live
+    )
+    
     result = {
         "symbol":     symbol,
         "sector":     sector or "GENERAL",
@@ -457,6 +549,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "lowPrice":   round(float(open_candle[3]), 2),
         "closePrice": round(float(open_candle[4]), 2),
         "sl_hit":     False,
+        "entry_target": entry_target,
+        "exit_status": exit_status.get("status", "ACTIVE"),
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -576,6 +670,7 @@ div[data-testid="stPills"] button {
 }
 .ts-badge-buy  { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
 .ts-badge-sell { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
+.ts-badge-exit { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
 .ts-badge-slhit{ color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
@@ -657,9 +752,10 @@ if toggle_hide_sl:
 # ─────────────────────────────────────────────────────────────────────────────
 # CALCULATE HEADER COUNTS FROM FILTERED VIEW (after all filters applied)
 # ─────────────────────────────────────────────────────────────────────────────
-buy_count   = len([r for r in view if r["signal"] == "BUY" and not r.get("sl_hit", False)])
-sell_count  = len([r for r in view if r["signal"] == "SELL" and not r.get("sl_hit", False)])
-sl_hit_count = len([r for r in view if r.get("sl_hit", False)])
+buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+exit_count  = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
+sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
 total_count = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -678,7 +774,7 @@ st.markdown(f"""
     </p>
   </div>
 
-  <div style="display:flex;gap:35px;margin-top:2px;">
+  <div style="display:flex;gap:30px;margin-top:2px;">
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
       <div class="ts-counter-lbl">Buy</div>
@@ -686,6 +782,10 @@ st.markdown(f"""
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
       <div class="ts-counter-lbl">Sell</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{exit_count}</div>
+      <div class="ts-counter-lbl">EXIT</div>
     </div>
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
@@ -858,9 +958,9 @@ else:
         )
 
     for item in view:
-        is_sl_hit    = item.get("sl_hit", False)
         sym          = item["symbol"]
         sig          = item["signal"]
+        exit_status  = item.get("exit_status", "ACTIVE")
         sector_clean = item["sector"].replace("NIFTY ", "")
         ltp          = item["ltp"]
         pct          = item["pctChange"]
@@ -868,14 +968,21 @@ else:
         vwap         = item["vwap"]
         ema200       = item["ema200"]
         score        = item["score"]
+        entry_target = item.get("entry_target", {})
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
-        # colours
-        if is_sl_hit:
+        # Determine badge based on exit_status
+        if exit_status == "EXIT":
+            border_clr   = "#27ae60"
+            badge_cls    = "ts-badge-exit"
+            badge_label  = "EXIT ✓"
+            bar_color    = "#27ae60"
+            pct_clr      = "#27ae60" if pct >= 0 else "#c0392b"
+        elif exit_status == "SL_HIT":
             border_clr   = "#e87040"
             badge_cls    = "ts-badge-slhit"
-            badge_label  = "SL HIT"
+            badge_label  = "SL HIT ✕"
             bar_color    = "#e87040"
             pct_clr      = "#d04a00"
         elif sig == "BUY":
