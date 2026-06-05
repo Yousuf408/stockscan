@@ -1,9 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.2
-#  Changes from v2.1:
-#    - SL Hit logic: 2 consecutive candles on wrong side of EMA20
-#    - Toggle to hide SL Hit cards in refine filters
-#    - Fixed auto-refresh (no more time.sleep(300))
+#  TRADE SENTRY — scanner.py  v2.3
+#  Changes from v2.2:
+#    - Full UI redesign: Variation B layout
+#      • Header card with live Buy / Sell / Total counters
+#      • Flat action-button row (Run scan · Refresh · Clear · Filters)
+#      • Collapsible filter panel behind "Filters" button
+#      • Compact sector pills
+#      • Wider signal cards with score progress-bar
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -69,7 +72,8 @@ for _k, _v in [
     ("selected_watchlist",   "Today"),
     ("auto_refresh",         False),
     ("scan_log",             []),
-    ("last_auto_refresh",    0),      # timestamp of last auto-refresh
+    ("last_auto_refresh",    0),
+    ("show_filters",         False),   # NEW — filter panel toggle
 ]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -369,7 +373,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
-                # Check SL Hit — 2 consecutive candles on wrong side of EMA20
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
                 r.update({
                     "ltp":       round(ltp, 2),
@@ -453,7 +456,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "highPrice":  round(float(open_candle[2]), 2),
         "lowPrice":   round(float(open_candle[3]), 2),
         "closePrice": round(float(open_candle[4]), 2),
-        "sl_hit":     False,   # fresh signal — not SL hit yet
+        "sl_hit":     False,
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -496,7 +499,7 @@ def run_refresh_scan(watchlist_stocks: list):
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI
+# SECTION 8: UI  — Variation B
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
@@ -505,15 +508,117 @@ from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand()
 
-st.markdown("## 🛡 Trade Sentry — Momentum Scanner")
+# ── Global style overrides for Variation B ──
+st.markdown("""
+<style>
+/* ── reset card gap ── */
+div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 
-# ── Watchlist selector on main page ──
+/* ── action buttons ── */
+.ts-btn-row { display:flex; gap:8px; align-items:center; margin:12px 0 4px; }
+.ts-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 16px; border-radius:8px; font-size:13px; font-weight:600;
+    cursor:pointer; border:1.5px solid #d0d0d0; background:#ffffff;
+    color:#333333; text-decoration:none; white-space:nowrap;
+    font-family: 'SF Pro Text', system-ui, sans-serif;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ts-btn:hover { background:#f5f5f5; border-color:#aaaaaa; }
+.ts-btn-primary { background:#111111; color:#ffffff; border-color:#111111; }
+.ts-btn-primary:hover { background:#333333; border-color:#333333; }
+.ts-signals-pill {
+    margin-left:auto; font-size:12px; font-weight:600;
+    background:#f0f0f0; color:#555555; padding:6px 14px;
+    border-radius:20px; white-space:nowrap;
+}
+
+/* ── header card ── */
+.ts-header-card {
+    background:#ffffff; border:1px solid #e8e8e8;
+    border-radius:12px; padding:16px 20px 14px;
+    margin-bottom:4px;
+}
+.ts-header-title { font-size:20px; font-weight:700; color:#111111; margin:0; }
+.ts-header-sub   { font-size:12px; color:#888888; margin:2px 0 14px; }
+.ts-counter-row  { display:flex; gap:0; }
+.ts-counter {
+    flex:1; text-align:center; padding:10px 0;
+    border-right:1px solid #f0f0f0;
+}
+.ts-counter:last-child { border-right:none; }
+.ts-counter-val { font-size:26px; font-weight:800; font-family:monospace; }
+.ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:1px; }
+
+/* ── sector pills override ── */
+div[data-testid="stPills"] button {
+    font-size:12px !important;
+    padding:4px 12px !important;
+    border-radius:20px !important;
+    font-weight:600 !important;
+}
+
+/* ── signal card ── */
+.ts-card {
+    background:#ffffff; border:1px solid #ebebeb;
+    border-left:4px solid #ebebeb;
+    border-radius:10px; padding:12px 16px;
+    margin-bottom:8px;
+}
+.ts-card-top {
+    display:flex; justify-content:space-between;
+    align-items:center; margin-bottom:8px;
+}
+.ts-card-left  { display:flex; align-items:center; gap:8px; }
+.ts-card-right { display:flex; align-items:center; gap:10px; }
+.ts-sym   { font-size:16px; font-weight:800; color:#111111; font-family:monospace; }
+.ts-chip  {
+    font-size:10px; background:#f3f3f3; color:#666666;
+    padding:2px 8px; border-radius:4px; font-weight:600;
+}
+.ts-badge {
+    font-size:11px; font-weight:700; padding:3px 10px;
+    border-radius:6px; font-family:monospace;
+}
+.ts-badge-buy  { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
+.ts-badge-sell { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
+.ts-badge-slhit{ color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
+.ts-price { font-size:15px; font-weight:700; color:#111111; font-family:monospace; }
+.ts-pct   { font-size:13px; font-weight:700; margin-left:5px; }
+.ts-meta  {
+    font-size:11px; color:#888888; font-family:monospace;
+    display:flex; gap:14px; align-items:center;
+    margin-bottom:10px;
+}
+.ts-meta span { color:#444444; font-weight:600; }
+/* ── score bar ── */
+.ts-score-row {
+    display:flex; align-items:center; gap:10px;
+}
+.ts-score-bar-bg {
+    flex:1; height:5px; background:#eeeeee; border-radius:3px; overflow:hidden;
+}
+.ts-score-bar-fill {
+    height:100%; border-radius:3px;
+    transition: width 0.4s ease;
+}
+.ts-score-lbl {
+    font-size:11px; font-weight:700; font-family:monospace;
+    white-space:nowrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Watchlist selector
+# ─────────────────────────────────────────────────────────────────────────────
 wl_col1, wl_col2 = st.columns([3, 9])
 with wl_col1:
     selected_wl = st.selectbox(
         "📋 Target Scanning Watchlist",
         WATCHLIST_NAMES,
         index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+        label_visibility="collapsed",
     )
 if selected_wl != st.session_state.selected_watchlist:
     st.session_state.selected_watchlist = selected_wl
@@ -522,64 +627,115 @@ if selected_wl != st.session_state.selected_watchlist:
     st.rerun()
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
+mkt_open       = is_market_open()
+mkt_label      = "Market open" if mkt_open else "Market closed"
+ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 
-mkt_open  = is_market_open()
-mkt_label = "🟢 Market Open" if mkt_open else "🔴 Market Closed"
-st.markdown(
-    f"Scanning **{st.session_state.selected_watchlist}** watchlist · "
-    f"`{len(stocks_to_scan)}` stocks · {mkt_label} · {get_ist_now().strftime('%I:%M %p IST')}"
-)
+# ─────────────────────────────────────────────────────────────────────────────
+# HEADER CARD — title + Buy / Sell / Total counters
+# ─────────────────────────────────────────────────────────────────────────────
+buy_count   = len([r for r in st.session_state.results if r["signal"] == "BUY"  and not r.get("sl_hit")])
+sell_count  = len([r for r in st.session_state.results if r["signal"] == "SELL" and not r.get("sl_hit")])
+total_count = len(st.session_state.results)
 
-if stocks_to_scan:
-    with st.expander(f"📋 {len(stocks_to_scan)} stocks loaded", expanded=False):
-        cols = st.columns(5)
-        for i, s in enumerate(stocks_to_scan):
-            cols[i % 5].markdown(f"`{s['symbol']}` — {s['sector']}")
+st.markdown(f"""
+<div class="ts-header-card">
+  <p class="ts-header-title">Momentum scanner</p>
+  <p class="ts-header-sub">
+    {st.session_state.selected_watchlist}
+    &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
+    &nbsp;·&nbsp; {mkt_label}
+    &nbsp;·&nbsp; {ist_time_str}
+  </p>
+  <div class="ts-counter-row">
+    <div class="ts-counter">
+      <div class="ts-counter-val" style="color:#1a9c4a;">{buy_count}</div>
+      <div class="ts-counter-lbl">Buy</div>
+    </div>
+    <div class="ts-counter">
+      <div class="ts-counter-val" style="color:#c0392b;">{sell_count}</div>
+      <div class="ts-counter-lbl">Sell</div>
+    </div>
+    <div class="ts-counter">
+      <div class="ts-counter-val" style="color:#111111;">{total_count}</div>
+      <div class="ts-counter-lbl">Total</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-# ── Control buttons ──
-col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
-with col1:
-    scan_clicked = st.button("🚀 RUN FULL SCAN", use_container_width=True,
-                              disabled=len(stocks_to_scan) == 0)
-with col2:
-    refresh_clicked = st.button("🔄 REFRESH METRICS", use_container_width=True,
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTION BUTTON ROW
+# ─────────────────────────────────────────────────────────────────────────────
+btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1.6, 1.6, 1.4, 1.4, 5])
+with btn_col1:
+    scan_clicked    = st.button("▷  Run scan",   use_container_width=True,
+                                 disabled=len(stocks_to_scan) == 0)
+with btn_col2:
+    refresh_clicked = st.button("↺  Refresh",    use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
-with col3:
-    clear_clicked = st.button("🧹 CLEAR RESULTS", use_container_width=True)
-with col4:
-    auto_on = st.checkbox("Toggle Auto-Refresh (5-Min Loops)",
-                          value=st.session_state.auto_refresh)
-    if auto_on != st.session_state.auto_refresh:
-        st.session_state.auto_refresh = auto_on
+with btn_col3:
+    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
+with btn_col4:
+    filter_toggle   = st.button(
+        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
+        use_container_width=True,
+    )
+with btn_col5:
+    sig_display     = len([r for r in st.session_state.results])
+    wl_total        = len(stocks_to_scan)
+    st.markdown(
+        f'<div style="display:flex;align-items:center;height:38px;">'
+        f'<span style="font-size:12px;font-weight:600;background:#f0f0f0;'
+        f'color:#555;padding:5px 14px;border-radius:20px;">'
+        f'{sig_display} / {wl_total} signals</span></div>',
+        unsafe_allow_html=True,
+    )
+
+if filter_toggle:
+    st.session_state.show_filters = not st.session_state.show_filters
+    st.rerun()
 
 if scan_clicked:
     run_full_scan(stocks_to_scan)
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
 if clear_clicked:
-    st.session_state.results  = []
-    st.session_state.scan_log = []
+    st.session_state.results   = []
+    st.session_state.scan_log  = []
+    st.session_state.show_filters = False
     st.success("Scanner cleared.")
 
-if len(stocks_to_scan) == 0:
-    st.info(f"⚠️ **{st.session_state.selected_watchlist}** watchlist is empty. Add stocks from the Watchlist page.")
+# ─────────────────────────────────────────────────────────────────────────────
+# COLLAPSIBLE FILTER PANEL
+# ─────────────────────────────────────────────────────────────────────────────
+if st.session_state.show_filters:
+    with st.container(border=True):
+        st.markdown("**⚙ Refine Filters**")
+        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
+        with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
+        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="",               key="f_vol")
+        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="",   key="f_e20")
+        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="",  key="f_e200")
+        with col_f5:  filter_min_score = st.text_input("Score ≥", value="",              key="f_score")
+        tog1, tog2, tog3 = st.columns(3)
+        with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
+        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
+        with tog3: auto_on          = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
+        if auto_on != st.session_state.auto_refresh:
+            st.session_state.auto_refresh = auto_on
+else:
+    filter_sig       = "ALL"
+    filter_min_vol   = ""
+    filter_ema20     = ""
+    filter_ema200    = ""
+    filter_min_score = ""
+    toggle_body_wick = False
+    toggle_hide_sl   = False
 
-# ── REFINE FILTERS ──
-st.write("### ⚙ REFINE CONFIGURATION FILTERS")
-col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
-with col_f1:  filter_sig       = st.selectbox("Signal", ["ALL", "BUY", "SELL"])
-with col_f2:  filter_min_vol   = st.text_input("VOL ≥", value="")
-with col_f3:  filter_ema20     = st.text_input("EMA20 %", value="")
-with col_f4:  filter_ema200    = st.text_input("EMA200 %", value="")
-with col_f5:  filter_min_score = st.text_input("SCORE ≥", value="")
-
-tog_col1, tog_col2 = st.columns([3, 9])
-with tog_col1:
-    toggle_body_wick = st.toggle("BODY > WICK (Body > 50% of Range)")
-with tog_col2:
-    toggle_hide_sl   = st.toggle("Hide SL Hit Stocks", value=False)
-
-# ── Apply all filters ──
+# ─────────────────────────────────────────────────────────────────────────────
+# APPLY FILTERS
+# ─────────────────────────────────────────────────────────────────────────────
 view = list(st.session_state.results)
 
 if filter_sig != "ALL":
@@ -605,13 +761,15 @@ if toggle_body_wick:
 if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
 
-# ── SECTOR PILLS with per-sector signal count ──
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTOR PILLS
+# ─────────────────────────────────────────────────────────────────────────────
 all_sectors = sorted(set(r["sector"] for r in view))
 sector_counts = {}
 for r in view:
     sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
 
-pill_options = ["ALL"]
+pill_options = ["All"]
 display_label_to_sector = {}
 for sector in all_sectors:
     clean = sector.replace("NIFTY ", "")
@@ -619,22 +777,17 @@ for sector in all_sectors:
     pill_options.append(label)
     display_label_to_sector[label] = sector
 
-selected_sector_label = st.pills("Sector", pill_options, default="ALL")
+selected_sector_label = st.pills("Sector", pill_options, default="All",
+                                  label_visibility="collapsed")
 
-if selected_sector_label and selected_sector_label != "ALL":
+if selected_sector_label and selected_sector_label != "All":
     mapped_sector = display_label_to_sector.get(selected_sector_label)
     if mapped_sector:
         view = [r for r in view if r["sector"] == mapped_sector]
 
-# ── Results summary ──
-sl_hit_count = len([r for r in st.session_state.results if r.get("sl_hit", False)])
-st.markdown(
-    f"#### 🎯 N: `{len(view)}` / `{len(st.session_state.results)}` signals  "
-    f"· WL: **{st.session_state.selected_watchlist}**"
-    + (f"  · 🔴 `{sl_hit_count}` SL Hit" if sl_hit_count > 0 else "")
-)
-
-# ── Debug log ──
+# ─────────────────────────────────────────────────────────────────────────────
+# SCAN LOG (debug)
+# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.scan_log:
     signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
     with st.expander(
@@ -645,13 +798,23 @@ if st.session_state.scan_log:
         for line in st.session_state.scan_log:
             st.markdown(line)
 
-# ── Signal cards — WHITE background ──
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNAL CARDS  — Variation B layout
+# ─────────────────────────────────────────────────────────────────────────────
 if not view:
     if st.session_state.results:
         st.info("🔍 No signals match your current filters.")
     elif not st.session_state.scan_log:
         st.info("🔍 Run a scan to see results.")
 else:
+    sl_hit_count = len([r for r in st.session_state.results if r.get("sl_hit", False)])
+    if sl_hit_count:
+        st.markdown(
+            f'<div style="font-size:12px;color:#d04a00;margin-bottom:6px;">'
+            f'🔴 <b>{sl_hit_count}</b> SL Hit stock{"s" if sl_hit_count>1 else ""} in results</div>',
+            unsafe_allow_html=True,
+        )
+
     for item in view:
         is_sl_hit    = item.get("sl_hit", False)
         sym          = item["symbol"]
@@ -664,72 +827,70 @@ else:
         ema200       = item["ema200"]
         score        = item["score"]
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
-        age_str      = "just now" if mins_ago < 1 else str(mins_ago) + "m ago"
+        age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
+        # colours
         if is_sl_hit:
-            signal_clr = "#FF6B35"
-            border_clr = "#FF6B35"
-            card_bg    = "#FFF8F5"
-            inner_bg   = "#FFF0E8"
-            sl_badge   = (
-                '<span style="font-size:10px;font-weight:700;color:#FF6B35;'
-                'background:#FF6B3520;padding:2px 7px;border-radius:3px;'
-                'border:1px solid #FF6B3540;margin-left:6px;">🔴 SL HIT</span>'
-            )
+            border_clr   = "#e87040"
+            badge_cls    = "ts-badge-slhit"
+            badge_label  = "SL HIT"
+            bar_color    = "#e87040"
+            pct_clr      = "#d04a00"
+        elif sig == "BUY":
+            border_clr   = "#1a9c4a"
+            badge_cls    = "ts-badge-buy"
+            badge_label  = "BUY"
+            bar_color    = "#1a9c4a"
+            pct_clr      = "#1a9c4a" if pct >= 0 else "#c0392b"
         else:
-            signal_clr = "#00AA3B" if sig == "BUY" else "#D32F2F"
-            border_clr = "#00AA3B" if sig == "BUY" else "#D32F2F"
-            card_bg    = "#ffffff"
-            inner_bg   = "#f8f8f8"
-            sl_badge   = ""
+            border_clr   = "#c0392b"
+            badge_cls    = "ts-badge-sell"
+            badge_label  = "SELL"
+            bar_color    = "#c0392b"
+            pct_clr      = "#1a9c4a" if pct >= 0 else "#c0392b"
 
-        pct_clr = "#00AA3B" if pct >= 0 else "#D32F2F"
+        pct_sign = "+" if pct > 0 else ""
+        bar_pct  = int((score / 6) * 100)
 
-        card_html = (
-            '<div style="border-left:4px solid ' + border_clr + ';'
-            'background:' + card_bg + ';'
-            'border:1px solid #e8e8e8;'
-            'border-left:4px solid ' + border_clr + ';'
-            'padding:10px 14px;margin-bottom:10px;border-radius:6px;">'
+        st.markdown(f"""
+<div class="ts-card" style="border-left-color:{border_clr};">
 
-            '<div style="display:flex;justify-content:space-between;align-items:center;">'
-            '<div style="display:flex;align-items:center;gap:8px;">'
-            '<span style="font-size:15px;font-weight:800;color:#111111;font-family:monospace;">' + sym + '</span>'
-            '<span style="font-size:10px;background:#f2f2f2;padding:2px 7px;border-radius:3px;'
-            'color:#555555;font-weight:600;">' + sector_clean + '</span>'
-            + sl_badge +
-            '</div>'
-            '<div style="display:flex;align-items:center;gap:10px;">'
-            '<span style="font-size:10px;color:#999999;font-family:monospace;">' + age_str + '</span>'
-            '<span style="font-size:12px;font-weight:800;color:' + signal_clr + ';'
-            'background:' + signal_clr + '15;padding:2px 10px;border-radius:4px;'
-            'border:1px solid ' + signal_clr + '40;font-family:monospace;">' + sig + '</span>'
-            '</div>'
-            '</div>'
+  <div class="ts-card-top">
+    <div class="ts-card-left">
+      <span class="ts-sym">{sym}</span>
+      <span class="ts-chip">{sector_clean}</span>
+      <span class="ts-badge {badge_cls}">{badge_label}</span>
+    </div>
+    <div class="ts-card-right">
+      <span class="ts-price">₹{ltp:,.2f}</span>
+      <span class="ts-pct" style="color:{pct_clr};">{pct_sign}{pct}%</span>
+    </div>
+  </div>
 
-            '<div style="display:flex;justify-content:space-between;align-items:center;'
-            'background:' + inner_bg + ';padding:6px 8px;border-radius:4px;margin-top:8px;">'
-            '<div style="font-size:13px;color:#111111;">'
-            'LTP: <b style="font-family:monospace;">&#8377;' + str(ltp) + '</b>'
-            '<span style="color:' + pct_clr + ';font-weight:700;margin-left:6px;">' + str(pct) + '%</span>'
-            '</div>'
-            '<div style="font-size:11px;color:#666666;font-family:monospace;">'
-            'EMA20: <span style="color:#333333;">' + str(ema20) + '</span> &nbsp;|&nbsp;'
-            'VWAP: <span style="color:#B36200;">' + str(vwap) + '</span> &nbsp;|&nbsp;'
-            'EMA200: <span style="color:#333333;">' + str(ema200) + '</span>'
-            '</div>'
-            '</div>'
+  <div class="ts-meta">
+    <span>EMA20: <span>{ema20}</span></span>
+    &nbsp;·&nbsp;
+    <span>VWAP: <span style="color:#B36200;">{vwap}</span></span>
+    &nbsp;·&nbsp;
+    <span>EMA200: <span>{ema200}</span></span>
+    &nbsp;·&nbsp;
+    <span style="color:#bbbbbb;">{age_str}</span>
+  </div>
 
-            '<div style="display:flex;justify-content:space-between;font-size:10px;'
-            'color:#999999;margin-top:6px;">'
-            '<span>Matrix Conviction Score</span>'
-            '<span style="color:' + signal_clr + ';font-weight:700;font-family:monospace;">' + str(score) + '/6</span>'
-            '</div>'
-            '</div>'
-        )
-        st.markdown(card_html, unsafe_allow_html=True)
+  <div class="ts-score-row">
+    <div class="ts-score-bar-bg">
+      <div class="ts-score-bar-fill"
+           style="width:{bar_pct}%;background:{bar_color};"></div>
+    </div>
+    <span class="ts-score-lbl" style="color:{bar_color};">{score}/6</span>
+  </div>
 
-# ── Auto-Refresh — FIXED (no time.sleep(300)) ──
+</div>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTO-REFRESH
+# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.auto_refresh:
     last = st.session_state.get("last_auto_refresh", 0)
     if time.time() - last >= 300:
