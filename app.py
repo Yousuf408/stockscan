@@ -46,24 +46,20 @@ st.set_page_config(
 # ──────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Hide ONLY the top-right toolbar buttons (Share, Edit, Menu) */
-/* Keep the sidebar toggle visible */
-button[kind="tertiary"] {
+/* Hide share, edit, and menu buttons - more specific targeting */
+header[data-testid="stHeader"] div:last-child button {
     display: none !important;
 }
 
-/* Hide the specific toolbar icon buttons */
-[data-testid="stToolbar"] button {
+/* Alternative: Hide by button content/svg icons */
+button[title="Share"],
+button[title="Edit"],
+button[title="Settings"] {
     display: none !important;
 }
 
-/* But keep the sidebar toggle button visible */
-button[aria-label="Show/hide sidebar"] {
-    display: block !important;
-}
-
-/* Hide decorative elements in header */
-[data-testid="stDecoration"] {
+/* Hide toolbar right side buttons only */
+[data-testid="stToolbar"] > div:last-child button {
     display: none !important;
 }
 </style>
