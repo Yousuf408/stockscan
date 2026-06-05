@@ -556,48 +556,48 @@ div[data-testid="stPills"] button {
 .ts-card {
     background:#ffffff; border:1px solid #ebebeb;
     border-left:4px solid #ebebeb;
-    border-radius:10px; padding:12px 16px;
-    margin-bottom:8px;
+    border-radius:10px; padding:8px 12px;
+    margin-bottom:6px;
 }
 .ts-card-top {
     display:flex; justify-content:space-between;
-    align-items:center; margin-bottom:8px;
+    align-items:center; margin-bottom:6px;
 }
-.ts-card-left  { display:flex; align-items:center; gap:8px; }
-.ts-card-right { display:flex; align-items:center; gap:10px; }
-.ts-sym   { font-size:16px; font-weight:800; color:#111111; font-family:monospace; }
+.ts-card-left  { display:flex; align-items:center; gap:6px; }
+.ts-card-right { display:flex; align-items:center; gap:8px; }
+.ts-sym   { font-size:14px; font-weight:800; color:#111111; font-family:monospace; }
 .ts-chip  {
-    font-size:10px; background:#f3f3f3; color:#666666;
-    padding:2px 8px; border-radius:4px; font-weight:600;
+    font-size:9px; background:#f3f3f3; color:#666666;
+    padding:1px 6px; border-radius:3px; font-weight:600;
 }
 .ts-badge {
-    font-size:11px; font-weight:700; padding:3px 10px;
-    border-radius:6px; font-family:monospace;
+    font-size:10px; font-weight:700; padding:2px 8px;
+    border-radius:5px; font-family:monospace;
 }
 .ts-badge-buy  { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
 .ts-badge-sell { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
 .ts-badge-slhit{ color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
-.ts-price { font-size:15px; font-weight:700; color:#111111; font-family:monospace; }
-.ts-pct   { font-size:13px; font-weight:700; margin-left:5px; }
+.ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
+.ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
 .ts-meta  {
-    font-size:13px; color:#888888; font-family:monospace;
-    display:flex; gap:14px; align-items:center;
-    margin-bottom:10px;
+    font-size:12px; color:#888888; font-family:monospace;
+    display:flex; gap:12px; align-items:center;
+    margin-bottom:6px;
 }
 .ts-meta span { color:#444444; font-weight:600; }
 /* ── score bar ── */
 .ts-score-row {
-    display:flex; align-items:center; gap:10px;
+    display:flex; align-items:center; gap:8px;
 }
 .ts-score-bar-bg {
-    flex:1; height:5px; background:#eeeeee; border-radius:3px; overflow:hidden;
+    flex:1; height:4px; background:#eeeeee; border-radius:2px; overflow:hidden;
 }
 .ts-score-bar-fill {
-    height:100%; border-radius:3px;
+    height:100%; border-radius:2px;
     transition: width 0.4s ease;
 }
 .ts-score-lbl {
-    font-size:11px; font-weight:700; font-family:monospace;
+    font-size:10px; font-weight:700; font-family:monospace;
     white-space:nowrap;
 }
 </style>
