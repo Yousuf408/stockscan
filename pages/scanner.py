@@ -612,16 +612,15 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 # ── ACTIVE — check if T1 or SL hit now via LTP ──
                 new_status = "ACTIVE"
 
-                # T1 check first
-                if signal == "BUY"  and ltp >= t1_val:
-                    new_status = "T1_ACHIEVE"
-                elif signal == "SELL" and ltp <= t1_val:
-                    new_status = "T1_ACHIEVE"
-                # SL check only if T1 not hit
-                elif signal == "BUY"  and ltp <= sl_price:
-                    new_status = "SL_HIT"
-                elif signal == "SELL" and ltp >= sl_price:
-                    new_status = "SL_HIT"
+                if t1_val and sl_price:
+                    if signal == "BUY"  and ltp >= t1_val:
+                        new_status = "T1_ACHIEVE"
+                    elif signal == "SELL" and ltp <= t1_val:
+                        new_status = "T1_ACHIEVE"
+                    elif signal == "BUY"  and ltp <= sl_price:
+                        new_status = "SL_HIT"
+                    elif signal == "SELL" and ltp >= sl_price:
+                        new_status = "SL_HIT"
 
                 t1_achieved = new_status == "T1_ACHIEVE"
 
