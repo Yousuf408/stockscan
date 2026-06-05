@@ -391,22 +391,20 @@ def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
     return min(score, 6)
 
 
-def check_sl_hit(signal: str, candles: list, ema20_live: float) -> bool:
+def check_sl_hit(signal: str, ltp: float, sl_price: float) -> bool:
     """
-    Returns True if last 2 consecutive candles closed on the wrong side of EMA20.
-    BUY signal  → SL hit if last 2 closes < EMA20
-    SELL signal → SL hit if last 2 closes > EMA20
+    NEW — Price based SL hit.
+    Triggers only if LTP actually crosses the SL price level.
+
+    BUY  → SL hit if LTP <= sl_price  (Low of 9:15 candle)
+    SELL → SL hit if LTP >= sl_price  (High of 9:15 candle)
     """
-    if not signal or not ema20_live or not candles or len(candles) < 2:
+    if not signal or ltp is None or sl_price is None:
         return False
-
-    last_two_closes = [float(c[4]) for c in candles[-2:]]
-
     if signal == "BUY":
-        return all(c < ema20_live for c in last_two_closes)
+        return ltp <= sl_price
     if signal == "SELL":
-        return all(c > ema20_live for c in last_two_closes)
-
+        return ltp >= sl_price
     return False
 
 
@@ -447,41 +445,54 @@ def calc_entry_target(signal: str, opening_candle: list) -> dict:
 
 
 def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
-                          candles: list, ema20_live: float,
-                          t1_already_achieved: bool = False) -> dict:
+                          sl_price: float, candles: list, ema20_live: float,
+                          t1_already_achieved: bool = False,
+                          exit_already_triggered: bool = False) -> dict:
     """
-    Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
+    Full trade status engine. Returns one of 5 statuses:
 
-    T1 ACHIEVE: LTP hits target (LOCKED forever via t1_already_achieved flag)
-    SL HIT: Only check if T1 NOT yet achieved (2 consecutive candles wrong side of EMA20)
+    ACTIVE       — trade is live, nothing triggered yet
+    SL_HIT       — LTP crossed the SL price (Low for BUY / High for SELL)
+                   only checked BEFORE T1 is achieved
+    T1_ACHIEVE   — LTP hit the 1:1 target, locked forever
+    EXIT         — after T1 is achieved, last candle closed on wrong side of EMA20
+                   BUY  → last candle close < EMA20
+                   SELL → last candle close > EMA20
+                   Once EXIT triggers it is also locked forever
 
-    Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
+    Priority order: EXIT > T1_ACHIEVE > SL_HIT > ACTIVE
+    SL is NEVER checked after T1 is achieved.
+    EXIT is ONLY checked after T1 is achieved.
     """
-    if not signal or ltp is None or entry is None or target is None:
+    if not signal or ltp is None or entry is None or target is None or sl_price is None:
         return {"status": "ACTIVE", "triggered": False}
 
-    # If T1 already achieved, KEEP IT LOCKED — don't change ever
+    # ── 1. EXIT already triggered — lock it forever ──
+    if exit_already_triggered:
+        return {"status": "EXIT", "triggered": True}
+
+    # ── 2. T1 already achieved — now watch for EXIT via EMA20 candle close ──
     if t1_already_achieved:
+        if candles and len(candles) >= 1:
+            last_close = float(candles[-1][4])
+            if signal == "BUY"  and last_close < ema20_live:
+                return {"status": "EXIT", "triggered": True}
+            if signal == "SELL" and last_close > ema20_live:
+                return {"status": "EXIT", "triggered": True}
+        # T1 achieved but EXIT not yet triggered — keep as T1_ACHIEVE
         return {"status": "T1_ACHIEVE", "triggered": True}
 
-    # Check if target is hit NOW using LTP
+    # ── 3. Check if T1 target is hit NOW using LTP ──
     if signal == "BUY"  and ltp >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     if signal == "SELL" and ltp <= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
 
-    # Only check SL HIT if T1 NOT yet achieved
-    if not candles or len(candles) < 2:
-        return {"status": "ACTIVE", "triggered": False}
-
-    last_two_closes = [float(c[4]) for c in candles[-2:]]
-
-    if signal == "BUY":
-        if all(c < ema20_live for c in last_two_closes):
-            return {"status": "SL_HIT", "triggered": True}
-    elif signal == "SELL":
-        if all(c > ema20_live for c in last_two_closes):
-            return {"status": "SL_HIT", "triggered": True}
+    # ── 4. SL price hit — only before T1 ──
+    if signal == "BUY"  and ltp <= sl_price:
+        return {"status": "SL_HIT", "triggered": True}
+    if signal == "SELL" and ltp >= sl_price:
+        return {"status": "SL_HIT", "triggered": True}
 
     return {"status": "ACTIVE", "triggered": False}
 
@@ -527,15 +538,25 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
-                sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
+                et        = r.get("entry_target") or {}
+                sl_price  = et.get("sl")
+                entry_val = et.get("entry")
+                t1_val    = et.get("target")
 
+                # New price-based SL check
+                sl_hit = check_sl_hit(r["signal"], ltp, sl_price)
+
+                # Full status engine with new EXIT logic
                 exit_status = check_exit_or_sl_hit(
                     r["signal"], ltp,
-                    r.get("entry_target", {}).get("entry")  if r.get("entry_target") else None,
-                    r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
+                    entry_val, t1_val, sl_price,
                     candles, ema20_live,
-                    t1_already_achieved=r.get("t1_achieved", False)
+                    t1_already_achieved=r.get("t1_achieved", False),
+                    exit_already_triggered=r.get("exit_status") == "EXIT",
                 )
+
+                new_status  = exit_status.get("status", "ACTIVE")
+                t1_achieved = new_status in ("T1_ACHIEVE", "EXIT")
 
                 r.update({
                     "ltp":         round(ltp, 2),
@@ -544,11 +565,17 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "vwap":        round(vwap_live, 2),
                     "pctChange":   round(pct_change, 2),
                     "sl_hit":      sl_hit,
-                    "exit_status": exit_status.get("status", "ACTIVE"),
-                    "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",
+                    "exit_status": new_status,
+                    "t1_achieved": t1_achieved,
                 })
-                if sl_hit:
-                    log.append(f"🔴 {symbol}: SL Hit — 2 consecutive candles crossed EMA20")
+
+                if new_status == "SL_HIT":
+                    log.append(f"🔴 {symbol}: SL Hit — LTP ₹{ltp} crossed SL ₹{sl_price}")
+                elif new_status == "EXIT":
+                    log.append(f"🟣 {symbol}: EXIT — candle closed wrong side of EMA20 after T1")
+                elif new_status == "T1_ACHIEVE":
+                    log.append(f"🟢 {symbol}: T1 Achieved — watching for EXIT signal")
+
                 return r
         return None
 
@@ -623,14 +650,21 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             f"T1={entry_target['target']}"
         )
 
-    # Check T1/SL status using LTP
+    # Check T1/SL/EXIT status using LTP
     exit_status = check_exit_or_sl_hit(
         signal, ltp,
         entry_target["entry"]  if entry_target else None,
         entry_target["target"] if entry_target else None,
+        entry_target["sl"]     if entry_target else None,
         candles, ema20_live,
-        t1_already_achieved=False
+        t1_already_achieved=False,
+        exit_already_triggered=False,
     )
+
+    sl_hit_now = check_sl_hit(signal, ltp, entry_target["sl"] if entry_target else None)
+
+    new_status  = exit_status.get("status", "ACTIVE")
+    t1_achieved = new_status in ("T1_ACHIEVE", "EXIT")
 
     result = {
         "symbol":       symbol,
@@ -648,10 +682,10 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "highPrice":    round(float(open_candle[2]), 2),
         "lowPrice":     round(float(open_candle[3]), 2),
         "closePrice":   round(float(open_candle[4]), 2),
-        "sl_hit":       False,
+        "sl_hit":       sl_hit_now,
         "entry_target": entry_target,
-        "exit_status":  exit_status.get("status", "ACTIVE"),
-        "t1_achieved":  exit_status.get("status") == "T1_ACHIEVE",
+        "exit_status":  new_status,
+        "t1_achieved":  t1_achieved,
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -767,6 +801,7 @@ div[data-testid="stPills"] button {
 .ts-badge-sell    { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
 .ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
 .ts-badge-slhit   { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
+.ts-badge-exit    { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
 .ts-meta  {
@@ -931,6 +966,7 @@ buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit
 sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
 sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
+exit_count       = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
 total_count      = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -962,6 +998,10 @@ with header_container:
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#27ae60;">{t1_achieve_count}</div>
       <div class="ts-counter-lbl">T1 Achieve</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#6c3fc5;">{exit_count}</div>
+      <div class="ts-counter-lbl">Exit</div>
     </div>
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#d04a00;">{sl_hit_count}</div>
@@ -1050,7 +1090,13 @@ else:
         t1_val     = entry_target.get("target", "—")
         risk_val   = entry_target.get("risk",   "—")
 
-        if exit_status == "T1_ACHIEVE":
+        if exit_status == "EXIT":
+            border_clr  = "#6c3fc5"
+            badge_cls   = "ts-badge-exit"
+            badge_label = "EXIT 🟣"
+            bar_color   = "#6c3fc5"
+            pct_clr     = "#6c3fc5"
+        elif exit_status == "T1_ACHIEVE":
             border_clr  = "#27ae60"
             badge_cls   = "ts-badge-t1achieve"
             badge_label = "T1 Achieve ✅"
