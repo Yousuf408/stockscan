@@ -22,6 +22,14 @@ from core import (
     clear_watchlist_tab,
 )
 
+# ── Auth guard ──  ← PASTE HERE (after imports, before st. calls)
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
+
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
     layout="wide",
