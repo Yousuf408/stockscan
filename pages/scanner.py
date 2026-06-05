@@ -28,14 +28,19 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth — soft check only, scanner accessible to all ──
+# ── Auth guard — hard stop if not logged in ──
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
+# ── Helper functions for inline login banner ──
 def _auth_sign_in(email: str, password: str) -> dict:
     try:
-        import os
         url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", "")).rstrip("/")
         key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
-        import requests as _req
-        res = _req.post(
+        res = requests.post(
             f"{url}/auth/v1/token?grant_type=password",
             headers={"apikey": key, "Content-Type": "application/json"},
             json={"email": email, "password": password},
@@ -51,11 +56,7 @@ def _set_session(data: dict):
     st.session_state["user_email"]   = user.get("email", "")
     st.session_state["access_token"] = data.get("access_token", "")
 
-# Always read live from session
 _user_logged_in = bool(st.session_state.get("user_id"))
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 1: WATCHLIST FILE INTEGRATION
 # ─────────────────────────────────────────────────────────────────────────────
 
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
