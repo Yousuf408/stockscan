@@ -13,6 +13,13 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_many_to_watchlist
 
+# ── Auth guard ──  ← PASTE HERE
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
 # ══════════════════════════════════════════
