@@ -149,7 +149,11 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                     rows = []
                     for c in data["data"]:
                         if isinstance(c, list) and len(c) >= 6:
-                            rows.append([str(c[0]), float(c[1]), float(c[2]),
+                            # Normalize timestamp — AngelOne returns ISO format
+                            # e.g. "2026-06-05T09:15:00+05:30" → "2026-06-05 09:15:00"
+                            raw_ts = str(c[0])
+                            ts_normalized = raw_ts.replace("T", " ")[:19]
+                            rows.append([ts_normalized, float(c[1]), float(c[2]),
                                          float(c[3]), float(c[4]), float(c[5])])
                     if rows:
                         return rows
