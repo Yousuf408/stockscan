@@ -501,52 +501,51 @@ def check_historical_status(signal: str, candles_from_open: list,
                              target: float, sl_price: float,
                              trading_date: str) -> str:
     """
-    Scans ALL candles from 9:15 onwards — SAME DAY ONLY — to determine
-    the correct trade status historically.
+    Scans candles AFTER the 9:15 opening candle — SAME DAY ONLY.
 
-    Logic (in order of priority per candle):
-    1. Check T1 hit first using candle HIGH (BUY) or LOW (SELL)
-    2. Only if T1 not yet hit — check SL using candle LOW (BUY) or HIGH (SELL)
-    3. EXIT is NOT checked here — it requires live EMA20 per candle which
-       we don't have historically. EXIT is only checked during live Refresh.
+    KEY FIXES:
+    1. Skips index 0 (the 9:15 candle itself) — entry is at its HIGH/LOW,
+       price cannot fill T1 or hit SL within the same candle it opened.
+    2. T1_ACHIEVE is final — once hit, locked forever. No EXIT, no SL after.
+    3. T1 checked before SL in every candle — wide candles can't wrongly SL.
+    4. Date filter on every candle — previous day data never included.
 
-    Safety: date filter ensures only same-day candles are processed.
+    BUY:
+      T1 hit  → candle HIGH  >= target
+      SL hit  → candle LOW   <= sl_price
+
+    SELL:
+      T1 hit  → candle LOW   <= target
+      SL hit  → candle HIGH  >= sl_price
     """
     if not candles_from_open or not signal or not target or not sl_price:
         return "ACTIVE"
 
-    t1_hit = False
-    sl_hit = False
+    # Skip index 0 — that is the 9:15 opening candle itself
+    # T1 and SL can only be hit by subsequent candles
+    candles_to_check = candles_from_open[1:]
 
-    for c in candles_from_open:
+    for c in candles_to_check:
         # ── Safety: same day only ──
         candle_date = str(c[0]).split(" ")[0]
         if candle_date != trading_date:
             continue
 
-        high  = float(c[2])
-        low   = float(c[3])
+        high = float(c[2])
+        low  = float(c[3])
 
-        # ── T1 check — always first ──
-        if not t1_hit:
-            if signal == "BUY"  and high >= target:
-                t1_hit = True
-                continue
-            if signal == "SELL" and low  <= target:
-                t1_hit = True
-                continue
+        # ── T1 always checked first — wide candle can hit both ──
+        if signal == "BUY"  and high >= target:
+            return "T1_ACHIEVE"   # locked — stop checking
+        if signal == "SELL" and low  <= target:
+            return "T1_ACHIEVE"   # locked — stop checking
 
-        # ── SL check — only before T1 ──
-        if not t1_hit and not sl_hit:
-            if signal == "BUY"  and low  <= sl_price:
-                sl_hit = True
-            if signal == "SELL" and high >= sl_price:
-                sl_hit = True
+        # ── SL only if T1 not hit in this candle ──
+        if signal == "BUY"  and low  <= sl_price:
+            return "SL_HIT"
+        if signal == "SELL" and high >= sl_price:
+            return "SL_HIT"
 
-    if t1_hit:
-        return "T1_ACHIEVE"
-    if sl_hit:
-        return "SL_HIT"
     return "ACTIVE"
 
 
@@ -593,23 +592,47 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             if r["symbol"] == symbol:
                 et        = r.get("entry_target") or {}
                 sl_price  = et.get("sl")
-                entry_val = et.get("entry")
                 t1_val    = et.get("target")
 
-                # New price-based SL check
-                sl_hit = check_sl_hit(r["signal"], ltp, sl_price)
+                current_status = r.get("exit_status", "ACTIVE")
 
-                # Full status engine with new EXIT logic
-                exit_status = check_exit_or_sl_hit(
-                    r["signal"], ltp,
-                    entry_val, t1_val, sl_price,
-                    candles, ema20_live,
-                    t1_already_achieved=r.get("t1_achieved", False),
-                    exit_already_triggered=r.get("exit_status") == "EXIT",
-                )
+                # ── T1_ACHIEVE is LOCKED FOREVER — never change it ──
+                if current_status == "T1_ACHIEVE":
+                    r.update({
+                        "ltp":       round(ltp, 2),
+                        "ema20":     round(ema20_live, 2),
+                        "ema200":    round(ema200_live, 2),
+                        "vwap":      round(vwap_live, 2),
+                        "pctChange": round(pct_change, 2),
+                    })
+                    return r
 
-                new_status  = exit_status.get("status", "ACTIVE")
-                t1_achieved = new_status in ("T1_ACHIEVE", "EXIT")
+                # ── SL_HIT is also LOCKED — never change it ──
+                if current_status == "SL_HIT":
+                    r.update({
+                        "ltp":       round(ltp, 2),
+                        "ema20":     round(ema20_live, 2),
+                        "ema200":    round(ema200_live, 2),
+                        "vwap":      round(vwap_live, 2),
+                        "pctChange": round(pct_change, 2),
+                    })
+                    return r
+
+                # ── ACTIVE — check if T1 or SL hit now via LTP ──
+                new_status = "ACTIVE"
+
+                # T1 check first
+                if signal == "BUY"  and ltp >= t1_val:
+                    new_status = "T1_ACHIEVE"
+                elif signal == "SELL" and ltp <= t1_val:
+                    new_status = "T1_ACHIEVE"
+                # SL check only if T1 not hit
+                elif signal == "BUY"  and ltp <= sl_price:
+                    new_status = "SL_HIT"
+                elif signal == "SELL" and ltp >= sl_price:
+                    new_status = "SL_HIT"
+
+                t1_achieved = new_status == "T1_ACHIEVE"
 
                 r.update({
                     "ltp":         round(ltp, 2),
@@ -617,17 +640,15 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "ema200":      round(ema200_live, 2),
                     "vwap":        round(vwap_live, 2),
                     "pctChange":   round(pct_change, 2),
-                    "sl_hit":      sl_hit,
+                    "sl_hit":      new_status == "SL_HIT",
                     "exit_status": new_status,
                     "t1_achieved": t1_achieved,
                 })
 
                 if new_status == "SL_HIT":
-                    log.append(f"🔴 {symbol}: SL Hit — LTP ₹{ltp} crossed SL ₹{sl_price}")
-                elif new_status == "EXIT":
-                    log.append(f"🟣 {symbol}: EXIT — candle closed wrong side of EMA20 after T1")
+                    log.append(f"🔴 {symbol}: SL Hit — LTP ₹{ltp} hit SL ₹{sl_price}")
                 elif new_status == "T1_ACHIEVE":
-                    log.append(f"🟢 {symbol}: T1 Achieved — watching for EXIT signal")
+                    log.append(f"🟢 {symbol}: T1 Achieved — LTP ₹{ltp} hit T1 ₹{t1_val} — LOCKED")
 
                 return r
         return None
@@ -1019,7 +1040,6 @@ buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit
 sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
 sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
-exit_count       = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
 total_count      = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1051,10 +1071,6 @@ with header_container:
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#27ae60;">{t1_achieve_count}</div>
       <div class="ts-counter-lbl">T1 Achieve</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#6c3fc5;">{exit_count}</div>
-      <div class="ts-counter-lbl">Exit</div>
     </div>
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#d04a00;">{sl_hit_count}</div>
@@ -1143,13 +1159,7 @@ else:
         t1_val     = entry_target.get("target", "—")
         risk_val   = entry_target.get("risk",   "—")
 
-        if exit_status == "EXIT":
-            border_clr  = "#6c3fc5"
-            badge_cls   = "ts-badge-exit"
-            badge_label = "EXIT 🟣"
-            bar_color   = "#6c3fc5"
-            pct_clr     = "#6c3fc5"
-        elif exit_status == "T1_ACHIEVE":
+        if exit_status == "T1_ACHIEVE":
             border_clr  = "#27ae60"
             badge_cls   = "ts-badge-t1achieve"
             badge_label = "T1 Achieve ✅"
