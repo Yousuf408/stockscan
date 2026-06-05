@@ -31,9 +31,11 @@ except ImportError:
 # ── Auth — soft check only, scanner accessible to all ──
 try:
     from login import is_logged_in, auth_sign_in, _set_session
-    _user_logged_in = is_logged_in()
 except ImportError:
-    _user_logged_in = False
+    def is_logged_in(): return False
+
+# Always read live from session — updates after inline login
+_user_logged_in = bool(st.session_state.get("user_id"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: WATCHLIST FILE INTEGRATION
@@ -985,7 +987,7 @@ if scan_clicked:
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
 if clear_clicked:
-    if _user_logged_in:
+    if st.session_state.get("user_id"):
         clear_scanner_results(st.session_state.selected_watchlist)
     st.session_state.results      = []
     st.session_state.scan_log     = []
