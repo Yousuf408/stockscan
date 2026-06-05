@@ -1,6 +1,5 @@
 [client]
-# Hide the toolbar items (share, edit button, menu)
-toolbarMode = "minimal"
+toolbarMode = "viewer"
 
 [logger]
 level = "info"
@@ -13,5 +12,4 @@ textColor = "#111111"
 font = "sans serif"
 
 [browser]
-# Reduce toolbar visibility
 gatherUsageStats = false
