@@ -10,6 +10,14 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from styles import apply_styles, sidebar_brand, page_header
 from stocks import SECTOR_YAHOO, get_stocks_by_sector
 
+# ── Auth guard ──  ← PASTE HERE (after imports, before st. calls)
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+    
+
 # 1. Page Configuration
 st.set_page_config(page_title="TradeSentry — Sectors", layout="wide", page_icon="📊")
 apply_styles()
