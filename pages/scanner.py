@@ -1029,6 +1029,7 @@ if not _user_logged_in:
                 else:
                     with st.spinner("Signing in..."):
                         data = auth_sign_in(il_email.strip(), il_pass.strip())
+                    st.write("DEBUG:", data)  # temporary debug
                     if data.get("access_token"):
                         _set_session(data)
                         st.session_state["show_inline_login"] = False
