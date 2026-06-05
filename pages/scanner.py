@@ -617,36 +617,16 @@ ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 # NOTE: Counters will be updated AFTER filters are applied (see below)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Placeholder - will be calculated after filters
-buy_count   = 0
-sell_count  = 0
-sl_hit_count = 0
-total_count = 0
-
 # ─────────────────────────────────────────────────────────────────────────────
-# INITIALIZE FILTER VARIABLES (defaults if filters not open)
+# INITIALIZE FILTER VARIABLES (defaults)
 # ─────────────────────────────────────────────────────────────────────────────
-if st.session_state.show_filters:
-    filter_sig       = "ALL"
-    filter_min_vol   = ""
-    filter_ema20     = ""
-    filter_ema200    = ""
-    filter_min_score = ""
-    toggle_body_wick = False
-    toggle_hide_sl   = False
-else:
-    filter_sig       = "ALL"
-    filter_min_vol   = ""
-    filter_ema20     = ""
-    filter_ema200    = ""
-    filter_min_score = ""
-    toggle_body_wick = False
-    toggle_hide_sl   = False
-
-# ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS
-# ─────────────────────────────────────────────────────────────────────────────
-view = list(st.session_state.results)
+filter_sig       = "ALL"
+filter_min_vol   = ""
+filter_ema20     = ""
+filter_ema200    = ""
+filter_min_score = ""
+toggle_body_wick = False
+toggle_hide_sl   = False
 
 if filter_sig != "ALL":
     view = [r for r in view if r["signal"] == filter_sig]
@@ -772,6 +752,53 @@ if clear_clicked:
     st.session_state.scan_log  = []
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLLAPSIBLE FILTER PANEL — Display AFTER buttons if toggled
+# ─────────────────────────────────────────────────────────────────────────────
+if st.session_state.show_filters:
+    with st.container(border=True):
+        st.markdown("**⚙ Refine Filters**")
+        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
+        with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
+        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="",               key="f_vol")
+        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="",   key="f_e20")
+        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="",  key="f_e200")
+        with col_f5:  filter_min_score = st.text_input("Score ≥", value="",              key="f_score")
+        tog1, tog2, tog3 = st.columns(3)
+        with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
+        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
+        with tog3: auto_on          = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
+        if auto_on != st.session_state.auto_refresh:
+            st.session_state.auto_refresh = auto_on
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RE-APPLY FILTERS WITH UPDATED VALUES
+# ─────────────────────────────────────────────────────────────────────────────
+view = list(st.session_state.results)
+
+if filter_sig != "ALL":
+    view = [r for r in view if r["signal"] == filter_sig]
+if filter_min_vol.strip():
+    try:    view = [r for r in view if r["volume"] >= float(filter_min_vol)]
+    except: pass
+if filter_ema20.strip():
+    try:    view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
+    except: pass
+if filter_ema200.strip():
+    try:    view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
+    except: pass
+if filter_min_score.strip():
+    try:    view = [r for r in view if r["score"] >= float(filter_min_score)]
+    except: pass
+if toggle_body_wick:
+    view = [
+        r for r in view
+        if (r["highPrice"] - r["lowPrice"]) > 0
+        and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
+    ]
+if toggle_hide_sl:
+    view = [r for r in view if not r.get("sl_hit", False)]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTOR PILLS
