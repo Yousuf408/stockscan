@@ -724,80 +724,6 @@ toggle_hide_sl   = False
 # Initialize view with all results
 view = list(st.session_state.results)
 
-if filter_sig != "ALL":
-    view = [r for r in view if r["signal"] == filter_sig]
-if filter_min_vol.strip():
-    try:    view = [r for r in view if r["volume"] >= float(filter_min_vol)]
-    except: pass
-if filter_ema20.strip():
-    try:    view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
-    except: pass
-if filter_ema200.strip():
-    try:    view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
-    except: pass
-if filter_min_score.strip():
-    try:    view = [r for r in view if r["score"] >= float(filter_min_score)]
-    except: pass
-if toggle_body_wick:
-    view = [
-        r for r in view
-        if (r["highPrice"] - r["lowPrice"]) > 0
-        and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
-    ]
-if toggle_hide_sl:
-    view = [r for r in view if not r.get("sl_hit", False)]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CALCULATE HEADER COUNTS FROM FILTERED VIEW (after all filters applied)
-# ─────────────────────────────────────────────────────────────────────────────
-buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
-sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
-exit_count  = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
-sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
-total_count = len(view)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# REDRAW HEADER WITH UPDATED COUNTS — TOP OF PAGE
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
-  
-  <div style="flex:1;">
-    <p class="ts-header-title">Momentum scanner</p>
-    <p class="ts-header-sub">
-      {st.session_state.selected_watchlist}
-      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
-      &nbsp;·&nbsp; {mkt_label}
-      &nbsp;·&nbsp; {ist_time_str}
-    </p>
-  </div>
-
-  <div style="display:flex;gap:30px;margin-top:2px;">
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
-      <div class="ts-counter-lbl">Buy</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
-      <div class="ts-counter-lbl">Sell</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{exit_count}</div>
-      <div class="ts-counter-lbl">EXIT</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
-      <div class="ts-counter-lbl">SL Hit</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
-      <div class="ts-counter-lbl">Total</div>
-    </div>
-  </div>
-
-</div>
-""", unsafe_allow_html=True)
-
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTION BUTTON ROW — with watchlist selector (AFTER HEADER)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -900,6 +826,57 @@ if toggle_body_wick:
     ]
 if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOW CALCULATE ACCURATE COUNTS AFTER ALL FILTERS APPLIED
+# ─────────────────────────────────────────────────────────────────────────────
+buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+exit_count  = len([r for r in view if r.get("exit_status", "ACTIVE") == "EXIT"])
+sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
+total_count = len(view)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DISPLAY HEADER WITH ACCURATE COUNTS (AFTER FILTERS APPLIED)
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
+  
+  <div style="flex:1;">
+    <p class="ts-header-title">Momentum scanner</p>
+    <p class="ts-header-sub">
+      {st.session_state.selected_watchlist}
+      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
+      &nbsp;·&nbsp; {mkt_label}
+      &nbsp;·&nbsp; {ist_time_str}
+    </p>
+  </div>
+
+  <div style="display:flex;gap:30px;margin-top:2px;">
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
+      <div class="ts-counter-lbl">Buy</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
+      <div class="ts-counter-lbl">Sell</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{exit_count}</div>
+      <div class="ts-counter-lbl">EXIT</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
+      <div class="ts-counter-lbl">SL Hit</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
+      <div class="ts-counter-lbl">Total</div>
+    </div>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTOR PILLS
