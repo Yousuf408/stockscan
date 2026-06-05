@@ -624,63 +624,7 @@ sl_hit_count = 0
 total_count = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACTION BUTTON ROW — with watchlist selector
-# ─────────────────────────────────────────────────────────────────────────────
-btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
-
-with btn_col1:
-    selected_wl = st.selectbox(
-        "Watchlist",
-        WATCHLIST_NAMES,
-        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
-        label_visibility="collapsed",
-    )
-    if selected_wl != st.session_state.selected_watchlist:
-        st.session_state.selected_watchlist = selected_wl
-        st.session_state.results            = []
-        st.session_state.scan_log           = []
-        st.rerun()
-
-with btn_col2:
-    scan_clicked    = st.button("▷  Run scan",   use_container_width=True,
-                                 disabled=len(stocks_to_scan) == 0)
-with btn_col3:
-    refresh_clicked = st.button("↺  Refresh",    use_container_width=True,
-                                 disabled=len(st.session_state.results) == 0)
-with btn_col4:
-    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
-with btn_col5:
-    filter_toggle   = st.button(
-        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
-        use_container_width=True,
-    )
-with btn_col6:
-    sig_display     = len([r for r in st.session_state.results])
-    wl_total        = len(stocks_to_scan)
-    st.markdown(
-        f'<div style="display:flex;align-items:center;height:38px;">'
-        f'<span style="font-size:12px;font-weight:600;background:#f0f0f0;'
-        f'color:#555;padding:5px 14px;border-radius:20px;">'
-        f'{sig_display} / {wl_total} signals</span></div>',
-        unsafe_allow_html=True,
-    )
-
-if filter_toggle:
-    st.session_state.show_filters = not st.session_state.show_filters
-    st.rerun()
-
-if scan_clicked:
-    run_full_scan(stocks_to_scan)
-if refresh_clicked:
-    run_refresh_scan(stocks_to_scan)
-if clear_clicked:
-    st.session_state.results   = []
-    st.session_state.scan_log  = []
-    st.session_state.show_filters = False
-    st.success("Scanner cleared.")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COLLAPSIBLE FILTER PANEL
+# COLLAPSIBLE FILTER PANEL (place before header so filters are available)
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.show_filters:
     with st.container(border=True):
@@ -743,7 +687,7 @@ sl_hit_count = len([r for r in view if r.get("sl_hit", False)])
 total_count = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REDRAW HEADER WITH UPDATED COUNTS
+# REDRAW HEADER WITH UPDATED COUNTS — TOP OF PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
@@ -779,7 +723,62 @@ st.markdown(f"""
 
 </div>
 """, unsafe_allow_html=True)
-all_sectors = sorted(set(r["sector"] for r in view))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTION BUTTON ROW — with watchlist selector (AFTER HEADER)
+# ─────────────────────────────────────────────────────────────────────────────
+btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
+
+with btn_col1:
+    selected_wl = st.selectbox(
+        "Watchlist",
+        WATCHLIST_NAMES,
+        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+        label_visibility="collapsed",
+    )
+    if selected_wl != st.session_state.selected_watchlist:
+        st.session_state.selected_watchlist = selected_wl
+        st.session_state.results            = []
+        st.session_state.scan_log           = []
+        st.rerun()
+
+with btn_col2:
+    scan_clicked    = st.button("▷  Run scan",   use_container_width=True,
+                                 disabled=len(stocks_to_scan) == 0)
+with btn_col3:
+    refresh_clicked = st.button("↺  Refresh",    use_container_width=True,
+                                 disabled=len(st.session_state.results) == 0)
+with btn_col4:
+    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
+with btn_col5:
+    filter_toggle   = st.button(
+        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
+        use_container_width=True,
+    )
+with btn_col6:
+    sig_display     = len([r for r in st.session_state.results])
+    wl_total        = len(stocks_to_scan)
+    st.markdown(
+        f'<div style="display:flex;align-items:center;height:38px;">'
+        f'<span style="font-size:12px;font-weight:600;background:#f0f0f0;'
+        f'color:#555;padding:5px 14px;border-radius:20px;">'
+        f'{sig_display} / {wl_total} signals</span></div>',
+        unsafe_allow_html=True,
+    )
+
+if filter_toggle:
+    st.session_state.show_filters = not st.session_state.show_filters
+    st.rerun()
+
+if scan_clicked:
+    run_full_scan(stocks_to_scan)
+if refresh_clicked:
+    run_refresh_scan(stocks_to_scan)
+if clear_clicked:
+    st.session_state.results   = []
+    st.session_state.scan_log  = []
+    st.session_state.show_filters = False
+    st.success("Scanner cleared.")
 sector_counts = {}
 for r in view:
     sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
