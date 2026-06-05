@@ -143,7 +143,7 @@ def _row_to_stock(row: dict) -> dict:
 
 
 def _stock_to_row(stock: dict, tab: str) -> dict:
-    user_id = _get_user_id()
+    user_id = _get_user_id() or None  # None instead of "" for UUID column
     return {
         "tab":        tab,
         "user_id":    user_id,
@@ -169,14 +169,18 @@ def _stock_to_row(stock: dict, tab: str) -> dict:
 def load_watchlist(tab: str = None):
     try:
         user_id = _get_user_id()
-        if not user_id:
-            return [] if tab else {f"watchlist_{t}": [] for t in WATCHLIST_TABS}
 
         if tab:
-            rows = _sb_select("watchlist", {"tab": f"eq.{tab}", "user_id": f"eq.{user_id}"})
+            filters = {"tab": f"eq.{tab}"}
+            if user_id:
+                filters["user_id"] = f"eq.{user_id}"
+            rows = _sb_select("watchlist", filters)
             return [_row_to_stock(r) for r in rows]
         else:
-            rows   = _sb_select("watchlist", {"user_id": f"eq.{user_id}"})
+            filters = {}
+            if user_id:
+                filters["user_id"] = f"eq.{user_id}"
+            rows   = _sb_select("watchlist", filters)
             result = {f"watchlist_{t}": [] for t in WATCHLIST_TABS}
             for row in rows:
                 key = f"watchlist_{row.get('tab', '')}"
@@ -189,15 +193,16 @@ def load_watchlist(tab: str = None):
 
 def save_watchlist(data: dict):
     try:
-        user_id = _get_user_id()
-        if not user_id:
-            raise RuntimeError("Not logged in")
+        user_id = _get_user_id() or None
         for tab in WATCHLIST_TABS:
             key    = f"watchlist_{tab}"
             stocks = data.get(key)
             if stocks is None:
                 continue
-            _sb_delete("watchlist", f"tab=eq.{tab}&user_id=eq.{user_id}")
+            if user_id:
+                _sb_delete("watchlist", f"tab=eq.{tab}&user_id=eq.{user_id}")
+            else:
+                _sb_delete("watchlist", f"tab=eq.{tab}&user_id=is.null")
             if stocks:
                 rows = [_stock_to_row(s, tab) for s in stocks]
                 _sb_insert("watchlist", rows)
@@ -254,8 +259,11 @@ def update_watchlist_stock(db_id: int, updates: dict):
 
 def clear_watchlist_tab(tab: str):
     try:
-        user_id = _get_user_id()
-        _sb_delete("watchlist", f"tab=eq.{tab}&user_id=eq.{user_id}")
+        user_id = _get_user_id() or None
+        if user_id:
+            _sb_delete("watchlist", f"tab=eq.{tab}&user_id=eq.{user_id}")
+        else:
+            _sb_delete("watchlist", f"tab=eq.{tab}&user_id=is.null")
         return True
     except Exception as e:
         raise RuntimeError(f"Supabase clear failed: {e}")
