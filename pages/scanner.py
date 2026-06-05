@@ -586,15 +586,15 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
-                et        = r.get("entry_target") or {}
-                sl_price  = et.get("sl")
-                t1_val    = et.get("target")
-                signal    = r.get("signal")          # ← read signal from stored result
+                signal   = r.get("signal")
+                et       = r.get("entry_target") or {}
+                sl_price = et.get("sl")
+                t1_val   = et.get("target")
 
                 current_status = r.get("exit_status", "ACTIVE")
 
-                # ── T1_ACHIEVE is LOCKED FOREVER — never change it ──
-                if current_status == "T1_ACHIEVE":
+                # T1_ACHIEVE and SL_HIT are locked forever — only update prices
+                if current_status in ("T1_ACHIEVE", "SL_HIT"):
                     r.update({
                         "ltp":       round(ltp, 2),
                         "ema20":     round(ema20_live, 2),
@@ -604,31 +604,17 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     })
                     return r
 
-                # ── SL_HIT is also LOCKED — never change it ──
-                if current_status == "SL_HIT":
-                    r.update({
-                        "ltp":       round(ltp, 2),
-                        "ema20":     round(ema20_live, 2),
-                        "ema200":    round(ema200_live, 2),
-                        "vwap":      round(vwap_live, 2),
-                        "pctChange": round(pct_change, 2),
-                    })
-                    return r
-
-                # ── ACTIVE — check if T1 or SL hit now via LTP ──
-                new_status = "ACTIVE"
-
-                if t1_val and sl_price:
-                    if signal == "BUY"  and ltp >= t1_val:
-                        new_status = "T1_ACHIEVE"
-                    elif signal == "SELL" and ltp <= t1_val:
-                        new_status = "T1_ACHIEVE"
-                    elif signal == "BUY"  and ltp <= sl_price:
-                        new_status = "SL_HIT"
-                    elif signal == "SELL" and ltp >= sl_price:
-                        new_status = "SL_HIT"
-
-                t1_achieved = new_status == "T1_ACHIEVE"
+                # Re-run full historical check — same logic as initial scan
+                opening_idx = find_opening_candle_index(candles)
+                if opening_idx >= 0:
+                    trading_date     = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+                    candles_from_open = candles[opening_idx:]
+                    new_status = check_historical_status(
+                        signal, candles_from_open,
+                        t1_val, sl_price, trading_date
+                    )
+                else:
+                    new_status = current_status
 
                 r.update({
                     "ltp":         round(ltp, 2),
@@ -638,14 +624,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "pctChange":   round(pct_change, 2),
                     "sl_hit":      new_status == "SL_HIT",
                     "exit_status": new_status,
-                    "t1_achieved": t1_achieved,
+                    "t1_achieved": new_status == "T1_ACHIEVE",
                 })
-
-                if new_status == "SL_HIT":
-                    log.append(f"🔴 {symbol}: SL Hit — LTP ₹{ltp} hit SL ₹{sl_price}")
-                elif new_status == "T1_ACHIEVE":
-                    log.append(f"🟢 {symbol}: T1 Achieved — LTP ₹{ltp} hit T1 ₹{t1_val} — LOCKED")
-
                 return r
         return None
 
