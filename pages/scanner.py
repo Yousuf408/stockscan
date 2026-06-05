@@ -1,12 +1,9 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.3
-#  Changes from v2.2:
-#    - Full UI redesign: Variation B layout
-#      • Header card with live Buy / Sell / Total counters
-#      • Flat action-button row (Run scan · Refresh · Clear · Filters)
-#      • Collapsible filter panel behind "Filters" button
-#      • Compact sector pills
-#      • Wider signal cards with score progress-bar
+#  TRADE SENTRY — scanner.py  v2.4  (debug build)
+#  Changes from v2.3:
+#    - Added debug_opening_candle() function
+#    - Called inside analyze_stock() right after find_opening_candle_index()
+#    - Scan Log will now show full candle details + Entry/SL/T1 for every stock
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -73,7 +70,7 @@ for _k, _v in [
     ("auto_refresh",         False),
     ("scan_log",             []),
     ("last_auto_refresh",    0),
-    ("show_filters",         False),   # NEW — filter panel toggle
+    ("show_filters",         False),
 ]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -255,6 +252,76 @@ def find_opening_candle_index(candles: list) -> int:
     return -1
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5.10: DEBUG — OPENING CANDLE INSPECTOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
+    """
+    Logs full details of the detected 9:15 opening candle and the
+    Entry / SL / T1 values that will be used for this stock.
+
+    Called inside analyze_stock() right after find_opening_candle_index().
+    Results appear in the Scan Log expander on the scanner page.
+    """
+    log = st.session_state.get("scan_log", [])
+
+    if opening_idx < 0:
+        log.append(f"🐛 DEBUG [{symbol}] — opening_idx = -1  (no 9:15 candle found)")
+        return
+
+    open_candle = candles[opening_idx]
+
+    ts    = open_candle[0]
+    o     = float(open_candle[1])
+    high  = float(open_candle[2])
+    low   = float(open_candle[3])
+    close = float(open_candle[4])
+    vol   = float(open_candle[5])
+
+    risk             = round(high - low, 2)
+    candle_range_pct = round((risk / low * 100) if low > 0 else 0, 3)
+
+    # BUY scenario
+    entry_buy  = round(high, 2)
+    sl_buy     = round(low, 2)
+    target_buy = round(entry_buy + risk, 2)
+
+    # SELL scenario
+    entry_sell  = round(low, 2)
+    sl_sell     = round(high, 2)
+    target_sell = round(entry_sell - risk, 2)
+
+    log.append("━" * 55)
+    log.append(f"🐛 DEBUG [{symbol}]  opening_idx={opening_idx}")
+    log.append(f"   Timestamp   : {ts}")
+    log.append(f"   O={o}  H={high}  L={low}  C={close}  Vol={vol:,.0f}")
+    log.append(f"   Candle range: {risk}  ({candle_range_pct}%)")
+    log.append(f"   ── BUY scenario ──────────────────")
+    log.append(f"      Entry  = HIGH        = {entry_buy}")
+    log.append(f"      SL     = LOW         = {sl_buy}")
+    log.append(f"      Risk   = H - L       = {risk}")
+    log.append(f"      T1     = {entry_buy} + {risk} = {target_buy}")
+    log.append(f"   ── SELL scenario ─────────────────")
+    log.append(f"      Entry  = LOW         = {entry_sell}")
+    log.append(f"      SL     = HIGH        = {sl_sell}")
+    log.append(f"      Risk   = H - L       = {risk}")
+    log.append(f"      T1     = {entry_sell} - {risk} = {target_sell}")
+    log.append(f"   ── Candles around opening_idx ────")
+
+    start = max(0, opening_idx - 2)
+    end   = min(len(candles), opening_idx + 3)
+    for i in range(start, end):
+        c      = candles[i]
+        marker = "  ◀ OPENING CANDLE" if i == opening_idx else ""
+        log.append(
+            f"   [{i:>4}] {c[0]}  "
+            f"O={float(c[1]):.2f}  H={float(c[2]):.2f}  "
+            f"L={float(c[3]):.2f}  C={float(c[4]):.2f}"
+            f"{marker}"
+        )
+    log.append("━" * 55)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION 6: SIGNAL LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -335,77 +402,76 @@ def check_sl_hit(signal: str, candles: list, ema20_live: float) -> bool:
 def calc_entry_target(signal: str, opening_candle: list) -> dict:
     """
     Calculate entry price and 1:1 target for BUY/SELL signals.
-    
-    BUY:  Entry = HIGH, SL = LOW, Target = Entry + (Entry - SL)
-    SELL: Entry = LOW, SL = HIGH, Target = Entry - (SL - Entry)
-    
+
+    BUY:  Entry = HIGH, SL = LOW,  Target = Entry + (Entry - SL)
+    SELL: Entry = LOW,  SL = HIGH, Target = Entry - (SL - Entry)
+
     Returns: {entry, sl, target, risk}
     """
     if not signal or not opening_candle:
         return None
-    
+
     high = float(opening_candle[2])
-    low = float(opening_candle[3])
-    
+    low  = float(opening_candle[3])
+
     if signal == "BUY":
-        entry = high
-        sl = low
-        risk = entry - sl
+        entry  = high
+        sl     = low
+        risk   = entry - sl
         target = entry + risk
     elif signal == "SELL":
-        entry = low
-        sl = high
-        risk = sl - entry
+        entry  = low
+        sl     = high
+        risk   = sl - entry
         target = entry - risk
     else:
         return None
-    
+
     return {
-        "entry": round(entry, 2),
-        "sl": round(sl, 2),
+        "entry":  round(entry,  2),
+        "sl":     round(sl,     2),
         "target": round(target, 2),
-        "risk": round(risk, 2)
+        "risk":   round(risk,   2),
     }
 
 
 def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
-                          candles: list, ema20_live: float, 
+                          candles: list, ema20_live: float,
                           t1_already_achieved: bool = False) -> dict:
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
-    
+
     T1 ACHIEVE: LTP hits target (LOCKED forever via t1_already_achieved flag)
     SL HIT: Only check if T1 NOT yet achieved (2 consecutive candles wrong side of EMA20)
-    
+
     Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
     """
     if not signal or ltp is None or entry is None or target is None:
         return {"status": "ACTIVE", "triggered": False}
-    
-    # If T1 already achieved, KEEP IT LOCKED - don't change ever
+
+    # If T1 already achieved, KEEP IT LOCKED — don't change ever
     if t1_already_achieved:
         return {"status": "T1_ACHIEVE", "triggered": True}
-    
+
     # Check if target is hit NOW using LTP
-    if signal == "BUY" and ltp >= target:
+    if signal == "BUY"  and ltp >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     if signal == "SELL" and ltp <= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
-    
+
     # Only check SL HIT if T1 NOT yet achieved
     if not candles or len(candles) < 2:
         return {"status": "ACTIVE", "triggered": False}
-    
+
     last_two_closes = [float(c[4]) for c in candles[-2:]]
-    
-    # 2 consecutive candles closed wrong side of EMA20
+
     if signal == "BUY":
         if all(c < ema20_live for c in last_two_closes):
             return {"status": "SL_HIT", "triggered": True}
     elif signal == "SELL":
         if all(c > ema20_live for c in last_two_closes):
             return {"status": "SL_HIT", "triggered": True}
-    
+
     return {"status": "ACTIVE", "triggered": False}
 
 
@@ -451,30 +517,24 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         for r in st.session_state.results:
             if r["symbol"] == symbol:
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
-                
-                # Get current candle HIGH and LOW
-                current_candle = candles[-1]
-                current_high = float(current_candle[2])
-                current_low = float(current_candle[3])
-                
-                # Check T1/SL status using LTP, lock T1 if already achieved
+
                 exit_status = check_exit_or_sl_hit(
                     r["signal"], ltp,
-                    r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
+                    r.get("entry_target", {}).get("entry")  if r.get("entry_target") else None,
                     r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
                     candles, ema20_live,
                     t1_already_achieved=r.get("t1_achieved", False)
                 )
-                
+
                 r.update({
-                    "ltp":       round(ltp, 2),
-                    "ema20":     round(ema20_live, 2),
-                    "ema200":    round(ema200_live, 2),
-                    "vwap":      round(vwap_live, 2),
-                    "pctChange": round(pct_change, 2),
-                    "sl_hit":    sl_hit,
+                    "ltp":         round(ltp, 2),
+                    "ema20":       round(ema20_live, 2),
+                    "ema200":      round(ema200_live, 2),
+                    "vwap":        round(vwap_live, 2),
+                    "pctChange":   round(pct_change, 2),
+                    "sl_hit":      sl_hit,
                     "exit_status": exit_status.get("status", "ACTIVE"),
-                    "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Update T1 flag
+                    "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",
                 })
                 if sl_hit:
                     log.append(f"🔴 {symbol}: SL Hit — 2 consecutive candles crossed EMA20")
@@ -483,6 +543,10 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
+
+    # ── DEBUG: log opening candle details for every stock ──
+    debug_opening_candle(symbol, candles, opening_idx)
+
     if opening_idx < 0:
         target = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
         log.append(f"⚠️ {symbol}: No 9:15 candle found for {target}")
@@ -534,19 +598,29 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         return None
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
-    
+
     # Calculate entry and target prices
     entry_target = calc_entry_target(signal, open_candle)
-    
+
+    # Log entry/target clearly for verification
+    if entry_target:
+        log.append(
+            f"🎯 {symbol} {signal} — "
+            f"Entry={entry_target['entry']}  "
+            f"SL={entry_target['sl']}  "
+            f"Risk={entry_target['risk']}  "
+            f"T1={entry_target['target']}"
+        )
+
     # Check T1/SL status using LTP
     exit_status = check_exit_or_sl_hit(
         signal, ltp,
-        entry_target["entry"] if entry_target else None,
+        entry_target["entry"]  if entry_target else None,
         entry_target["target"] if entry_target else None,
         candles, ema20_live,
         t1_already_achieved=False
     )
-    
+
     result = {
         "symbol":       symbol,
         "sector":       sector or "GENERAL",
@@ -618,13 +692,10 @@ from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand()
 
-# ── Global style overrides for Variation B ──
 st.markdown("""
 <style>
-/* ── reset card gap ── */
 div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 
-/* ── action buttons ── */
 .ts-btn-row { display:flex; gap:8px; align-items:center; margin:12px 0 4px; }
 .ts-btn {
     display:inline-flex; align-items:center; gap:6px;
@@ -643,7 +714,6 @@ div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
     border-radius:20px; white-space:nowrap;
 }
 
-/* ── header card ── */
 .ts-header-card {
     background:#ffffff; border:1px solid #e8e8e8;
     border-radius:12px; padding:18px 24px;
@@ -654,7 +724,6 @@ div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 .ts-counter-val { font-size:28px; font-weight:800; font-family:monospace; }
 .ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:2px; }
 
-/* ── sector pills override ── */
 div[data-testid="stPills"] button {
     font-size:12px !important;
     padding:4px 12px !important;
@@ -662,7 +731,6 @@ div[data-testid="stPills"] button {
     font-weight:600 !important;
 }
 
-/* ── signal card ── */
 .ts-card {
     background:#ffffff; border:1px solid #ebebeb;
     border-left:4px solid #ebebeb;
@@ -684,19 +752,24 @@ div[data-testid="stPills"] button {
     font-size:10px; font-weight:700; padding:2px 8px;
     border-radius:5px; font-family:monospace;
 }
-.ts-badge-buy  { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
-.ts-badge-sell { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
+.ts-badge-buy     { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
+.ts-badge-sell    { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
 .ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
-.ts-badge-slhit{ color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
+.ts-badge-slhit   { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
 .ts-meta  {
     font-size:12px; color:#888888; font-family:monospace;
     display:flex; gap:12px; align-items:center;
-    margin-bottom:6px;
+    margin-bottom:4px;
 }
 .ts-meta span { color:#444444; font-weight:600; }
-/* ── score bar ── */
+.ts-entry-row {
+    font-size:11px; font-family:monospace; color:#888888;
+    display:flex; gap:14px; align-items:center;
+    margin-bottom:6px;
+}
+.ts-entry-row span { font-weight:700; }
 .ts-score-row {
     display:flex; align-items:center; gap:8px;
 }
@@ -715,7 +788,7 @@ div[data-testid="stPills"] button {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RESERVE SPACE FOR HEADER AT TOP (will be filled after filters are calculated)
+# RESERVE SPACE FOR HEADER
 # ─────────────────────────────────────────────────────────────────────────────
 header_container = st.container()
 
@@ -725,7 +798,7 @@ mkt_label      = "Market open" if mkt_open else "Market closed"
 ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INITIALIZE FILTER VARIABLES (defaults)
+# INITIALIZE FILTER VARIABLES
 # ─────────────────────────────────────────────────────────────────────────────
 filter_sig       = "ALL"
 filter_min_vol   = ""
@@ -735,11 +808,10 @@ filter_min_score = ""
 toggle_body_wick = False
 toggle_hide_sl   = False
 
-# Initialize view with all results
 view = list(st.session_state.results)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACTION BUTTON ROW — with watchlist selector
+# ACTION BUTTON ROW
 # ─────────────────────────────────────────────────────────────────────────────
 btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
 
@@ -757,21 +829,21 @@ with btn_col1:
         st.rerun()
 
 with btn_col2:
-    scan_clicked    = st.button("▷  Run scan",   use_container_width=True,
+    scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
                                  disabled=len(stocks_to_scan) == 0)
 with btn_col3:
-    refresh_clicked = st.button("↺  Refresh",    use_container_width=True,
+    refresh_clicked = st.button("↺  Refresh",   use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
 with btn_col4:
-    clear_clicked   = st.button("🗑  Clear",       use_container_width=True)
+    clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
 with btn_col5:
     filter_toggle   = st.button(
         ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
         use_container_width=True,
     )
 with btn_col6:
-    sig_display     = len([r for r in st.session_state.results])
-    wl_total        = len(stocks_to_scan)
+    sig_display = len(st.session_state.results)
+    wl_total    = len(stocks_to_scan)
     st.markdown(
         f'<div style="display:flex;align-items:center;height:38px;">'
         f'<span style="font-size:12px;font-weight:600;background:#f0f0f0;'
@@ -789,13 +861,13 @@ if scan_clicked:
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
 if clear_clicked:
-    st.session_state.results   = []
-    st.session_state.scan_log  = []
+    st.session_state.results      = []
+    st.session_state.scan_log     = []
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COLLAPSIBLE FILTER PANEL — Display AFTER buttons if toggled
+# COLLAPSIBLE FILTER PANEL
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.show_filters:
     with st.container(border=True):
@@ -814,7 +886,7 @@ if st.session_state.show_filters:
             st.session_state.auto_refresh = auto_on
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY ALL FILTERS (after filter panel values are set)
+# APPLY ALL FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
 view = list(st.session_state.results)
 
@@ -842,21 +914,21 @@ if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CALCULATE ACCURATE COUNTS AFTER ALL FILTERS APPLIED
+# CALCULATE COUNTS AFTER FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
-buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
-sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
-sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
-total_count = len(view)
+sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
+total_count      = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOW FILL THE HEADER CONTAINER WITH CORRECT COUNTS
+# FILL HEADER WITH CORRECT COUNTS
 # ─────────────────────────────────────────────────────────────────────────────
 with header_container:
     st.markdown(f"""
 <div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
-  
+
   <div style="flex:1;">
     <p class="ts-header-title">Momentum scanner</p>
     <p class="ts-header-sub">
@@ -869,23 +941,23 @@ with header_container:
 
   <div style="display:flex;gap:30px;margin-top:2px;">
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
+      <div class="ts-counter-val" style="color:#1a9c4a;">{buy_count}</div>
       <div class="ts-counter-lbl">Buy</div>
     </div>
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
+      <div class="ts-counter-val" style="color:#c0392b;">{sell_count}</div>
       <div class="ts-counter-lbl">Sell</div>
     </div>
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#27ae60;font-size:28px;">{t1_achieve_count}</div>
+      <div class="ts-counter-val" style="color:#27ae60;">{t1_achieve_count}</div>
       <div class="ts-counter-lbl">T1 Achieve</div>
     </div>
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#d04a00;font-size:28px;">{sl_hit_count}</div>
+      <div class="ts-counter-val" style="color:#d04a00;">{sl_hit_count}</div>
       <div class="ts-counter-lbl">SL Hit</div>
     </div>
     <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
+      <div class="ts-counter-val" style="color:#111111;">{total_count}</div>
       <div class="ts-counter-lbl">Total</div>
     </div>
   </div>
@@ -896,12 +968,12 @@ with header_container:
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTOR PILLS
 # ─────────────────────────────────────────────────────────────────────────────
-all_sectors = sorted(set(r["sector"] for r in view))
+all_sectors  = sorted(set(r["sector"] for r in view))
 sector_counts = {}
 for r in view:
     sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
 
-pill_options = ["All"]
+pill_options           = ["All"]
 display_label_to_sector = {}
 for sector in all_sectors:
     clean = sector.replace("NIFTY ", "")
@@ -918,7 +990,7 @@ if selected_sector_label and selected_sector_label != "All":
         view = [r for r in view if r["sector"] == mapped_sector]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SCAN LOG (debug)
+# SCAN LOG
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.scan_log:
     signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
@@ -931,7 +1003,7 @@ if st.session_state.scan_log:
             st.markdown(line)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIGNAL CARDS  — Variation B layout
+# SIGNAL CARDS  — Variation B
 # ─────────────────────────────────────────────────────────────────────────────
 if not view:
     if st.session_state.results:
@@ -939,11 +1011,11 @@ if not view:
     elif not st.session_state.scan_log:
         st.info("🔍 Run a scan to see results.")
 else:
-    sl_hit_count = len([r for r in st.session_state.results if r.get("sl_hit", False)])
-    if sl_hit_count:
+    sl_hit_display = len([r for r in st.session_state.results if r.get("sl_hit", False)])
+    if sl_hit_display:
         st.markdown(
             f'<div style="font-size:12px;color:#d04a00;margin-bottom:6px;">'
-            f'🔴 <b>{sl_hit_count}</b> SL Hit stock{"s" if sl_hit_count>1 else ""} in results</div>',
+            f'🔴 <b>{sl_hit_display}</b> SL Hit stock{"s" if sl_hit_display>1 else ""} in results</div>',
             unsafe_allow_html=True,
         )
 
@@ -958,35 +1030,39 @@ else:
         vwap         = item["vwap"]
         ema200       = item["ema200"]
         score        = item["score"]
-        entry_target = item.get("entry_target", {})
+        entry_target = item.get("entry_target") or {}
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
-        # Determine badge based on exit_status
+        entry_val  = entry_target.get("entry",  "—")
+        sl_val     = entry_target.get("sl",     "—")
+        t1_val     = entry_target.get("target", "—")
+        risk_val   = entry_target.get("risk",   "—")
+
         if exit_status == "T1_ACHIEVE":
-            border_clr   = "#27ae60"
-            badge_cls    = "ts-badge-t1achieve"
-            badge_label  = "T1 Achieve ✅"
-            bar_color    = "#27ae60"
-            pct_clr      = "#27ae60" if pct >= 0 else "#c0392b"
+            border_clr  = "#27ae60"
+            badge_cls   = "ts-badge-t1achieve"
+            badge_label = "T1 Achieve ✅"
+            bar_color   = "#27ae60"
+            pct_clr     = "#27ae60" if pct >= 0 else "#c0392b"
         elif exit_status == "SL_HIT":
-            border_clr   = "#e87040"
-            badge_cls    = "ts-badge-slhit"
-            badge_label  = "SL HIT ✕"
-            bar_color    = "#e87040"
-            pct_clr      = "#d04a00"
+            border_clr  = "#e87040"
+            badge_cls   = "ts-badge-slhit"
+            badge_label = "SL HIT ✕"
+            bar_color   = "#e87040"
+            pct_clr     = "#d04a00"
         elif sig == "BUY":
-            border_clr   = "#1a9c4a"
-            badge_cls    = "ts-badge-buy"
-            badge_label  = "BUY"
-            bar_color    = "#1a9c4a"
-            pct_clr      = "#1a9c4a" if pct >= 0 else "#c0392b"
+            border_clr  = "#1a9c4a"
+            badge_cls   = "ts-badge-buy"
+            badge_label = "BUY"
+            bar_color   = "#1a9c4a"
+            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
         else:
-            border_clr   = "#c0392b"
-            badge_cls    = "ts-badge-sell"
-            badge_label  = "SELL"
-            bar_color    = "#c0392b"
-            pct_clr      = "#1a9c4a" if pct >= 0 else "#c0392b"
+            border_clr  = "#c0392b"
+            badge_cls   = "ts-badge-sell"
+            badge_label = "SELL"
+            bar_color   = "#c0392b"
+            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
 
         pct_sign = "+" if pct > 0 else ""
         bar_pct  = int((score / 6) * 100)
@@ -1014,6 +1090,16 @@ else:
     <span>EMA200: <span>{ema200}</span></span>
     &nbsp;·&nbsp;
     <span style="color:#bbbbbb;">{age_str}</span>
+  </div>
+
+  <div class="ts-entry-row">
+    Entry: <span>₹{entry_val}</span>
+    &nbsp;·&nbsp;
+    SL: <span style="color:#d04a00;">₹{sl_val}</span>
+    &nbsp;·&nbsp;
+    T1: <span style="color:#1a7f4a;">₹{t1_val}</span>
+    &nbsp;·&nbsp;
+    Risk: <span>₹{risk_val}</span>
   </div>
 
   <div class="ts-score-row">
