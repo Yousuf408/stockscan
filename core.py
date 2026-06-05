@@ -8,7 +8,7 @@ import json
 import requests
 from datetime import date
 
-DEFAULT_WATCHLIST_NAMES = ["Watchlist A", "Watchlist B", "Watchlist C"]
+DEFAULT_WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 MAX_WATCHLISTS = 15
 
 # ─────────────────────────────────────────────────────────────────────────────
