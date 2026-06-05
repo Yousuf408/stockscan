@@ -369,12 +369,14 @@ def calc_entry_target(signal: str, opening_candle: list) -> dict:
 
 
 def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, entry: float, target: float, 
-                          candles: list, ema20_live: float, t1_already_achieved: bool = False) -> dict:
+                          candles: list, ema20_live: float, t1_already_achieved: bool = False, 
+                          opening_timestamp: float = None) -> dict:
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
     T1 ACHIEVE: Check if target was EVER touched in ANY candle from TODAY's TRADING DAY
-    (Filters by latest trading day in data to handle weekends/holidays)
+                AFTER the opening signal was generated
+    (Filters by latest trading day + after opening_timestamp to handle weekends/holidays)
     Once T1 is achieved, it's LOCKED - no further status changes.
     SL HIT: Only check if T1 was NEVER achieved
     
@@ -400,15 +402,18 @@ def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, ent
             latest_timestamp = max(float(c[0]) for c in candles)
             latest_trading_day = datetime.fromtimestamp(latest_timestamp).date()
             
-            # Filter candles to only those from the latest trading day
+            # Filter candles to BOTH:
+            # 1. Latest trading day only
+            # 2. AFTER the opening_timestamp (when signal was generated)
             today_candles = [
                 c for c in candles 
-                if datetime.fromtimestamp(float(c[0])).date() == latest_trading_day
+                if (datetime.fromtimestamp(float(c[0])).date() == latest_trading_day and
+                    float(c[0]) >= opening_timestamp if opening_timestamp else True)
             ]
         except:
             today_candles = candles  # Fallback to all candles if error
     
-    # Step 2: Check if target was EVER touched on TODAY'S TRADING DAY
+    # Step 2: Check if target was EVER touched on TODAY'S TRADING DAY (AFTER opening)
     if today_candles:
         max_high_today = max(float(c[2]) for c in today_candles)
         min_low_today = min(float(c[3]) for c in today_candles)
@@ -490,7 +495,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
                     r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
                     candles, ema20_live,
-                    t1_already_achieved=r.get("t1_achieved", False)  # ← LOCK if already achieved
+                    t1_already_achieved=r.get("t1_achieved", False),  # ← LOCK if already achieved
+                    opening_timestamp=r.get("opening_timestamp")  # ← Pass opening timestamp from result
                 )
                 
                 r.update({
@@ -576,7 +582,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         entry_target["entry"] if entry_target else None,
         entry_target["target"] if entry_target else None,
         candles, ema20_live,
-        t1_already_achieved=False  # First time, not achieved yet
+        t1_already_achieved=False,  # First time, not achieved yet
+        opening_timestamp=float(open_candle[0])  # ← Pass opening timestamp
     )
     
     result = {
@@ -598,7 +605,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "sl_hit":     False,
         "entry_target": entry_target,
         "exit_status": exit_status.get("status", "ACTIVE"),
-        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Lock T1 once achieved
+        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",
+        "opening_timestamp": float(open_candle[0]),  # ← Store opening candle timestamp
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
