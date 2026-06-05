@@ -28,17 +28,12 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth guard — redirect to login if not logged in ──
-# ── Auth guard ──
+# ── Auth — soft check only, scanner accessible to all ──
 try:
-    from login import is_logged_in
-    if not is_logged_in():
-        st.warning("Please login to access the scanner.")
-        if st.button("Go to Login →", type="primary"):
-            st.switch_page("pages/login.py")
-        st.stop()
+    from login import is_logged_in, auth_sign_in, _set_session
+    _user_logged_in = is_logged_in()
 except ImportError:
-    pass
+    _user_logged_in = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: WATCHLIST FILE INTEGRATION
@@ -89,11 +84,12 @@ for _k, _v in [
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-# ── Load today's results from Supabase on first page load ──
+# ── Load today's results from Supabase on first page load — only if logged in ──
 if not st.session_state["db_results_loaded"]:
-    db_results = load_scanner_results(st.session_state["selected_watchlist"])
-    if db_results:
-        st.session_state["results"] = db_results
+    if st.session_state.get("user_id"):
+        db_results = load_scanner_results(st.session_state["selected_watchlist"])
+        if db_results:
+            st.session_state["results"] = db_results
     st.session_state["db_results_loaded"] = True
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -762,8 +758,9 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
     st.session_state.results.append(result)
-    # Persist to Supabase immediately
-    save_scanner_result(result, st.session_state.get("selected_watchlist", "Today"))
+    # Persist to Supabase only if logged in
+    if st.session_state.get("user_id"):
+        save_scanner_result(result, st.session_state.get("selected_watchlist", "Today"))
     return result
 
 
@@ -988,11 +985,55 @@ if scan_clicked:
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
 if clear_clicked:
-    clear_scanner_results(st.session_state.selected_watchlist)
+    if _user_logged_in:
+        clear_scanner_results(st.session_state.selected_watchlist)
     st.session_state.results      = []
     st.session_state.scan_log     = []
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
+
+# ── Login banner — shown only when not logged in ──
+if not _user_logged_in:
+    with st.container(border=True):
+        col_msg, col_btn = st.columns([5, 1])
+        with col_msg:
+            st.markdown(
+                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime.',
+                unsafe_allow_html=False
+            )
+        with col_btn:
+            show_login = st.button("Login", key="banner_login_btn", type="primary", use_container_width=True)
+
+        if show_login:
+            st.session_state["show_inline_login"] = not st.session_state.get("show_inline_login", False)
+
+        if st.session_state.get("show_inline_login", False):
+            with st.form("inline_login_form"):
+                il_email = st.text_input("Email",    placeholder="you@email.com")
+                il_pass  = st.text_input("Password", placeholder="••••••••", type="password")
+                col_s, col_c = st.columns(2)
+                with col_s: il_submit = st.form_submit_button("Login",  use_container_width=True, type="primary")
+                with col_c: il_cancel = st.form_submit_button("Cancel", use_container_width=True)
+
+            if il_cancel:
+                st.session_state["show_inline_login"] = False
+                st.rerun()
+
+            if il_submit:
+                if not il_email or not il_pass:
+                    st.error("Enter email and password.")
+                else:
+                    with st.spinner("Signing in..."):
+                        data = auth_sign_in(il_email.strip(), il_pass.strip())
+                    if data.get("access_token"):
+                        _set_session(data)
+                        st.session_state["show_inline_login"] = False
+                        st.session_state["db_results_loaded"] = False
+                        st.success("Logged in! Results will now be saved.")
+                        st.rerun()
+                    else:
+                        msg = data.get("error_description") or data.get("msg") or "Login failed."
+                        st.error(msg)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COLLAPSIBLE FILTER PANEL
