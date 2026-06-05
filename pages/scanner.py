@@ -504,51 +504,38 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
 def check_historical_status(signal: str, candles_from_open: list,
                              target: float, sl_price: float,
                              trading_date: str) -> str:
-    """
-    Scans candles AFTER the 9:15 opening candle — SAME DAY ONLY.
-
-    KEY FIXES:
-    1. Skips index 0 (the 9:15 candle itself) — entry is at its HIGH/LOW,
-       price cannot fill T1 or hit SL within the same candle it opened.
-    2. T1_ACHIEVE is final — once hit, locked forever. No EXIT, no SL after.
-    3. T1 checked before SL in every candle — wide candles can't wrongly SL.
-    4. Date filter on every candle — previous day data never included.
-
-    BUY:
-      T1 hit  → candle HIGH  >= target
-      SL hit  → candle LOW   <= sl_price
-
-    SELL:
-      T1 hit  → candle LOW   <= target
-      SL hit  → candle HIGH  >= sl_price
-    """
     if not candles_from_open or not signal or not target or not sl_price:
         return "ACTIVE"
 
-    # Skip index 0 — that is the 9:15 opening candle itself
-    # T1 and SL can only be hit by subsequent candles
-    candles_to_check = candles_from_open[1:]
+    candles_to_check = [
+        c for c in candles_from_open[1:]
+        if str(c[0]).split(" ")[0] == trading_date
+    ]
 
+    if not candles_to_check:
+        return "ACTIVE"
+
+    # Entry price = High of 9:15 candle (BUY) or Low of 9:15 candle (SELL)
+    entry_price = float(candles_from_open[0][2]) if signal == "BUY" else float(candles_from_open[0][3])
+
+    # Check if entry was ever triggered
+    entry_hit = any(
+        float(c[2]) >= entry_price if signal == "BUY" else float(c[3]) <= entry_price
+        for c in candles_to_check
+    )
+
+    if not entry_hit:
+        return "NO_ENTRY"
+
+    # Entry triggered — now check T1 and SL candle by candle
     for c in candles_to_check:
-        # ── Safety: same day only ──
-        candle_date = str(c[0]).split(" ")[0]
-        if candle_date != trading_date:
-            continue
-
         high = float(c[2])
         low  = float(c[3])
 
-        # ── T1 always checked first — wide candle can hit both ──
-        if signal == "BUY"  and high >= target:
-            return "T1_ACHIEVE"   # locked — stop checking
-        if signal == "SELL" and low  <= target:
-            return "T1_ACHIEVE"   # locked — stop checking
-
-        # ── SL only if T1 not hit in this candle ──
-        if signal == "BUY"  and low  <= sl_price:
-            return "SL_HIT"
-        if signal == "SELL" and high >= sl_price:
-            return "SL_HIT"
+        if signal == "BUY"  and high >= target: return "T1_ACHIEVE"
+        if signal == "SELL" and low  <= target: return "T1_ACHIEVE"
+        if signal == "BUY"  and low  <= sl_price: return "SL_HIT"
+        if signal == "SELL" and high >= sl_price: return "SL_HIT"
 
     return "ACTIVE"
 
@@ -788,8 +775,13 @@ def run_full_scan(watchlist_stocks: list):
         analyze_stock(stock, candles, is_refresh=False)
 
     if st.session_state.results:
+        status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "SL_HIT": 2, "NO_ENTRY": 3}
         st.session_state.results.sort(
-            key=lambda x: (0 if x["signal"] == "BUY" else 1, -x["score"])
+            key=lambda x: (
+                status_order.get(x.get("exit_status", "ACTIVE"), 1),
+                0 if x["signal"] == "BUY" else 1,
+                -x["score"]
+            )
         )
 
     progress_bar.empty()
@@ -880,6 +872,7 @@ div[data-testid="stPills"] button {
 .ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
 .ts-badge-slhit   { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
 .ts-badge-exit    { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
+.ts-badge-noentry { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
 .ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
 .ts-meta  {
@@ -1044,6 +1037,7 @@ buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit
 sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
 sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
+no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") == "NO_ENTRY"])
 total_count      = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1079,6 +1073,10 @@ with header_container:
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#d04a00;">{sl_hit_count}</div>
       <div class="ts-counter-lbl">SL Hit</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#888888;">{no_entry_count}</div>
+      <div class="ts-counter-lbl">No Entry</div>
     </div>
     <div style="text-align:center;">
       <div class="ts-counter-val" style="color:#111111;">{total_count}</div>
@@ -1175,6 +1173,12 @@ else:
             badge_label = "SL HIT ✕"
             bar_color   = "#e87040"
             pct_clr     = "#d04a00"
+        elif exit_status == "NO_ENTRY":
+            border_clr  = "#cccccc"
+            badge_cls   = "ts-badge-noentry"
+            badge_label = "No Entry"
+            bar_color   = "#aaaaaa"
+            pct_clr     = "#888888"
         elif sig == "BUY":
             border_clr  = "#1a9c4a"
             badge_cls   = "ts-badge-buy"
