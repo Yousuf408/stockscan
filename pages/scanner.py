@@ -697,18 +697,14 @@ div[data-testid="stPills"] button {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Watchlist selector will be in button row (see below)
+# RESERVE SPACE FOR HEADER AT TOP (will be filled after filters are calculated)
 # ─────────────────────────────────────────────────────────────────────────────
+header_container = st.container()
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
 mkt_open       = is_market_open()
 mkt_label      = "Market open" if mkt_open else "Market closed"
 ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HEADER CARD — title + subtitle LEFT | counters RIGHT
-# NOTE: Counters will be updated AFTER filters are applied (see below)
-# ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INITIALIZE FILTER VARIABLES (defaults)
@@ -725,7 +721,7 @@ toggle_hide_sl   = False
 view = list(st.session_state.results)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACTION BUTTON ROW — with watchlist selector (AFTER HEADER)
+# ACTION BUTTON ROW — with watchlist selector
 # ─────────────────────────────────────────────────────────────────────────────
 btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
 
@@ -800,7 +796,7 @@ if st.session_state.show_filters:
             st.session_state.auto_refresh = auto_on
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RE-APPLY FILTERS WITH UPDATED VALUES
+# APPLY ALL FILTERS (after filter panel values are set)
 # ─────────────────────────────────────────────────────────────────────────────
 view = list(st.session_state.results)
 
@@ -828,7 +824,7 @@ if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NOW CALCULATE ACCURATE COUNTS AFTER ALL FILTERS APPLIED
+# CALCULATE ACCURATE COUNTS AFTER ALL FILTERS APPLIED
 # ─────────────────────────────────────────────────────────────────────────────
 buy_count   = len([r for r in view if r["signal"] == "BUY" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 sell_count  = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
@@ -837,9 +833,10 @@ sl_hit_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT
 total_count = len(view)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DISPLAY HEADER WITH ACCURATE COUNTS (AFTER FILTERS APPLIED)
+# NOW FILL THE HEADER CONTAINER WITH CORRECT COUNTS
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown(f"""
+with header_container:
+    st.markdown(f"""
 <div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
   
   <div style="flex:1;">
