@@ -373,26 +373,31 @@ def check_exit_or_sl_hit(signal: str, candle_high: float, candle_low: float, ent
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
-    T1 ACHIEVE: Check CANDLE HIGH (BUY) or LOW (SELL) touches target
+    T1 ACHIEVE: Check if target was EVER touched in ANY candle (past or current)
     Once T1 is achieved, it's LOCKED - no further status changes.
+    SL HIT: Only check if T1 was NEVER achieved
     
     Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
     """
-    if not signal or entry is None or target is None:
+    if not signal or entry is None or target is None or not candles:
         return {"status": "ACTIVE", "triggered": False}
     
     # If T1 already achieved, KEEP IT LOCKED - don't change
     if t1_already_achieved:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Check if target is hit NOW using CANDLE HIGH/LOW (not LTP)
-    if signal == "BUY" and candle_high >= target:
+    # Step 1: Check if target was EVER touched in ANY candle (even past ones)
+    # This handles late refresh cases where target was hit in a previous candle
+    max_high_all = max(float(c[2]) for c in candles)  # Maximum HIGH across all candles
+    min_low_all = min(float(c[3]) for c in candles)   # Minimum LOW across all candles
+    
+    if signal == "BUY" and max_high_all >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "SELL" and candle_low <= target:
+    if signal == "SELL" and min_low_all <= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Only check SL HIT if T1 NOT yet achieved
-    if not candles or len(candles) < 2:
+    # Step 2: Only check SL HIT if target was NEVER touched
+    if len(candles) < 2:
         return {"status": "ACTIVE", "triggered": False}
     
     last_two_closes = [float(c[4]) for c in candles[-2:]]
