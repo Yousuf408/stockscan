@@ -368,23 +368,25 @@ def calc_entry_target(signal: str, opening_candle: list) -> dict:
     }
 
 
-def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float, 
-                          candles: list, ema20_live: float, t1_already_achieved: bool = False) -> dict:
+def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
+                          candles: list, ema20_live: float, 
+                          t1_already_achieved: bool = False) -> dict:
     """
     Check if signal has T1 ACHIEVE (hit 1:1 target - LOCKED), SL HIT, or ACTIVE.
     
-    Once T1 is achieved, it's LOCKED - no further status changes.
+    T1 ACHIEVE: LTP hits target (LOCKED forever via t1_already_achieved flag)
+    SL HIT: Only check if T1 NOT yet achieved (2 consecutive candles wrong side of EMA20)
     
     Returns: {status: "T1_ACHIEVE" | "SL_HIT" | "ACTIVE", triggered: True/False}
     """
     if not signal or ltp is None or entry is None or target is None:
         return {"status": "ACTIVE", "triggered": False}
     
-    # If T1 already achieved, KEEP IT LOCKED - don't change
+    # If T1 already achieved, KEEP IT LOCKED - don't change ever
     if t1_already_achieved:
         return {"status": "T1_ACHIEVE", "triggered": True}
     
-    # Check if target is hit NOW (1:1 achieved)
+    # Check if target is hit NOW using LTP
     if signal == "BUY" and ltp >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     if signal == "SELL" and ltp <= target:
@@ -396,7 +398,7 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
     
     last_two_closes = [float(c[4]) for c in candles[-2:]]
     
-    # Check if SL is hit (2 consecutive candles closed wrong side of EMA20)
+    # 2 consecutive candles closed wrong side of EMA20
     if signal == "BUY":
         if all(c < ema20_live for c in last_two_closes):
             return {"status": "SL_HIT", "triggered": True}
@@ -450,14 +452,18 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
             if r["symbol"] == symbol:
                 sl_hit = check_sl_hit(r["signal"], candles, ema20_live)
                 
-                # Check if signal has reached T1, SL hit, or still active
-                # Pass t1_already_achieved flag to LOCK T1 once achieved
+                # Get current candle HIGH and LOW
+                current_candle = candles[-1]
+                current_high = float(current_candle[2])
+                current_low = float(current_candle[3])
+                
+                # Check T1/SL status using LTP, lock T1 if already achieved
                 exit_status = check_exit_or_sl_hit(
                     r["signal"], ltp,
                     r.get("entry_target", {}).get("entry") if r.get("entry_target") else None,
                     r.get("entry_target", {}).get("target") if r.get("entry_target") else None,
                     candles, ema20_live,
-                    t1_already_achieved=r.get("t1_achieved", False)  # ← LOCK if already achieved
+                    t1_already_achieved=r.get("t1_achieved", False)
                 )
                 
                 r.update({
@@ -532,35 +538,35 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     # Calculate entry and target prices
     entry_target = calc_entry_target(signal, open_candle)
     
-    # Check exit or SL hit status
+    # Check T1/SL status using LTP
     exit_status = check_exit_or_sl_hit(
-        signal, ltp, 
+        signal, ltp,
         entry_target["entry"] if entry_target else None,
         entry_target["target"] if entry_target else None,
         candles, ema20_live,
-        t1_already_achieved=False  # First time, not achieved yet
+        t1_already_achieved=False
     )
     
     result = {
-        "symbol":     symbol,
-        "sector":     sector or "GENERAL",
-        "signal":     signal,
-        "ltp":        round(ltp, 2),
-        "ema20":      round(ema20_live, 2),
-        "ema200":     round(ema200_live, 2),
-        "vwap":       round(vwap_live, 2),
-        "pctChange":  round(pct_change, 2),
-        "score":      round(float(score), 1),
-        "timestamp":  time.time(),
-        "volume":     last_vol,
-        "openPrice":  round(float(open_candle[1]), 2),
-        "highPrice":  round(float(open_candle[2]), 2),
-        "lowPrice":   round(float(open_candle[3]), 2),
-        "closePrice": round(float(open_candle[4]), 2),
-        "sl_hit":     False,
+        "symbol":       symbol,
+        "sector":       sector or "GENERAL",
+        "signal":       signal,
+        "ltp":          round(ltp, 2),
+        "ema20":        round(ema20_live, 2),
+        "ema200":       round(ema200_live, 2),
+        "vwap":         round(vwap_live, 2),
+        "pctChange":    round(pct_change, 2),
+        "score":        round(float(score), 1),
+        "timestamp":    time.time(),
+        "volume":       last_vol,
+        "openPrice":    round(float(open_candle[1]), 2),
+        "highPrice":    round(float(open_candle[2]), 2),
+        "lowPrice":     round(float(open_candle[3]), 2),
+        "closePrice":   round(float(open_candle[4]), 2),
+        "sl_hit":       False,
         "entry_target": entry_target,
-        "exit_status": exit_status.get("status", "ACTIVE"),
-        "t1_achieved": exit_status.get("status") == "T1_ACHIEVE",  # Lock T1 once achieved
+        "exit_status":  exit_status.get("status", "ACTIVE"),
+        "t1_achieved":  exit_status.get("status") == "T1_ACHIEVE",
     }
     log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
