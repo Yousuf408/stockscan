@@ -536,19 +536,13 @@ div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 /* ── header card ── */
 .ts-header-card {
     background:#ffffff; border:1px solid #e8e8e8;
-    border-radius:12px; padding:16px 20px 14px;
+    border-radius:12px; padding:18px 24px;
     margin-bottom:4px;
 }
-.ts-header-title { font-size:20px; font-weight:700; color:#111111; margin:0; }
-.ts-header-sub   { font-size:12px; color:#888888; margin:2px 0 14px; }
-.ts-counter-row  { display:flex; gap:0; }
-.ts-counter {
-    flex:1; text-align:center; padding:10px 0;
-    border-right:1px solid #f0f0f0;
-}
-.ts-counter:last-child { border-right:none; }
-.ts-counter-val { font-size:26px; font-weight:800; font-family:monospace; }
-.ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:1px; }
+.ts-header-title { font-size:22px; font-weight:700; color:#111111; margin:0; }
+.ts-header-sub   { font-size:13px; color:#888888; margin:4px 0 0; }
+.ts-counter-val { font-size:28px; font-weight:800; font-family:monospace; }
+.ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:2px; }
 
 /* ── sector pills override ── */
 div[data-testid="stPills"] button {
@@ -610,16 +604,19 @@ div[data-testid="stPills"] button {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Watchlist selector
+# Watchlist selector - VISIBLE & PROMINENT
 # ─────────────────────────────────────────────────────────────────────────────
-wl_col1, wl_col2 = st.columns([3, 9])
+wl_col1, wl_col2 = st.columns([2, 8])
 with wl_col1:
+    st.markdown("<span style='font-size:12px;font-weight:600;color:#666;'>📋 Watchlist</span>", 
+                unsafe_allow_html=True)
     selected_wl = st.selectbox(
-        "📋 Target Scanning Watchlist",
+        "Watchlist",
         WATCHLIST_NAMES,
         index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
         label_visibility="collapsed",
     )
+    
 if selected_wl != st.session_state.selected_watchlist:
     st.session_state.selected_watchlist = selected_wl
     st.session_state.results            = []
@@ -632,35 +629,40 @@ mkt_label      = "Market open" if mkt_open else "Market closed"
 ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HEADER CARD — title + Buy / Sell / Total counters
+# HEADER CARD — title + subtitle LEFT | counters RIGHT
 # ─────────────────────────────────────────────────────────────────────────────
 buy_count   = len([r for r in st.session_state.results if r["signal"] == "BUY"  and not r.get("sl_hit")])
 sell_count  = len([r for r in st.session_state.results if r["signal"] == "SELL" and not r.get("sl_hit")])
 total_count = len(st.session_state.results)
 
 st.markdown(f"""
-<div class="ts-header-card">
-  <p class="ts-header-title">Momentum scanner</p>
-  <p class="ts-header-sub">
-    {st.session_state.selected_watchlist}
-    &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
-    &nbsp;·&nbsp; {mkt_label}
-    &nbsp;·&nbsp; {ist_time_str}
-  </p>
-  <div class="ts-counter-row">
-    <div class="ts-counter">
-      <div class="ts-counter-val" style="color:#1a9c4a;">{buy_count}</div>
+<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
+  
+  <div style="flex:1;">
+    <p class="ts-header-title">Momentum scanner</p>
+    <p class="ts-header-sub">
+      {st.session_state.selected_watchlist}
+      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
+      &nbsp;·&nbsp; {mkt_label}
+      &nbsp;·&nbsp; {ist_time_str}
+    </p>
+  </div>
+
+  <div style="display:flex;gap:40px;margin-top:2px;">
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#1a9c4a;font-size:28px;">{buy_count}</div>
       <div class="ts-counter-lbl">Buy</div>
     </div>
-    <div class="ts-counter">
-      <div class="ts-counter-val" style="color:#c0392b;">{sell_count}</div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#c0392b;font-size:28px;">{sell_count}</div>
       <div class="ts-counter-lbl">Sell</div>
     </div>
-    <div class="ts-counter">
-      <div class="ts-counter-val" style="color:#111111;">{total_count}</div>
+    <div style="text-align:center;">
+      <div class="ts-counter-val" style="color:#111111;font-size:28px;">{total_count}</div>
       <div class="ts-counter-lbl">Total</div>
     </div>
   </div>
+
 </div>
 """, unsafe_allow_html=True)
 
