@@ -1,7 +1,6 @@
 # ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py  v2.0
-#   Supabase replaces watchlist.json
-#   All UI, price fetch, sound, chart — unchanged
+#   TRADESENTRY — pages/3_Watchlist.py  v3.0
+#   Dynamic watchlists — create/rename/delete
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -20,9 +19,12 @@ from core import (
     delete_from_watchlist,
     update_watchlist_stock,
     clear_watchlist_tab,
+    get_user_watchlist_names,
+    create_user_watchlist,
+    rename_user_watchlist,
+    delete_user_watchlist,
+    MAX_WATCHLISTS,
 )
-
-# ── Auth guard ──
 
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
@@ -30,9 +32,21 @@ st.set_page_config(
     page_icon="👁",
     initial_sidebar_state="collapsed"
 )
+
+# ── Auth guard ──
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
 apply_styles()
 sidebar_brand()
 page_header("Watchlist", "Track your trades")
+
+# ══════════════════════════════════════════
+#   TIMEZONE
+# ══════════════════════════════════════════
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -46,7 +60,9 @@ def is_market_open():
     mins = n.hour * 60 + n.minute
     return (9*60+15) <= mins <= (15*60+30)
 
-WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+# ══════════════════════════════════════════
+#   WATCHLIST STORAGE
+# ══════════════════════════════════════════
 
 def get_list(tab: str) -> list:
     try:
@@ -63,6 +79,10 @@ def set_list(tab: str, lst: list):
     except Exception as e:
         st.error(f"Save error: {e}")
 
+# ══════════════════════════════════════════
+#   SOUND ALERT
+# ══════════════════════════════════════════
+
 def play_alert_sound(alert_type="triggered"):
     if alert_type == "triggered":  freq, dur = 800, 300
     elif alert_type == "sl_hit":   freq, dur = 400, 500
@@ -76,6 +96,10 @@ def play_alert_sound(alert_type="triggered"):
     gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + {dur/1000});
     osc.start(ac.currentTime); osc.stop(ac.currentTime + {dur/1000});
     </script>""", height=0)
+
+# ══════════════════════════════════════════
+#   PRICE FETCH
+# ══════════════════════════════════════════
 
 AUTO_REFRESH_SECS = 300
 
@@ -193,6 +217,10 @@ def fetch_all_prices(watchlist: list) -> dict:
                                "time": now_ist().strftime("%H:%M:%S")}
     return prices
 
+# ══════════════════════════════════════════
+#   STATUS LOGIC
+# ══════════════════════════════════════════
+
 def compute_status(stock: dict, ltp: float) -> str:
     entry, sl, t1, t2 = stock.get("entry"), stock.get("sl"), stock.get("target1"), stock.get("target2")
     d = stock.get("direction", "BUY")
@@ -232,16 +260,50 @@ SOURCE_ICON = {
     "yfinance": "🟠", "close_price": "🟠", "offline": "⚪"
 }
 
+# ══════════════════════════════════════════
+#   SESSION STATE
+# ══════════════════════════════════════════
+
 for k, v in [
-    ("current_tab", "Today"), ("direction", "BUY"), ("exchange", "NS"),
-    ("f_symbol", ""), ("f_entry", 0.0), ("f_sl", 0.0), ("f_t1", 0.0), ("f_t2", 0.0),
-    ("edit_idx", None), ("edit_tab", None), ("sort_by", "default"),
-    ("sort_open", False), ("sound_enabled", True), ("selected_symbol", ""),
-    ("selected_exchange", "NS"), ("show_add_form", False),
-    ("prices", {}), ("last_fetch_time", None), ("fetching", False),
+    ("wl_names",         None),
+    ("current_tab",      None),
+    ("direction",        "BUY"),
+    ("exchange",         "NS"),
+    ("f_symbol",         ""),
+    ("f_entry",          0.0),
+    ("f_sl",             0.0),
+    ("f_t1",             0.0),
+    ("f_t2",             0.0),
+    ("edit_idx",         None),
+    ("edit_tab",         None),
+    ("sort_by",          "default"),
+    ("sort_open",        False),
+    ("sound_enabled",    True),
+    ("selected_symbol",  ""),
+    ("selected_exchange","NS"),
+    ("show_add_form",    False),
+    ("prices",           {}),
+    ("last_fetch_time",  None),
+    ("fetching",         False),
+    ("show_new_wl",      False),
+    ("manage_wl",        None),   # which watchlist is being managed
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
+
+# Load watchlist names from Supabase once per session
+if st.session_state.wl_names is None:
+    st.session_state.wl_names = get_user_watchlist_names()
+
+WATCHLIST_NAMES = st.session_state.wl_names
+
+# Set default tab
+if st.session_state.current_tab not in WATCHLIST_NAMES:
+    st.session_state.current_tab = WATCHLIST_NAMES[0]
+
+# ══════════════════════════════════════════
+#   AUTO REFRESH LOGIC
+# ══════════════════════════════════════════
 
 def should_auto_refresh() -> bool:
     if not st.session_state.prices:
@@ -258,9 +320,15 @@ def do_price_fetch(watchlist: list):
     st.session_state.prices.update(prices)
     st.session_state.last_fetch_time = now_ist()
 
+# ══════════════════════════════════════════
+#   MAIN LAYOUT
+# ══════════════════════════════════════════
+
 left_col, right_col = st.columns([3, 7], gap="small")
 
 with left_col:
+
+    # ── TOP CONTROLS ──
     ctrl1, ctrl2, ctrl3 = st.columns(3)
     with ctrl1:
         if st.button("➕", use_container_width=True, help="Add Trade", key="add_toggle"):
@@ -273,6 +341,7 @@ with left_col:
             st.session_state.sound_enabled = not st.session_state.sound_enabled
             st.rerun()
 
+    # ── ADD TRADE FORM ──
     if st.session_state.show_add_form:
         with st.expander("➕ ADD TRADE", expanded=True):
             st.markdown(
@@ -281,7 +350,6 @@ with left_col:
                 '⚡ Smart paste: <b>RELIANCE 2800 2750 2900 2950</b></div>',
                 unsafe_allow_html=True
             )
-            st.markdown('<div class="ts-section-label">Trade Direction</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
             with d1:
                 if st.button("▲ BUY", use_container_width=True, key="add_buy",
@@ -292,7 +360,6 @@ with left_col:
                              type="primary" if st.session_state.direction == "SELL" else "secondary"):
                     st.session_state.direction = "SELL"; st.rerun()
 
-            st.markdown('<div class="ts-section-label" style="margin-top:10px">Symbol</div>', unsafe_allow_html=True)
             raw_input = st.text_input("Symbol", value=st.session_state.f_symbol,
                                       placeholder="RELIANCE 2800 2750 2900 2950",
                                       key="raw_symbol_input", label_visibility="collapsed")
@@ -311,7 +378,6 @@ with left_col:
 
             symbol = clean_symbol(st.session_state.f_symbol)
 
-            st.markdown('<div class="ts-section-label" style="margin-top:10px">Exchange</div>', unsafe_allow_html=True)
             ex1, ex2 = st.columns(2)
             with ex1:
                 if st.button("NSE", use_container_width=True, key="add_nse",
@@ -322,29 +388,18 @@ with left_col:
                              type="primary" if st.session_state.exchange == "BO" else "secondary"):
                     st.session_state.exchange = "BO"; st.rerun()
 
-            st.markdown('<div class="ts-section-label" style="margin-top:10px">Price Levels</div>', unsafe_allow_html=True)
-            st.markdown("**Entry**")
             entry_val = st.number_input("Entry Price", value=st.session_state.f_entry,
-                                        min_value=0.0, format="%.0f",
-                                        key="add_entry", label_visibility="collapsed")
+                                        min_value=0.0, format="%.0f", key="add_entry")
             sl_col, t1_col = st.columns(2)
             with sl_col:
-                st.markdown("**SL**")
-                sl_val = st.number_input("Stop Loss", value=st.session_state.f_sl,
-                                         min_value=0.0, format="%.0f",
-                                         key="add_sl", label_visibility="collapsed")
+                sl_val = st.number_input("SL", value=st.session_state.f_sl,
+                                         min_value=0.0, format="%.0f", key="add_sl")
             with t1_col:
-                st.markdown("**T1**")
-                t1_val = st.number_input("Target 1", value=st.session_state.f_t1,
-                                         min_value=0.0, format="%.0f",
-                                         key="add_t1", label_visibility="collapsed")
-            st.markdown("**T2** (optional)")
-            t2_val = st.number_input("Target 2", value=st.session_state.f_t2,
-                                     min_value=0.0, format="%.0f",
-                                     key="add_t2", label_visibility="collapsed")
-            st.markdown("**Notes** (optional)")
-            note_val = st.text_input("Notes", placeholder="e.g. Breakout",
-                                     key="add_note", label_visibility="collapsed")
+                t1_val = st.number_input("T1", value=st.session_state.f_t1,
+                                         min_value=0.0, format="%.0f", key="add_t1")
+            t2_val   = st.number_input("T2 (optional)", value=st.session_state.f_t2,
+                                       min_value=0.0, format="%.0f", key="add_t2")
+            note_val = st.text_input("Notes", placeholder="e.g. Breakout", key="add_note")
 
             if st.button(f"{'▲ ADD LONG' if st.session_state.direction=='BUY' else '▼ ADD SHORT'} → {st.session_state.current_tab}",
                          use_container_width=True, type="primary", key="add_submit"):
@@ -385,23 +440,123 @@ with left_col:
                         except Exception as e:
                             st.error(f"Failed to add: {e}")
 
-    tc1, tc2, tc3 = st.columns(3)
-    for i, col in enumerate([tc1, tc2, tc3]):
-        with col:
-            cnt       = len(get_list(WATCHLIST_NAMES[i]))
-            is_active = st.session_state.current_tab == WATCHLIST_NAMES[i]
-            if st.button(f"{'●' if is_active else ''}{WATCHLIST_NAMES[i]}({cnt})",
-                         key=f"tab_{WATCHLIST_NAMES[i]}", use_container_width=True,
-                         type="primary" if is_active else "secondary"):
-                st.session_state.current_tab = WATCHLIST_NAMES[i]
-                st.session_state.prices = {}
-                st.rerun()
+    # ══════════════════════════════════════════
+    #   WATCHLIST TABS — dynamic with + and ⚙
+    # ══════════════════════════════════════════
 
     st.markdown('<hr style="margin:6px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
 
-    current_tab = st.session_state.current_tab
-    watchlist   = get_list(current_tab)
+    # ── Tab row with + button ──
+    tab_cols = st.columns(len(WATCHLIST_NAMES) + 1)
 
+    for i, tab_name in enumerate(WATCHLIST_NAMES):
+        with tab_cols[i]:
+            cnt       = len(get_list(tab_name))
+            is_active = st.session_state.current_tab == tab_name
+            label     = f"{'●' if is_active else ''}{tab_name}({cnt})"
+            if st.button(label, key=f"tab_{i}", use_container_width=True,
+                         type="primary" if is_active else "secondary"):
+                st.session_state.current_tab = tab_name
+                st.session_state.prices      = {}
+                st.session_state.manage_wl   = None
+                st.rerun()
+
+    with tab_cols[-1]:
+        if len(WATCHLIST_NAMES) < MAX_WATCHLISTS:
+            if st.button("＋", use_container_width=True, help="New watchlist", key="new_wl_btn"):
+                st.session_state.show_new_wl = not st.session_state.show_new_wl
+                st.rerun()
+        else:
+            st.markdown(f'<div style="font-size:9px;color:#aaa;padding-top:8px;">Max {MAX_WATCHLISTS}</div>',
+                        unsafe_allow_html=True)
+
+    # ── New watchlist form ──
+    if st.session_state.show_new_wl:
+        with st.container(border=True):
+            st.markdown("**Create new watchlist**")
+            with st.form("new_wl_form"):
+                new_name = st.text_input("Name", placeholder="e.g. Swing Trades", max_chars=30)
+                c1, c2   = st.columns(2)
+                with c1: create_btn = st.form_submit_button("Create", use_container_width=True, type="primary")
+                with c2: cancel_btn = st.form_submit_button("Cancel", use_container_width=True)
+            if cancel_btn:
+                st.session_state.show_new_wl = False
+                st.rerun()
+            if create_btn:
+                if not new_name.strip():
+                    st.error("Enter a name.")
+                else:
+                    ok, msg = create_user_watchlist(new_name.strip())
+                    if ok:
+                        st.session_state.wl_names    = get_user_watchlist_names()
+                        st.session_state.current_tab = new_name.strip()
+                        st.session_state.show_new_wl = False
+                        st.success(f"'{new_name}' created!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    # ── ⚙ Manage current watchlist (rename/delete) ──
+    current_tab = st.session_state.current_tab
+
+    manage_col1, manage_col2 = st.columns([5, 1])
+    with manage_col2:
+        if st.button("⚙", key="manage_wl_btn", use_container_width=True,
+                     help=f"Manage '{current_tab}'"):
+            if st.session_state.manage_wl == current_tab:
+                st.session_state.manage_wl = None
+            else:
+                st.session_state.manage_wl = current_tab
+            st.rerun()
+
+    if st.session_state.manage_wl == current_tab:
+        with st.container(border=True):
+            st.markdown(f"**⚙ Manage: {current_tab}**")
+
+            # Rename
+            with st.form("rename_wl_form"):
+                st.markdown("**Rename**")
+                new_wl_name  = st.text_input("New name", value=current_tab, max_chars=30)
+                rename_btn   = st.form_submit_button("Rename", use_container_width=True)
+            if rename_btn:
+                if new_wl_name.strip() == current_tab:
+                    st.info("Same name — no change.")
+                elif not new_wl_name.strip():
+                    st.error("Enter a name.")
+                else:
+                    ok, msg = rename_user_watchlist(current_tab, new_wl_name.strip())
+                    if ok:
+                        st.session_state.wl_names    = get_user_watchlist_names()
+                        st.session_state.current_tab = new_wl_name.strip()
+                        st.session_state.manage_wl   = None
+                        st.success(f"Renamed to '{new_wl_name}'!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            st.markdown("---")
+
+            # Delete
+            st.markdown("**Delete this watchlist**")
+            st.caption("⚠️ All stocks in this watchlist will be deleted permanently.")
+            if st.button(f"🗑 Delete '{current_tab}'", use_container_width=True,
+                         type="primary", key="delete_wl_confirm"):
+                ok, msg = delete_user_watchlist(current_tab)
+                if ok:
+                    st.session_state.wl_names    = get_user_watchlist_names()
+                    st.session_state.current_tab = st.session_state.wl_names[0]
+                    st.session_state.manage_wl   = None
+                    st.session_state.prices      = {}
+                    st.success("Deleted!")
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    st.markdown('<hr style="margin:6px 0;border:none;border-top:1px solid #e0e3e8">', unsafe_allow_html=True)
+
+    watchlist = get_list(current_tab)
+
+    # ── SORT + CLEAR ──
     sc1, sc2, sc3 = st.columns(3)
     with sc1:
         if st.button("Sort", use_container_width=True, key="sort_btn"):
@@ -432,9 +587,9 @@ with left_col:
                     st.session_state.sort_by = key
                     st.rerun()
 
+    # ── SOURCE STATUS ──
     market_now = is_market_open()
     src_label  = "🟢 Live" if market_now else "🟠 Close Price"
-
     if st.session_state.last_fetch_time:
         elapsed   = (now_ist() - st.session_state.last_fetch_time).total_seconds()
         mins_left = max(0, int((AUTO_REFRESH_SECS - elapsed) / 60))
@@ -442,7 +597,6 @@ with left_col:
         refresh_info = f" · Next refresh in {mins_left}m {secs_left}s"
     else:
         refresh_info = " · Fetching..."
-
     st.markdown(
         f'<div style="font-size:10px;font-weight:600;margin:6px 0;padding:4px 8px;'
         f'background:#f5f5f5;border-radius:4px;color:{"#00a854" if market_now else "#ff6b35"};">'
@@ -450,18 +604,20 @@ with left_col:
         unsafe_allow_html=True
     )
 
+    # ── AUTO FETCH ──
     if watchlist and should_auto_refresh() and not refresh:
         with st.spinner("Loading prices..."):
             do_price_fetch(watchlist)
 
     if watchlist and refresh:
         st.session_state.prices = {}
-        with st.spinner(f"Fetching {len(watchlist)} stocks in batch..."):
+        with st.spinner(f"Fetching {len(watchlist)} stocks..."):
             new_prices = fetch_all_prices(watchlist)
             st.session_state.prices.update(new_prices)
             st.session_state.last_fetch_time = now_ist()
         st.success(f"✅ {len(new_prices)} prices updated!")
 
+    # ── SORT ──
     def sort_list(lst, by):
         order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
         if by == "status":
@@ -519,10 +675,7 @@ with left_col:
                 new_status = compute_status(stock, ltp)
                 if new_status != old_status and db_id:
                     try:
-                        update_watchlist_stock(db_id, {
-                            "status":    new_status,
-                            "lastPrice": ltp,
-                        })
+                        update_watchlist_stock(db_id, {"status": new_status, "lastPrice": ltp})
                     except Exception as e:
                         print(f"Status update failed for {sym}: {e}")
                     if st.session_state.sound_enabled:
@@ -540,7 +693,6 @@ with left_col:
             src_icon     = SOURCE_ICON.get(source,"⚪")
 
             if st.session_state.edit_idx==stock_idx and st.session_state.edit_tab==current_tab:
-                st.markdown(f'<div class="ts-section-label">Edit — {sym}</div>', unsafe_allow_html=True)
                 with st.container(border=True):
                     e1, e2 = st.columns(2)
                     with e1:
@@ -575,7 +727,6 @@ with left_col:
             else:
                 selected_border = "2px solid #2563eb" if is_selected else "1px solid #e0e3e8"
                 selected_bg     = "#f0f5ff" if is_selected else "#fff"
-
                 card_html = (
                     '<div style="padding:10px 12px;background:' + selected_bg + ';'
                     'border:' + selected_border + ';'
@@ -660,6 +811,10 @@ with left_col:
         f'<div style="font-size:10px;color:#7a8394">{mkt_label} · {ist_now}</div>',
         unsafe_allow_html=True
     )
+
+# ══════════════════════════════════════════
+#   RIGHT PANEL — CHART
+# ══════════════════════════════════════════
 
 with right_col:
     if not st.session_state.selected_symbol:
