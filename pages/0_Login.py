@@ -97,12 +97,14 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = uid
     st.session_state["user_email"]   = email
     st.session_state["access_token"] = token
-    # Save server-side session for 7-day persistence
+    # Save server-side session and get session token
     try:
         import sys, os
         sys.path.append(os.path.dirname(os.path.dirname(__file__)))
         from auth import save_session
-        save_session(token, uid, email)
+        session_token = save_session(token, uid, email)
+        # Set in URL BEFORE switching page
+        st.query_params["s"] = session_token
     except Exception as e:
         print(f"[login] Session save failed: {e}")
 
@@ -159,8 +161,13 @@ with tab_login:
                 data = auth_sign_in(email.strip(), password.strip())
             if data.get("access_token"):
                 _set_session(data)
-                st.success("Logged in!")
-                st.switch_page("app.py")
+                session_token = st.session_state.get("session_token", "")
+                st.success("Logged in! Redirecting...")
+                # Use JS redirect to preserve ?s=TOKEN in URL
+                st.markdown(
+                    f'<meta http-equiv="refresh" content="1;url=/scanner?s={session_token}">',
+                    unsafe_allow_html=True
+                )
             else:
                 msg = data.get("error_description") or data.get("msg") or "Login failed."
                 st.error(msg)
