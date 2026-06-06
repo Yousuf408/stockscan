@@ -97,14 +97,14 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = uid
     st.session_state["user_email"]   = email
     st.session_state["access_token"] = token
-    # Save to cookie for 7-day persistence
+    # Save server-side session for 7-day persistence
     try:
         import sys, os
         sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        from auth import save_session_to_cookie
-        save_session_to_cookie(token, uid, email)
+        from auth import save_session
+        save_session(token, uid, email)
     except Exception as e:
-        print(f"[login] Cookie save failed: {e}")
+        print(f"[login] Session save failed: {e}")
 
 
 def logout():
