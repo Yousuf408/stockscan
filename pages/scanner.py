@@ -73,7 +73,43 @@ except Exception:
     WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
-def load_watchlist_stocks(tab: str) -> list:
+def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
+    """Send browser notification and save to Supabase notifications table."""
+    icons = {
+        "NEAR_ENTRY":  "🔔",
+        "ENTRY_HIT":   "✅",
+        "T1_ACHIEVE":  "🎯",
+        "SL_HIT":      "🛑",
+    }
+    icon  = icons.get(alert_type, "🔔")
+    title = f"TradeSentry — {symbol}"
+    body  = f"{icon} {alert_type.replace('_', ' ')} | {signal} | LTP: ₹{ltp} | Entry: ₹{entry}"
+
+    # Browser notification via JS
+    st.components.v1.html(f"""
+<script>
+if ("Notification" in window && Notification.permission === "granted") {{
+    new Notification("{title}", {{
+        body: "{body}",
+        icon: "https://img.icons8.com/color/48/000000/stock-market.png"
+    }});
+}}
+</script>
+""", height=0)
+
+    # Save to Supabase
+    try:
+        from core import _sb_insert, _get_user_id
+        _sb_insert("notifications", [{
+            "user_id":    _get_user_id() or None,
+            "symbol":     symbol,
+            "signal":     signal,
+            "alert_type": alert_type,
+            "ltp":        ltp,
+            "entry":      entry,
+        }])
+    except Exception as e:
+        print(f"[notification] Save failed: {e}")
     try:
         raw = load_watchlist(tab)
         if not raw:
@@ -674,6 +710,19 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                     "exit_status": new_status,
                     "t1_achieved": new_status == "T1_ACHIEVE",
                 })
+
+                # ── Trigger notification on status change ──
+                if new_status != current_status:
+                    entry_price = et.get("entry", 0)
+                    if new_status == "NEAR_ENTRY":
+                        _send_notification(symbol, "NEAR_ENTRY", round(ltp,2), entry_price, signal)
+                    elif new_status == "ACTIVE" and current_status == "NEAR_ENTRY":
+                        _send_notification(symbol, "ENTRY_HIT", round(ltp,2), entry_price, signal)
+                    elif new_status == "T1_ACHIEVE":
+                        _send_notification(symbol, "T1_ACHIEVE", round(ltp,2), entry_price, signal)
+                    elif new_status == "SL_HIT":
+                        _send_notification(symbol, "SL_HIT", round(ltp,2), entry_price, signal)
+
                 return r
         return None
 
@@ -901,6 +950,24 @@ st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
 from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand()
+
+# ── Browser notification permission request ──
+st.components.v1.html("""
+<script>
+function tsRequestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}
+function tsSendNotification(title, body, icon) {
+    if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body: body, icon: icon || "" });
+    }
+}
+// Auto-request on page load
+tsRequestNotificationPermission();
+</script>
+""", height=0)
 
 st.markdown("""
 <style>
