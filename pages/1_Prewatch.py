@@ -18,10 +18,6 @@ from auth import restore_session
 restore_session()
 
 if not st.session_state.get("user_id"):
-    # Give cookie manager one rerun to load
-    if not st.session_state.get("_cookie_checked"):
-        st.session_state["_cookie_checked"] = True
-        st.rerun()
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
         st.switch_page("pages/0_Login.py")
