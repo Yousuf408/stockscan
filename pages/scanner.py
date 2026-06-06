@@ -28,12 +28,6 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth guard — hard stop if not logged in ──
-if not st.session_state.get("user_id"):
-    st.warning("Please login to access this page.")
-    if st.button("Go to Login →", type="primary"):
-        st.switch_page("pages/0_Login.py")
-    st.stop()
 
 # ── Helper functions for inline login banner ──
 def _auth_sign_in(email: str, password: str) -> dict:
