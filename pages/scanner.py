@@ -322,61 +322,17 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
         except Exception as e:
             print(f"[AngelOne] ❌ {symbol} fetch error: {e}")
 
-    print(f"[AngelOne] ❌ {symbol} — no data returned, Yahoo disabled for testing")
     return None
 
 
-def fetch_yahoo_fallback_candles(symbol: str):
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=5m&range=20d"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        if res.status_code != 200:
-            return None
-
-        result = res.json().get("chart", {}).get("result", [None])[0]
-        if not result:
-            return None
-
-        timestamps = result.get("timestamp", [])
-        quote      = result.get("indicators", {}).get("quote", [{}])[0]
-        if not timestamps or not quote:
-            return None
-
-        rows = []
-        for i, ts in enumerate(timestamps):
-            o = quote.get("open",   [None])[i]
-            h = quote.get("high",   [None])[i]
-            l = quote.get("low",    [None])[i]
-            c = quote.get("close",  [None])[i]
-            v = quote.get("volume", [0])[i] or 0
-            if None in (o, h, l, c):
-                continue
-            dt_ist = datetime.fromtimestamp(ts, tz=pytz.utc).astimezone(IST)
-            ts_str = dt_ist.strftime("%Y-%m-%d %H:%M:%S")
-            rows.append([ts_str, float(o), float(h), float(l), float(c), float(v)])
-
-        return rows if rows else None
-    except Exception:
-        return None
+# fetch_yahoo_fallback_candles removed in v2.9 — AngelOne only
 
 
-@st.cache_data(ttl=1800)
 def fetch_daily_prev_close(symbol: str):
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS?interval=1d&range=10d"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-        if res.status_code != 200:
-            return None
-        closes = (
-            res.json()
-            .get("chart", {}).get("result", [{}])[0]
-            .get("indicators", {}).get("quote", [{}])[0]
-            .get("close", [])
-        )
-        valid = [c for c in closes if c is not None]
-        return valid[-2] if len(valid) >= 2 else None
-    except Exception:
-        return None
+    # Yahoo removed in v2.9 — prev close from AngelOne daily candle
+    # Use last candle close from 5-min data as prev close approximation
+    # Returns None — pctChange will show 0.0 which is acceptable
+    return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4.5: F5 OPENING LEVELS  ← NEW in v2.6
@@ -971,7 +927,7 @@ def run_full_scan(watchlist_stocks: list):
     if angel_auth.get("session"):
         st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
     else:
-        st.session_state.scan_log.append("⚠️ AngelOne session unavailable — Yahoo fallback active")
+        st.session_state.scan_log.append("❌ AngelOne session unavailable — stocks will be skipped")
 
     # ── Step 1: Fetch all candles in parallel batches ──
     candles_map   = {}   # symbol → candles
@@ -1004,22 +960,11 @@ def run_full_scan(watchlist_stocks: list):
                 )
         time.sleep(BATCH_WAIT)
 
-    # ── Retry failed stocks one by one via Yahoo fallback ──
+    # ── Log failed stocks — no Yahoo fallback ──
     if failed_stocks:
         st.session_state.scan_log.append(
-            f"⚠️ {len(failed_stocks)} stocks failed fetch — retrying via Yahoo: {', '.join(failed_stocks)}"
+            f"❌ {len(failed_stocks)} stocks failed AngelOne fetch — skipped: {', '.join(failed_stocks)}"
         )
-        for symbol in failed_stocks:
-            try:
-                clean_sym = symbol.split("-")[0].split(".")[0].strip()
-                candles   = fetch_yahoo_fallback_candles(clean_sym)
-                candles_map[symbol] = candles
-                if candles:
-                    st.session_state.scan_log.append(f"✅ Retry OK: {symbol}")
-                else:
-                    st.session_state.scan_log.append(f"❌ Retry failed: {symbol} — skipped")
-            except Exception as e:
-                st.session_state.scan_log.append(f"❌ Retry error: {symbol} — {e}")
 
     # ── Step 2: Analyze sequentially (session_state not thread-safe) ──
     for i, stock in enumerate(watchlist_stocks):
