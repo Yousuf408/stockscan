@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.6
+#  TRADE SENTRY — scanner.py  v2.7
 #  Changes from v2.5:
 #    - Added fetch_candles_1min() — fetches 1-min candles from AngelOne
 #    - Added get_f5_opening_levels() — Pine Script exact logic:
@@ -9,6 +9,10 @@
 #    - calc_entry_target() accepts f5_high, f5_low directly
 #    - check_historical_status() entry_price uses correct F5 level
 #    - All other logic, UI, filters unchanged
+#  Changes from v2.6:
+#    - Fixed get_last_trading_day_str() — removed early weekday return
+#      Now always walks back to last Mon-Fri, fixing Saturday/Sunday edge cases
+#      This caused 1-min API to get wrong date → fallback to 5min
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -230,17 +234,21 @@ def get_ist_today_str() -> str:
 
 def get_last_trading_day_str() -> str:
     """
-    Returns the most recent trading day as YYYY-MM-DD.
+    Returns the most recent ACTUAL trading weekday as YYYY-MM-DD.
 
-    KEY FIX: If today is a weekday (Mon-Fri), return TODAY — the market
-    just closed but we still want today's 9:15 candle, not yesterday's.
-    Only go back to a previous day if today is Saturday or Sunday.
+    v2.7 FIX: Always walk back to last Mon-Fri day.
+    Previously the early return for weekdays caused Saturday (weekday=5)
+    edge cases and returned wrong dates to AngelOne API.
+
+    Examples (IST):
+      Saturday Jun 7  -> Friday Jun 5  (skips Jun 6 which is also Sat)
+      Sunday   Jun 8  -> Friday Jun 5
+      Monday   Jun 9  before open -> Friday Jun 5 (market not open yet)
+      Any weekday  during market hours -> is_market_open() returns True,
+                   callers use get_ist_today_str() directly.
     """
     dt = get_ist_now()
-    # Today is a weekday — market ran today, return today's date
-    if dt.weekday() < 5:
-        return dt.strftime("%Y-%m-%d")
-    # Today is weekend — walk back to last Friday
+    # Always walk back until we land on a weekday (Mon=0 to Fri=4)
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
