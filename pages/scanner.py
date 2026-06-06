@@ -1035,18 +1035,12 @@ div[data-testid="stSelectbox"] > div > div {
     border: 1px solid #d0d0d0 !important;
     border-radius: 8px !important;
 }
-/* Responsive button row on small screens */
-@media (max-width: 768px) {
-    div[data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-    }
-}
 </style>
 """, unsafe_allow_html=True)
 
-btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.5, 1.5, 1.5, 1.2, 1.2, 3])
-
-with btn_col1:
+# ── Row 1: Watchlist selector + signals pill ──
+row1_col1, row1_col2 = st.columns([3, 2])
+with row1_col1:
     selected_wl = st.selectbox(
         "Watchlist",
         WATCHLIST_NAMES,
@@ -1059,29 +1053,32 @@ with btn_col1:
         st.session_state.scan_log           = []
         st.session_state.db_results_loaded  = False
         st.rerun()
-
-with btn_col2:
-    scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
-                                 disabled=len(stocks_to_scan) == 0)
-with btn_col3:
-    refresh_clicked = st.button("↺  Refresh",   use_container_width=True,
-                                 disabled=len(st.session_state.results) == 0)
-with btn_col4:
-    clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
-with btn_col5:
-    filter_toggle   = st.button(
-        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
-        use_container_width=True,
-    )
-with btn_col6:
+with row1_col2:
     sig_display = len(st.session_state.results)
     wl_total    = len(stocks_to_scan)
     st.markdown(
-        f'<div style="display:flex;align-items:center;height:38px;">'
+        f'<div style="display:flex;align-items:center;height:38px;justify-content:flex-end;">'
         f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
-        f'color:#555;padding:5px 10px;border-radius:20px;white-space:nowrap;">'
+        f'color:#555;padding:5px 12px;border-radius:20px;white-space:nowrap;">'
         f'{sig_display}/{wl_total} signals</span></div>',
         unsafe_allow_html=True,
+    )
+
+# ── Row 2: Action buttons — full width ──
+btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+
+with btn_col1:
+    scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
+                                 disabled=len(stocks_to_scan) == 0)
+with btn_col2:
+    refresh_clicked = st.button("↺  Refresh",   use_container_width=True,
+                                 disabled=len(st.session_state.results) == 0)
+with btn_col3:
+    clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
+with btn_col4:
+    filter_toggle   = st.button(
+        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
+        use_container_width=True,
     )
 
 if filter_toggle:
