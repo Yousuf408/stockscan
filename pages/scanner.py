@@ -956,8 +956,10 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 15
-    BATCH_WAIT  = 0.3
+    # AngelOne rate limit: 3 req/sec, 180 req/min
+    # Batch of 3 stocks at a time with 1.5s gap = ~2 req/sec ✅
+    BATCH_SIZE  = 3
+    BATCH_WAIT  = 1.5
 
     st.session_state.is_scanning  = True
     st.session_state.scan_log     = []
