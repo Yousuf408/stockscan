@@ -22,6 +22,16 @@ from core import (
     clear_watchlist_tab,
 )
 
+# ── Auth guard ──
+from auth import restore_session
+restore_session()
+
+if not st.session_state.get("user_id"):
+    st.warning("Please login to access this page.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
 st.set_page_config(
     page_title="Watchlist · TradeSentry",
     layout="wide",
@@ -31,11 +41,6 @@ st.set_page_config(
 apply_styles()
 sidebar_brand()
 page_header("Watchlist", "Track your trades")
-
-
-# ══════════════════════════════════════════
-#   TIMEZONE
-# ══════════════════════════════════════════
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -49,17 +54,9 @@ def is_market_open():
     mins = n.hour * 60 + n.minute
     return (9*60+15) <= mins <= (15*60+30)
 
-
-# ══════════════════════════════════════════
-#   WATCHLIST STORAGE — Supabase via core.py
-#   get_list / set_list replaced with direct
-#   Supabase calls for efficiency
-# ══════════════════════════════════════════
-
 WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 def get_list(tab: str) -> list:
-    """Load stocks for a tab from Supabase."""
     try:
         return load_watchlist(tab)
     except Exception as e:
@@ -67,21 +64,12 @@ def get_list(tab: str) -> list:
         return []
 
 def set_list(tab: str, lst: list):
-    """
-    Save full list for a tab to Supabase.
-    Used for bulk operations like sort reorder.
-    """
     try:
         all_data = load_watchlist()
         all_data[f"watchlist_{tab}"] = lst
         save_watchlist(all_data)
     except Exception as e:
         st.error(f"Save error: {e}")
-
-
-# ══════════════════════════════════════════
-#   SOUND ALERT
-# ══════════════════════════════════════════
 
 def play_alert_sound(alert_type="triggered"):
     if alert_type == "triggered":  freq, dur = 800, 300
@@ -96,11 +84,6 @@ def play_alert_sound(alert_type="triggered"):
     gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + {dur/1000});
     osc.start(ac.currentTime); osc.stop(ac.currentTime + {dur/1000});
     </script>""", height=0)
-
-
-# ══════════════════════════════════════════
-#   PRICE FETCH — unchanged
-# ══════════════════════════════════════════
 
 AUTO_REFRESH_SECS = 300
 
@@ -157,8 +140,6 @@ def fetch_all_prices(watchlist: list) -> dict:
     prices = {}
     if not watchlist:
         return prices
-
-    # ── Angel One attempt during market hours ──
     if is_market_open():
         for stock in watchlist:
             sym  = stock.get("symbol", "")
@@ -168,7 +149,6 @@ def fetch_all_prices(watchlist: list) -> dict:
             if price:
                 prices[key] = {"price": price, "source": source,
                                "time": now_ist().strftime("%H:%M:%S")}
-
     missing = []
     for stock in watchlist:
         sym  = stock.get("symbol", "")
@@ -176,11 +156,8 @@ def fetch_all_prices(watchlist: list) -> dict:
         key  = f"{sym}_{exch}"
         if key not in prices:
             missing.append((sym, exch))
-
     if not missing:
         return prices
-
-    # ── Single stock — use individual fetch, more reliable than batch ──
     if len(missing) == 1:
         sym, exch = missing[0]
         key = f"{sym}_{exch}"
@@ -189,31 +166,20 @@ def fetch_all_prices(watchlist: list) -> dict:
             prices[key] = {"price": price, "source": source,
                            "time": now_ist().strftime("%H:%M:%S")}
         return prices
-
-    # ── Multiple stocks — use bulk download ──
     try:
         ns_syms  = [f"{clean_symbol(s)}.NS" for s, e in missing if e == "NS"]
         bo_syms  = [f"{clean_symbol(s)}.BO" for s, e in missing if e == "BO"]
         all_syms = ns_syms + bo_syms
-
         if all_syms:
-            # Market open  → 1m interval (near-live, ~1-2 min delay)
-            # Market closed → 1d interval (previous close, 1m unavailable)
-            if is_market_open():
-                dl_period, dl_interval = "1d", "1m"
-            else:
-                dl_period, dl_interval = "2d", "1d"
-
+            dl_period, dl_interval = ("1d", "1m") if is_market_open() else ("2d", "1d")
             data = yf.download(
                 tickers=" ".join(all_syms), period=dl_period, interval=dl_interval,
                 progress=False, auto_adjust=True, threads=True
             )
-
             for sym, exch in missing:
                 key    = f"{sym}_{exch}"
                 ticker = f"{clean_symbol(sym)}.{'NS' if exch == 'NS' else 'BO'}"
                 try:
-                    # MultiIndex columns for multiple tickers
                     if hasattr(data.columns, "levels"):
                         price = float(data["Close"][ticker].dropna().iloc[-1])
                     else:
@@ -221,19 +187,12 @@ def fetch_all_prices(watchlist: list) -> dict:
                     if price:
                         prices[key] = {"price": price, "source": "yfinance",
                                        "time": now_ist().strftime("%H:%M:%S")}
-                except Exception as e:
-                    # Fallback to individual fetch if batch extraction fails
-                    try:
-                        price, source = fetch_price_yfinance(sym, exch)
-                        if price:
-                            prices[key] = {"price": price, "source": source,
-                                           "time": now_ist().strftime("%H:%M:%S")}
-                    except Exception:
-                        print(f"[Fallback] Could not fetch {sym}: {e}")
-
+                except:
+                    price, source = fetch_price_yfinance(sym, exch)
+                    if price:
+                        prices[key] = {"price": price, "source": source,
+                                       "time": now_ist().strftime("%H:%M:%S")}
     except Exception as e:
-        print(f"[Batch yfinance] Failed: {e}")
-        # Full fallback — fetch each stock individually
         for sym, exch in missing:
             key = f"{sym}_{exch}"
             price, source = fetch_price_yfinance(sym, exch)
@@ -241,11 +200,6 @@ def fetch_all_prices(watchlist: list) -> dict:
                 prices[key] = {"price": price, "source": source,
                                "time": now_ist().strftime("%H:%M:%S")}
     return prices
-
-
-# ══════════════════════════════════════════
-#   STATUS LOGIC — unchanged
-# ══════════════════════════════════════════
 
 def compute_status(stock: dict, ltp: float) -> str:
     entry, sl, t1, t2 = stock.get("entry"), stock.get("sl"), stock.get("target1"), stock.get("target2")
@@ -286,11 +240,6 @@ SOURCE_ICON = {
     "yfinance": "🟠", "close_price": "🟠", "offline": "⚪"
 }
 
-
-# ══════════════════════════════════════════
-#   SESSION STATE
-# ══════════════════════════════════════════
-
 for k, v in [
     ("current_tab", "Today"), ("direction", "BUY"), ("exchange", "NS"),
     ("f_symbol", ""), ("f_entry", 0.0), ("f_sl", 0.0), ("f_t1", 0.0), ("f_t2", 0.0),
@@ -301,11 +250,6 @@ for k, v in [
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
-
-
-# ══════════════════════════════════════════
-#   AUTO REFRESH LOGIC
-# ══════════════════════════════════════════
 
 def should_auto_refresh() -> bool:
     if not st.session_state.prices:
@@ -318,22 +262,13 @@ def should_auto_refresh() -> bool:
 def do_price_fetch(watchlist: list):
     if not watchlist:
         return
-    st.session_state.fetching = True
     prices = fetch_all_prices(watchlist)
     st.session_state.prices.update(prices)
     st.session_state.last_fetch_time = now_ist()
-    st.session_state.fetching = False
-
-
-# ══════════════════════════════════════════
-#   MAIN LAYOUT
-# ══════════════════════════════════════════
 
 left_col, right_col = st.columns([3, 7], gap="small")
 
 with left_col:
-
-    # ── TOP CONTROLS ──
     ctrl1, ctrl2, ctrl3 = st.columns(3)
     with ctrl1:
         if st.button("➕", use_container_width=True, help="Add Trade", key="add_toggle"):
@@ -346,7 +281,6 @@ with left_col:
             st.session_state.sound_enabled = not st.session_state.sound_enabled
             st.rerun()
 
-    # ── ADD TRADE FORM ──
     if st.session_state.show_add_form:
         with st.expander("➕ ADD TRADE", expanded=True):
             st.markdown(
@@ -449,7 +383,6 @@ with left_col:
                             "added_at":  datetime.now().isoformat(),
                         }
                         try:
-                            # ── Single insert to Supabase ──
                             add_to_watchlist(st.session_state.current_tab, new_stock)
                             for k in ["f_symbol","f_entry","f_sl","f_t1","f_t2"]:
                                 st.session_state[k] = "" if k=="f_symbol" else 0.0
@@ -460,7 +393,6 @@ with left_col:
                         except Exception as e:
                             st.error(f"Failed to add: {e}")
 
-    # ── TABS ──
     tc1, tc2, tc3 = st.columns(3)
     for i, col in enumerate([tc1, tc2, tc3]):
         with col:
@@ -478,7 +410,6 @@ with left_col:
     current_tab = st.session_state.current_tab
     watchlist   = get_list(current_tab)
 
-    # ── SORT + CLEAR ──
     sc1, sc2, sc3 = st.columns(3)
     with sc1:
         if st.button("Sort", use_container_width=True, key="sort_btn"):
@@ -509,7 +440,6 @@ with left_col:
                     st.session_state.sort_by = key
                     st.rerun()
 
-    # ── SOURCE STATUS + NEXT REFRESH ──
     market_now = is_market_open()
     src_label  = "🟢 Live" if market_now else "🟠 Close Price"
 
@@ -528,12 +458,10 @@ with left_col:
         unsafe_allow_html=True
     )
 
-    # ── AUTO FETCH ON PAGE LOAD / STALE ──
     if watchlist and should_auto_refresh() and not refresh:
         with st.spinner("Loading prices..."):
             do_price_fetch(watchlist)
 
-    # ── MANUAL REFRESH ──
     if watchlist and refresh:
         st.session_state.prices = {}
         with st.spinner(f"Fetching {len(watchlist)} stocks in batch..."):
@@ -542,7 +470,6 @@ with left_col:
             st.session_state.last_fetch_time = now_ist()
         st.success(f"✅ {len(new_prices)} prices updated!")
 
-    # ── SORT ──
     def sort_list(lst, by):
         order = {"SL_HIT":0,"TRIGGERED":1,"NEAR":2,"TARGET1":3,"TARGET2":4,"WATCHING":5}
         if by == "status":
@@ -561,7 +488,6 @@ with left_col:
 
     watchlist = sort_list(watchlist, st.session_state.sort_by)
 
-    # ── EMPTY STATE ──
     if not watchlist:
         st.markdown(
             '<div style="text-align:center;padding:40px 10px">'
@@ -580,7 +506,7 @@ with left_col:
             t2       = stock.get("target2")
             note     = stock.get("note","")
             exchange = stock.get("exchange","NS")
-            db_id    = stock.get("_db_id")   # Supabase row ID
+            db_id    = stock.get("_db_id")
 
             price_key  = f"{sym}_{exchange}"
             price_data = st.session_state.prices.get(price_key, {})
@@ -599,7 +525,6 @@ with left_col:
 
             if ltp:
                 new_status = compute_status(stock, ltp)
-                # ── Write to Supabase only when status changed ──
                 if new_status != old_status and db_id:
                     try:
                         update_watchlist_stock(db_id, {
@@ -622,7 +547,6 @@ with left_col:
                             and st.session_state.selected_exchange == exchange)
             src_icon     = SOURCE_ICON.get(source,"⚪")
 
-            # ── EDIT MODE ──
             if st.session_state.edit_idx==stock_idx and st.session_state.edit_tab==current_tab:
                 st.markdown(f'<div class="ts-section-label">Edit — {sym}</div>', unsafe_allow_html=True)
                 with st.container(border=True):
@@ -745,11 +669,6 @@ with left_col:
         unsafe_allow_html=True
     )
 
-
-# ══════════════════════════════════════════
-#   RIGHT PANEL — CHART
-# ══════════════════════════════════════════
-
 with right_col:
     if not st.session_state.selected_symbol:
         st.markdown(
@@ -777,8 +696,6 @@ with right_col:
         )
         render_chart(symbol, exchange)
 
-# ── Auto-refresh during market hours — refreshes every 60 seconds ──
-# Pauses if user is editing a stock to avoid losing their input
 if is_market_open() and st.session_state.edit_idx is None:
     time.sleep(60)
     st.rerun()
