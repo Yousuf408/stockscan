@@ -90,23 +90,10 @@ def get_access_token() -> str:
 
 
 def _set_session(data: dict):
-    user  = data.get("user") or {}
-    uid   = user.get("id", "")
-    email = user.get("email", "")
-    token = data.get("access_token", "")
-    st.session_state["user_id"]      = uid
-    st.session_state["user_email"]   = email
-    st.session_state["access_token"] = token
-    # Save server-side session and get session token
-    try:
-        import sys, os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        from auth import save_session
-        session_token = save_session(token, uid, email)
-        # Set in URL BEFORE switching page
-        st.query_params["s"] = session_token
-    except Exception as e:
-        print(f"[login] Session save failed: {e}")
+    user = data.get("user") or {}
+    st.session_state["user_id"]      = user.get("id", "")
+    st.session_state["user_email"]   = user.get("email", "")
+    st.session_state["access_token"] = data.get("access_token", "")
 
 
 def logout():
@@ -161,13 +148,8 @@ with tab_login:
                 data = auth_sign_in(email.strip(), password.strip())
             if data.get("access_token"):
                 _set_session(data)
-                session_token = st.session_state.get("session_token", "")
-                st.success("Logged in! Redirecting...")
-                # Use JS redirect to preserve ?s=TOKEN in URL
-                st.markdown(
-                    f'<meta http-equiv="refresh" content="1;url=/scanner?s={session_token}">',
-                    unsafe_allow_html=True
-                )
+                st.success("Logged in!")
+                st.switch_page("pages/scanner.py")
             else:
                 msg = data.get("error_description") or data.get("msg") or "Login failed."
                 st.error(msg)
