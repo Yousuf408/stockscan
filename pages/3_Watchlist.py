@@ -34,6 +34,9 @@ st.set_page_config(
 )
 
 # ── Auth guard ──
+from auth import restore_session
+restore_session()
+
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
