@@ -1142,7 +1142,16 @@ with btn_col1:
     scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
                                  disabled=len(stocks_to_scan) == 0)
 with btn_col2:
-    refresh_clicked = st.button("↺  Refresh",   use_container_width=True,
+    # Show countdown timer on refresh button if results exist
+    if st.session_state.results and st.session_state.get("last_auto_refresh", 0):
+        elapsed   = time.time() - st.session_state.get("last_auto_refresh", time.time())
+        remaining = max(0, 300 - int(elapsed))
+        mins      = remaining // 60
+        secs      = remaining % 60
+        btn_label = f"↺  Refresh  {mins}:{secs:02d}"
+    else:
+        btn_label = "↺  Refresh"
+    refresh_clicked = st.button(btn_label, use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
 with btn_col3:
     clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
@@ -1158,8 +1167,10 @@ if filter_toggle:
 
 if scan_clicked:
     run_full_scan(stocks_to_scan)
+    st.session_state.last_auto_refresh = time.time()
 if refresh_clicked:
     run_refresh_scan(stocks_to_scan)
+    st.session_state.last_auto_refresh = time.time()
 if clear_clicked:
     if st.session_state.get("user_id"):
         clear_scanner_results(st.session_state.selected_watchlist)
