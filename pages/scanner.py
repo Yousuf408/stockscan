@@ -171,9 +171,17 @@ def load_watchlist_stocks(tab: str) -> list:
             sym = s.get("symbol", "").strip().upper()
             if not sym:
                 continue
-            sym    = sym.replace(".NS", "").replace(".BO", "").split("-")[0].split(".")[0].strip()
-            token  = s.get("token")  or get_stock_token(sym)  or ""
-            sector = s.get("sector") or get_stock_sector(sym) or "GENERAL"
+            sym = sym.replace(".NS", "").replace(".BO", "").split("-")[0].split(".")[0].strip()
+
+            # Fix: Supabase stores "EMPTY" string — treat it as missing
+            raw_token = str(s.get("token") or "").strip()
+            token     = raw_token if raw_token and raw_token.upper() not in ("EMPTY", "NONE", "") else ""
+            token     = token or get_stock_token(sym) or ""
+
+            # Fix: Supabase stores "EMPTY" string for sector too
+            raw_sector = str(s.get("sector") or "").strip()
+            sector     = raw_sector if raw_sector and raw_sector.upper() not in ("EMPTY", "NONE", "") else ""
+            sector     = sector or get_stock_sector(sym) or "GENERAL"
             stocks.append({
                 "symbol":   sym,
                 "token":    str(token),
