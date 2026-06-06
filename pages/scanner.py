@@ -248,8 +248,12 @@ def get_ist_time_now() -> str:
 # SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
-    log      = st.session_state.get("scan_log", [])
+def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None, _log: list = None):
+    """
+    Thread-safe: does NOT access st.session_state.
+    Pass _log list from main thread if you want logging.
+    """
+    log      = _log if _log is not None else []
     is_open  = is_market_open()
     end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
@@ -819,7 +823,9 @@ def run_full_scan(watchlist_stocks: list):
 
     def fetch_one(stock):
         try:
-            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth)
+            # Pass scan_log reference so thread can append without st.session_state
+            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth,
+                                         _log=st.session_state.scan_log)
             return stock["symbol"], candles, None
         except Exception as e:
             return stock["symbol"], None, str(e)
@@ -879,7 +885,8 @@ def run_refresh_scan(watchlist_stocks: list):
     for r in st.session_state.results:
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
-            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_auth)
+            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_auth,
+                                         _log=st.session_state.scan_log)
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
