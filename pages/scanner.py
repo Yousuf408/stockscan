@@ -274,53 +274,62 @@ def get_ist_time_now() -> str:
 # Reason: cache was ignoring angel_auth parameter changes,
 # causing Yahoo fallback to be used even when AngelOne session was valid.
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
-    is_open    = is_market_open()
-    end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
+    log      = st.session_state.get("scan_log", [])
+    is_open  = is_market_open()
+    end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (get_ist_now() - timedelta(days=20)).strftime("%Y-%m-%d")
-    clean_sym  = symbol.split("-")[0].split(".")[0].strip()
 
-    if angel_auth and angel_auth.get("session"):
-        try:
-            headers = {
-                "Content-Type":  "application/json",
-                "Authorization": f"Bearer {angel_auth['session'].get('jwtToken')}",
-                "X-UserType":    "USER",
-                "X-SourceID":    "WEB",
-                "X-PrivateKey":  angel_auth['session'].get('apiKey'),
-            }
-            payload = {
-                "exchange":    "NSE",
-                "symboltoken": str(symbol_token).strip(),
-                "interval":    "FIVE_MINUTE",
-                "from":        f"{start_date} 09:15",
-                "to":          f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
-            }
-            res = requests.post(
-                "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
-                json=payload, headers=headers, timeout=7,
-            )
-            if res.status_code == 200:
-                data = res.json()
-                if data.get("status") is True and isinstance(data.get("data"), list):
-                    rows = []
-                    for c in data["data"]:
-                        if isinstance(c, list) and len(c) >= 6:
-                            # Normalize timestamp — AngelOne returns ISO format
-                            # e.g. "2026-06-05T09:15:00+05:30" → "2026-06-05 09:15:00"
-                            raw_ts = str(c[0])
-                            ts_normalized = raw_ts.replace("T", " ")[:19]
-                            rows.append([ts_normalized, float(c[1]), float(c[2]),
-                                         float(c[3]), float(c[4]), float(c[5])])
-                    if rows:
-                        print(f"[AngelOne] ✅ {symbol} — {len(rows)} candles fetched")
-                        return rows
-                else:
-                    msg = data.get('message', '')
-                    print(f"[AngelOne] ⚠️ {symbol} — {msg}")
-                    log = st.session_state.get("scan_log", [])
-                    log.append(f"⚠️ AngelOne [{symbol}] — {msg}")
-        except Exception as e:
-            print(f"[AngelOne] ❌ {symbol} fetch error: {e}")
+    if not angel_auth or not angel_auth.get("session"):
+        log.append(f"❌ [{symbol}] No AngelOne session")
+        return None
+
+    try:
+        headers = {
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {angel_auth['session'].get('jwtToken')}",
+            "X-UserType":    "USER",
+            "X-SourceID":    "WEB",
+            "X-PrivateKey":  angel_auth['session'].get('apiKey'),
+        }
+        payload = {
+            "exchange":    "NSE",
+            "symboltoken": str(symbol_token).strip(),
+            "interval":    "FIVE_MINUTE",
+            "from":        f"{start_date} 09:15",
+            "to":          f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
+        }
+        log.append(
+            f"🔍 [{symbol}] token={symbol_token} "
+            f"from={start_date} to={end_date}"
+        )
+        res = requests.post(
+            "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
+            json=payload, headers=headers, timeout=7,
+        )
+        log.append(f"   HTTP {res.status_code}")
+        if res.status_code == 200:
+            data = res.json()
+            status = data.get("status")
+            msg    = data.get("message", "")
+            log.append(f"   status={status} msg={msg}")
+            if status is True and isinstance(data.get("data"), list):
+                rows = []
+                for c in data["data"]:
+                    if isinstance(c, list) and len(c) >= 6:
+                        raw_ts        = str(c[0])
+                        ts_normalized = raw_ts.replace("T", " ")[:19]
+                        rows.append([ts_normalized, float(c[1]), float(c[2]),
+                                     float(c[3]), float(c[4]), float(c[5])])
+                if rows:
+                    log.append(f"   ✅ {len(rows)} candles fetched")
+                    return rows
+                log.append(f"   ⚠️ 0 rows in response")
+            else:
+                log.append(f"   ❌ API error — status={status} msg={msg}")
+        else:
+            log.append(f"   ❌ HTTP error {res.status_code}: {res.text[:100]}")
+    except Exception as e:
+        log.append(f"   ❌ Exception: {e}")
 
     return None
 
