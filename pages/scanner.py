@@ -944,10 +944,10 @@ def run_full_scan(watchlist_stocks: list):
 
     def fetch_one(stock):
         try:
-            # ← CHANGED v2.5: pass angel_auth so AngelOne API is used
             candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth)
             return stock["symbol"], candles, None
         except Exception as e:
+            st.session_state.scan_log.append(f"❌ [{stock['symbol']}] Exception in fetch: {e}")
             return stock["symbol"], None, str(e)
 
     batches = [watchlist_stocks[i:i+BATCH_SIZE]
@@ -963,6 +963,8 @@ def run_full_scan(watchlist_stocks: list):
                 fetched += 1
                 if candles is None:
                     failed_stocks.append(symbol)
+                    if error:
+                        st.session_state.scan_log.append(f"❌ [{symbol}] fetch error: {error}")
                 progress_bar.progress(
                     fetched / total / 2,
                     text=f"Fetching {fetched}/{total}: {symbol}"
