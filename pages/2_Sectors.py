@@ -10,7 +10,10 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from styles import apply_styles, sidebar_brand, page_header
 from stocks import SECTOR_YAHOO, get_stocks_by_sector
 
-# ── Auth guard ──  ← PASTE HERE (after imports, before st. calls)
+# ── Auth guard ──
+from auth import restore_session
+restore_session()
+
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
