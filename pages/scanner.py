@@ -1396,12 +1396,11 @@ else:
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH
+# AUTO-REFRESH — only during market hours
 # ─────────────────────────────────────────────────────────────────────────────
-if st.session_state.auto_refresh:
+if st.session_state.auto_refresh and is_market_open() and st.session_state.results:
     last = st.session_state.get("last_auto_refresh", 0)
     if time.time() - last >= 300:
         run_refresh_scan(stocks_to_scan)
         st.session_state.last_auto_refresh = time.time()
-    time.sleep(5)
-    st.rerun()
+        st.rerun()
