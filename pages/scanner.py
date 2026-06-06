@@ -396,92 +396,10 @@ def fetch_daily_prev_close(symbol: str):
 #   F5 LOW  = min(LOW  of 9:15, 9:16, 9:17, 9:18, 9:19) — 5 one-min candles
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str,
-                        angel_auth=None, scan_log=None) -> list:
-    """
-    Fetch 1-min candles for 9:15-9:19 window from AngelOne.
-    Logs to scan_log (Streamlit UI) instead of print().
-    Returns list of [ts, open, high, low, close, vol] or None.
-    """
-    log = scan_log or []
-
-    if not angel_auth or not angel_auth.get("session"):
-        log.append(f"⚠️ [1min] {symbol} — No AngelOne session")
-        return None
-    try:
-        headers = {
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {angel_auth['session'].get('jwtToken')}",
-            "X-UserType":    "USER",
-            "X-SourceID":    "WEB",
-            "X-PrivateKey":  angel_auth['session'].get('apiKey'),
-        }
-        payload = {
-            "exchange":    "NSE",
-            "symboltoken": str(symbol_token).strip(),
-            "interval":    "ONE_MINUTE",
-            "from":        f"{trading_date} 09:15",
-            "to":          f"{trading_date} 09:19",
-        }
-        log.append(f"🔍 [1min] {symbol} — fetching {trading_date} 09:15 to 09:19")
-        res = requests.post(
-            "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
-            json=payload, headers=headers, timeout=7,
-        )
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("status") is True and isinstance(data.get("data"), list):
-                rows = []
-                for c in data["data"]:
-                    if isinstance(c, list) and len(c) >= 6:
-                        raw_ts        = str(c[0])
-                        ts_normalized = raw_ts.replace("T", " ")[:19]
-                        rows.append([ts_normalized, float(c[1]), float(c[2]),
-                                     float(c[3]), float(c[4]), float(c[5])])
-                if rows:
-                    log.append(f"✅ [1min] {symbol} — {len(rows)} candles fetched")
-                    return rows
-                log.append(f"⚠️ [1min] {symbol} — API OK but 0 rows | msg: {data.get('message')}")
-            else:
-                msg = data.get('message', '')
-                log.append(f"⚠️ [1min] {symbol} — status={data.get('status')} msg={msg}")
-                # ── Token expired — retry with fresh login ──
-                if 'Invalid Token' in str(msg) or 'invalid token' in str(msg).lower():
-                    log.append(f"🔄 [1min] {symbol} — Token expired, refreshing session...")
-                    fresh_auth = get_angel_auth(force_refresh=True)
-                    if fresh_auth.get('session'):
-                        return fetch_candles_1min(symbol_token, symbol, trading_date,
-                                                  fresh_auth, log)
-        else:
-            log.append(f"❌ [1min] {symbol} — HTTP {res.status_code}")
-    except Exception as e:
-        log.append(f"❌ [1min] {symbol} — Exception: {e}")
-    return None
-
-
-def get_f5_opening_levels(symbol_token: str, symbol: str, trading_date: str,
-                           open_candle_5min: list, angel_auth=None,
-                           scan_log=None) -> dict:
-    """
-    Pine Script F5 logic — get correct HIGH and LOW for 9:15-9:19 window.
-    Logs results to scan_log for Streamlit UI visibility.
-    """
-    log     = scan_log or []
-    one_min = fetch_candles_1min(symbol_token, symbol, trading_date, angel_auth, log)
-
-    if one_min and len(one_min) > 0:
-        f5_high = max(float(c[2]) for c in one_min)
-        f5_low  = min(float(c[3]) for c in one_min)
-        log.append(f"📐 [1min] {symbol} candles:")
-        for c in one_min:
-            log.append(f"   {c[0]}  H={float(c[2]):.2f}  L={float(c[3]):.2f}")
-        return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "1min"}
-
-    # Fallback to 5-min candle
-    f5_high = float(open_candle_5min[2])
-    f5_low  = float(open_candle_5min[3])
-    log.append(f"⚠️ [F5] {symbol} — 1min failed, using 5min fallback: HIGH={f5_high} LOW={f5_low}")
-    return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "5min"}
+# fetch_candles_1min and get_f5_opening_levels removed in v2.8
+# Reason: 1-min API caused rate limit (3 req/sec) + infinite retry loop
+# Solution: Use 5-min candle HIGH/LOW directly from AngelOne
+# AngelOne 5-min data is accurate when session is valid
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -971,22 +889,18 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
 
-    # ── F5 levels — Pine Script exact logic ← NEW v2.6 ──
+    # ── Entry/SL from 9:15 opening candle HIGH/LOW ← v2.8 ──
+    # 1-min fetch removed (rate limit: 3 req/sec, caused infinite loop)
+    # AngelOne 5-min candle HIGH/LOW is accurate when session is valid
     trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
-    angel_auth   = get_angel_auth()
-    log.append(f"🗓️ {symbol} — trading_date for 1min fetch: {trading_date}")
-    f5_levels    = get_f5_opening_levels(
-        stock["token"], symbol, trading_date, open_candle, angel_auth,
-        scan_log=log
-    )
-    f5_high = f5_levels["high"]
-    f5_low  = f5_levels["low"]
+    f5_high = round(float(open_candle[2]), 2)
+    f5_low  = round(float(open_candle[3]), 2)
     log.append(
-        f"📐 {symbol} F5 levels ({f5_levels['source']}) — "
-        f"HIGH={f5_high}  LOW={f5_low}"
+        f"📐 {symbol} opening candle — "
+        f"HIGH={f5_high}  LOW={f5_low}  date={trading_date}"
     )
 
-    # Calculate entry and target prices using F5 levels
+    # Calculate entry and target prices
     entry_target = calc_entry_target(signal, f5_high, f5_low)
 
     # Log entry/target clearly for verification
