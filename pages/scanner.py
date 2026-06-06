@@ -83,20 +83,26 @@ except Exception:
 def get_angel_auth() -> dict:
     """
     Always does a fresh AngelOne login — JWT tokens expire quickly.
-    Does NOT cache JWT to avoid stale token issues.
-    Called ONCE in main thread before parallel fetch.
+    Tries st.secrets first (Streamlit Cloud), falls back to os.environ (Railway).
     """
     try:
         import pyotp
         from SmartApi import SmartConnect
 
-        api_key     = st.secrets.get("API_KEY", "")
-        client_code = st.secrets.get("CLIENT_CODE", "")
-        password    = st.secrets.get("PASSWORD", "")
-        totp_secret = st.secrets.get("TOTP_SECRET", "")
+        # Try st.secrets first, fall back to os.environ
+        try:
+            api_key     = st.secrets["ANGEL_API_KEY"]
+            client_code = st.secrets["ANGEL_CLIENT_ID"]
+            password    = st.secrets["ANGEL_PASSWORD"]
+            totp_secret = st.secrets["ANGEL_TOTP_SECRET"]
+        except Exception:
+            api_key     = os.environ["ANGEL_API_KEY"]
+            client_code = os.environ["ANGEL_CLIENT_ID"]
+            password    = os.environ["ANGEL_PASSWORD"]
+            totp_secret = os.environ["ANGEL_TOTP_SECRET"]
 
         if not all([api_key, client_code, password, totp_secret]):
-            print("[AngelAuth] Secrets missing")
+            print("[AngelAuth] ❌ One or more credentials are empty")
             return {}
 
         angel_obj    = SmartConnect(api_key=api_key)
@@ -109,6 +115,7 @@ def get_angel_auth() -> dict:
             return {"session": {"jwtToken": jwt, "apiKey": api_key}}
         else:
             print(f"[AngelAuth] ❌ Login failed: {session_data.get('message')}")
+
     except Exception as e:
         print(f"[AngelAuth] ❌ Exception: {e}")
 
