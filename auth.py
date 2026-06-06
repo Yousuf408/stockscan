@@ -1,13 +1,39 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — auth.py
-#  Persistent login via browser localStorage
-#  Import and call restore_session() at top of every page
+#  TRADE SENTRY — auth.py  v2.0
+#  Persistent login via browser cookies (7 days)
+#  Uses streamlit-cookies-manager
+#  Add to requirements.txt: streamlit-cookies-manager
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 import os
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COOKIE MANAGER — singleton per session
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_cookie_manager():
+    """Get or create cookie manager — singleton."""
+    if "cookie_manager" not in st.session_state:
+        try:
+            from streamlit_cookies_manager import EncryptedCookieManager
+            cm = EncryptedCookieManager(
+                prefix="tradesentry_",
+                password=_get_cookie_secret(),
+            )
+            st.session_state["cookie_manager"] = cm
+        except Exception as e:
+            print(f"[auth] Cookie manager init failed: {e}")
+            st.session_state["cookie_manager"] = None
+    return st.session_state["cookie_manager"]
+
+
+def _get_cookie_secret() -> str:
+    try:
+        return st.secrets.get("COOKIE_SECRET", "tradesentry_secret_key_2024")
+    except Exception:
+        return os.environ.get("COOKIE_SECRET", "tradesentry_secret_key_2024")
 
 
 def _get_config():
@@ -21,7 +47,7 @@ def _get_config():
 
 
 def _verify_token(access_token: str) -> dict:
-    """Verify token with Supabase and get user info."""
+    """Verify token with Supabase and return user info."""
     try:
         url, key = _get_config()
         res = requests.get(
@@ -39,83 +65,60 @@ def _verify_token(access_token: str) -> dict:
         return {}
 
 
-def save_session_to_browser(access_token: str, user_id: str, user_email: str):
-    """Save session to browser localStorage — persists across refreshes."""
-    components.html(f"""
-    <script>
-        localStorage.setItem('ts_access_token', '{access_token}');
-        localStorage.setItem('ts_user_id',      '{user_id}');
-        localStorage.setItem('ts_user_email',   '{user_email}');
-        localStorage.setItem('ts_saved_at',     Date.now().toString());
-    </script>
-    """, height=0)
+# ─────────────────────────────────────────────────────────────────────────────
+# PUBLIC API
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def clear_session_from_browser():
-    """Clear session from browser localStorage."""
-    components.html("""
-    <script>
-        localStorage.removeItem('ts_access_token');
-        localStorage.removeItem('ts_user_id');
-        localStorage.removeItem('ts_user_email');
-        localStorage.removeItem('ts_saved_at');
-    </script>
-    """, height=0)
-
-
-def restore_session():
+def restore_session() -> bool:
     """
-    Call at the top of every page.
-    If session_state has user_id → already logged in, skip.
-    If not → inject JS to read localStorage and post back via query params.
+    Call at top of every page BEFORE auth guard.
+    1. If session_state has user_id → already logged in ✅
+    2. Else → read token from cookie → verify → restore session
+    Returns True if logged in, False if not.
     """
-    # Already logged in in this session
+    # Already logged in
     if st.session_state.get("user_id"):
         return True
 
-    # Check query params — JS posts token back via URL
-    params = st.query_params
-    token  = params.get("ts_token", "")
-    uid    = params.get("ts_uid", "")
-    email  = params.get("ts_email", "")
+    cm = _get_cookie_manager()
+    if cm is None:
+        return False
 
-    if token and uid:
-        # Verify token is still valid with Supabase
-        user = _verify_token(token)
-        if user.get("id"):
-            st.session_state["user_id"]      = user.get("id", uid)
-            st.session_state["user_email"]   = user.get("email", email)
-            st.session_state["access_token"] = token
-            # Clear query params
-            st.query_params.clear()
-            return True
-        else:
-            # Token expired — clear browser storage
-            clear_session_from_browser()
-            st.query_params.clear()
-            return False
+    # Cookie manager must be ready before reading
+    if not cm.ready():
+        st.stop()  # wait for cookie manager to initialize
 
-    # Inject JS to read localStorage and redirect with token in params
-    components.html("""
-    <script>
-        const token = localStorage.getItem('ts_access_token');
-        const uid   = localStorage.getItem('ts_user_id');
-        const email = localStorage.getItem('ts_user_email');
-        const saved = parseInt(localStorage.getItem('ts_saved_at') || '0');
-        const WEEK  = 7 * 24 * 60 * 60 * 1000;
+    token = cm.get("access_token", "")
+    uid   = cm.get("user_id", "")
+    email = cm.get("user_email", "")
 
-        if (token && uid && (Date.now() - saved) < WEEK) {
-            // Token exists and within 7 days — restore session
-            const url = new URL(window.location.href);
-            url.searchParams.set('ts_token', token);
-            url.searchParams.set('ts_uid',   uid);
-            url.searchParams.set('ts_email', email || '');
-            window.location.href = url.toString();
-        }
-    </script>
-    """, height=0)
+    if not token or not uid:
+        return False
 
-    return False
+    # Verify token is still valid
+    user = _verify_token(token)
+    if user.get("id"):
+        st.session_state["user_id"]      = user.get("id", uid)
+        st.session_state["user_email"]   = user.get("email", email)
+        st.session_state["access_token"] = token
+        return True
+    else:
+        # Token expired — clear cookies
+        save_session_to_cookie("", "", "")
+        return False
+
+
+def save_session_to_cookie(access_token: str, user_id: str, user_email: str):
+    """Save session to cookie after login."""
+    cm = _get_cookie_manager()
+    if cm is None:
+        return
+    if not cm.ready():
+        return
+    cm["access_token"] = access_token
+    cm["user_id"]      = user_id
+    cm["user_email"]   = user_email
+    cm.save()
 
 
 def is_logged_in() -> bool:
@@ -123,7 +126,7 @@ def is_logged_in() -> bool:
 
 
 def logout():
-    """Clear session state and browser storage."""
+    """Clear session and cookies."""
     try:
         token = st.session_state.get("access_token", "")
         if token:
@@ -136,9 +139,12 @@ def logout():
     except Exception:
         pass
 
+    # Clear cookies
+    save_session_to_cookie("", "", "")
+
+    # Clear session state
     for k in ["user_id", "user_email", "access_token", "results",
-              "scan_log", "wl_names", "db_results_loaded"]:
+              "scan_log", "wl_names", "db_results_loaded", "cookie_manager"]:
         st.session_state.pop(k, None)
 
-    clear_session_from_browser()
     st.rerun()
