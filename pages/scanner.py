@@ -61,7 +61,6 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = uid
     st.session_state["user_email"]   = email
     st.session_state["access_token"] = token
-    # Save server-side session
     try:
         from auth import save_session
         session_token = save_session(token, uid, email)
@@ -71,7 +70,6 @@ def _set_session(data: dict):
 
 _user_logged_in = bool(st.session_state.get("user_id"))
 
-# Load dynamic watchlist names from Supabase
 try:
     from core import get_user_watchlist_names
     if st.session_state.get("user_id"):
@@ -82,28 +80,20 @@ except Exception:
     WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ANGEL ONE AUTH  ← NEW in v2.5
-# Reuses session saved by app.py in st.session_state["angel_jwt"].
-# Falls back to a fresh login via st.secrets if session not available.
-# ─────────────────────────────────────────────────────────────────────────────
-
 def get_angel_auth() -> dict:
     """
     Returns angel_auth dict with session key containing jwtToken + apiKey.
     Priority:
       1. Reuse st.session_state["angel_jwt"] set by app.py
       2. Fresh login via st.secrets — only ONCE per session, cached in state
-      3. Return {} if both fail — data fetch will return None
+      3. Return {} if both fail
     Called ONCE in main thread before parallel fetch — never inside threads.
     """
-    # ── 1. Already cached ──
     jwt = st.session_state.get("angel_jwt")
     key = st.session_state.get("angel_api_key")
     if jwt and key:
         return {"session": {"jwtToken": jwt, "apiKey": key}}
 
-    # ── 2. Fresh login — only runs once per session ──
     try:
         import pyotp
         from SmartApi import SmartConnect
@@ -123,7 +113,6 @@ def get_angel_auth() -> dict:
 
         if session_data and session_data.get("status"):
             jwt = session_data["data"]["jwtToken"]
-            # Cache in session_state — next call reuses this
             st.session_state["angel_jwt"]     = jwt
             st.session_state["angel_api_key"] = api_key
             print("[AngelAuth] ✅ Login successful")
@@ -137,7 +126,6 @@ def get_angel_auth() -> dict:
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
-    """Send browser notification and save to Supabase notifications table."""
     icons = {
         "NEAR_ENTRY":  "🔔",
         "ENTRY_HIT":   "✅",
@@ -148,7 +136,6 @@ def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, s
     title = f"TradeSentry — {symbol}"
     body  = f"{icon} {alert_type.replace('_', ' ')} | {signal} | LTP: ₹{ltp} | Entry: ₹{entry}"
 
-    # Browser notification via JS
     st.components.v1.html(f"""
 <script>
 if ("Notification" in window && Notification.permission === "granted") {{
@@ -160,7 +147,6 @@ if ("Notification" in window && Notification.permission === "granted") {{
 </script>
 """, height=0)
 
-    # Save to Supabase
     try:
         from core import _sb_insert, _get_user_id
         _sb_insert("notifications", [{
@@ -217,7 +203,6 @@ for _k, _v in [
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-# ── Load today's results from Supabase on first page load — only if logged in ──
 if not st.session_state["db_results_loaded"]:
     if st.session_state.get("user_id"):
         db_results = load_scanner_results(st.session_state["selected_watchlist"])
@@ -238,13 +223,6 @@ def get_ist_today_str() -> str:
     return get_ist_now().strftime("%Y-%m-%d")
 
 def get_last_trading_day_str() -> str:
-    """
-    Returns the most recent ACTUAL trading weekday as YYYY-MM-DD.
-
-    v2.7 FIX: Always walk back to last Mon-Fri day.
-    Previously the early return for weekdays caused Saturday (weekday=5)
-    edge cases and returned wrong dates to AngelOne API.
-    """
     dt = get_ist_now()
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
@@ -265,19 +243,15 @@ def get_ist_time_now() -> str:
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
     log      = st.session_state.get("scan_log", [])
     is_open  = is_market_open()
-    
-    # Ensure stable date tracking for weekend vs weekday off-hours
     end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
 
-    # REASON 1: Instrument Token Missing from stocks.py mapping file
     if not symbol_token or str(symbol_token).strip() == "":
-        log.append(f"❌ [{symbol}] Failed — Reason: Missing numeric instrument token in stocks.py mapping file.")
+        log.append(f"❌ [{symbol}] Failed — Missing token in stocks.py")
         return None
 
-    # REASON 2: Missing Authentication credentials
     if not angel_auth or not angel_auth.get("session"):
-        log.append(f"❌ [{symbol}] Failed — Reason: Active session credentials/JWT not provided to fetch block.")
+        log.append(f"❌ [{symbol}] Failed — No AngelOne session")
         return None
 
     try:
@@ -288,8 +262,6 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "X-SourceID":    "WEB",
             "X-PrivateKey":  angel_auth['session'].get('apiKey'),
         }
-        
-        # Enforced AngelOne standard contract payload keys ('fromdate' and 'todate')
         payload = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
@@ -297,17 +269,14 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "fromdate":    f"{start_date} 09:15",
             "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
-        
         res = requests.post(
             "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
-            json=payload, headers=headers, timeout=7,
+            json=payload, headers=headers, timeout=10,
         )
-        
         if res.status_code == 200:
-            data = res.json()
+            data   = res.json()
             status = data.get("status")
             msg    = data.get("message", "")
-            
             if status is True and isinstance(data.get("data"), list):
                 rows = []
                 for c in data["data"]:
@@ -318,28 +287,24 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
                     return rows
-                
-                # REASON 3: Valid connection, but 0 data returned for request coordinates
-                log.append(f"⚠️ [{symbol}] Empty Response — Reason: API server returned 0 records. Check if token '{symbol_token}' is active on exchange.")
+                log.append(f"⚠️ [{symbol}] 0 rows returned — token '{symbol_token}' may be inactive")
             else:
-                # REASON 4: AngelOne explicit API rejection message
-                log.append(f"❌ [{symbol}] Rejected — Reason: AngelOne Server error. Status={status} | Message='{msg}'")
-        
-        # REASON 5: Rate Limiting or Server Outages
+                log.append(f"❌ [{symbol}] API rejected — status={status} msg={msg}")
         elif res.status_code == 429:
-            log.append(f"❌ [{symbol}] Failed — Reason: Rate Limit Breached (HTTP 429). Thread loop firing too quickly for SmartAPI gateway.")
-        elif res.status_code == 400:
-            log.append(f"❌ [{symbol}] Failed — Reason: Bad Request (HTTP 400). Structural contract payload layout validation rejected.")
-        elif res.status_code == 401 or res.status_code == 403:
-            log.append(f"❌ [{symbol}] Failed — Reason: Authentication Expired (HTTP {res.status_code}). Session JWT token rejected by server.")
+            log.append(f"❌ [{symbol}] Rate limit hit (HTTP 429)")
+        elif res.status_code in (401, 403):
+            log.append(f"❌ [{symbol}] Auth expired (HTTP {res.status_code})")
         else:
-            log.append(f"❌ [{symbol}] Failed — Reason: Unexpected Network State Code: {res.status_code}")
-            
+            log.append(f"❌ [{symbol}] HTTP {res.status_code}")
     except Exception as e:
-        # REASON 6: Internal Engine Exception
-        log.append(f"❌ [{symbol}] Exception — Reason: Runtime process error | Detail: {str(e)}")
+        log.append(f"❌ [{symbol}] Exception: {e}")
 
     return None
+
+
+def fetch_daily_prev_close(symbol: str):
+    return None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5: TECHNICAL INDICATORS
@@ -373,9 +338,6 @@ def calc_vwap(candles: list):
 
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5.9: FIND OPENING CANDLE
-# ─────────────────────────────────────────────────────────────────────────────
 
 def find_opening_candle_index(candles: list) -> int:
     if not candles:
@@ -392,9 +354,6 @@ def find_opening_candle_index(candles: list) -> int:
 
     return -1
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5.10: DEBUG — OPENING CANDLE INSPECTOR
-# ─────────────────────────────────────────────────────────────────────────────
 
 def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
     log = st.session_state.get("scan_log", [])
@@ -404,7 +363,6 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
         return
 
     open_candle = candles[opening_idx]
-
     ts    = open_candle[0]
     o     = float(open_candle[1])
     high  = float(open_candle[2])
@@ -414,14 +372,12 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
 
     risk             = round(high - low, 2)
     candle_range_pct = round((risk / low * 100) if low > 0 else 0, 3)
-
-    entry_buy  = round(high, 2)
-    sl_buy     = round(low, 2)
-    target_buy = round(entry_buy + risk, 2)
-
-    entry_sell  = round(low, 2)
-    sl_sell     = round(high, 2)
-    target_sell = round(entry_sell - risk, 2)
+    entry_buy        = round(high, 2)
+    sl_buy           = round(low, 2)
+    target_buy       = round(entry_buy + risk, 2)
+    entry_sell       = round(low, 2)
+    sl_sell          = round(high, 2)
+    target_sell      = round(entry_sell - risk, 2)
 
     log.append("━" * 55)
     log.append(f"🐛 DEBUG [{symbol}]  opening_idx={opening_idx}")
@@ -452,6 +408,7 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
             f"{marker}"
         )
     log.append("━" * 55)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 6: SIGNAL LOGIC
@@ -525,7 +482,6 @@ def check_sl_hit(signal: str, ltp: float, sl_price: float) -> bool:
 def calc_entry_target(signal: str, f5_high: float, f5_low: float) -> dict:
     if not signal or f5_high is None or f5_low is None:
         return None
-
     if signal == "BUY":
         entry  = f5_high
         sl     = f5_low
@@ -538,7 +494,6 @@ def calc_entry_target(signal: str, f5_high: float, f5_low: float) -> dict:
         target = entry - risk
     else:
         return None
-
     return {
         "entry":  round(entry,  2),
         "sl":     round(sl,     2),
@@ -553,10 +508,8 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
                           exit_already_triggered: bool = False) -> dict:
     if not signal or ltp is None or entry is None or target is None or sl_price is None:
         return {"status": "ACTIVE", "triggered": False}
-
     if exit_already_triggered:
         return {"status": "EXIT", "triggered": True}
-
     if t1_already_achieved:
         if candles and len(candles) >= 1:
             last_close = float(candles[-1][4])
@@ -565,17 +518,14 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
             if signal == "SELL" and last_close > ema20_live:
                 return {"status": "EXIT", "triggered": True}
         return {"status": "T1_ACHIEVE", "triggered": True}
-
     if signal == "BUY"  and ltp >= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
     if signal == "SELL" and ltp <= target:
         return {"status": "T1_ACHIEVE", "triggered": True}
-
     if signal == "BUY"  and ltp <= sl_price:
         return {"status": "SL_HIT", "triggered": True}
     if signal == "SELL" and ltp >= sl_price:
         return {"status": "SL_HIT", "triggered": True}
-
     return {"status": "ACTIVE", "triggered": False}
 
 
@@ -614,13 +564,13 @@ def check_historical_status(signal: str, candles_from_open: list,
     for c in candles_to_check:
         high = float(c[2])
         low  = float(c[3])
-
-        if signal == "BUY"  and high >= target: return "T1_ACHIEVE"
-        if signal == "SELL" and low  <= target: return "T1_ACHIEVE"
-        if signal == "BUY"  and low  <= sl_price: return "SL_HIT"
-        if signal == "SELL" and high >= sl_price: return "SL_HIT"
+        if signal == "BUY"  and high >= target:    return "T1_ACHIEVE"
+        if signal == "SELL" and low  <= target:    return "T1_ACHIEVE"
+        if signal == "BUY"  and low  <= sl_price:  return "SL_HIT"
+        if signal == "SELL" and high >= sl_price:  return "SL_HIT"
 
     return "ACTIVE"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
@@ -628,6 +578,7 @@ def check_historical_status(signal: str, candles_from_open: list,
 
 MIN_CANDLES_TOTAL   = 800
 MIN_CANDLES_AT_OPEN = 200
+
 
 def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     symbol = stock["symbol"]
@@ -658,6 +609,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     prev_close  = fetch_daily_prev_close(symbol)
     pct_change  = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
+    # ── REFRESH PATH ──
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
@@ -680,7 +632,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
                 opening_idx = find_opening_candle_index(candles)
                 if opening_idx >= 0:
-                    trading_date     = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+                    trading_date      = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
                     candles_from_open = candles[opening_idx:]
                     new_status = check_historical_status(
                         signal, candles_from_open,
@@ -714,6 +666,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 return r
         return None
 
+    # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
     debug_opening_candle(symbol, candles, opening_idx)
 
@@ -772,10 +725,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
     f5_high = round(float(open_candle[2]), 2)
     f5_low  = round(float(open_candle[3]), 2)
-    log.append(
-        f"📐 {symbol} opening candle — "
-        f"HIGH={f5_high}  LOW={f5_low}  date={trading_date}"
-    )
+    log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date}")
 
     entry_target = calc_entry_target(signal, f5_high, f5_low)
 
@@ -839,7 +789,9 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 2
+    # AngelOne rate limit: 3 req/sec, 180 req/min
+    # Batch of 3 with 1.5s gap = safe
+    BATCH_SIZE  = 3
     BATCH_WAIT  = 1.5
 
     st.session_state.is_scanning  = True
@@ -847,6 +799,7 @@ def run_full_scan(watchlist_stocks: list):
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
+    # Get auth ONCE in main thread
     angel_auth = get_angel_auth()
     if angel_auth.get("session"):
         st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
@@ -861,7 +814,6 @@ def run_full_scan(watchlist_stocks: list):
             candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth)
             return stock["symbol"], candles, None
         except Exception as e:
-            st.session_state.scan_log.append(f"❌ [{stock['symbol']}] Exception in fetch: {e}")
             return stock["symbol"], None, str(e)
 
     batches = [watchlist_stocks[i:i+BATCH_SIZE]
@@ -878,7 +830,7 @@ def run_full_scan(watchlist_stocks: list):
                 if candles is None:
                     failed_stocks.append(symbol)
                     if error:
-                        st.session_state.scan_log.append(f"❌ [{symbol}] fetch error: {error}")
+                        st.session_state.scan_log.append(f"❌ [{symbol}] {error}")
                 progress_bar.progress(
                     fetched / total / 2,
                     text=f"Fetching {fetched}/{total}: {symbol}"
@@ -887,7 +839,7 @@ def run_full_scan(watchlist_stocks: list):
 
     if failed_stocks:
         st.session_state.scan_log.append(
-            f"❌ {len(failed_stocks)} stocks failed AngelOne fetch — skipped: {', '.join(failed_stocks)}"
+            f"❌ {len(failed_stocks)} stocks failed — skipped: {', '.join(failed_stocks)}"
         )
 
     for i, stock in enumerate(watchlist_stocks):
@@ -951,7 +903,6 @@ tsRequestNotificationPermission();
 st.markdown("""
 <style>
 div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-
 .ts-btn-row { display:flex; gap:8px; align-items:center; margin:12px 0 4px; }
 .ts-btn {
     display:inline-flex; align-items:center; gap:6px;
@@ -964,50 +915,24 @@ div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 .ts-btn:hover { background:#f5f5f5; border-color:#aaaaaa; }
 .ts-btn-primary { background:#111111; color:#ffffff; border-color:#111111; }
 .ts-btn-primary:hover { background:#333333; border-color:#333333; }
-.ts-signals-pill {
-    margin-left:auto; font-size:12px; font-weight:600;
-    background:#f0f0f0; color:#555555; padding:6px 14px;
-    border-radius:20px; white-space:nowrap;
-}
-
-.ts-header-card {
-    background:#ffffff; border:1px solid #e8e8e8;
-    border-radius:12px; padding:18px 24px;
-    margin-bottom:4px;
-}
-.ts-header-title { font-size:22px; font-weight:700; color:#111111; margin:0; }
-.ts-header-sub   { font-size:13px; color:#888888; margin:4px 0 0; }
-.ts-counter-val { font-size:28px; font-weight:800; font-family:monospace; }
-.ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:2px; }
-
 div[data-testid="stPills"] button {
     font-size:12px !important;
     padding:4px 12px !important;
     border-radius:20px !important;
     font-weight:600 !important;
 }
-
 .ts-card {
     background:#ffffff; border:1px solid #ebebeb;
     border-left:4px solid #ebebeb;
     border-radius:10px; padding:8px 12px;
     margin-bottom:6px;
 }
-.ts-card-top {
-    display:flex; justify-content:space-between;
-    align-items:center; margin-bottom:6px;
-}
+.ts-card-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
 .ts-card-left  { display:flex; align-items:center; gap:6px; }
 .ts-card-right { display:flex; align-items:center; gap:8px; }
 .ts-sym   { font-size:15px; font-weight:800; color:#111111; font-family:monospace; }
-.ts-chip  {
-    font-size:15px; background:#f3f3f3; color:#111111;
-    padding:1px 6px; border-radius:3px; font-weight:600;
-}
-.ts-badge {
-    font-size:11px; font-weight:700; padding:2px 8px;
-    border-radius:5px; font-family:monospace;
-}
+.ts-chip  { font-size:15px; background:#f3f3f3; color:#111111; padding:1px 6px; border-radius:3px; font-weight:600; }
+.ts-badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:5px; font-family:monospace; }
 .ts-badge-buy       { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
 .ts-badge-sell      { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
 .ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
@@ -1015,40 +940,20 @@ div[data-testid="stPills"] button {
 .ts-badge-exit      { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
 .ts-badge-noentry   { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
 .ts-badge-nearentry { color:#b36200; background:#fff8ec; border:1px solid #ffd599; }
-.ts-price { font-size:14px; font-weight:700; color:#111111; font-family:monospace; }
-.ts-pct   { font-size:14px; font-weight:700; margin-left:4px; }
 .ts-meta  {
     font-size:14px; color:#222222; font-family:monospace;
-    display:flex; gap:12px; align-items:center;
-    margin-bottom:4px;
+    display:flex; gap:12px; align-items:center; margin-bottom:4px;
 }
-.ts-meta span { color:#111111; font-weight:600; }
 .ts-entry-row {
     font-size:14px; font-family:monospace; color:#222222;
-    display:flex; gap:14px; align-items:center;
-    margin-bottom:6px;
+    display:flex; gap:14px; align-items:center; margin-bottom:6px;
 }
 .ts-entry-row span { font-weight:700; color:#111111; }
-.ts-score-row {
-    display:flex; align-items:center; gap:8px;
-}
-.ts-score-bar-bg {
-    flex:1; height:4px; background:#eeeeee; border-radius:2px; overflow:hidden;
-}
-.ts-score-bar-fill {
-    height:100%; border-radius:2px;
-    transition: width 0.4s ease;
-}
-.ts-score-lbl {
-    font-size:10px; font-weight:700; font-family:monospace;
-    white-space:nowrap;
-}
 </style>
 """, unsafe_allow_html=True)
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
 mkt_open       = is_market_open()
-mkt_label      = "Market open" if mkt_open else "Market closed"
 ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
 
 filter_sig       = "ALL"
@@ -1168,8 +1073,8 @@ if not _user_logged_in and st.session_state.get("show_inline_login", False):
 btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
 with btn_col1:
-    scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
-                                 disabled=len(stocks_to_scan) == 0)
+    scan_clicked = st.button("▷  Run scan", use_container_width=True,
+                              disabled=len(stocks_to_scan) == 0)
 with btn_col2:
     if st.session_state.results and st.session_state.get("last_auto_refresh", 0):
         elapsed   = time.time() - st.session_state.get("last_auto_refresh", time.time())
@@ -1182,9 +1087,9 @@ with btn_col2:
     refresh_clicked = st.button(btn_label, use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
 with btn_col3:
-    clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
+    clear_clicked = st.button("🗑  Clear", use_container_width=True)
 with btn_col4:
-    filter_toggle   = st.button(
+    filter_toggle = st.button(
         ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
         use_container_width=True,
     )
@@ -1255,12 +1160,12 @@ sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL
 no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") in ("NO_ENTRY", "NEAR_ENTRY")])
 total_count      = len(view)
 
-all_sectors  = sorted(set(r["sector"] for r in view))
+all_sectors   = sorted(set(r["sector"] for r in view))
 sector_counts = {}
 for r in view:
     sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
 
-pill_options           = ["All"]
+pill_options            = ["All"]
 display_label_to_sector = {}
 for sector in all_sectors:
     clean = sector.replace("NIFTY ", "")
@@ -1325,54 +1230,37 @@ else:
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
-        entry_val  = entry_target.get("entry",  "—")
-        sl_val     = entry_target.get("sl",     "—")
-        t1_val     = entry_target.get("target", "—")
-        risk_val   = entry_target.get("risk",   "—")
+        entry_val = entry_target.get("entry",  "—")
+        sl_val    = entry_target.get("sl",     "—")
+        t1_val    = entry_target.get("target", "—")
+        risk_val  = entry_target.get("risk",   "—")
 
         if exit_status == "T1_ACHIEVE":
-            border_clr  = "#27ae60"
-            badge_cls   = "ts-badge-t1achieve"
-            badge_label = "T1 Achieve ✅"
-            bar_color   = "#27ae60"
+            border_clr  = "#27ae60"; badge_cls = "ts-badge-t1achieve"
+            badge_label = "T1 Achieve ✅"; bar_color = "#27ae60"
             pct_clr     = "#27ae60" if pct >= 0 else "#c0392b"
         elif exit_status == "SL_HIT":
-            border_clr  = "#e87040"
-            badge_cls   = "ts-badge-slhit"
-            badge_label = "SL HIT ✕"
-            bar_color   = "#e87040"
-            pct_clr     = "#d04a00"
+            border_clr  = "#e87040"; badge_cls = "ts-badge-slhit"
+            badge_label = "SL HIT ✕";   bar_color = "#e87040"; pct_clr = "#d04a00"
         elif exit_status == "NEAR_ENTRY":
-            border_clr  = "#e6a020"
-            badge_cls   = "ts-badge-nearentry"
-            badge_label = "Near Entry 🔔"
-            bar_color   = "#e6a020"
-            pct_clr     = "#b36200"
+            border_clr  = "#e6a020"; badge_cls = "ts-badge-nearentry"
+            badge_label = "Near Entry 🔔"; bar_color = "#e6a020"; pct_clr = "#b36200"
         elif exit_status == "NO_ENTRY":
-            border_clr  = "#cccccc"
-            badge_cls   = "ts-badge-noentry"
-            badge_label = "No Entry"
-            bar_color   = "#aaaaaa"
-            pct_clr     = "#888888"
+            border_clr  = "#cccccc"; badge_cls = "ts-badge-noentry"
+            badge_label = "No Entry";    bar_color = "#aaaaaa"; pct_clr = "#888888"
         elif sig == "BUY":
-            border_clr  = "#1a9c4a"
-            badge_cls   = "ts-badge-buy"
-            badge_label = "BUY"
-            bar_color   = "#1a9c4a"
+            border_clr  = "#1a9c4a"; badge_cls = "ts-badge-buy"
+            badge_label = "BUY";         bar_color = "#1a9c4a"
             pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
         else:
-            border_clr  = "#c0392b"
-            badge_cls   = "ts-badge-sell"
-            badge_label = "SELL"
-            bar_color   = "#c0392b"
+            border_clr  = "#c0392b"; badge_cls = "ts-badge-sell"
+            badge_label = "SELL";        bar_color = "#c0392b"
             pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
 
         pct_sign = "+" if pct > 0 else ""
-        bar_pct  = int((score / 6) * 100)
 
         st.markdown(f"""
 <div class="ts-card" style="border-left-color:{border_clr};">
-
   <div class="ts-card-top">
     <div class="ts-card-left">
       <span class="ts-sym">{sym}</span>
@@ -1387,7 +1275,6 @@ else:
       <span style="font-size:14px;font-weight:800;color:{bar_color};margin-left:4px;">{score}/6</span>
     </div>
   </div>
-
   <div class="ts-meta">
     <span style="color:#111;font-weight:700;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
     &nbsp;&nbsp;
@@ -1397,9 +1284,7 @@ else:
     &nbsp;&nbsp;
     <span style="color:#111;font-weight:600;">{age_str}</span>
   </div>
-
   <div style="border-top:2px solid #c0c0c0;margin:4px 0;"></div>
-
   <div class="ts-entry-row">
     <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
     &nbsp;&nbsp;
@@ -1409,7 +1294,6 @@ else:
     &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
   </div>
-
 </div>
 """, unsafe_allow_html=True)
 
