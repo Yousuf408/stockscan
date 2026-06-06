@@ -858,6 +858,5 @@ with right_col:
         )
         render_chart(symbol, exchange)
 
-if is_market_open() and st.session_state.edit_idx is None:
-    time.sleep(60)
-    st.rerun()
+# Auto-refresh disabled — causes session reset issues
+# Use manual refresh button instead
