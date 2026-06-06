@@ -1065,9 +1065,9 @@ with row1_col1:
 if not _user_logged_in and row1_col2 and row1_col3:
     with row1_col2:
         st.markdown(
-            '<div style="display:flex;align-items:center;height:38px;font-size:12px;color:#555;">'
-            '🔒 <span class="login-full"> Results are not being saved. Login to save permanently.</span>'
-            '<span class="login-short"> Results not saved. Login to save.</span>'
+            '<div style="display:flex;align-items:center;height:38px;font-size:14px;font-weight:700;color:#111;">'
+            '🔒 <span class="login-full">&nbsp;<b>Results are not being saved.</b> Login to save permanently.</span>'
+            '<span class="login-short">&nbsp;<b>Results not saved.</b> Login to save.</span>'
             '</div>'
             '<style>'
             '.login-short{display:none;}'
