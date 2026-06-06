@@ -1038,32 +1038,6 @@ div[data-testid="stSelectbox"] > div > div {
 </style>
 """, unsafe_allow_html=True)
 
-# ── Row 1: Watchlist selector + signals pill ──
-row1_col1, row1_col2 = st.columns([3, 2])
-with row1_col1:
-    selected_wl = st.selectbox(
-        "Watchlist",
-        WATCHLIST_NAMES,
-        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
-        label_visibility="collapsed",
-    )
-    if selected_wl != st.session_state.selected_watchlist:
-        st.session_state.selected_watchlist = selected_wl
-        st.session_state.results            = []
-        st.session_state.scan_log           = []
-        st.session_state.db_results_loaded  = False
-        st.rerun()
-with row1_col2:
-    sig_display = len(st.session_state.results)
-    wl_total    = len(stocks_to_scan)
-    st.markdown(
-        f'<div style="display:flex;align-items:center;height:38px;justify-content:flex-end;">'
-        f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
-        f'color:#555;padding:5px 12px;border-radius:20px;white-space:nowrap;">'
-        f'{sig_display}/{wl_total} signals</span></div>',
-        unsafe_allow_html=True,
-    )
-
 # ── Row 2: Action buttons — full width ──
 # ── Row 1: Watchlist + Login message + signals ──
 if not _user_logged_in:
@@ -1079,6 +1053,7 @@ with row1_col1:
         WATCHLIST_NAMES,
         index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
         label_visibility="collapsed",
+        key="wl_selector",
     )
     if selected_wl != st.session_state.selected_watchlist:
         st.session_state.selected_watchlist = selected_wl
