@@ -1038,6 +1038,22 @@ div[data-testid="stSelectbox"] > div > div {
 
 st.markdown('<div style="margin-top:12px;"></div>', unsafe_allow_html=True)
 
+# ── Cache watchlist counts — fetch once, reuse across reruns ──
+if "wl_counts" not in st.session_state or not st.session_state.wl_counts:
+    try:
+        from core import load_watchlist
+        wl_counts = {}
+        for wl in WATCHLIST_NAMES:
+            stocks = load_watchlist(wl)
+            wl_counts[wl] = len(stocks) if stocks else 0
+        st.session_state.wl_counts = wl_counts
+    except Exception:
+        st.session_state.wl_counts = {wl: 0 for wl in WATCHLIST_NAMES}
+
+# Build display names with counts
+WATCHLIST_DISPLAY = [f"{wl} ({st.session_state.wl_counts.get(wl, 0)})" for wl in WATCHLIST_NAMES]
+selected_display  = f"{st.session_state.selected_watchlist} ({st.session_state.wl_counts.get(st.session_state.selected_watchlist, 0)})"
+
 # ── Row 2: Action buttons — full width ──
 # ── Row 1: Watchlist + Login message + signals ──
 if not _user_logged_in:
@@ -1048,18 +1064,21 @@ else:
     row1_col3 = None
 
 with row1_col1:
-    selected_wl = st.selectbox(
+    selected_wl_display = st.selectbox(
         "Watchlist",
-        WATCHLIST_NAMES,
-        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+        WATCHLIST_DISPLAY,
+        index=WATCHLIST_DISPLAY.index(selected_display) if selected_display in WATCHLIST_DISPLAY else 0,
         label_visibility="collapsed",
         key="wl_selector",
     )
+    # Extract actual name from display string "Yesterday (90)" → "Yesterday"
+    selected_wl = selected_wl_display.rsplit(" (", 1)[0]
     if selected_wl != st.session_state.selected_watchlist:
         st.session_state.selected_watchlist = selected_wl
         st.session_state.results            = []
         st.session_state.scan_log           = []
         st.session_state.db_results_loaded  = False
+        st.session_state.wl_counts          = {}  # refresh counts on tab change
         st.rerun()
 
 if not _user_logged_in and row1_col2 and row1_col3:
@@ -1367,7 +1386,7 @@ else:
     <span style="color:#111;font-weight:600;">{age_str}</span>
   </div>
 
-  <div style="border-top:2px solid #c0c0c0;margin:4px 0;"></div>
+  <div style="border-top:1px solid #f0f0f0;margin:4px 0;"></div>
 
   <div class="ts-entry-row">
     <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
