@@ -1026,7 +1026,25 @@ view = list(st.session_state.results)
 # ─────────────────────────────────────────────────────────────────────────────
 # ACTION BUTTON ROW
 # ─────────────────────────────────────────────────────────────────────────────
-btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.2, 1.6, 1.6, 1.4, 1.4, 5])
+# ── Fix selectbox white background + responsive buttons ──
+st.markdown("""
+<style>
+/* White selectbox */
+div[data-testid="stSelectbox"] > div > div {
+    background-color: #ffffff !important;
+    border: 1px solid #d0d0d0 !important;
+    border-radius: 8px !important;
+}
+/* Responsive button row on small screens */
+@media (max-width: 768px) {
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+btn_col1, btn_col2, btn_col3, btn_col4, btn_col5, btn_col6 = st.columns([1.5, 1.5, 1.5, 1.2, 1.2, 3])
 
 with btn_col1:
     selected_wl = st.selectbox(
@@ -1060,9 +1078,9 @@ with btn_col6:
     wl_total    = len(stocks_to_scan)
     st.markdown(
         f'<div style="display:flex;align-items:center;height:38px;">'
-        f'<span style="font-size:12px;font-weight:600;background:#f0f0f0;'
-        f'color:#555;padding:5px 14px;border-radius:20px;">'
-        f'{sig_display} / {wl_total} signals</span></div>',
+        f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
+        f'color:#555;padding:5px 10px;border-radius:20px;white-space:nowrap;">'
+        f'{sig_display}/{wl_total} signals</span></div>',
         unsafe_allow_html=True,
     )
 
