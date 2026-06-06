@@ -28,9 +28,6 @@ apply_styles()
 sidebar_brand()
 page_header("Prewatch", "Daily EMA Scanner")
 
-# ── Auth guard ──
-
-
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
 # ══════════════════════════════════════════
@@ -46,12 +43,6 @@ except ImportError:
     STOCK_UNIVERSE = {
         "RELIANCE": {"sector": "NIFTY ENERGY", "token": "2885"},
         "TCS": {"sector": "NIFTY IT", "token": "11536"},
-        "HEROMOTOCO": {"sector": "NIFTY AUTO", "token": "1348"},
-        "JYOTICNC": {"sector": "NIFTY CAPITAL GOODS", "token": "19485"},
-        "GMDC": {"sector": "NIFTY METALS", "token": "10174"},
-        "ADANIENT": {"sector": "NIFTY ENERGY", "token": "25"},
-        "WELCORP": {"sector": "NIFTY METALS", "token": "11369"},
-        "NAVINFLUOR": {"sector": "NIFTY CHEM", "token": "14144"}
     }
     def get_stock_sector(sym): return STOCK_UNIVERSE.get(sym, {}).get("sector", "GENERAL")
     def get_stock_token(sym): return STOCK_UNIVERSE.get(sym, {}).get("token", None)
@@ -289,7 +280,7 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ══════════════════════════════════════════
-    #  BATCH WATCHLIST PANEL — dynamic watchlist names
+    #  BATCH WATCHLIST PANEL
     # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
@@ -331,7 +322,7 @@ if st.session_state.ts_prewatch:
                             "status":    "WATCHING",
                             "lastPrice": None,
                             "added_at":  datetime.now().isoformat(),
-                            "token":     get_stock_token(clean_sym) or "",
+                            "token":     get_stock_token(clean_sym) or "",  # ← FIX v1.1
                         })
                     if new_stocks_to_insert:
                         try:
