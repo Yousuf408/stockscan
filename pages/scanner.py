@@ -1038,21 +1038,16 @@ div[data-testid="stSelectbox"] > div > div {
 
 st.markdown('<div style="margin-top:12px;"></div>', unsafe_allow_html=True)
 
-# ── Cache watchlist counts — fetch once, reuse across reruns ──
-if "wl_counts" not in st.session_state or not st.session_state.wl_counts:
-    try:
-        from core import load_watchlist
-        wl_counts = {}
-        for wl in WATCHLIST_NAMES:
-            stocks = load_watchlist(wl)
-            wl_counts[wl] = len(stocks) if stocks else 0
-        st.session_state.wl_counts = wl_counts
-    except Exception:
-        st.session_state.wl_counts = {wl: 0 for wl in WATCHLIST_NAMES}
+# ── Build watchlist display with count from already-loaded stocks ──
+current_count     = len(stocks_to_scan)
+WATCHLIST_DISPLAY = []
+for wl in WATCHLIST_NAMES:
+    if wl == st.session_state.selected_watchlist:
+        WATCHLIST_DISPLAY.append(f"{wl} ({current_count})")
+    else:
+        WATCHLIST_DISPLAY.append(wl)
 
-# Build display names with counts
-WATCHLIST_DISPLAY = [f"{wl} ({st.session_state.wl_counts.get(wl, 0)})" for wl in WATCHLIST_NAMES]
-selected_display  = f"{st.session_state.selected_watchlist} ({st.session_state.wl_counts.get(st.session_state.selected_watchlist, 0)})"
+selected_display = f"{st.session_state.selected_watchlist} ({current_count})"
 
 # ── Row 2: Action buttons — full width ──
 # ── Row 1: Watchlist + Login message + signals ──
@@ -1078,7 +1073,6 @@ with row1_col1:
         st.session_state.results            = []
         st.session_state.scan_log           = []
         st.session_state.db_results_loaded  = False
-        st.session_state.wl_counts          = {}  # refresh counts on tab change
         st.rerun()
 
 if not _user_logged_in and row1_col2 and row1_col3:
