@@ -1349,15 +1349,9 @@ else:
       <span class="ts-badge {badge_cls}">{badge_label}</span>
     </div>
     <div class="ts-card-right">
-      <div style="text-align:right;margin-right:16px;">
-        <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:1px;">LTP</div>
-        <div style="font-size:15px;font-weight:800;color:#111;font-family:monospace;">₹{ltp:,.2f}</div>
-        <div style="font-size:13px;font-weight:700;color:{pct_clr};">{pct_sign}{pct}%</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:1px;">Score</div>
-        <div style="font-size:15px;font-weight:800;color:{bar_color};font-family:monospace;">{score}/6</div>
-      </div>
+      <span style="font-size:15px;font-weight:800;color:#111;font-family:monospace;">₹{ltp:,.2f}</span>
+      <span style="font-size:14px;font-weight:700;color:{pct_clr};margin-left:6px;">{pct_sign}{pct}%</span>
+      <span style="font-size:13px;font-weight:700;color:{bar_color};margin-left:8px;">{score}/6</span>
     </div>
   </div>
 
