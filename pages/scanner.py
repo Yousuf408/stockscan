@@ -28,10 +28,7 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth guard ──
-from auth import restore_session
-restore_session()
-
+# ── Auth guard — hard stop if not logged in ──
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
@@ -54,15 +51,32 @@ def _auth_sign_in(email: str, password: str) -> dict:
         return {"error": str(e)}
 
 def _set_session(data: dict):
-    user = data.get("user") or {}
-    st.session_state["user_id"]      = user.get("id", "")
-    st.session_state["user_email"]   = user.get("email", "")
-    st.session_state["access_token"] = data.get("access_token", "")
+    user  = data.get("user") or {}
+    uid   = user.get("id", "")
+    email = user.get("email", "")
+    token = data.get("access_token", "")
+    st.session_state["user_id"]      = uid
+    st.session_state["user_email"]   = email
+    st.session_state["access_token"] = token
+    # Save server-side session
+    try:
+        from auth import save_session
+        session_token = save_session(token, uid, email)
+        st.session_state["session_token"] = session_token
+    except Exception as e:
+        print(f"[scanner] Session save failed: {e}")
 
 _user_logged_in = bool(st.session_state.get("user_id"))
-# ─────────────────────────────────────────────────────────────────────────────
 
-WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+# Load dynamic watchlist names from Supabase
+try:
+    from core import get_user_watchlist_names
+    if st.session_state.get("user_id"):
+        WATCHLIST_NAMES = get_user_watchlist_names()
+    else:
+        WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+except Exception:
+    WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
 def load_watchlist_stocks(tab: str) -> list:
@@ -1050,6 +1064,9 @@ if not _user_logged_in:
                         data = _auth_sign_in(il_email.strip(), il_pass.strip())
                     if data.get("access_token"):
                         _set_session(data)
+                        session_token = st.session_state.get("session_token", "")
+                        if session_token:
+                            st.query_params["s"] = session_token
                         st.session_state["show_inline_login"] = False
                         st.session_state["db_results_loaded"] = False
                         st.success("Logged in! Results will now be saved.")
