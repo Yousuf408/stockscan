@@ -90,19 +90,21 @@ def get_access_token() -> str:
 
 
 def _set_session(data: dict):
-    user = data.get("user") or {}
+    user  = data.get("user") or {}
     uid   = user.get("id", "")
     email = user.get("email", "")
     token = data.get("access_token", "")
     st.session_state["user_id"]      = uid
     st.session_state["user_email"]   = email
     st.session_state["access_token"] = token
-    # Save to browser localStorage for 7-day persistence
+    # Save to cookie for 7-day persistence
     try:
-        from auth import save_session_to_browser
-        save_session_to_browser(token, uid, email)
-    except ImportError:
-        pass
+        import sys, os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from auth import save_session_to_cookie
+        save_session_to_cookie(token, uid, email)
+    except Exception as e:
+        print(f"[login] Cookie save failed: {e}")
 
 
 def logout():
