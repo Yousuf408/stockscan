@@ -953,13 +953,13 @@ div[data-testid="stPills"] button {
 }
 .ts-card-left  { display:flex; align-items:center; gap:6px; }
 .ts-card-right { display:flex; align-items:center; gap:8px; }
-.ts-sym   { font-size:14px; font-weight:800; color:#111111; font-family:monospace; }
+.ts-sym   { font-size:15px; font-weight:800; color:#111111; font-family:monospace; }
 .ts-chip  {
-    font-size:9px; background:#f3f3f3; color:#666666;
+    font-size:15px; background:#f3f3f3; color:#666666;
     padding:1px 6px; border-radius:3px; font-weight:600;
 }
 .ts-badge {
-    font-size:10px; font-weight:700; padding:2px 8px;
+    font-size:11px; font-weight:700; padding:2px 8px;
     border-radius:5px; font-family:monospace;
 }
 .ts-badge-buy       { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
@@ -969,16 +969,16 @@ div[data-testid="stPills"] button {
 .ts-badge-exit      { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
 .ts-badge-noentry   { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
 .ts-badge-nearentry { color:#b36200; background:#fff8ec; border:1px solid #ffd599; }
-.ts-price { font-size:13px; font-weight:700; color:#111111; font-family:monospace; }
-.ts-pct   { font-size:12px; font-weight:700; margin-left:4px; }
+.ts-price { font-size:14px; font-weight:700; color:#111111; font-family:monospace; }
+.ts-pct   { font-size:14px; font-weight:700; margin-left:4px; }
 .ts-meta  {
-    font-size:12px; color:#888888; font-family:monospace;
+    font-size:14px; color:#888888; font-family:monospace;
     display:flex; gap:12px; align-items:center;
     margin-bottom:4px;
 }
 .ts-meta span { color:#444444; font-weight:600; }
 .ts-entry-row {
-    font-size:11px; font-family:monospace; color:#888888;
+    font-size:14px; font-family:monospace; color:#888888;
     display:flex; gap:14px; align-items:center;
     margin-bottom:6px;
 }
