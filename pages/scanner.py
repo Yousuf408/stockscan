@@ -1003,8 +1003,6 @@ div[data-testid="stPills"] button {
 # ─────────────────────────────────────────────────────────────────────────────
 # RESERVE SPACE FOR HEADER
 # ─────────────────────────────────────────────────────────────────────────────
-header_container = st.container()
-
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
 mkt_open       = is_market_open()
 mkt_label      = "Market open" if mkt_open else "Market closed"
@@ -1212,52 +1210,7 @@ sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL
 no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") in ("NO_ENTRY", "NEAR_ENTRY")])
 total_count      = len(view)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FILL HEADER WITH CORRECT COUNTS
-# ─────────────────────────────────────────────────────────────────────────────
-with header_container:
-    st.markdown(f"""
-<div class="ts-header-card" style="display:flex;justify-content:space-between;align-items:flex-start;">
-
-  <div style="flex:1;">
-    <p class="ts-header-title">Momentum scanner</p>
-    <p class="ts-header-sub">
-      {st.session_state.selected_watchlist}
-      &nbsp;·&nbsp; {len(stocks_to_scan)} stocks
-      &nbsp;·&nbsp; {mkt_label}
-      &nbsp;·&nbsp; {ist_time_str}
-    </p>
-  </div>
-
-  <div style="display:flex;gap:30px;margin-top:2px;">
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#1a9c4a;">{buy_count}</div>
-      <div class="ts-counter-lbl">Buy</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#c0392b;">{sell_count}</div>
-      <div class="ts-counter-lbl">Sell</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#27ae60;">{t1_achieve_count}</div>
-      <div class="ts-counter-lbl">T1 Achieve</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#d04a00;">{sl_hit_count}</div>
-      <div class="ts-counter-lbl">SL Hit</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#888888;">{no_entry_count}</div>
-      <div class="ts-counter-lbl">No Entry</div>
-    </div>
-    <div style="text-align:center;">
-      <div class="ts-counter-val" style="color:#111111;">{total_count}</div>
-      <div class="ts-counter-lbl">Total</div>
-    </div>
-  </div>
-
-</div>
-""", unsafe_allow_html=True)
+# Header card removed — counters moved to signal cards area
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTOR PILLS
@@ -1305,13 +1258,24 @@ if not view:
     elif not st.session_state.scan_log:
         st.info("🔍 Run a scan to see results.")
 else:
+    # ── Counter bar + SL Hit info in one row ──
     sl_hit_display = len([r for r in st.session_state.results if r.get("sl_hit", False)])
-    if sl_hit_display:
-        st.markdown(
-            f'<div style="font-size:12px;color:#d04a00;margin-bottom:6px;">'
-            f'🔴 <b>{sl_hit_display}</b> SL Hit stock{"s" if sl_hit_display>1 else ""} in results</div>',
-            unsafe_allow_html=True,
-        )
+    st.markdown(f"""
+<div style="display:flex;justify-content:space-between;align-items:center;
+            margin-bottom:8px;padding:6px 4px;">
+  <div style="font-size:12px;color:#d04a00;font-weight:600;">
+    {"🔴 <b>" + str(sl_hit_display) + "</b> SL Hit stock" + ("s" if sl_hit_display>1 else "") + " in results" if sl_hit_display else ""}
+  </div>
+  <div style="display:flex;gap:16px;align-items:center;">
+    <span style="font-size:12px;font-weight:700;color:#1a9c4a;">Buy <b>{buy_count}</b></span>
+    <span style="font-size:12px;font-weight:700;color:#c0392b;">Sell <b>{sell_count}</b></span>
+    <span style="font-size:12px;font-weight:700;color:#27ae60;">T1 <b>{t1_achieve_count}</b></span>
+    <span style="font-size:12px;font-weight:700;color:#d04a00;">SL <b>{sl_hit_count}</b></span>
+    <span style="font-size:12px;font-weight:700;color:#888888;">No Entry <b>{no_entry_count}</b></span>
+    <span style="font-size:12px;font-weight:700;color:#111111;">Total <b>{total_count}</b></span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     for item in view:
         sym          = item["symbol"]
