@@ -955,7 +955,7 @@ div[data-testid="stPills"] button {
 .ts-card-right { display:flex; align-items:center; gap:8px; }
 .ts-sym   { font-size:15px; font-weight:800; color:#111111; font-family:monospace; }
 .ts-chip  {
-    font-size:15px; background:#f3f3f3; color:#666666;
+    font-size:15px; background:#f3f3f3; color:#111111;
     padding:1px 6px; border-radius:3px; font-weight:600;
 }
 .ts-badge {
@@ -972,17 +972,17 @@ div[data-testid="stPills"] button {
 .ts-price { font-size:14px; font-weight:700; color:#111111; font-family:monospace; }
 .ts-pct   { font-size:14px; font-weight:700; margin-left:4px; }
 .ts-meta  {
-    font-size:14px; color:#888888; font-family:monospace;
+    font-size:14px; color:#222222; font-family:monospace;
     display:flex; gap:12px; align-items:center;
     margin-bottom:4px;
 }
-.ts-meta span { color:#444444; font-weight:600; }
+.ts-meta span { color:#111111; font-weight:600; }
 .ts-entry-row {
-    font-size:14px; font-family:monospace; color:#888888;
+    font-size:14px; font-family:monospace; color:#222222;
     display:flex; gap:14px; align-items:center;
     margin-bottom:6px;
 }
-.ts-entry-row span { font-weight:700; }
+.ts-entry-row span { font-weight:700; color:#111111; }
 .ts-score-row {
     display:flex; align-items:center; gap:8px;
 }
@@ -1362,7 +1362,7 @@ else:
     &nbsp;·&nbsp;
     <span>EMA200: <span>{ema200}</span></span>
     &nbsp;·&nbsp;
-    <span style="color:#bbbbbb;">{age_str}</span>
+    <span style="color:#555555;">{age_str}</span>
   </div>
 
   <div class="ts-entry-row">
