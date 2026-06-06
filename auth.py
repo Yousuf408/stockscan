@@ -84,9 +84,10 @@ def restore_session() -> bool:
     if cm is None:
         return False
 
-    # Cookie manager must be ready before reading
+    # Cookie manager must be ready — if not ready yet, return False
+    # It will be ready on next rerun
     if not cm.ready():
-        st.stop()  # wait for cookie manager to initialize
+        return False
 
     token = cm.get("access_token", "")
     uid   = cm.get("user_id", "")
