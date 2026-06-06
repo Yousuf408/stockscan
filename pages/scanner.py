@@ -1349,30 +1349,36 @@ else:
       <span class="ts-badge {badge_cls}">{badge_label}</span>
     </div>
     <div class="ts-card-right">
-      <span class="ts-price">₹{ltp:,.2f}</span>
-      <span class="ts-pct" style="color:{pct_clr};">{pct_sign}{pct}%</span>
-      <span style="font-size:10px;font-weight:700;color:{bar_color};margin-left:6px;">{score}/6</span>
+      <div style="text-align:right;margin-right:16px;">
+        <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:1px;">LTP</div>
+        <div style="font-size:15px;font-weight:800;color:#111;font-family:monospace;">₹{ltp:,.2f}</div>
+        <div style="font-size:13px;font-weight:700;color:{pct_clr};">{pct_sign}{pct}%</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:11px;font-weight:600;color:#888;margin-bottom:1px;">Score</div>
+        <div style="font-size:15px;font-weight:800;color:{bar_color};font-family:monospace;">{score}/6</div>
+      </div>
     </div>
   </div>
 
   <div class="ts-meta">
-    <span style="color:#888;font-weight:400;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
+    <span style="color:#111;font-weight:700;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
     &nbsp;·&nbsp;
-    <span style="color:#888;font-weight:400;">VWAP:</span> <span style="color:#B36200;font-weight:700;">{vwap}</span>
+    <span style="color:#111;font-weight:700;">VWAP:</span> <span style="color:#B36200;font-weight:700;">{vwap}</span>
     &nbsp;·&nbsp;
-    <span style="color:#888;font-weight:400;">EMA200:</span> <span style="color:#111;font-weight:700;">{ema200}</span>
+    <span style="color:#111;font-weight:700;">EMA200:</span> <span style="color:#111;font-weight:700;">{ema200}</span>
     &nbsp;·&nbsp;
-    <span style="color:#aaa;font-weight:400;font-size:13px;">{age_str}</span>
+    <span style="color:#111;font-weight:600;">{age_str}</span>
   </div>
 
   <div class="ts-entry-row">
-    <span style="color:#888;font-weight:400;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
+    <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
     &nbsp;·&nbsp;
-    <span style="color:#888;font-weight:400;">SL:</span> <span style="color:#d04a00;font-weight:700;">₹{sl_val}</span>
+    <span style="color:#111;font-weight:700;">SL:</span> <span style="color:#d04a00;font-weight:700;">₹{sl_val}</span>
     &nbsp;·&nbsp;
-    <span style="color:#888;font-weight:400;">T1:</span> <span style="color:#1a7f4a;font-weight:700;">₹{t1_val}</span>
+    <span style="color:#111;font-weight:700;">T1:</span> <span style="color:#1a7f4a;font-weight:700;">₹{t1_val}</span>
     &nbsp;·&nbsp;
-    <span style="color:#888;font-weight:400;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
+    <span style="color:#111;font-weight:700;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
   </div>
 
 </div>
