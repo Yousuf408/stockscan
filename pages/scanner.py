@@ -1,11 +1,14 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.5
-#  Changes from v2.4:
-#    - Added get_angel_auth() function to reuse AngelOne session from app.py
-#    - Removed @st.cache_data from fetch_candles_5min (was blocking angel_auth)
-#    - fetch_one() in run_full_scan() now passes angel_auth to fetch_candles_5min
-#    - run_refresh_scan() now passes angel_auth to fetch_candles_5min
-#    - All existing logic, UI, filters, signals unchanged
+#  TRADE SENTRY — scanner.py  v2.6
+#  Changes from v2.5:
+#    - Added fetch_candles_1min() — fetches 1-min candles from AngelOne
+#    - Added get_f5_opening_levels() — Pine Script exact logic:
+#        F5 HIGH = max(HIGH of 9:15,9:16,9:17,9:18,9:19 one-min candles)
+#        F5 LOW  = min(LOW  of 9:15,9:16,9:17,9:18,9:19 one-min candles)
+#    - analyze_stock() now uses F5 levels for entry/SL instead of single candle
+#    - calc_entry_target() accepts f5_high, f5_low directly
+#    - check_historical_status() entry_price uses correct F5 level
+#    - All other logic, UI, filters unchanged
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -360,6 +363,88 @@ def fetch_daily_prev_close(symbol: str):
         return None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4.5: F5 OPENING LEVELS  ← NEW in v2.6
+# Pine Script exact logic:
+#   F5 HIGH = max(HIGH of 9:15, 9:16, 9:17, 9:18, 9:19) — 5 one-min candles
+#   F5 LOW  = min(LOW  of 9:15, 9:16, 9:17, 9:18, 9:19) — 5 one-min candles
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str, angel_auth=None):
+    """
+    Fetch 1-min candles for a specific date from AngelOne.
+    Only fetches 9:15 to 9:19 window — exactly 5 candles needed.
+    Returns list of [ts, open, high, low, close, vol] or None.
+    """
+    if not angel_auth or not angel_auth.get("session"):
+        return None
+    try:
+        headers = {
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {angel_auth['session'].get('jwtToken')}",
+            "X-UserType":    "USER",
+            "X-SourceID":    "WEB",
+            "X-PrivateKey":  angel_auth['session'].get('apiKey'),
+        }
+        payload = {
+            "exchange":    "NSE",
+            "symboltoken": str(symbol_token).strip(),
+            "interval":    "ONE_MINUTE",
+            "from":        f"{trading_date} 09:15",
+            "to":          f"{trading_date} 09:19",
+        }
+        res = requests.post(
+            "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
+            json=payload, headers=headers, timeout=7,
+        )
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("status") is True and isinstance(data.get("data"), list):
+                rows = []
+                for c in data["data"]:
+                    if isinstance(c, list) and len(c) >= 6:
+                        raw_ts        = str(c[0])
+                        ts_normalized = raw_ts.replace("T", " ")[:19]
+                        rows.append([ts_normalized, float(c[1]), float(c[2]),
+                                     float(c[3]), float(c[4]), float(c[5])])
+                if rows:
+                    print(f"[1min] ✅ {symbol} — {len(rows)} candles (9:15–9:19)")
+                    return rows
+            print(f"[1min] ⚠️ {symbol} — {data.get('message')}")
+    except Exception as e:
+        print(f"[1min] ❌ {symbol}: {e}")
+    return None
+
+
+def get_f5_opening_levels(symbol_token: str, symbol: str, trading_date: str,
+                           open_candle_5min: list, angel_auth=None) -> dict:
+    """
+    Pine Script F5 logic — get correct HIGH and LOW for 9:15–9:19 window.
+
+    Strategy:
+      1. Try AngelOne 1-min candles (9:15 to 9:19)
+         → F5_HIGH = max of all 5 candle HIGHs
+         → F5_LOW  = min of all 5 candle LOWs
+      2. Fallback: use the 5-min candle HIGH/LOW directly
+         (less accurate but better than nothing)
+
+    Returns: {"high": float, "low": float, "source": "1min" | "5min"}
+    """
+    one_min = fetch_candles_1min(symbol_token, symbol, trading_date, angel_auth)
+
+    if one_min and len(one_min) > 0:
+        f5_high = max(float(c[2]) for c in one_min)
+        f5_low  = min(float(c[3]) for c in one_min)
+        print(f"[F5] {symbol} — 1min: HIGH={f5_high} LOW={f5_low} ({len(one_min)} candles)")
+        return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "1min"}
+
+    # Fallback to 5-min candle
+    f5_high = float(open_candle_5min[2])
+    f5_low  = float(open_candle_5min[3])
+    print(f"[F5] {symbol} — fallback 5min: HIGH={f5_high} LOW={f5_low}")
+    return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "5min"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5: TECHNICAL INDICATORS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -556,29 +641,27 @@ def check_sl_hit(signal: str, ltp: float, sl_price: float) -> bool:
     return False
 
 
-def calc_entry_target(signal: str, opening_candle: list) -> dict:
+def calc_entry_target(signal: str, f5_high: float, f5_low: float) -> dict:
     """
     Calculate entry price and 1:1 target for BUY/SELL signals.
+    Uses F5 HIGH/LOW (max/min of 9:15–9:19 one-min candles) — Pine Script exact.
 
-    BUY:  Entry = HIGH, SL = LOW,  Target = Entry + (Entry - SL)
-    SELL: Entry = LOW,  SL = HIGH, Target = Entry - (SL - Entry)
+    BUY:  Entry = F5_HIGH, SL = F5_LOW,  Target = Entry + (Entry - SL)
+    SELL: Entry = F5_LOW,  SL = F5_HIGH, Target = Entry - (SL - Entry)
 
     Returns: {entry, sl, target, risk}
     """
-    if not signal or not opening_candle:
+    if not signal or f5_high is None or f5_low is None:
         return None
 
-    high = float(opening_candle[2])
-    low  = float(opening_candle[3])
-
     if signal == "BUY":
-        entry  = high
-        sl     = low
+        entry  = f5_high
+        sl     = f5_low
         risk   = entry - sl
         target = entry + risk
     elif signal == "SELL":
-        entry  = low
-        sl     = high
+        entry  = f5_low
+        sl     = f5_high
         risk   = sl - entry
         target = entry - risk
     else:
@@ -647,7 +730,8 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
 
 def check_historical_status(signal: str, candles_from_open: list,
                              target: float, sl_price: float,
-                             trading_date: str) -> str:
+                             trading_date: str,
+                             f5_entry_price: float = None) -> str:
     if not candles_from_open or not signal or not target or not sl_price:
         return "ACTIVE"
 
@@ -659,8 +743,11 @@ def check_historical_status(signal: str, candles_from_open: list,
     if not candles_to_check:
         return "ACTIVE"
 
-    # Entry price = High of 9:15 candle (BUY) or Low of 9:15 candle (SELL)
-    entry_price = float(candles_from_open[0][2]) if signal == "BUY" else float(candles_from_open[0][3])
+    # Entry price — use F5 level if provided, else fallback to 9:15 candle H/L
+    if f5_entry_price is not None:
+        entry_price = f5_entry_price
+    else:
+        entry_price = float(candles_from_open[0][2]) if signal == "BUY" else float(candles_from_open[0][3])
 
     # Check if entry was ever triggered
     entry_hit = any(
@@ -844,8 +931,21 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
 
-    # Calculate entry and target prices
-    entry_target = calc_entry_target(signal, open_candle)
+    # ── F5 levels — Pine Script exact logic ← NEW v2.6 ──
+    trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+    angel_auth   = get_angel_auth()
+    f5_levels    = get_f5_opening_levels(
+        stock["token"], symbol, trading_date, open_candle, angel_auth
+    )
+    f5_high = f5_levels["high"]
+    f5_low  = f5_levels["low"]
+    log.append(
+        f"📐 {symbol} F5 levels ({f5_levels['source']}) — "
+        f"HIGH={f5_high}  LOW={f5_low}"
+    )
+
+    # Calculate entry and target prices using F5 levels
+    entry_target = calc_entry_target(signal, f5_high, f5_low)
 
     # Log entry/target clearly for verification
     if entry_target:
@@ -859,15 +959,16 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     # ── All candles from 9:15 onwards — same day only ──
     candles_from_open = candles[opening_idx:]
-    trading_date      = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
 
     # Historical status — scans entire day's candles to find T1/SL
+    # Entry price now uses F5 levels (not just 9:15 candle)
     historical_status = check_historical_status(
         signal,
         candles_from_open,
         entry_target["target"] if entry_target else None,
         entry_target["sl"]     if entry_target else None,
         trading_date,
+        f5_entry_price=entry_target["entry"] if entry_target else None,
     )
 
     sl_hit_now  = historical_status == "SL_HIT"
@@ -886,8 +987,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "timestamp":    time.time(),
         "volume":       last_vol,
         "openPrice":    round(float(open_candle[1]), 2),
-        "highPrice":    round(float(open_candle[2]), 2),
-        "lowPrice":     round(float(open_candle[3]), 2),
+        "highPrice":    round(f5_high, 2),   # F5 HIGH ← v2.6
+        "lowPrice":     round(f5_low,  2),   # F5 LOW  ← v2.6
         "closePrice":   round(float(open_candle[4]), 2),
         "sl_hit":       sl_hit_now,
         "entry_target": entry_target,
