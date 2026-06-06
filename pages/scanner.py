@@ -1359,21 +1359,23 @@ else:
 
   <div class="ts-meta">
     <span style="color:#111;font-weight:700;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">VWAP:</span> <span style="color:#B36200;font-weight:700;">{vwap}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">EMA200:</span> <span style="color:#111;font-weight:700;">{ema200}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:600;">{age_str}</span>
   </div>
 
+  <div style="border-top:1px solid #f0f0f0;margin:4px 0;"></div>
+
   <div class="ts-entry-row">
     <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">SL:</span> <span style="color:#d04a00;font-weight:700;">₹{sl_val}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">T1:</span> <span style="color:#1a7f4a;font-weight:700;">₹{t1_val}</span>
-    &nbsp;·&nbsp;
+    &nbsp;&nbsp;
     <span style="color:#111;font-weight:700;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
   </div>
 
