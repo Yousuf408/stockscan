@@ -802,46 +802,66 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 5
-    BATCH_WAIT  = 0.5   # seconds between batches
+    BATCH_SIZE  = 15
+    BATCH_WAIT  = 0.3
 
-    st.session_state.is_scanning = True
-    st.session_state.scan_log    = []
+    st.session_state.is_scanning  = True
+    st.session_state.scan_log     = []
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
     # ── Step 1: Fetch all candles in parallel batches ──
-    candles_map = {}   # symbol → candles
+    candles_map   = {}   # symbol → candles
+    failed_stocks = []   # symbols that failed — likely rate limited
 
     def fetch_one(stock):
         try:
             candles = fetch_candles_5min(stock["token"], stock["symbol"])
-            return stock["symbol"], candles
-        except Exception:
-            return stock["symbol"], None
+            return stock["symbol"], candles, None
+        except Exception as e:
+            return stock["symbol"], None, str(e)
 
-    batches     = [watchlist_stocks[i:i+BATCH_SIZE]
-                   for i in range(0, total, BATCH_SIZE)]
-    fetched     = 0
+    batches = [watchlist_stocks[i:i+BATCH_SIZE]
+               for i in range(0, total, BATCH_SIZE)]
+    fetched = 0
 
     for batch in batches:
         with concurrent.futures.ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
             futures = {executor.submit(fetch_one, s): s for s in batch}
             for future in concurrent.futures.as_completed(futures):
-                symbol, candles = future.result()
+                symbol, candles, error = future.result()
                 candles_map[symbol] = candles
                 fetched += 1
+                if candles is None:
+                    failed_stocks.append(symbol)
                 progress_bar.progress(
-                    fetched / total / 2,   # first half = fetching
+                    fetched / total / 2,
                     text=f"Fetching {fetched}/{total}: {symbol}"
                 )
         time.sleep(BATCH_WAIT)
+
+    # ── Retry failed stocks one by one via Yahoo fallback ──
+    if failed_stocks:
+        st.session_state.scan_log.append(
+            f"⚠️ {len(failed_stocks)} stocks failed fetch — retrying via Yahoo: {', '.join(failed_stocks)}"
+        )
+        for symbol in failed_stocks:
+            try:
+                clean_sym = symbol.split("-")[0].split(".")[0].strip()
+                candles   = fetch_yahoo_fallback_candles(clean_sym)
+                candles_map[symbol] = candles
+                if candles:
+                    st.session_state.scan_log.append(f"✅ Retry OK: {symbol}")
+                else:
+                    st.session_state.scan_log.append(f"❌ Retry failed: {symbol} — skipped")
+            except Exception as e:
+                st.session_state.scan_log.append(f"❌ Retry error: {symbol} — {e}")
 
     # ── Step 2: Analyze sequentially (session_state not thread-safe) ──
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
-            0.5 + (i + 1) / total / 2,   # second half = analyzing
+            0.5 + (i + 1) / total / 2,
             text=f"Analyzing {i+1}/{total}: {stock['symbol']}"
         )
         analyze_stock(stock, candles, is_refresh=False)
