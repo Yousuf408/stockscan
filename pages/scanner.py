@@ -1356,23 +1356,23 @@ else:
   </div>
 
   <div class="ts-meta">
-    <span>EMA20: <span>{ema20}</span></span>
+    <span style="color:#888;font-weight:400;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
     &nbsp;·&nbsp;
-    <span>VWAP: <span style="color:#B36200;">{vwap}</span></span>
+    <span style="color:#888;font-weight:400;">VWAP:</span> <span style="color:#B36200;font-weight:700;">{vwap}</span>
     &nbsp;·&nbsp;
-    <span>EMA200: <span>{ema200}</span></span>
+    <span style="color:#888;font-weight:400;">EMA200:</span> <span style="color:#111;font-weight:700;">{ema200}</span>
     &nbsp;·&nbsp;
-    <span style="color:#555555;">{age_str}</span>
+    <span style="color:#aaa;font-weight:400;font-size:13px;">{age_str}</span>
   </div>
 
   <div class="ts-entry-row">
-    Entry: <span>₹{entry_val}</span>
+    <span style="color:#888;font-weight:400;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
     &nbsp;·&nbsp;
-    SL: <span style="color:#d04a00;">₹{sl_val}</span>
+    <span style="color:#888;font-weight:400;">SL:</span> <span style="color:#d04a00;font-weight:700;">₹{sl_val}</span>
     &nbsp;·&nbsp;
-    T1: <span style="color:#1a7f4a;">₹{t1_val}</span>
+    <span style="color:#888;font-weight:400;">T1:</span> <span style="color:#1a7f4a;font-weight:700;">₹{t1_val}</span>
     &nbsp;·&nbsp;
-    Risk: <span>₹{risk_val}</span>
+    <span style="color:#888;font-weight:400;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
   </div>
 
 </div>
