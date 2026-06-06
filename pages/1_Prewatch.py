@@ -17,17 +17,11 @@ from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_
 from auth import restore_session
 restore_session()
 
-# Re-inject token into URL if session exists but token missing from URL
-if st.session_state.get("session_token") and not st.query_params.get("s"):
-    st.query_params["s"] = st.session_state["session_token"]
-   
-
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
         st.switch_page("pages/0_Login.py")
     st.stop()
-
 
 
 # ══════════════════════════════════════════
