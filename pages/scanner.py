@@ -265,8 +265,10 @@ def get_ist_time_now() -> str:
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
     log      = st.session_state.get("scan_log", [])
     is_open  = is_market_open()
+    
+    # Ensure stable date tracking for weekend vs weekday off-hours
     end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
-    start_date = (get_ist_now() - timedelta(days=20)).strftime("%Y-%m-%d")
+    start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
 
     if not angel_auth or not angel_auth.get("session"):
         log.append(f"❌ [{symbol}] No AngelOne session")
@@ -280,13 +282,17 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "X-SourceID":    "WEB",
             "X-PrivateKey":  angel_auth['session'].get('apiKey'),
         }
+        
+        # FIXED: Changed 'from' -> 'fromdate' and 'to' -> 'todate'
+        # FIXED: Enforced strict 15:30 closing timestamp padding for weekend scans
         payload = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
             "interval":    "FIVE_MINUTE",
-            "from":        f"{start_date} 09:15",
-            "to":          f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
+            "fromdate":    f"{start_date} 09:15",
+            "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
+        
         log.append(
             f"🔍 [{symbol}] token={symbol_token} "
             f"from={start_date} to={end_date}"
@@ -295,12 +301,11 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
             json=payload, headers=headers, timeout=7,
         )
-        log.append(f"   HTTP {res.status_code}")
+        
         if res.status_code == 200:
             data = res.json()
             status = data.get("status")
             msg    = data.get("message", "")
-            log.append(f"   status={status} msg={msg}")
             if status is True and isinstance(data.get("data"), list):
                 rows = []
                 for c in data["data"]:
@@ -310,18 +315,16 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                         rows.append([ts_normalized, float(c[1]), float(c[2]),
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
-                    log.append(f"   ✅ {len(rows)} candles fetched")
                     return rows
-                log.append(f"   ⚠️ 0 rows in response")
+                log.append(f"   ⚠️ 0 rows in response for {symbol}")
             else:
-                log.append(f"   ❌ API error — status={status} msg={msg}")
+                log.append(f"   ❌ API error [{symbol}] — status={status} msg={msg}")
         else:
-            log.append(f"   ❌ HTTP error {res.status_code}: {res.text[:100]}")
+            log.append(f"   ❌ HTTP error {res.status_code} for {symbol}")
     except Exception as e:
-        log.append(f"   ❌ Exception: {e}")
+        log.append(f"   ❌ Exception [{symbol}]: {e}")
 
     return None
-
 
 def fetch_daily_prev_close(symbol: str):
     return None
