@@ -34,9 +34,6 @@ st.set_page_config(
 )
 
 # ── Auth guard ──
-from auth import restore_session
-restore_session()
-
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
@@ -438,6 +435,8 @@ with left_col:
                                 st.session_state[k] = "" if k=="f_symbol" else 0.0
                             st.session_state.show_add_form = False
                             st.session_state.prices = {}
+                            # Refresh count
+                            st.session_state.tab_counts[st.session_state.current_tab] = len(get_list(st.session_state.current_tab))
                             st.success(f"✅ {symbol} added!")
                             st.rerun()
                         except Exception as e:
@@ -452,9 +451,16 @@ with left_col:
     # ── Tab row with + button ──
     tab_cols = st.columns(len(WATCHLIST_NAMES) + 1)
 
+    # Cache counts — only refresh when tab changes or stock added/deleted
+    if "tab_counts" not in st.session_state:
+        st.session_state.tab_counts = {}
+    if not st.session_state.tab_counts:
+        for tn in WATCHLIST_NAMES:
+            st.session_state.tab_counts[tn] = len(get_list(tn))
+
     for i, tab_name in enumerate(WATCHLIST_NAMES):
         with tab_cols[i]:
-            cnt       = len(get_list(tab_name))
+            cnt       = st.session_state.tab_counts.get(tab_name, 0)
             is_active = st.session_state.current_tab == tab_name
             label     = f"{'●' if is_active else ''}{tab_name}({cnt})"
             if st.button(label, key=f"tab_{i}", use_container_width=True,
@@ -462,6 +468,8 @@ with left_col:
                 st.session_state.current_tab = tab_name
                 st.session_state.prices      = {}
                 st.session_state.manage_wl   = None
+                # Refresh count for this tab on switch
+                st.session_state.tab_counts[tab_name] = len(get_list(tab_name))
                 st.rerun()
 
     with tab_cols[-1]:
@@ -575,6 +583,7 @@ with left_col:
                 try:
                     clear_watchlist_tab(current_tab)
                     st.session_state.prices = {}
+                    st.session_state.tab_counts[current_tab] = 0
                     st.rerun()
                 except Exception as e:
                     st.error(f"Clear failed: {e}")
