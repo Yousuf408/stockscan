@@ -28,7 +28,10 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth guard — hard stop if not logged in ──
+# ── Auth guard ──
+from auth import restore_session
+restore_session()
+
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
