@@ -139,15 +139,15 @@ def restore_session() -> bool:
     return True
 
 
-def save_session(access_token: str, user_id: str, user_email: str):
+def save_session(access_token: str, user_id: str, user_email: str) -> str:
     """
     Call after successful login.
-    Creates server-side session and sets URL param.
+    Creates server-side session and returns token.
+    Token must be added to URL manually after this call.
     """
     token = _create_session(user_id, user_email, access_token)
     st.session_state["session_token"] = token
-    # Set in URL — persists across refreshes
-    st.query_params[SESSION_PARAM] = token
+    return token
 
 
 def is_logged_in() -> bool:
