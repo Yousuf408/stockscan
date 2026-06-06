@@ -91,9 +91,18 @@ def get_access_token() -> str:
 
 def _set_session(data: dict):
     user = data.get("user") or {}
-    st.session_state["user_id"]      = user.get("id", "")
-    st.session_state["user_email"]   = user.get("email", "")
-    st.session_state["access_token"] = data.get("access_token", "")
+    uid   = user.get("id", "")
+    email = user.get("email", "")
+    token = data.get("access_token", "")
+    st.session_state["user_id"]      = uid
+    st.session_state["user_email"]   = email
+    st.session_state["access_token"] = token
+    # Save to browser localStorage for 7-day persistence
+    try:
+        from auth import save_session_to_browser
+        save_session_to_browser(token, uid, email)
+    except ImportError:
+        pass
 
 
 def logout():
@@ -149,7 +158,7 @@ with tab_login:
             if data.get("access_token"):
                 _set_session(data)
                 st.success("Logged in!")
-                st.switch_page("pages/scanner.py")
+                st.switch_page("app.py")
             else:
                 msg = data.get("error_description") or data.get("msg") or "Login failed."
                 st.error(msg)
