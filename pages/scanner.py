@@ -28,8 +28,8 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-
-# ── Helper functions for inline login banner ──
+# ── Auth — soft check only, scanner accessible to all ──
+_user_logged_in = bool(st.session_state.get("user_id"))
 def _auth_sign_in(email: str, password: str) -> dict:
     try:
         url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", "")).rstrip("/")
@@ -800,14 +800,50 @@ def run_full_scan(watchlist_stocks: list):
         st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
         return
 
+    import concurrent.futures
+
+    BATCH_SIZE  = 5
+    BATCH_WAIT  = 0.5   # seconds between batches
+
     st.session_state.is_scanning = True
     st.session_state.scan_log    = []
-    progress_bar = st.progress(0, text="Initialising scan...")
     total        = len(watchlist_stocks)
+    progress_bar = st.progress(0, text="Initialising scan...")
 
+    # ── Step 1: Fetch all candles in parallel batches ──
+    candles_map = {}   # symbol → candles
+
+    def fetch_one(stock):
+        try:
+            candles = fetch_candles_5min(stock["token"], stock["symbol"])
+            return stock["symbol"], candles
+        except Exception:
+            return stock["symbol"], None
+
+    batches     = [watchlist_stocks[i:i+BATCH_SIZE]
+                   for i in range(0, total, BATCH_SIZE)]
+    fetched     = 0
+
+    for batch in batches:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+            futures = {executor.submit(fetch_one, s): s for s in batch}
+            for future in concurrent.futures.as_completed(futures):
+                symbol, candles = future.result()
+                candles_map[symbol] = candles
+                fetched += 1
+                progress_bar.progress(
+                    fetched / total / 2,   # first half = fetching
+                    text=f"Fetching {fetched}/{total}: {symbol}"
+                )
+        time.sleep(BATCH_WAIT)
+
+    # ── Step 2: Analyze sequentially (session_state not thread-safe) ──
     for i, stock in enumerate(watchlist_stocks):
-        progress_bar.progress((i + 1) / total, text=f"Scanning {i+1}/{total}: {stock['symbol']}")
-        candles = fetch_candles_5min(stock["token"], stock["symbol"])
+        candles = candles_map.get(stock["symbol"])
+        progress_bar.progress(
+            0.5 + (i + 1) / total / 2,   # second half = analyzing
+            text=f"Analyzing {i+1}/{total}: {stock['symbol']}"
+        )
         analyze_stock(stock, candles, is_refresh=False)
 
     if st.session_state.results:
@@ -819,6 +855,9 @@ def run_full_scan(watchlist_stocks: list):
                 -x["score"]
             )
         )
+
+    progress_bar.empty()
+    st.session_state.is_scanning = False
 
     progress_bar.empty()
     st.session_state.is_scanning = False
@@ -1029,7 +1068,7 @@ if not _user_logged_in:
         col_msg, col_btn = st.columns([5, 1])
         with col_msg:
             st.markdown(
-                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime or else it will auto remove once timeout.',
+                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime.',
                 unsafe_allow_html=False
             )
         with col_btn:
