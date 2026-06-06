@@ -1029,7 +1029,7 @@ if not _user_logged_in:
         col_msg, col_btn = st.columns([5, 1])
         with col_msg:
             st.markdown(
-                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime.',
+                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime or else it will auto remove once timeout.',
                 unsafe_allow_html=False
             )
         with col_btn:
