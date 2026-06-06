@@ -1036,6 +1036,8 @@ div[data-testid="stSelectbox"] > div > div {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown('<div style="margin-top:12px;"></div>', unsafe_allow_html=True)
+
 # ── Row 2: Action buttons — full width ──
 # ── Row 1: Watchlist + Login message + signals ──
 if not _user_logged_in:
@@ -1266,13 +1268,13 @@ else:
   <div style="font-size:12px;color:#d04a00;font-weight:600;">
     {"🔴 <b>" + str(sl_hit_display) + "</b> SL Hit stock" + ("s" if sl_hit_display>1 else "") + " in results" if sl_hit_display else ""}
   </div>
-  <div style="display:flex;gap:16px;align-items:center;">
-    <span style="font-size:12px;font-weight:700;color:#1a9c4a;">Buy <b>{buy_count}</b></span>
-    <span style="font-size:12px;font-weight:700;color:#c0392b;">Sell <b>{sell_count}</b></span>
-    <span style="font-size:12px;font-weight:700;color:#27ae60;">T1 <b>{t1_achieve_count}</b></span>
-    <span style="font-size:12px;font-weight:700;color:#d04a00;">SL <b>{sl_hit_count}</b></span>
-    <span style="font-size:12px;font-weight:700;color:#888888;">No Entry <b>{no_entry_count}</b></span>
-    <span style="font-size:12px;font-weight:700;color:#111111;">Total <b>{total_count}</b></span>
+  <div style="display:flex;gap:20px;align-items:center;">
+    <span style="font-size:16px;font-weight:800;color:#1a9c4a;">Buy <b>{buy_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#c0392b;">Sell <b>{sell_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#27ae60;">T1 <b>{t1_achieve_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#d04a00;">SL <b>{sl_hit_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#888888;">No Entry <b>{no_entry_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#111111;">Total <b>{total_count}</b></span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1349,6 +1351,7 @@ else:
     <div class="ts-card-right">
       <span class="ts-price">₹{ltp:,.2f}</span>
       <span class="ts-pct" style="color:{pct_clr};">{pct_sign}{pct}%</span>
+      <span style="font-size:10px;font-weight:700;color:{bar_color};margin-left:6px;">{score}/6</span>
     </div>
   </div>
 
@@ -1370,14 +1373,6 @@ else:
     T1: <span style="color:#1a7f4a;">₹{t1_val}</span>
     &nbsp;·&nbsp;
     Risk: <span>₹{risk_val}</span>
-  </div>
-
-  <div class="ts-score-row">
-    <div class="ts-score-bar-bg">
-      <div class="ts-score-bar-fill"
-           style="width:{bar_pct}%;background:{bar_color};"></div>
-    </div>
-    <span class="ts-score-lbl" style="color:{bar_color};">{score}/6</span>
   </div>
 
 </div>
