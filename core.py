@@ -1,6 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — core.py  v4.0
+#  TRADE SENTRY — core.py  v4.1
 #  v4.0: Dynamic user watchlists (create/rename/delete)
+#  v4.1: Fixed _row_to_stock() — "EMPTY" token string now treated as missing
+#        so get_stock_token() fallback correctly picks token from stocks.py
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os
@@ -151,14 +153,12 @@ def rename_user_watchlist(old_name: str, new_name: str) -> tuple:
         })
         if not rows:
             return False, "Watchlist not found"
-        # Check duplicate
         all_rows = _sb_select("user_watchlists", {"user_id": f"eq.{user_id}"})
         names = [r["name"].lower() for r in all_rows if r["name"] != old_name]
         if new_name.strip().lower() in names:
             return False, "Name already exists"
         row_id = rows[0]["id"]
         _sb_update("user_watchlists", f"id=eq.{row_id}", {"name": new_name.strip()})
-        # Update stocks tab name
         _sb_update("watchlist", f"user_id=eq.{user_id}&tab=eq.{old_name}", {"tab": new_name.strip()})
         return True, "Renamed"
     except Exception as e:
@@ -182,7 +182,20 @@ def delete_user_watchlist(name: str) -> tuple:
 # SECTION 4: ROW CONVERTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _clean_field(value, invalid=("EMPTY", "NONE", "NULL", ""), default="") -> str:
+    """
+    v4.1 fix: Supabase stores literal 'EMPTY' string when no value was set.
+    Treat 'EMPTY', 'NONE', 'NULL', '' all as missing → return default.
+    """
+    cleaned = str(value or "").strip()
+    return default if cleaned.upper() in [i.upper() for i in invalid] else cleaned
+
+
 def _row_to_stock(row: dict) -> dict:
+    """
+    Convert Supabase watchlist row to stock dict.
+    v4.1: token and sector 'EMPTY' strings treated as missing.
+    """
     return {
         "symbol":    row.get("symbol", ""),
         "exchange":  row.get("exchange", "NS"),
@@ -192,11 +205,11 @@ def _row_to_stock(row: dict) -> dict:
         "target1":   row.get("target1"),
         "target2":   row.get("target2"),
         "note":      row.get("note"),
-        "sector":    row.get("sector", "GENERAL"),
+        "sector":    _clean_field(row.get("sector"), default=""),
         "status":    row.get("status", "WATCHING"),
         "lastPrice": row.get("last_price"),
         "added_at":  row.get("added_at", ""),
-        "token":     row.get("token", ""),
+        "token":     _clean_field(row.get("token"), default=""),
         "_db_id":    row.get("id"),
     }
 
@@ -426,8 +439,9 @@ def clear_scanner_results(watchlist_tab: str):
     except Exception as e:
         print(f"[clear_scanner_results] ERROR: {e}")
 
+
 if __name__ == "__main__":
     dummy_closes  = [100+i for i in range(25)]
     dummy_candles = [["2024-01-01", 0, 0, 0, c, 0] for c in dummy_closes]
     print(f"EMA20 = {calc_ema(dummy_candles, 20):.4f}")
-    print("core.py v4.0 ✅")
+    print("core.py v4.1 ✅")
