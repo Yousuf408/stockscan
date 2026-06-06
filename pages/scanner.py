@@ -110,8 +110,9 @@ if ("Notification" in window && Notification.permission === "granted") {{
         }])
     except Exception as e:
         print(f"[notification] Save failed: {e}")
-    try:
-        raw = load_watchlist(tab)
+
+
+def load_watchlist_stocks(tab: str) -> list:
         if not raw:
             return []
         stocks = []
