@@ -33,12 +33,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ── Auth guard ──
-if not st.session_state.get("user_id"):
-    st.warning("Please login to access this page.")
-    if st.button("Go to Login →", type="primary"):
-        st.switch_page("pages/0_Login.py")
-    st.stop()
 
 apply_styles()
 sidebar_brand()
