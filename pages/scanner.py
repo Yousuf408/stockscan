@@ -1065,6 +1065,89 @@ with row1_col2:
     )
 
 # ── Row 2: Action buttons — full width ──
+# ── Row 1: Watchlist + Login message + signals ──
+if not _user_logged_in:
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns([1.5, 3.5, 1, 1])
+else:
+    row1_col1, row1_col4 = st.columns([2, 1])
+    row1_col2 = None
+    row1_col3 = None
+
+with row1_col1:
+    selected_wl = st.selectbox(
+        "Watchlist",
+        WATCHLIST_NAMES,
+        index=WATCHLIST_NAMES.index(st.session_state.selected_watchlist),
+        label_visibility="collapsed",
+    )
+    if selected_wl != st.session_state.selected_watchlist:
+        st.session_state.selected_watchlist = selected_wl
+        st.session_state.results            = []
+        st.session_state.scan_log           = []
+        st.session_state.db_results_loaded  = False
+        st.rerun()
+
+if not _user_logged_in and row1_col2 and row1_col3:
+    with row1_col2:
+        st.markdown(
+            '<div style="display:flex;align-items:center;height:38px;font-size:12px;color:#555;">'
+            '🔒 <span class="login-full"> Results are not being saved. Login to save permanently.</span>'
+            '<span class="login-short"> Results not saved. Login to save.</span>'
+            '</div>'
+            '<style>'
+            '.login-short{display:none;}'
+            '@media(max-width:900px){.login-full{display:none;}.login-short{display:inline;}}'
+            '</style>',
+            unsafe_allow_html=True
+        )
+    with row1_col3:
+        show_login = st.button("Login", key="row1_login_btn", type="primary", use_container_width=True)
+        if show_login:
+            st.session_state["show_inline_login"] = not st.session_state.get("show_inline_login", False)
+            st.rerun()
+
+with row1_col4:
+    sig_display = len(st.session_state.results)
+    wl_total    = len(stocks_to_scan)
+    st.markdown(
+        f'<div style="display:flex;align-items:center;height:38px;justify-content:flex-end;">'
+        f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
+        f'color:#555;padding:5px 12px;border-radius:20px;white-space:nowrap;">'
+        f'{sig_display}/{wl_total} signals</span></div>',
+        unsafe_allow_html=True,
+    )
+
+# ── Inline login form ──
+if not _user_logged_in and st.session_state.get("show_inline_login", False):
+    with st.container(border=True):
+        with st.form("inline_login_form"):
+            il_email = st.text_input("Email",    placeholder="you@email.com")
+            il_pass  = st.text_input("Password", placeholder="••••••••", type="password")
+            col_s, col_c = st.columns(2)
+            with col_s: il_submit = st.form_submit_button("Login",  use_container_width=True, type="primary")
+            with col_c: il_cancel = st.form_submit_button("Cancel", use_container_width=True)
+
+        if il_cancel:
+            st.session_state["show_inline_login"] = False
+            st.rerun()
+
+        if il_submit:
+            if not il_email or not il_pass:
+                st.error("Enter email and password.")
+            else:
+                with st.spinner("Signing in..."):
+                    data = _auth_sign_in(il_email.strip(), il_pass.strip())
+                if data.get("access_token"):
+                    _set_session(data)
+                    st.session_state["show_inline_login"] = False
+                    st.session_state["db_results_loaded"] = False
+                    st.success("Logged in! Results will now be saved.")
+                    st.rerun()
+                else:
+                    msg = data.get("error_description") or data.get("msg") or "Login failed."
+                    st.error(msg)
+
+# ── Row 2: Action buttons — full width ──
 btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
 with btn_col1:
@@ -1096,52 +1179,6 @@ if clear_clicked:
     st.session_state.scan_log     = []
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
-
-# ── Login banner — shown only when not logged in ──
-if not _user_logged_in:
-    with st.container(border=True):
-        col_msg, col_btn = st.columns([5, 1])
-        with col_msg:
-            st.markdown(
-                '🔒 **Results are not being saved.** Login to save scan results permanently and access them anytime.',
-                unsafe_allow_html=False
-            )
-        with col_btn:
-            show_login = st.button("Login", key="banner_login_btn", type="primary", use_container_width=True)
-
-        if show_login:
-            st.session_state["show_inline_login"] = not st.session_state.get("show_inline_login", False)
-
-        if st.session_state.get("show_inline_login", False):
-            with st.form("inline_login_form"):
-                il_email = st.text_input("Email",    placeholder="you@email.com")
-                il_pass  = st.text_input("Password", placeholder="••••••••", type="password")
-                col_s, col_c = st.columns(2)
-                with col_s: il_submit = st.form_submit_button("Login",  use_container_width=True, type="primary")
-                with col_c: il_cancel = st.form_submit_button("Cancel", use_container_width=True)
-
-            if il_cancel:
-                st.session_state["show_inline_login"] = False
-                st.rerun()
-
-            if il_submit:
-                if not il_email or not il_pass:
-                    st.error("Enter email and password.")
-                else:
-                    with st.spinner("Signing in..."):
-                        data = _auth_sign_in(il_email.strip(), il_pass.strip())
-                    if data.get("access_token"):
-                        _set_session(data)
-                        session_token = st.session_state.get("session_token", "")
-                        if session_token:
-                            st.query_params["s"] = session_token
-                        st.session_state["show_inline_login"] = False
-                        st.session_state["db_results_loaded"] = False
-                        st.success("Logged in! Results will now be saved.")
-                        st.rerun()
-                    else:
-                        msg = data.get("error_description") or data.get("msg") or "Login failed."
-                        st.error(msg)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COLLAPSIBLE FILTER PANEL
