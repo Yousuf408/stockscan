@@ -377,13 +377,17 @@ def fetch_daily_prev_close(symbol: str):
 #   F5 LOW  = min(LOW  of 9:15, 9:16, 9:17, 9:18, 9:19) — 5 one-min candles
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str, angel_auth=None):
+def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str,
+                        angel_auth=None, scan_log=None) -> list:
     """
-    Fetch 1-min candles for a specific date from AngelOne.
-    Only fetches 9:15 to 9:19 window — exactly 5 candles needed.
+    Fetch 1-min candles for 9:15-9:19 window from AngelOne.
+    Logs to scan_log (Streamlit UI) instead of print().
     Returns list of [ts, open, high, low, close, vol] or None.
     """
+    log = scan_log or []
+
     if not angel_auth or not angel_auth.get("session"):
+        log.append(f"⚠️ [1min] {symbol} — No AngelOne session")
         return None
     try:
         headers = {
@@ -400,6 +404,7 @@ def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str, angel_
             "from":        f"{trading_date} 09:15",
             "to":          f"{trading_date} 09:19",
         }
+        log.append(f"🔍 [1min] {symbol} — fetching {trading_date} 09:15 to 09:19")
         res = requests.post(
             "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
             json=payload, headers=headers, timeout=7,
@@ -415,40 +420,40 @@ def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str, angel_
                         rows.append([ts_normalized, float(c[1]), float(c[2]),
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
-                    print(f"[1min] ✅ {symbol} — {len(rows)} candles (9:15–9:19)")
+                    log.append(f"✅ [1min] {symbol} — {len(rows)} candles fetched")
                     return rows
-            print(f"[1min] ⚠️ {symbol} — {data.get('message')}")
+                log.append(f"⚠️ [1min] {symbol} — API OK but 0 rows returned | msg: {data.get('message')}")
+            else:
+                log.append(f"⚠️ [1min] {symbol} — status={data.get('status')} msg={data.get('message')} data={str(data.get('data', ''))[:80]}")
+        else:
+            log.append(f"❌ [1min] {symbol} — HTTP {res.status_code}")
     except Exception as e:
-        print(f"[1min] ❌ {symbol}: {e}")
+        log.append(f"❌ [1min] {symbol} — Exception: {e}")
     return None
 
 
 def get_f5_opening_levels(symbol_token: str, symbol: str, trading_date: str,
-                           open_candle_5min: list, angel_auth=None) -> dict:
+                           open_candle_5min: list, angel_auth=None,
+                           scan_log=None) -> dict:
     """
-    Pine Script F5 logic — get correct HIGH and LOW for 9:15–9:19 window.
-
-    Strategy:
-      1. Try AngelOne 1-min candles (9:15 to 9:19)
-         → F5_HIGH = max of all 5 candle HIGHs
-         → F5_LOW  = min of all 5 candle LOWs
-      2. Fallback: use the 5-min candle HIGH/LOW directly
-         (less accurate but better than nothing)
-
-    Returns: {"high": float, "low": float, "source": "1min" | "5min"}
+    Pine Script F5 logic — get correct HIGH and LOW for 9:15-9:19 window.
+    Logs results to scan_log for Streamlit UI visibility.
     """
-    one_min = fetch_candles_1min(symbol_token, symbol, trading_date, angel_auth)
+    log     = scan_log or []
+    one_min = fetch_candles_1min(symbol_token, symbol, trading_date, angel_auth, log)
 
     if one_min and len(one_min) > 0:
         f5_high = max(float(c[2]) for c in one_min)
         f5_low  = min(float(c[3]) for c in one_min)
-        print(f"[F5] {symbol} — 1min: HIGH={f5_high} LOW={f5_low} ({len(one_min)} candles)")
+        log.append(f"📐 [1min] {symbol} candles:")
+        for c in one_min:
+            log.append(f"   {c[0]}  H={float(c[2]):.2f}  L={float(c[3]):.2f}")
         return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "1min"}
 
     # Fallback to 5-min candle
     f5_high = float(open_candle_5min[2])
     f5_low  = float(open_candle_5min[3])
-    print(f"[F5] {symbol} — fallback 5min: HIGH={f5_high} LOW={f5_low}")
+    log.append(f"⚠️ [F5] {symbol} — 1min failed, using 5min fallback: HIGH={f5_high} LOW={f5_low}")
     return {"high": round(f5_high, 2), "low": round(f5_low, 2), "source": "5min"}
 
 
@@ -942,8 +947,10 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     # ── F5 levels — Pine Script exact logic ← NEW v2.6 ──
     trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
     angel_auth   = get_angel_auth()
+    log.append(f"🗓️ {symbol} — trading_date for 1min fetch: {trading_date}")
     f5_levels    = get_f5_opening_levels(
-        stock["token"], symbol, trading_date, open_candle, angel_auth
+        stock["token"], symbol, trading_date, open_candle, angel_auth,
+        scan_log=log
     )
     f5_high = f5_levels["high"]
     f5_low  = f5_levels["low"]
