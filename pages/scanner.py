@@ -1,9 +1,11 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.4  (debug build)
-#  Changes from v2.3:
-#    - Added debug_opening_candle() function
-#    - Called inside analyze_stock() right after find_opening_candle_index()
-#    - Scan Log will now show full candle details + Entry/SL/T1 for every stock
+#  TRADE SENTRY — scanner.py  v2.5
+#  Changes from v2.4:
+#    - Added get_angel_auth() function to reuse AngelOne session from app.py
+#    - Removed @st.cache_data from fetch_candles_5min (was blocking angel_auth)
+#    - fetch_one() in run_full_scan() now passes angel_auth to fetch_candles_5min
+#    - run_refresh_scan() now passes angel_auth to fetch_candles_5min
+#    - All existing logic, UI, filters, signals unchanged
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -71,6 +73,55 @@ try:
         WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 except Exception:
     WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANGEL ONE AUTH  ← NEW in v2.5
+# Reuses session saved by app.py in st.session_state["angel_jwt"].
+# Falls back to a fresh login via st.secrets if session not available.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_angel_auth() -> dict:
+    """
+    Returns angel_auth dict with 'session' key containing jwtToken + apiKey.
+    Priority:
+      1. Reuse st.session_state["angel_jwt"] set by app.py
+      2. Fresh login via st.secrets (SmartApi)
+      3. Return {} if both fail — Yahoo fallback will kick in
+    """
+    # ── 1. Reuse from app.py ──
+    jwt = st.session_state.get("angel_jwt")
+    key = st.session_state.get("angel_api_key")
+    if jwt and key:
+        return {"session": {"jwtToken": jwt, "apiKey": key}}
+
+    # ── 2. Fresh login ──
+    try:
+        import pyotp
+        from SmartApi import SmartConnect
+
+        api_key     = st.secrets["API_KEY"]
+        client_code = st.secrets["CLIENT_CODE"]
+        password    = st.secrets["PASSWORD"]
+        totp_secret = st.secrets["TOTP_SECRET"]
+
+        angel_obj    = SmartConnect(api_key=api_key)
+        totp         = pyotp.TOTP(totp_secret).now()
+        session_data = angel_obj.generateSession(client_code, password, totp)
+
+        if session_data and session_data.get("status"):
+            jwt = session_data["data"]["jwtToken"]
+            # Cache for this session
+            st.session_state["angel_jwt"]     = jwt
+            st.session_state["angel_api_key"] = api_key
+            print("[AngelAuth] Fresh login successful")
+            return {"session": {"jwtToken": jwt, "apiKey": api_key}}
+        else:
+            print(f"[AngelAuth] Login failed: {session_data.get('message')}")
+    except Exception as e:
+        print(f"[AngelAuth] Exception: {e}")
+
+    return {}
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
@@ -177,7 +228,7 @@ def get_ist_today_str() -> str:
 def get_last_trading_day_str() -> str:
     """
     Returns the most recent trading day as YYYY-MM-DD.
-    
+
     KEY FIX: If today is a weekday (Mon-Fri), return TODAY — the market
     just closed but we still want today's 9:15 candle, not yesterday's.
     Only go back to a previous day if today is Saturday or Sunday.
@@ -203,7 +254,9 @@ def get_ist_time_now() -> str:
 # SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
+# NOTE: @st.cache_data removed intentionally in v2.5
+# Reason: cache was ignoring angel_auth parameter changes,
+# causing Yahoo fallback to be used even when AngelOne session was valid.
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
     is_open    = is_market_open()
     end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
@@ -243,10 +296,14 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                             rows.append([ts_normalized, float(c[1]), float(c[2]),
                                          float(c[3]), float(c[4]), float(c[5])])
                     if rows:
+                        print(f"[AngelOne] ✅ {symbol} — {len(rows)} candles fetched")
                         return rows
-        except Exception:
-            pass
+                else:
+                    print(f"[AngelOne] ⚠️ {symbol} — API returned: {data.get('message')}")
+        except Exception as e:
+            print(f"[AngelOne] ❌ {symbol} fetch error: {e}")
 
+    print(f"[Yahoo] Falling back for {symbol}")
     return fetch_yahoo_fallback_candles(clean_sym)
 
 
@@ -862,13 +919,21 @@ def run_full_scan(watchlist_stocks: list):
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
+    # ── Get AngelOne auth ONCE before parallel fetch ──  ← NEW v2.5
+    angel_auth = get_angel_auth()
+    if angel_auth.get("session"):
+        st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
+    else:
+        st.session_state.scan_log.append("⚠️ AngelOne session unavailable — Yahoo fallback active")
+
     # ── Step 1: Fetch all candles in parallel batches ──
     candles_map   = {}   # symbol → candles
     failed_stocks = []   # symbols that failed — likely rate limited
 
     def fetch_one(stock):
         try:
-            candles = fetch_candles_5min(stock["token"], stock["symbol"])
+            # ← CHANGED v2.5: pass angel_auth so AngelOne API is used
+            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth)
             return stock["symbol"], candles, None
         except Exception as e:
             return stock["symbol"], None, str(e)
@@ -938,10 +1003,12 @@ def run_full_scan(watchlist_stocks: list):
 def run_refresh_scan(watchlist_stocks: list):
     if not st.session_state.results:
         return
+    # ← CHANGED v2.5: get angel_auth once, pass to every fetch call
+    angel_auth = get_angel_auth()
     for r in st.session_state.results:
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
-            candles = fetch_candles_5min(matched["token"], matched["symbol"])
+            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_auth)
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1119,7 +1186,6 @@ for wl in WATCHLIST_NAMES:
 
 selected_display = f"{st.session_state.selected_watchlist} ({current_count})"
 
-# ── Row 2: Action buttons — full width ──
 # ── Row 1: Watchlist + Login message + signals ──
 if not _user_logged_in:
     row1_col1, row1_col2, row1_col3, row1_col4 = st.columns([1.5, 3.5, 1, 1])
@@ -1305,8 +1371,6 @@ t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1
 sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
 no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") in ("NO_ENTRY", "NEAR_ENTRY")])
 total_count      = len(view)
-
-# Header card removed — counters moved to signal cards area
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTOR PILLS
