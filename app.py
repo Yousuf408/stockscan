@@ -387,6 +387,8 @@ class PriceStreamer:
             if session_data and session_data.get("status"):
                 self.auth_token = session_data["data"]["jwtToken"]
                 self.feed_token = session_data["data"].get("feedToken") or self.angel_obj.getfeedToken()
+                st.session_state["angel_jwt"]     = auth_token
+                st.session_state["angel_api_key"] = api_key
                 return True
             return False
         except Exception as e:
