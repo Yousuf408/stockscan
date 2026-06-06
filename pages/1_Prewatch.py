@@ -13,7 +13,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_many_to_watchlist
 
-# ── Auth guard ──  ← PASTE HERE
+# ── Auth guard ──
+from auth import restore_session
+restore_session()
+
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
