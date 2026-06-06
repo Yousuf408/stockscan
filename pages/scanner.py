@@ -88,21 +88,11 @@ except Exception:
 # Falls back to a fresh login via st.secrets if session not available.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_angel_auth() -> dict:
+def _angel_fresh_login() -> dict:
     """
-    Returns angel_auth dict with 'session' key containing jwtToken + apiKey.
-    Priority:
-      1. Reuse st.session_state["angel_jwt"] set by app.py
-      2. Fresh login via st.secrets (SmartApi)
-      3. Return {} if both fail — Yahoo fallback will kick in
+    Force a fresh AngelOne login using st.secrets.
+    Clears cached session and returns new auth dict.
     """
-    # ── 1. Reuse from app.py ──
-    jwt = st.session_state.get("angel_jwt")
-    key = st.session_state.get("angel_api_key")
-    if jwt and key:
-        return {"session": {"jwtToken": jwt, "apiKey": key}}
-
-    # ── 2. Fresh login ──
     try:
         import pyotp
         from SmartApi import SmartConnect
@@ -118,17 +108,39 @@ def get_angel_auth() -> dict:
 
         if session_data and session_data.get("status"):
             jwt = session_data["data"]["jwtToken"]
-            # Cache for this session
             st.session_state["angel_jwt"]     = jwt
             st.session_state["angel_api_key"] = api_key
-            print("[AngelAuth] Fresh login successful")
+            print("[AngelAuth] Fresh login OK")
             return {"session": {"jwtToken": jwt, "apiKey": api_key}}
         else:
             print(f"[AngelAuth] Login failed: {session_data.get('message')}")
     except Exception as e:
         print(f"[AngelAuth] Exception: {e}")
-
     return {}
+
+
+def get_angel_auth(force_refresh: bool = False) -> dict:
+    """
+    Returns angel_auth dict with 'session' key containing jwtToken + apiKey.
+    Priority:
+      1. Reuse st.session_state["angel_jwt"] set by app.py (unless force_refresh)
+      2. Fresh login via st.secrets (SmartApi)
+      3. Return {} if both fail — Yahoo fallback will kick in
+    """
+    # ── Force refresh — clear cached token and re-login ──
+    if force_refresh:
+        st.session_state.pop("angel_jwt", None)
+        st.session_state.pop("angel_api_key", None)
+        return _angel_fresh_login()
+
+    # ── Reuse from app.py or previous login ──
+    jwt = st.session_state.get("angel_jwt")
+    key = st.session_state.get("angel_api_key")
+    if jwt and key:
+        return {"session": {"jwtToken": jwt, "apiKey": key}}
+
+    # ── No cached session — fresh login ──
+    return _angel_fresh_login()
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
@@ -310,7 +322,14 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                         print(f"[AngelOne] ✅ {symbol} — {len(rows)} candles fetched")
                         return rows
                 else:
-                    print(f"[AngelOne] ⚠️ {symbol} — API returned: {data.get('message')}")
+                    msg = data.get('message', '')
+                    print(f"[AngelOne] ⚠️ {symbol} — {msg}")
+                    # ── Token expired — retry with fresh login ──
+                    if 'Invalid Token' in str(msg) or 'invalid token' in str(msg).lower():
+                        print(f"[AngelOne] 🔄 {symbol} — Token expired, refreshing...")
+                        fresh_auth = get_angel_auth(force_refresh=True)
+                        if fresh_auth.get('session'):
+                            return fetch_candles_5min(symbol_token, symbol, fresh_auth)
         except Exception as e:
             print(f"[AngelOne] ❌ {symbol} fetch error: {e}")
 
@@ -422,9 +441,17 @@ def fetch_candles_1min(symbol_token: str, symbol: str, trading_date: str,
                 if rows:
                     log.append(f"✅ [1min] {symbol} — {len(rows)} candles fetched")
                     return rows
-                log.append(f"⚠️ [1min] {symbol} — API OK but 0 rows returned | msg: {data.get('message')}")
+                log.append(f"⚠️ [1min] {symbol} — API OK but 0 rows | msg: {data.get('message')}")
             else:
-                log.append(f"⚠️ [1min] {symbol} — status={data.get('status')} msg={data.get('message')} data={str(data.get('data', ''))[:80]}")
+                msg = data.get('message', '')
+                log.append(f"⚠️ [1min] {symbol} — status={data.get('status')} msg={msg}")
+                # ── Token expired — retry with fresh login ──
+                if 'Invalid Token' in str(msg) or 'invalid token' in str(msg).lower():
+                    log.append(f"🔄 [1min] {symbol} — Token expired, refreshing session...")
+                    fresh_auth = get_angel_auth(force_refresh=True)
+                    if fresh_auth.get('session'):
+                        return fetch_candles_1min(symbol_token, symbol, trading_date,
+                                                  fresh_auth, log)
         else:
             log.append(f"❌ [1min] {symbol} — HTTP {res.status_code}")
     except Exception as e:
