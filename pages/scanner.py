@@ -91,13 +91,48 @@ except Exception:
 def get_angel_auth() -> dict:
     """
     Returns angel_auth dict with session key containing jwtToken + apiKey.
-    Only reuses session saved by app.py in st.session_state.
-    No fresh login here — avoids loop in parallel threads.
+    Priority:
+      1. Reuse st.session_state["angel_jwt"] set by app.py
+      2. Fresh login via st.secrets — only ONCE per session, cached in state
+      3. Return {} if both fail — data fetch will return None
+    Called ONCE in main thread before parallel fetch — never inside threads.
     """
+    # ── 1. Already cached ──
     jwt = st.session_state.get("angel_jwt")
     key = st.session_state.get("angel_api_key")
     if jwt and key:
         return {"session": {"jwtToken": jwt, "apiKey": key}}
+
+    # ── 2. Fresh login — only runs once per session ──
+    try:
+        import pyotp
+        from SmartApi import SmartConnect
+
+        api_key     = st.secrets.get("API_KEY", "")
+        client_code = st.secrets.get("CLIENT_CODE", "")
+        password    = st.secrets.get("PASSWORD", "")
+        totp_secret = st.secrets.get("TOTP_SECRET", "")
+
+        if not all([api_key, client_code, password, totp_secret]):
+            print("[AngelAuth] Secrets missing")
+            return {}
+
+        angel_obj    = SmartConnect(api_key=api_key)
+        totp         = pyotp.TOTP(totp_secret).now()
+        session_data = angel_obj.generateSession(client_code, password, totp)
+
+        if session_data and session_data.get("status"):
+            jwt = session_data["data"]["jwtToken"]
+            # Cache in session_state — next call reuses this
+            st.session_state["angel_jwt"]     = jwt
+            st.session_state["angel_api_key"] = api_key
+            print("[AngelAuth] ✅ Login successful")
+            return {"session": {"jwtToken": jwt, "apiKey": api_key}}
+        else:
+            print(f"[AngelAuth] ❌ Login failed: {session_data.get('message')}")
+    except Exception as e:
+        print(f"[AngelAuth] ❌ Exception: {e}")
+
     return {}
 
 
