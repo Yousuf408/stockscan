@@ -1269,12 +1269,12 @@ else:
     {"🔴 <b>" + str(sl_hit_display) + "</b> SL Hit stock" + ("s" if sl_hit_display>1 else "") + " in results" if sl_hit_display else ""}
   </div>
   <div style="display:flex;gap:20px;align-items:center;">
-    <span style="font-size:16px;font-weight:800;color:#1a9c4a;">Buy <b>{buy_count}</b></span>
-    <span style="font-size:16px;font-weight:800;color:#c0392b;">Sell <b>{sell_count}</b></span>
-    <span style="font-size:16px;font-weight:800;color:#27ae60;">T1 <b>{t1_achieve_count}</b></span>
-    <span style="font-size:16px;font-weight:800;color:#d04a00;">SL <b>{sl_hit_count}</b></span>
-    <span style="font-size:16px;font-weight:800;color:#888888;">No Entry <b>{no_entry_count}</b></span>
-    <span style="font-size:16px;font-weight:800;color:#111111;">Total <b>{total_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#1a9c4a;">Buy: <b>{buy_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#c0392b;">Sell: <b>{sell_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#27ae60;">T1: <b>{t1_achieve_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#d04a00;">SL: <b>{sl_hit_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#888888;">No Entry: <b>{no_entry_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#111111;">Total: <b>{total_count}</b></span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1349,9 +1349,11 @@ else:
       <span class="ts-badge {badge_cls}">{badge_label}</span>
     </div>
     <div class="ts-card-right">
-      <span style="font-size:15px;font-weight:800;color:#111;font-family:monospace;">₹{ltp:,.2f}</span>
+      <span style="font-size:13px;font-weight:600;color:#888;">LTP:</span>
+      <span style="font-size:15px;font-weight:800;color:#111;font-family:monospace;margin-left:4px;">₹{ltp:,.2f}</span>
       <span style="font-size:14px;font-weight:700;color:{pct_clr};margin-left:6px;">{pct_sign}{pct}%</span>
-      <span style="font-size:13px;font-weight:700;color:{bar_color};margin-left:8px;">{score}/6</span>
+      <span style="font-size:13px;font-weight:600;color:#888;margin-left:10px;">Score:</span>
+      <span style="font-size:14px;font-weight:800;color:{bar_color};margin-left:4px;">{score}/6</span>
     </div>
   </div>
 
