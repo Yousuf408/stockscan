@@ -1367,7 +1367,7 @@ else:
     <span style="color:#111;font-weight:600;">{age_str}</span>
   </div>
 
-  <div style="border-top:1px solid #f0f0f0;margin:4px 0;"></div>
+  <div style="border-top:3px solid #f0f0f0;margin:4px 0;"></div>
 
   <div class="ts-entry-row">
     <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
