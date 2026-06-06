@@ -11,7 +11,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ══════════════════════════════════════════
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_many_to_watchlist
+from core import calc_ema_from_series, load_watchlist, add_to_watchlist, insert_many_to_watchlist, get_user_watchlist_names
+from styles import apply_styles, sidebar_brand, page_header
+
+# ══════════════════════════════════════════
+#  PAGE CONFIG — must be first st. call
+# ══════════════════════════════════════════
+st.set_page_config(
+    page_title="Prewatch · TradeSentry",
+    layout="wide",
+    page_icon="🚀",
+    initial_sidebar_state="expanded"
+)
+
+apply_styles()
+sidebar_brand()
+page_header("Prewatch", "Daily EMA Scanner")
 
 # ── Auth guard ──
 from auth import restore_session
@@ -22,7 +37,6 @@ if not st.session_state.get("user_id"):
     if st.button("Go to Login →", type="primary"):
         st.switch_page("pages/0_Login.py")
     st.stop()
-
 
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
@@ -54,6 +68,14 @@ except ImportError:
 # ══════════════════════════════════════════
 if "ts_prewatch" not in st.session_state: st.session_state.ts_prewatch = None
 if "ts_prewatch_time" not in st.session_state: st.session_state.ts_prewatch_time = None
+
+# ══════════════════════════════════════════
+#  DYNAMIC WATCHLIST NAMES
+# ══════════════════════════════════════════
+try:
+    WATCHLIST_NAMES = get_user_watchlist_names() if st.session_state.get("user_id") else ["Today", "Yesterday", "New"]
+except Exception:
+    WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 # ══════════════════════════════════════════
 #  CORE MATHEMATICS LOGIC
@@ -186,7 +208,6 @@ def process_individual_dataframe(sym, df_stock, live_price, results_list):
 # ══════════════════════════════════════════
 #  INTERFACE LAYOUT ENGINE
 # ══════════════════════════════════════════
-st.set_page_config(layout="wide")
 
 col_btn1, col_btn2, col_info = st.columns([1.5, 1.5, 5])
 with col_btn1:
@@ -197,23 +218,6 @@ with col_btn2:
         st.session_state.ts_prewatch = None
         st.session_state.ts_prewatch_time = None
         st.rerun()
-
-# ── TEMPORARY: Supabase connection test — remove after debugging ──
-if st.button("🔍 TEST SUPABASE CONNECTION"):
-    try:
-        import requests
-        url = st.secrets["SUPABASE_URL"].rstrip("/")
-        key = st.secrets["SUPABASE_KEY"]
-        res = requests.get(
-            f"{url}/rest/v1/watchlist?select=id&limit=1",
-            headers={"apikey": key, "Authorization": f"Bearer {key}"},
-            timeout=10
-        )
-        st.write(f"Status Code: {res.status_code}")
-        st.write(f"Response: {res.text}")
-        st.write(f"URL used: {url}")
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
 
 total_scanned_count = len(st.session_state.ts_prewatch) if st.session_state.ts_prewatch else 0
 scan_time_str = st.session_state.ts_prewatch_time if st.session_state.ts_prewatch_time else "None"
@@ -292,38 +296,35 @@ if st.session_state.ts_prewatch:
     elif sort_strategy == "Confidence Score": processed_cards_list.sort(key=lambda x: x["confidence"], reverse=True)
 
     # ══════════════════════════════════════════
-    #  BATCH WATCHLIST PANEL — uses add_to_watchlist() per stock
-    #  No full delete+reinsert — efficient single INSERTs to Supabase
+    #  BATCH WATCHLIST PANEL — dynamic watchlist names
     # ══════════════════════════════════════════
     with st.container(border=True):
         st.markdown("<h4 style='margin:0 0 10px 0; font-size:13px; color:#000000; font-weight:700;'>📦 Batch Inject Watchlist Management Panel</h4>", unsafe_allow_html=True)
         w_col1, w_col2 = st.columns([5, 3])
         with w_col1:
-            target_list_id = st.selectbox("Select Target Database Watchlist Bucket Location:", ["Today", "Yesterday", "New"], label_visibility="collapsed")
+            target_list_id = st.selectbox(
+                "Select Target Watchlist:",
+                WATCHLIST_NAMES,
+                label_visibility="collapsed"
+            )
         with w_col2:
             if st.button("➕ ADD STOCKS TO SELECTED WATCHLIST", use_container_width=True, type="secondary"):
                 if not processed_cards_list:
                     st.warning("No processing stocks found matching parameters to add.")
                 else:
-                    # ── Load existing stocks for duplicate check ──
-                    existing = load_watchlist(target_list_id)
+                    existing      = load_watchlist(target_list_id)
                     existing_keys = set(
                         (x.get("symbol"), x.get("exchange"), x.get("direction"))
                         for x in existing
                     )
-
-                    # ── Build list of new stocks skipping duplicates ──
                     new_stocks_to_insert = []
                     for item in processed_cards_list:
                         clean_sym  = item['sym'].replace(".NS", "").replace(".BO", "").upper().strip()
                         trade_dir  = "SELL" if "SELL" in item["sig"]["label"] else "BUY"
-
                         if (clean_sym, "NS", trade_dir) in existing_keys:
                             continue
-
                         raw_ltp      = item.get("ltp", 0.0)
                         parsed_entry = 0.0 if (pd.isna(raw_ltp) or math.isnan(raw_ltp)) else float(round(raw_ltp))
-
                         new_stocks_to_insert.append({
                             "symbol":    clean_sym,
                             "exchange":  "NS",
@@ -338,17 +339,15 @@ if st.session_state.ts_prewatch:
                             "lastPrice": None,
                             "added_at":  datetime.now().isoformat(),
                         })
-
                     if new_stocks_to_insert:
                         try:
-                            # ── ONE batch INSERT for all stocks ──
-                            with st.spinner(f"Saving {len(new_stocks_to_insert)} stocks to database..."):
+                            with st.spinner(f"Saving {len(new_stocks_to_insert)} stocks..."):
                                 insert_many_to_watchlist(target_list_id, new_stocks_to_insert)
-                            st.toast(f"⚡ Injected {len(new_stocks_to_insert)} Stocks into '{target_list_id}' Watchlist!", icon="✅")
+                            st.toast(f"⚡ Injected {len(new_stocks_to_insert)} stocks into '{target_list_id}'!", icon="✅")
                         except Exception as e:
                             st.error(f"Batch save failed: {e}")
                     else:
-                        st.info("Selected setups are already active inside that watchlist container.")
+                        st.info("All stocks already exist in that watchlist.")
 
     st.markdown(f"<h3 style='font-size: 14px; font-weight: 700; margin-top: 20px; color: #000000;'>📊 Showing {len(processed_cards_list)} of {len(raw_data)} Scanned Securities</h3>", unsafe_allow_html=True)
 
