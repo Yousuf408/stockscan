@@ -331,6 +331,7 @@ if st.session_state.ts_prewatch:
                             "status":    "WATCHING",
                             "lastPrice": None,
                             "added_at":  datetime.now().isoformat(),
+                            "token":     get_stock_token(clean_sym) or "",
                         })
                     if new_stocks_to_insert:
                         try:
