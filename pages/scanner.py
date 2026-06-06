@@ -1,6 +1,18 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#   TRADE SENTRY — scanner.py   v2.9 (Stable)
-#   Optimized for AngelOne 5-minute continuous historical streams.
+#  TRADE SENTRY — scanner.py  v2.7
+#  Changes from v2.5:
+#    - Added fetch_candles_1min() — fetches 1-min candles from AngelOne
+#    - Added get_f5_opening_levels() — Pine Script exact logic:
+#        F5 HIGH = max(HIGH of 9:15,9:16,9:17,9:18,9:19 one-min candles)
+#        F5 LOW  = min(LOW  of 9:15,9:16,9:17,9:18,9:19 one-min candles)
+#    - analyze_stock() now uses F5 levels for entry/SL instead of single candle
+#    - calc_entry_target() accepts f5_high, f5_low directly
+#    - check_historical_status() entry_price uses correct F5 level
+#    - All other logic, UI, filters unchanged
+#  Changes from v2.6:
+#    - Fixed get_last_trading_day_str() — removed early weekday return
+#      Now always walks back to last Mon-Fri, fixing Saturday/Sunday edge cases
+#      This caused 1-min API to get wrong date → fallback to 5min
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -49,6 +61,7 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = uid
     st.session_state["user_email"]   = email
     st.session_state["access_token"] = token
+    # Save server-side session
     try:
         from auth import save_session
         session_token = save_session(token, uid, email)
@@ -58,6 +71,7 @@ def _set_session(data: dict):
 
 _user_logged_in = bool(st.session_state.get("user_id"))
 
+# Load dynamic watchlist names from Supabase
 try:
     from core import get_user_watchlist_names
     if st.session_state.get("user_id"):
@@ -69,15 +83,27 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ANGEL ONE AUTH
+# ANGEL ONE AUTH  ← NEW in v2.5
+# Reuses session saved by app.py in st.session_state["angel_jwt"].
+# Falls back to a fresh login via st.secrets if session not available.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_angel_auth() -> dict:
+    """
+    Returns angel_auth dict with session key containing jwtToken + apiKey.
+    Priority:
+      1. Reuse st.session_state["angel_jwt"] set by app.py
+      2. Fresh login via st.secrets — only ONCE per session, cached in state
+      3. Return {} if both fail — data fetch will return None
+    Called ONCE in main thread before parallel fetch — never inside threads.
+    """
+    # ── 1. Already cached ──
     jwt = st.session_state.get("angel_jwt")
     key = st.session_state.get("angel_api_key")
     if jwt and key:
         return {"session": {"jwtToken": jwt, "apiKey": key}}
 
+    # ── 2. Fresh login — only runs once per session ──
     try:
         import pyotp
         from SmartApi import SmartConnect
@@ -97,6 +123,7 @@ def get_angel_auth() -> dict:
 
         if session_data and session_data.get("status"):
             jwt = session_data["data"]["jwtToken"]
+            # Cache in session_state — next call reuses this
             st.session_state["angel_jwt"]     = jwt
             st.session_state["angel_api_key"] = api_key
             print("[AngelAuth] ✅ Login successful")
@@ -110,6 +137,7 @@ def get_angel_auth() -> dict:
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
+    """Send browser notification and save to Supabase notifications table."""
     icons = {
         "NEAR_ENTRY":  "🔔",
         "ENTRY_HIT":   "✅",
@@ -120,6 +148,7 @@ def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, s
     title = f"TradeSentry — {symbol}"
     body  = f"{icon} {alert_type.replace('_', ' ')} | {signal} | LTP: ₹{ltp} | Entry: ₹{entry}"
 
+    # Browser notification via JS
     st.components.v1.html(f"""
 <script>
 if ("Notification" in window && Notification.permission === "granted") {{
@@ -131,6 +160,7 @@ if ("Notification" in window && Notification.permission === "granted") {{
 </script>
 """, height=0)
 
+    # Save to Supabase
     try:
         from core import _sb_insert, _get_user_id
         _sb_insert("notifications", [{
@@ -187,6 +217,7 @@ for _k, _v in [
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
+# ── Load today's results from Supabase on first page load — only if logged in ──
 if not st.session_state["db_results_loaded"]:
     if st.session_state.get("user_id"):
         db_results = load_scanner_results(st.session_state["selected_watchlist"])
@@ -195,7 +226,7 @@ if not st.session_state["db_results_loaded"]:
     st.session_state["db_results_loaded"] = True
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3: DATE & TIME (v2.9 FIXES)
+# SECTION 3: DATE & TIME
 # ─────────────────────────────────────────────────────────────────────────────
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -208,33 +239,20 @@ def get_ist_today_str() -> str:
 
 def get_last_trading_day_str() -> str:
     """
-    Returns the most recent COMPLETED or ACTIVE trading weekday as YYYY-MM-DD.
-    Safely handles weekends and pre-market weekday queries.
+    Returns the most recent ACTUAL trading weekday as YYYY-MM-DD.
+
+    v2.7 FIX: Always walk back to last Mon-Fri day.
+    Previously the early return for weekdays caused Saturday (weekday=5)
+    edge cases and returned wrong dates to AngelOne API.
     """
     dt = get_ist_now()
-    
-    # 1. Roll back weekend days
-    if dt.weekday() == 5:    # Saturday
+    while dt.weekday() >= 5:
         dt -= timedelta(days=1)
-    elif dt.weekday() == 6:  # Sunday
-        dt -= timedelta(days=2)
-        
-    # 2. Check if it's a weekday but BEFORE market opening data is processed (9:15 AM)
-    market_open_time = dt.replace(hour=9, minute=15, second=0, microsecond=0)
-    if get_ist_now() < market_open_time:
-        dt -= timedelta(days=1)
-        # Handle secondary edge case if walking back lands on a weekend
-        while dt.weekday() >= 5:
-            dt -= timedelta(days=1)
-
     return dt.strftime("%Y-%m-%d")
 
 def is_market_open() -> bool:
     now  = get_ist_now()
     mins = now.hour * 60 + now.minute
-    # True only between 9:15 AM and 3:30 PM on standard trading weekdays
-    if now.weekday() >= 5:
-        return False
     return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
 
 def get_ist_time_now() -> str:
@@ -269,16 +287,20 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "from":        f"{start_date} 09:15",
             "to":          f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
-        log.append(f"🔍 [{symbol}] token={symbol_token} from={start_date} to={end_date}")
-        
+        log.append(
+            f"🔍 [{symbol}] token={symbol_token} "
+            f"from={start_date} to={end_date}"
+        )
         res = requests.post(
             "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
             json=payload, headers=headers, timeout=7,
         )
+        log.append(f"   HTTP {res.status_code}")
         if res.status_code == 200:
             data = res.json()
             status = data.get("status")
             msg    = data.get("message", "")
+            log.append(f"   status={status} msg={msg}")
             if status is True and isinstance(data.get("data"), list):
                 rows = []
                 for c in data["data"]:
@@ -288,6 +310,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                         rows.append([ts_normalized, float(c[1]), float(c[2]),
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
+                    log.append(f"   ✅ {len(rows)} candles fetched")
                     return rows
                 log.append(f"   ⚠️ 0 rows in response")
             else:
@@ -335,6 +358,9 @@ def calc_vwap(candles: list):
 
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5.9: FIND OPENING CANDLE
+# ─────────────────────────────────────────────────────────────────────────────
 
 def find_opening_candle_index(candles: list) -> int:
     if not candles:
@@ -351,6 +377,9 @@ def find_opening_candle_index(candles: list) -> int:
 
     return -1
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5.10: DEBUG — OPENING CANDLE INSPECTOR
+# ─────────────────────────────────────────────────────────────────────────────
 
 def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
     log = st.session_state.get("scan_log", [])
@@ -499,7 +528,7 @@ def calc_entry_target(signal: str, f5_high: float, f5_low: float) -> dict:
         "entry":  round(entry,  2),
         "sl":     round(sl,     2),
         "target": round(target, 2),
-        "risk":   round(risk,  2),
+        "risk":   round(risk,   2),
     }
 
 
@@ -578,14 +607,12 @@ def check_historical_status(signal: str, candles_from_open: list,
 
     return "ACTIVE"
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: ANALYSIS ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
 
 MIN_CANDLES_TOTAL   = 800
 MIN_CANDLES_AT_OPEN = 200
-
 
 def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     symbol = stock["symbol"]
@@ -616,7 +643,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
     prev_close  = fetch_daily_prev_close(symbol)
     pct_change  = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
 
-    # ── REFRESH PATH ──
     if is_refresh:
         for r in st.session_state.results:
             if r["symbol"] == symbol:
@@ -673,9 +699,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
                 return r
         return None
 
-    # ── INITIAL SCAN PATH ──
     opening_idx = find_opening_candle_index(candles)
-
     debug_opening_candle(symbol, candles, opening_idx)
 
     if opening_idx < 0:
@@ -714,40 +738,669 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         signal = "SELL"
 
     if not signal:
+        reasons = []
+        h, l, c = float(open_candle[2]), float(open_candle[3]), float(open_candle[4])
+        rng = ((h - l) / l * 100) if l > 0 else 0
+        if rng > 2.2:
+            reasons.append(f"candle range {rng:.2f}% > 2.2%")
+        if ema200_at_open and ema20_at_open:
+            gap = abs(ema20_at_open - ema200_at_open) / ema200_at_open * 100
+            if gap > 1.5:
+                reasons.append(f"EMA gap {gap:.2f}% > 1.5%")
+        if not reasons:
+            reasons.append("price/VWAP/EMA directional conditions not met")
+        log.append(f"— {symbol}: No signal — {', '.join(reasons)}")
         return None
-
-    # Extract boundaries
-    f5_high = float(open_candle[2])
-    f5_low  = float(open_candle[3])
-
-    et = calc_entry_target(signal, f5_high, f5_low)
-    if not et:
-        return None
-
-    trading_date = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
-    candles_from_open = candles[opening_idx:]
-    
-    status = check_historical_status(
-        signal, candles_from_open, 
-        et["target"], et["sl"], trading_date, 
-        f5_entry_price=et["entry"]
-    )
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
 
-    return {
+    trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+    f5_high = round(float(open_candle[2]), 2)
+    f5_low  = round(float(open_candle[3]), 2)
+    log.append(
+        f"📐 {symbol} opening candle — "
+        f"HIGH={f5_high}  LOW={f5_low}  date={trading_date}"
+    )
+
+    entry_target = calc_entry_target(signal, f5_high, f5_low)
+
+    if entry_target:
+        log.append(
+            f"🎯 {symbol} {signal} — "
+            f"Entry={entry_target['entry']}  "
+            f"SL={entry_target['sl']}  "
+            f"Risk={entry_target['risk']}  "
+            f"T1={entry_target['target']}"
+        )
+
+    candles_from_open = candles[opening_idx:]
+
+    historical_status = check_historical_status(
+        signal,
+        candles_from_open,
+        entry_target["target"] if entry_target else None,
+        entry_target["sl"]     if entry_target else None,
+        trading_date,
+        f5_entry_price=entry_target["entry"] if entry_target else None,
+    )
+
+    sl_hit_now  = historical_status == "SL_HIT"
+    t1_achieved = historical_status in ("T1_ACHIEVE", "EXIT")
+
+    result = {
         "symbol":       symbol,
-        "sector":       sector,
+        "sector":       sector or "GENERAL",
         "signal":       signal,
         "ltp":          round(ltp, 2),
         "ema20":        round(ema20_live, 2),
         "ema200":       round(ema200_live, 2),
         "vwap":         round(vwap_live, 2),
         "pctChange":    round(pct_change, 2),
-        "score":        score,
-        "entry_target": et,
-        "sl_hit":       status == "SL_HIT",
-        "exit_status":  status,
-        "t1_achieved":  status == "T1_ACHIEVE",
-        "timestamp":    datetime.now(IST).strftime("%H:%M:%S"),
+        "score":        round(float(score), 1),
+        "timestamp":    time.time(),
+        "volume":       last_vol,
+        "openPrice":    round(float(open_candle[1]), 2),
+        "highPrice":    round(f5_high, 2),
+        "lowPrice":     round(f5_low,  2),
+        "closePrice":   round(float(open_candle[4]), 2),
+        "sl_hit":       sl_hit_now,
+        "entry_target": entry_target,
+        "exit_status":  historical_status,
+        "t1_achieved":  t1_achieved,
     }
+    log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
+
+    st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
+    st.session_state.results.append(result)
+    if st.session_state.get("user_id"):
+        save_scanner_result(result, st.session_state.get("selected_watchlist", "Today"))
+    return result
+
+
+def run_full_scan(watchlist_stocks: list):
+    if not watchlist_stocks:
+        st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
+        return
+
+    import concurrent.futures
+
+    BATCH_SIZE  = 3
+    BATCH_WAIT  = 1.5
+
+    st.session_state.is_scanning  = True
+    st.session_state.scan_log     = []
+    total        = len(watchlist_stocks)
+    progress_bar = st.progress(0, text="Initialising scan...")
+
+    angel_auth = get_angel_auth()
+    if angel_auth.get("session"):
+        st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
+    else:
+        st.session_state.scan_log.append("❌ AngelOne session unavailable — stocks will be skipped")
+
+    candles_map   = {}
+    failed_stocks = []
+
+    def fetch_one(stock):
+        try:
+            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth)
+            return stock["symbol"], candles, None
+        except Exception as e:
+            st.session_state.scan_log.append(f"❌ [{stock['symbol']}] Exception in fetch: {e}")
+            return stock["symbol"], None, str(e)
+
+    batches = [watchlist_stocks[i:i+BATCH_SIZE]
+               for i in range(0, total, BATCH_SIZE)]
+    fetched = 0
+
+    for batch in batches:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+            futures = {executor.submit(fetch_one, s): s for s in batch}
+            for future in concurrent.futures.as_completed(futures):
+                symbol, candles, error = future.result()
+                candles_map[symbol] = candles
+                fetched += 1
+                if candles is None:
+                    failed_stocks.append(symbol)
+                    if error:
+                        st.session_state.scan_log.append(f"❌ [{symbol}] fetch error: {error}")
+                progress_bar.progress(
+                    fetched / total / 2,
+                    text=f"Fetching {fetched}/{total}: {symbol}"
+                )
+        time.sleep(BATCH_WAIT)
+
+    if failed_stocks:
+        st.session_state.scan_log.append(
+            f"❌ {len(failed_stocks)} stocks failed AngelOne fetch — skipped: {', '.join(failed_stocks)}"
+        )
+
+    for i, stock in enumerate(watchlist_stocks):
+        candles = candles_map.get(stock["symbol"])
+        progress_bar.progress(
+            0.5 + (i + 1) / total / 2,
+            text=f"Analyzing {i+1}/{total}: {stock['symbol']}"
+        )
+        analyze_stock(stock, candles, is_refresh=False)
+
+    if st.session_state.results:
+        status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "NEAR_ENTRY": 2, "NO_ENTRY": 3, "SL_HIT": 4}
+        st.session_state.results.sort(
+            key=lambda x: (
+                status_order.get(x.get("exit_status", "ACTIVE"), 1),
+                0 if x["signal"] == "BUY" else 1,
+                -x["score"]
+            )
+        )
+
+    progress_bar.empty()
+    st.session_state.is_scanning = False
+
+
+def run_refresh_scan(watchlist_stocks: list):
+    if not st.session_state.results:
+        return
+    angel_auth = get_angel_auth()
+    for r in st.session_state.results:
+        matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
+        if matched:
+            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_auth)
+            analyze_stock(matched, candles, is_refresh=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 8: UI  — Variation B
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
+
+from styles import apply_styles, sidebar_brand
+apply_styles()
+sidebar_brand()
+
+st.components.v1.html("""
+<script>
+function tsRequestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}
+function tsSendNotification(title, body, icon) {
+    if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body: body, icon: icon || "" });
+    }
+}
+tsRequestNotificationPermission();
+</script>
+""", height=0)
+
+st.markdown("""
+<style>
+div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
+
+.ts-btn-row { display:flex; gap:8px; align-items:center; margin:12px 0 4px; }
+.ts-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 16px; border-radius:8px; font-size:13px; font-weight:600;
+    cursor:pointer; border:1.5px solid #d0d0d0; background:#ffffff;
+    color:#333333; text-decoration:none; white-space:nowrap;
+    font-family: 'SF Pro Text', system-ui, sans-serif;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ts-btn:hover { background:#f5f5f5; border-color:#aaaaaa; }
+.ts-btn-primary { background:#111111; color:#ffffff; border-color:#111111; }
+.ts-btn-primary:hover { background:#333333; border-color:#333333; }
+.ts-signals-pill {
+    margin-left:auto; font-size:12px; font-weight:600;
+    background:#f0f0f0; color:#555555; padding:6px 14px;
+    border-radius:20px; white-space:nowrap;
+}
+
+.ts-header-card {
+    background:#ffffff; border:1px solid #e8e8e8;
+    border-radius:12px; padding:18px 24px;
+    margin-bottom:4px;
+}
+.ts-header-title { font-size:22px; font-weight:700; color:#111111; margin:0; }
+.ts-header-sub   { font-size:13px; color:#888888; margin:4px 0 0; }
+.ts-counter-val { font-size:28px; font-weight:800; font-family:monospace; }
+.ts-counter-lbl { font-size:11px; color:#aaaaaa; font-weight:500; margin-top:2px; }
+
+div[data-testid="stPills"] button {
+    font-size:12px !important;
+    padding:4px 12px !important;
+    border-radius:20px !important;
+    font-weight:600 !important;
+}
+
+.ts-card {
+    background:#ffffff; border:1px solid #ebebeb;
+    border-left:4px solid #ebebeb;
+    border-radius:10px; padding:8px 12px;
+    margin-bottom:6px;
+}
+.ts-card-top {
+    display:flex; justify-content:space-between;
+    align-items:center; margin-bottom:6px;
+}
+.ts-card-left  { display:flex; align-items:center; gap:6px; }
+.ts-card-right { display:flex; align-items:center; gap:8px; }
+.ts-sym   { font-size:15px; font-weight:800; color:#111111; font-family:monospace; }
+.ts-chip  {
+    font-size:15px; background:#f3f3f3; color:#111111;
+    padding:1px 6px; border-radius:3px; font-weight:600;
+}
+.ts-badge {
+    font-size:11px; font-weight:700; padding:2px 8px;
+    border-radius:5px; font-family:monospace;
+}
+.ts-badge-buy       { color:#1a9c4a; background:#e8f8ee; border:1px solid #a8dfc0; }
+.ts-badge-sell      { color:#c0392b; background:#fdecea; border:1px solid #f5b8b5; }
+.ts-badge-t1achieve { color:#27ae60; background:#d5f4e6; border:1px solid #82d5b3; }
+.ts-badge-slhit     { color:#d04a00; background:#fff1eb; border:1px solid #ffcdb3; }
+.ts-badge-exit      { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
+.ts-badge-noentry   { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
+.ts-badge-nearentry { color:#b36200; background:#fff8ec; border:1px solid #ffd599; }
+.ts-price { font-size:14px; font-weight:700; color:#111111; font-family:monospace; }
+.ts-pct   { font-size:14px; font-weight:700; margin-left:4px; }
+.ts-meta  {
+    font-size:14px; color:#222222; font-family:monospace;
+    display:flex; gap:12px; align-items:center;
+    margin-bottom:4px;
+}
+.ts-meta span { color:#111111; font-weight:600; }
+.ts-entry-row {
+    font-size:14px; font-family:monospace; color:#222222;
+    display:flex; gap:14px; align-items:center;
+    margin-bottom:6px;
+}
+.ts-entry-row span { font-weight:700; color:#111111; }
+.ts-score-row {
+    display:flex; align-items:center; gap:8px;
+}
+.ts-score-bar-bg {
+    flex:1; height:4px; background:#eeeeee; border-radius:2px; overflow:hidden;
+}
+.ts-score-bar-fill {
+    height:100%; border-radius:2px;
+    transition: width 0.4s ease;
+}
+.ts-score-lbl {
+    font-size:10px; font-weight:700; font-family:monospace;
+    white-space:nowrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
+stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
+mkt_open       = is_market_open()
+mkt_label      = "Market open" if mkt_open else "Market closed"
+ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
+
+filter_sig       = "ALL"
+filter_min_vol   = ""
+filter_ema20     = ""
+filter_ema200    = ""
+filter_min_score = ""
+toggle_body_wick = False
+toggle_hide_sl   = False
+
+view = list(st.session_state.results)
+
+st.markdown("""
+<style>
+div[data-testid="stSelectbox"] > div > div {
+    background-color: #ffffff !important;
+    border: 1px solid #d0d0d0 !important;
+    border-radius: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div style="margin-top:12px;"></div>', unsafe_allow_html=True)
+
+current_count     = len(stocks_to_scan)
+WATCHLIST_DISPLAY = []
+for wl in WATCHLIST_NAMES:
+    if wl == st.session_state.selected_watchlist:
+        WATCHLIST_DISPLAY.append(f"{wl} ({current_count})")
+    else:
+        WATCHLIST_DISPLAY.append(wl)
+
+selected_display = f"{st.session_state.selected_watchlist} ({current_count})"
+
+if not _user_logged_in:
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns([1.5, 3.5, 1, 1])
+else:
+    row1_col1, row1_col4 = st.columns([2, 1])
+    row1_col2 = None
+    row1_col3 = None
+
+with row1_col1:
+    selected_wl_display = st.selectbox(
+        "Watchlist",
+        WATCHLIST_DISPLAY,
+        index=WATCHLIST_DISPLAY.index(selected_display) if selected_display in WATCHLIST_DISPLAY else 0,
+        label_visibility="collapsed",
+        key="wl_selector",
+    )
+    selected_wl = selected_wl_display.rsplit(" (", 1)[0]
+    if selected_wl != st.session_state.selected_watchlist:
+        st.session_state.selected_watchlist = selected_wl
+        st.session_state.results            = []
+        st.session_state.scan_log           = []
+        st.session_state.db_results_loaded  = False
+        st.rerun()
+
+if not _user_logged_in and row1_col2 and row1_col3:
+    with row1_col2:
+        st.markdown(
+            '<div style="display:flex;align-items:center;height:38px;font-size:14px;font-weight:700;color:#111;">'
+            '🔒 <span class="login-full">&nbsp;<b>Results are not being saved.</b> Login to save permanently.</span>'
+            '<span class="login-short">&nbsp;<b>Results not saved.</b> Login to save.</span>'
+            '</div>'
+            '<style>'
+            '.login-short{display:none;}'
+            '@media(max-width:900px){.login-full{display:none;}.login-short{display:inline;}}'
+            '</style>',
+            unsafe_allow_html=True
+        )
+    with row1_col3:
+        show_login = st.button("Login", key="row1_login_btn", type="primary", use_container_width=True)
+        if show_login:
+            st.session_state["show_inline_login"] = not st.session_state.get("show_inline_login", False)
+            st.rerun()
+
+with row1_col4:
+    sig_display = len(st.session_state.results)
+    wl_total    = len(stocks_to_scan)
+    st.markdown(
+        f'<div style="display:flex;align-items:center;height:38px;justify-content:flex-end;">'
+        f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
+        f'color:#555;padding:5px 12px;border-radius:20px;white-space:nowrap;">'
+        f'{sig_display}/{wl_total} signals</span></div>',
+        unsafe_allow_html=True,
+    )
+
+if not _user_logged_in and st.session_state.get("show_inline_login", False):
+    with st.container(border=True):
+        with st.form("inline_login_form"):
+            il_email = st.text_input("Email",    placeholder="you@email.com")
+            il_pass  = st.text_input("Password", placeholder="••••••••", type="password")
+            col_s, col_c = st.columns(2)
+            with col_s: il_submit = st.form_submit_button("Login",  use_container_width=True, type="primary")
+            with col_c: il_cancel = st.form_submit_button("Cancel", use_container_width=True)
+
+        if il_cancel:
+            st.session_state["show_inline_login"] = False
+            st.rerun()
+
+        if il_submit:
+            if not il_email or not il_pass:
+                st.error("Enter email and password.")
+            else:
+                with st.spinner("Signing in..."):
+                    data = _auth_sign_in(il_email.strip(), il_pass.strip())
+                if data.get("access_token"):
+                    _set_session(data)
+                    st.session_state["show_inline_login"] = False
+                    st.session_state["db_results_loaded"] = False
+                    st.success("Logged in! Results will now be saved.")
+                    st.rerun()
+                else:
+                    msg = data.get("error_description") or data.get("msg") or "Login failed."
+                    st.error(msg)
+
+btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+
+with btn_col1:
+    scan_clicked    = st.button("▷  Run scan",  use_container_width=True,
+                                 disabled=len(stocks_to_scan) == 0)
+with btn_col2:
+    if st.session_state.results and st.session_state.get("last_auto_refresh", 0):
+        elapsed   = time.time() - st.session_state.get("last_auto_refresh", time.time())
+        remaining = max(0, 300 - int(elapsed))
+        mins      = remaining // 60
+        secs      = remaining % 60
+        btn_label = f"↺  Refresh  {mins}:{secs:02d}"
+    else:
+        btn_label = "↺  Refresh"
+    refresh_clicked = st.button(btn_label, use_container_width=True,
+                                 disabled=len(st.session_state.results) == 0)
+with btn_col3:
+    clear_clicked   = st.button("🗑  Clear",      use_container_width=True)
+with btn_col4:
+    filter_toggle   = st.button(
+        ("✕ Filters" if st.session_state.show_filters else "⚙  Filters"),
+        use_container_width=True,
+    )
+
+if filter_toggle:
+    st.session_state.show_filters = not st.session_state.show_filters
+    st.rerun()
+
+if scan_clicked:
+    run_full_scan(stocks_to_scan)
+    st.session_state.last_auto_refresh = time.time()
+if refresh_clicked:
+    run_refresh_scan(stocks_to_scan)
+    st.session_state.last_auto_refresh = time.time()
+if clear_clicked:
+    if st.session_state.get("user_id"):
+        clear_scanner_results(st.session_state.selected_watchlist)
+    st.session_state.results      = []
+    st.session_state.scan_log     = []
+    st.session_state.show_filters = False
+    st.success("Scanner cleared.")
+
+if st.session_state.show_filters:
+    with st.container(border=True):
+        st.markdown("**⚙ Refine Filters**")
+        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
+        with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
+        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="",               key="f_vol")
+        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="",   key="f_e20")
+        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="",  key="f_e200")
+        with col_f5:  filter_min_score = st.text_input("Score ≥", value="",              key="f_score")
+        tog1, tog2, tog3 = st.columns(3)
+        with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
+        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
+        with tog3: auto_on          = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
+        if auto_on != st.session_state.auto_refresh:
+            st.session_state.auto_refresh = auto_on
+
+view = list(st.session_state.results)
+
+if filter_sig != "ALL":
+    view = [r for r in view if r["signal"] == filter_sig]
+if filter_min_vol.strip():
+    try:    view = [r for r in view if r["volume"] >= float(filter_min_vol)]
+    except: pass
+if filter_ema20.strip():
+    try:    view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
+    except: pass
+if filter_ema200.strip():
+    try:    view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
+    except: pass
+if filter_min_score.strip():
+    try:    view = [r for r in view if r["score"] >= float(filter_min_score)]
+    except: pass
+if toggle_body_wick:
+    view = [
+        r for r in view
+        if (r["highPrice"] - r["lowPrice"]) > 0
+        and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
+    ]
+if toggle_hide_sl:
+    view = [r for r in view if not r.get("sl_hit", False)]
+
+buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
+t1_achieve_count = len([r for r in view if r.get("exit_status", "ACTIVE") == "T1_ACHIEVE"])
+sl_hit_count     = len([r for r in view if r.get("exit_status", "ACTIVE") == "SL_HIT"])
+no_entry_count   = len([r for r in view if r.get("exit_status", "ACTIVE") in ("NO_ENTRY", "NEAR_ENTRY")])
+total_count      = len(view)
+
+all_sectors  = sorted(set(r["sector"] for r in view))
+sector_counts = {}
+for r in view:
+    sector_counts[r["sector"]] = sector_counts.get(r["sector"], 0) + 1
+
+pill_options           = ["All"]
+display_label_to_sector = {}
+for sector in all_sectors:
+    clean = sector.replace("NIFTY ", "")
+    label = f"{clean} ({sector_counts.get(sector, 0)})"
+    pill_options.append(label)
+    display_label_to_sector[label] = sector
+
+selected_sector_label = st.pills("Sector", pill_options, default="All",
+                                  label_visibility="collapsed")
+
+if selected_sector_label and selected_sector_label != "All":
+    mapped_sector = display_label_to_sector.get(selected_sector_label)
+    if mapped_sector:
+        view = [r for r in view if r["sector"] == mapped_sector]
+
+if st.session_state.scan_log:
+    signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
+    with st.expander(
+        f"🔍 Scan Log — {len(signals_found)} signals | "
+        f"{len(st.session_state.scan_log) - len(signals_found)} skipped",
+        expanded=(len(signals_found) == 0),
+    ):
+        for line in st.session_state.scan_log:
+            st.markdown(line)
+
+if not view:
+    if st.session_state.results:
+        st.info("🔍 No signals match your current filters.")
+    elif not st.session_state.scan_log:
+        st.info("🔍 Run a scan to see results.")
+else:
+    sl_hit_display = len([r for r in st.session_state.results if r.get("sl_hit", False)])
+    st.markdown(f"""
+<div style="display:flex;justify-content:space-between;align-items:center;
+            margin-bottom:8px;padding:6px 4px;">
+  <div style="font-size:12px;color:#d04a00;font-weight:600;">
+    {"🔴 <b>" + str(sl_hit_display) + "</b> SL Hit stock" + ("s" if sl_hit_display>1 else "") + " in results" if sl_hit_display else ""}
+  </div>
+  <div style="display:flex;gap:20px;align-items:center;">
+    <span style="font-size:16px;font-weight:800;color:#1a9c4a;">Buy: <b>{buy_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#c0392b;">Sell: <b>{sell_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#27ae60;">T1: <b>{t1_achieve_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#d04a00;">SL: <b>{sl_hit_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#888888;">No Entry: <b>{no_entry_count}</b></span>
+    <span style="font-size:16px;font-weight:800;color:#111111;">Total: <b>{total_count}</b></span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    for item in view:
+        sym          = item["symbol"]
+        sig          = item["signal"]
+        exit_status  = item.get("exit_status", "ACTIVE")
+        sector_clean = item["sector"].replace("NIFTY ", "")
+        ltp          = item["ltp"]
+        pct          = item["pctChange"]
+        ema20        = item["ema20"]
+        vwap         = item["vwap"]
+        ema200       = item["ema200"]
+        score        = item["score"]
+        entry_target = item.get("entry_target") or {}
+        mins_ago     = int((time.time() - item["timestamp"]) // 60)
+        age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
+
+        entry_val  = entry_target.get("entry",  "—")
+        sl_val     = entry_target.get("sl",     "—")
+        t1_val     = entry_target.get("target", "—")
+        risk_val   = entry_target.get("risk",   "—")
+
+        if exit_status == "T1_ACHIEVE":
+            border_clr  = "#27ae60"
+            badge_cls   = "ts-badge-t1achieve"
+            badge_label = "T1 Achieve ✅"
+            bar_color   = "#27ae60"
+            pct_clr     = "#27ae60" if pct >= 0 else "#c0392b"
+        elif exit_status == "SL_HIT":
+            border_clr  = "#e87040"
+            badge_cls   = "ts-badge-slhit"
+            badge_label = "SL HIT ✕"
+            bar_color   = "#e87040"
+            pct_clr     = "#d04a00"
+        elif exit_status == "NEAR_ENTRY":
+            border_clr  = "#e6a020"
+            badge_cls   = "ts-badge-nearentry"
+            badge_label = "Near Entry 🔔"
+            bar_color   = "#e6a020"
+            pct_clr     = "#b36200"
+        elif exit_status == "NO_ENTRY":
+            border_clr  = "#cccccc"
+            badge_cls   = "ts-badge-noentry"
+            badge_label = "No Entry"
+            bar_color   = "#aaaaaa"
+            pct_clr     = "#888888"
+        elif sig == "BUY":
+            border_clr  = "#1a9c4a"
+            badge_cls   = "ts-badge-buy"
+            badge_label = "BUY"
+            bar_color   = "#1a9c4a"
+            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
+        else:
+            border_clr  = "#c0392b"
+            badge_cls   = "ts-badge-sell"
+            badge_label = "SELL"
+            bar_color   = "#c0392b"
+            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
+
+        pct_sign = "+" if pct > 0 else ""
+        bar_pct  = int((score / 6) * 100)
+
+        st.markdown(f"""
+<div class="ts-card" style="border-left-color:{border_clr};">
+
+  <div class="ts-card-top">
+    <div class="ts-card-left">
+      <span class="ts-sym">{sym}</span>
+      <span class="ts-chip">{sector_clean}</span>
+      <span class="ts-badge {badge_cls}">{badge_label}</span>
+    </div>
+    <div class="ts-card-right">
+      <span style="font-size:13px;font-weight:600;color:#888;">LTP:</span>
+      <span style="font-size:15px;font-weight:800;color:#111;font-family:monospace;margin-left:4px;">₹{ltp:,.2f}</span>
+      <span style="font-size:14px;font-weight:700;color:{pct_clr};margin-left:6px;">{pct_sign}{pct}%</span>
+      <span style="font-size:13px;font-weight:600;color:#888;margin-left:10px;">Score:</span>
+      <span style="font-size:14px;font-weight:800;color:{bar_color};margin-left:4px;">{score}/6</span>
+    </div>
+  </div>
+
+  <div class="ts-meta">
+    <span style="color:#111;font-weight:700;">EMA20:</span> <span style="color:#111;font-weight:700;">{ema20}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:700;">VWAP:</span> <span style="color:#B36200;font-weight:700;">{vwap}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:700;">EMA200:</span> <span style="color:#111;font-weight:700;">{ema200}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:600;">{age_str}</span>
+  </div>
+
+  <div style="border-top:2px solid #c0c0c0;margin:4px 0;"></div>
+
+  <div class="ts-entry-row">
+    <span style="color:#111;font-weight:700;">Entry:</span> <span style="color:#111;font-weight:700;">₹{entry_val}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:700;">SL:</span> <span style="color:#d04a00;font-weight:700;">₹{sl_val}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:700;">T1:</span> <span style="color:#1a7f4a;font-weight:700;">₹{t1_val}</span>
+    &nbsp;&nbsp;
+    <span style="color:#111;font-weight:700;">Risk:</span> <span style="color:#111;font-weight:700;">₹{risk_val}</span>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
+
+if st.session_state.auto_refresh and is_market_open() and st.session_state.results:
+    last = st.session_state.get("last_auto_refresh", 0)
+    if time.time() - last >= 300:
+        run_refresh_scan(stocks_to_scan)
+        st.session_state.last_auto_refresh = time.time()
+        st.rerun()
