@@ -82,18 +82,10 @@ except Exception:
 
 def get_angel_auth() -> dict:
     """
-    Returns angel_auth dict with session key containing jwtToken + apiKey.
-    Priority:
-      1. Reuse st.session_state["angel_jwt"] set by app.py
-      2. Fresh login via st.secrets — only ONCE per session, cached in state
-      3. Return {} if both fail
-    Called ONCE in main thread before parallel fetch — never inside threads.
+    Always does a fresh AngelOne login — JWT tokens expire quickly.
+    Does NOT cache JWT to avoid stale token issues.
+    Called ONCE in main thread before parallel fetch.
     """
-    jwt = st.session_state.get("angel_jwt")
-    key = st.session_state.get("angel_api_key")
-    if jwt and key:
-        return {"session": {"jwtToken": jwt, "apiKey": key}}
-
     try:
         import pyotp
         from SmartApi import SmartConnect
@@ -113,9 +105,7 @@ def get_angel_auth() -> dict:
 
         if session_data and session_data.get("status"):
             jwt = session_data["data"]["jwtToken"]
-            st.session_state["angel_jwt"]     = jwt
-            st.session_state["angel_api_key"] = api_key
-            print("[AngelAuth] ✅ Login successful")
+            print("[AngelAuth] ✅ Fresh login successful")
             return {"session": {"jwtToken": jwt, "apiKey": api_key}}
         else:
             print(f"[AngelAuth] ❌ Login failed: {session_data.get('message')}")
