@@ -282,11 +282,13 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                 else:
                     msg = data.get('message', '')
                     print(f"[AngelOne] ⚠️ {symbol} — {msg}")
+                    log = st.session_state.get("scan_log", [])
+                    log.append(f"⚠️ AngelOne [{symbol}] — {msg}")
         except Exception as e:
             print(f"[AngelOne] ❌ {symbol} fetch error: {e}")
 
-    print(f"[Yahoo] Falling back for {symbol}")
-    return fetch_yahoo_fallback_candles(clean_sym)
+    print(f"[AngelOne] ❌ {symbol} — no data returned, Yahoo disabled for testing")
+    return None
 
 
 def fetch_yahoo_fallback_candles(symbol: str):
