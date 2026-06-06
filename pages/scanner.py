@@ -270,8 +270,14 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
     end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
 
+    # REASON 1: Instrument Token Missing from stocks.py mapping file
+    if not symbol_token or str(symbol_token).strip() == "":
+        log.append(f"❌ [{symbol}] Failed — Reason: Missing numeric instrument token in stocks.py mapping file.")
+        return None
+
+    # REASON 2: Missing Authentication credentials
     if not angel_auth or not angel_auth.get("session"):
-        log.append(f"❌ [{symbol}] No AngelOne session")
+        log.append(f"❌ [{symbol}] Failed — Reason: Active session credentials/JWT not provided to fetch block.")
         return None
 
     try:
@@ -283,8 +289,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "X-PrivateKey":  angel_auth['session'].get('apiKey'),
         }
         
-        # FIXED: Changed 'from' -> 'fromdate' and 'to' -> 'todate'
-        # FIXED: Enforced strict 15:30 closing timestamp padding for weekend scans
+        # Enforced AngelOne standard contract payload keys ('fromdate' and 'todate')
         payload = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
@@ -293,10 +298,6 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
         
-        log.append(
-            f"🔍 [{symbol}] token={symbol_token} "
-            f"from={start_date} to={end_date}"
-        )
         res = requests.post(
             "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
             json=payload, headers=headers, timeout=7,
@@ -306,6 +307,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
             data = res.json()
             status = data.get("status")
             msg    = data.get("message", "")
+            
             if status is True and isinstance(data.get("data"), list):
                 rows = []
                 for c in data["data"]:
@@ -316,17 +318,27 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None):
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
                     return rows
-                log.append(f"   ⚠️ 0 rows in response for {symbol}")
+                
+                # REASON 3: Valid connection, but 0 data returned for request coordinates
+                log.append(f"⚠️ [{symbol}] Empty Response — Reason: API server returned 0 records. Check if token '{symbol_token}' is active on exchange.")
             else:
-                log.append(f"   ❌ API error [{symbol}] — status={status} msg={msg}")
+                # REASON 4: AngelOne explicit API rejection message
+                log.append(f"❌ [{symbol}] Rejected — Reason: AngelOne Server error. Status={status} | Message='{msg}'")
+        
+        # REASON 5: Rate Limiting or Server Outages
+        elif res.status_code == 429:
+            log.append(f"❌ [{symbol}] Failed — Reason: Rate Limit Breached (HTTP 429). Thread loop firing too quickly for SmartAPI gateway.")
+        elif res.status_code == 400:
+            log.append(f"❌ [{symbol}] Failed — Reason: Bad Request (HTTP 400). Structural contract payload layout validation rejected.")
+        elif res.status_code == 401 or res.status_code == 403:
+            log.append(f"❌ [{symbol}] Failed — Reason: Authentication Expired (HTTP {res.status_code}). Session JWT token rejected by server.")
         else:
-            log.append(f"   ❌ HTTP error {res.status_code} for {symbol}")
+            log.append(f"❌ [{symbol}] Failed — Reason: Unexpected Network State Code: {res.status_code}")
+            
     except Exception as e:
-        log.append(f"   ❌ Exception [{symbol}]: {e}")
+        # REASON 6: Internal Engine Exception
+        log.append(f"❌ [{symbol}] Exception — Reason: Runtime process error | Detail: {str(e)}")
 
-    return None
-
-def fetch_daily_prev_close(symbol: str):
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
