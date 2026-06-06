@@ -422,6 +422,7 @@ with left_col:
                             "status":    "WATCHING",
                             "lastPrice": None,
                             "added_at":  datetime.now().isoformat(),
+                             "token":     get_stock_token(symbol) or "",
                         }
                         try:
                             add_to_watchlist(st.session_state.current_tab, new_stock)
