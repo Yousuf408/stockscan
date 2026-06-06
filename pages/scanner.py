@@ -113,6 +113,8 @@ if ("Notification" in window && Notification.permission === "granted") {{
 
 
 def load_watchlist_stocks(tab: str) -> list:
+    try:
+        raw = load_watchlist(tab)
         if not raw:
             return []
         stocks = []
