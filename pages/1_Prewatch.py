@@ -29,14 +29,7 @@ sidebar_brand()
 page_header("Prewatch", "Daily EMA Scanner")
 
 # ── Auth guard ──
-from auth import restore_session
-restore_session()
 
-if not st.session_state.get("user_id"):
-    st.warning("Please login to access this page.")
-    if st.button("Go to Login →", type="primary"):
-        st.switch_page("pages/0_Login.py")
-    st.stop()
 
 # ══════════════════════════════════════════
 #  EXTERNAL MODULE & BACKEND INTEGRATION
