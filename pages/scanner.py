@@ -821,11 +821,13 @@ def run_full_scan(watchlist_stocks: list):
     candles_map   = {}
     failed_stocks = []
 
+    # Capture scan_log reference ONCE in main thread before spawning threads
+    _scan_log = st.session_state.scan_log
+
     def fetch_one(stock):
         try:
-            # Pass scan_log reference so thread can append without st.session_state
             candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth,
-                                         _log=st.session_state.scan_log)
+                                         _log=_scan_log)
             return stock["symbol"], candles, None
         except Exception as e:
             return stock["symbol"], None, str(e)
