@@ -1,17 +1,20 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — core.py  v4.1
+#  TRADE SENTRY — core.py  v4.2
 #  v4.0: Dynamic user watchlists (create/rename/delete)
 #  v4.1: Fixed _row_to_stock() — "EMPTY" token string now treated as missing
-#        so get_stock_token() fallback correctly picks token from stocks.py
+#  v4.2: Added WebSocket extensions (save_websocket_tick, live_high_low, etc)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os
 import json
 import requests
-from datetime import date
+from datetime import date, datetime, timedelta
+import pytz
 
 DEFAULT_WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 MAX_WATCHLISTS = 15
+
+IST = pytz.timezone("Asia/Kolkata")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: SUPABASE REST API HELPERS
@@ -439,9 +442,189 @@ def clear_scanner_results(watchlist_tab: str):
     except Exception as e:
         print(f"[clear_scanner_results] ERROR: {e}")
 
+# ═════════════════════════════════════════════════════════════════════════════
+# SECTION 7: WebSocket Tick Storage (v4.2 NEW)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def save_websocket_tick(symbol: str, exchange: str, token: str, price: float, 
+                       quantity: int, volume: int, tick_sequence: int):
+    """Save a single live tick from WebSocket."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        
+        now_ist = datetime.now(IST)
+        
+        resp = requests.post(
+            f"{url}/rest/v1/websocket_ticks",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "symbol": symbol,
+                "exchange": exchange,
+                "token": token,
+                "price": float(price),
+                "quantity": int(quantity),
+                "volume": int(volume),
+                "timestamp": now_ist.isoformat(),
+                "tick_sequence": tick_sequence,
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"[save_websocket_tick] Error: {e}")
+        return False
+
+
+def get_websocket_ticks_for_candle(symbol: str, start_time: str, end_time: str):
+    """Fetch all ticks between start_time and end_time."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        
+        resp = requests.get(
+            f"{url}/rest/v1/websocket_ticks",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+            },
+            params={
+                "symbol": f"eq.{symbol}",
+                "timestamp": f"gte.{start_time}",
+                "timestamp": f"lte.{end_time}",
+                "order": "timestamp.asc",
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"[get_websocket_ticks_for_candle] Error: {e}")
+        return []
+
+
+def save_live_high_low(symbol: str, exchange: str, token: str, 
+                       live_high: float, live_low: float,
+                       source: str, tick_count: int,
+                       http_high: float = None, http_low: float = None,
+                       websocket_success: bool = True):
+    """Save calculated High/Low from 9:15-9:20 candle."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        
+        now_ist = datetime.now(IST)
+        trading_date = now_ist.strftime("%Y-%m-%d")
+        
+        resp = requests.post(
+            f"{url}/rest/v1/live_high_low",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            },
+            json={
+                "trading_date": trading_date,
+                "symbol": symbol,
+                "exchange": exchange,
+                "token": token,
+                "live_high": float(live_high),
+                "live_low": float(live_low),
+                "http_high": float(http_high) if http_high else None,
+                "http_low": float(http_low) if http_low else None,
+                "source": source,
+                "collection_start_time": now_ist.replace(hour=9, minute=15, second=0).isoformat(),
+                "collection_end_time": now_ist.replace(hour=9, minute=20, second=0).isoformat(),
+                "tick_count": tick_count,
+                "websocket_success": websocket_success,
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        record_id = data[0]["id"] if isinstance(data, list) and data else None
+        print(f"[save_live_high_low] {symbol}: High={live_high}, Low={live_low} (source={source})")
+        return record_id
+    except Exception as e:
+        print(f"[save_live_high_low] Error: {e}")
+        return None
+
+
+def get_live_high_low(symbol: str, trading_date: str = None):
+    """Fetch calculated High/Low for a symbol."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        
+        if not trading_date:
+            trading_date = datetime.now(IST).strftime("%Y-%m-%d")
+        
+        resp = requests.get(
+            f"{url}/rest/v1/live_high_low",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+            },
+            params={
+                "symbol": f"eq.{symbol}",
+                "trading_date": f"eq.{trading_date}",
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data[0] if isinstance(data, list) and data else None
+    except Exception as e:
+        print(f"[get_live_high_low] Error: {e}")
+        return None
+
+
+def log_websocket_event(event_type: str, symbol: str = None, 
+                       status: str = None, message: str = None,
+                       tick_count: int = None, duration_seconds: int = None):
+    """Log WebSocket events for debugging."""
+    try:
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
+        
+        requests.post(
+            f"{url}/rest/v1/websocket_logs",
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "event_type": event_type,
+                "symbol": symbol,
+                "status": status,
+                "message": message,
+                "tick_count": tick_count,
+                "duration_seconds": duration_seconds,
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[log_websocket_event] Error: {e}")
+
+
+def calculate_high_low_from_ticks(ticks: list):
+    """Calculate High and Low from list of ticks."""
+    if not ticks:
+        return None, None
+    
+    prices = [float(tick.get("price", 0)) for tick in ticks]
+    return (max(prices), min(prices)) if prices else (None, None)
+
 
 if __name__ == "__main__":
     dummy_closes  = [100+i for i in range(25)]
     dummy_candles = [["2024-01-01", 0, 0, 0, c, 0] for c in dummy_closes]
     print(f"EMA20 = {calc_ema(dummy_candles, 20):.4f}")
-    print("core.py v4.1 ✅")
+    print("core.py v4.2 ✅")
