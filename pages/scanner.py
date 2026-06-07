@@ -836,8 +836,8 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 8
-    BATCH_WAIT  = 1.5
+    BATCH_SIZE  = 5
+    BATCH_WAIT  = 1.3
 
     st.session_state.is_scanning  = True
     st.session_state.scan_log     = []
