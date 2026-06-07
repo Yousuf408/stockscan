@@ -1,6 +1,7 @@
 # ══════════════════════════════════════════
-#   TRADESENTRY — pages/3_Watchlist.py  v3.0
+#   TRADESENTRY — pages/3_Watchlist.py  v3.1
 #   Dynamic watchlists — create/rename/delete
+#   v3.1: Fixed get_angel_session() — os.environ fallback for Railway
 # ══════════════════════════════════════════
 
 import streamlit as st
@@ -102,12 +103,25 @@ def get_angel_session():
     try:
         import pyotp
         from SmartApi import SmartConnect
-        obj  = SmartConnect(api_key=st.secrets["API_KEY"])
-        totp = pyotp.TOTP(st.secrets["TOTP_SECRET"]).now()
-        sess = obj.generateSession(
-            st.secrets["CLIENT_CODE"],
-            st.secrets["PASSWORD"], totp
-        )
+        
+        # Try st.secrets first, fall back to os.environ
+        try:
+            api_key     = st.secrets["API_KEY"]
+            client_code = st.secrets["CLIENT_CODE"]
+            password    = st.secrets["PASSWORD"]
+            totp_secret = st.secrets["TOTP_SECRET"]
+        except Exception:
+            api_key     = os.environ.get("API_KEY", "")
+            client_code = os.environ.get("CLIENT_CODE", "")
+            password    = os.environ.get("PASSWORD", "")
+            totp_secret = os.environ.get("TOTP_SECRET", "")
+        
+        if not all([api_key, client_code, password, totp_secret]):
+            return None
+        
+        obj  = SmartConnect(api_key=api_key)
+        totp = pyotp.TOTP(totp_secret).now()
+        sess = obj.generateSession(client_code, password, totp)
         return obj if sess.get("status") else None
     except:
         return None
