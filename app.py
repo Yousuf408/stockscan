@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — app.py
-#  Production-Grade Safe WebSocket Streamer
-#  With Unmapped Token UI Fallback Core Engine
+#  v2: Fixed Railway deployment — removed st.secrets for AngelOne credentials
+#      Now reads directly from os.environ (Railway environment variables)
 # ══════════════════════════════════════════
 
 import sys
@@ -61,8 +61,8 @@ PRICE_CACHE_FILE = os.path.join(os.path.dirname(__file__), "price_cache.json")
 WATCHLIST_NAMES  = ["Today", "Yesterday", "New"]
 
 IST          = pytz.timezone("Asia/Kolkata")
-MARKET_OPEN  = (9,  15)   # 9:15 AM IST
-MARKET_CLOSE = (15, 30)   # 3:30 PM IST
+MARKET_OPEN  = (9,  15)
+MARKET_CLOSE = (15, 30)
 
 
 # ══════════════════════════════════════════
@@ -84,28 +84,15 @@ def is_market_open() -> bool:
     curr_mins  = now.hour * 60 + now.minute
     return open_mins <= curr_mins <= close_mins
 
-
-# ══════════════════════════════════════════
-#  NEW HELPER — minutes since last update
-#  Used ONLY by the offline fallback block.
-#  Does NOT affect any live market logic.
-# ══════════════════════════════════════════
-
 def _minutes_since_last_update(time_str: str) -> int:
-    """
-    Returns how many minutes have passed since a 'HH:MM:SS IST' timestamp.
-    Returns 999 on any parse failure so a refresh is always triggered safely.
-    """
     try:
         now = now_ist()
         clean = time_str.replace(" IST", "").strip()
         t = datetime.strptime(clean, "%H:%M:%S")
-        # Attach today's date and IST timezone
         t_ist = IST.localize(
             t.replace(year=now.year, month=now.month, day=now.day)
         )
         diff = (now - t_ist).total_seconds() / 60
-        # If diff is negative the update was yesterday — treat as very stale
         return int(diff) if diff >= 0 else 999
     except Exception as e:
         print(f"[OfflineTimer] Could not parse '{time_str}': {e}")
@@ -144,10 +131,6 @@ def update_price(symbol: str, exchange: str, price: float, source: str):
         "exchange": exchange
     }
     cache["last_update"] = ist_time_str()
-
-    # ── Auto-reflect actual fetch source in mode badge ──
-    # This is the single source of truth for what the UI shows.
-    # websocket → 🟢  |  http → 🟡  |  yfinance → 🟠
     source_to_mode = {
         "websocket": "websocket",
         "http":      "http_polling",
@@ -155,7 +138,6 @@ def update_price(symbol: str, exchange: str, price: float, source: str):
     }
     if source in source_to_mode:
         cache["mode"] = source_to_mode[source]
-
     save_cache(cache)
 
 def force_set_mode(mode: str):
@@ -167,11 +149,10 @@ def increment_failure_count() -> int:
     cache = load_cache()
     current_fails = cache.get("failures", 0) + 1
     cache["failures"] = current_fails
-    
     if current_fails >= 2:
         cache["circuit_broken"] = True
         cache["mode"] = "http_polling"
-        print("🚨 [CRITICAL SHUTDOWN] 2 continuous failures reached. Tripping Circuit Breaker to prevent API Ban!")
+        print("🚨 [CRITICAL SHUTDOWN] 2 continuous failures reached. Tripping Circuit Breaker!")
     save_cache(cache)
     return current_fails
 
@@ -217,15 +198,13 @@ def build_token_map(stocks: list):
     for stock in stocks:
         symbol   = stock.get("symbol")
         exchange = stock.get("exchange", "NS")
-        try: 
+        try:
             token = get_stock_token(symbol)
-        except: 
+        except:
             token = None
-            
-        if not token: 
+        if not token:
             print(f"[Token Warning] No valid active mapping found for symbol: {symbol}")
             continue
-            
         token = str(token)
         token_map[token] = (symbol, exchange)
         if exchange == "NS": nse_tokens.append(token)
@@ -256,11 +235,9 @@ def run_http_polling(angel_obj):
                 symbol   = stock.get("symbol")
                 exchange = stock.get("exchange", "NS")
                 token    = get_stock_token(symbol)
-                
                 if not token:
                     run_single_yfinance_patch(symbol, exchange)
                     continue
-                    
                 resp = angel_obj.ltpData("NSE" if exchange == "NS" else "BSE", symbol, str(token))
                 if resp and resp.get("status"):
                     ltp = float(resp["data"]["ltp"])
@@ -270,17 +247,15 @@ def run_http_polling(angel_obj):
         time.sleep(1)
 
 def run_yfinance_fallback():
-    """Batch fetch all stocks at once using yfinance.download() — fast."""
     import yfinance as yf
     print("[yfinance Fallback] Batch fetching all stocks...")
     stocks = get_all_watchlist_stocks()
     if not stocks:
         return
 
-    # Build ticker list
     ns_tickers = []
     bo_tickers = []
-    ticker_map = {}  # "TCS.NS" → (symbol, exchange)
+    ticker_map = {}
 
     for stock in stocks:
         sym    = stock.get("symbol", "").lstrip("$").strip().upper().replace(".NS","").replace(".BO","")
@@ -305,7 +280,6 @@ def run_yfinance_fallback():
             auto_adjust=True,
             threads=True
         )
-
         fetched = 0
         for ticker, (orig_symbol, exch) in ticker_map.items():
             try:
@@ -317,18 +291,14 @@ def run_yfinance_fallback():
                     update_price(orig_symbol, exch, price, "yfinance")
                     fetched += 1
             except:
-                # Single stock fallback
                 run_single_yfinance_patch(orig_symbol, exch)
-
         print(f"[yfinance Batch] Done — {fetched}/{len(all_tickers)} prices fetched.")
-
     except Exception as e:
         print(f"[yfinance Batch] Failed: {e} — falling back to one by one...")
         for stock in stocks:
             run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
 def run_single_yfinance_patch(symbol: str, exchange: str):
-    """Fetch price from yfinance using history() — more reliable than fast_info."""
     import yfinance as yf
     try:
         clean = symbol.lstrip("$").strip().upper()
@@ -337,17 +307,12 @@ def run_single_yfinance_patch(symbol: str, exchange: str):
             clean = "BSE" if exchange == "NS" else "540073"
         suffix = ".NS" if exchange == "NS" else ".BO"
         ticker = yf.Ticker(f"{clean}{suffix}")
-
-        # Try fast_info first
         price = (ticker.fast_info.get("last_price") or
                  ticker.fast_info.get("regularMarketPrice"))
-
-        # Fallback to history if fast_info returns nothing
         if not price:
             hist = ticker.history(period="2d")
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
-
         if price:
             update_price(symbol, exchange, float(price), "yfinance")
             print(f"[yfinance] ✅ {clean} = {price}")
@@ -358,20 +323,20 @@ def run_single_yfinance_patch(symbol: str, exchange: str):
 
 
 # ══════════════════════════════════════════
-#  WEBSOCKET STREAMER (OVERIDDEN RETRY LOOP)
+#  WEBSOCKET STREAMER
 # ══════════════════════════════════════════
 
 class PriceStreamer:
     def __init__(self, auth_token, api_key, client_code, feed_token, angel_obj):
-        self.auth_token  = auth_token
-        self.api_key     = api_key
-        self.client_code = client_code
-        self.feed_token  = feed_token
-        self.angel_obj   = angel_obj
-        self.token_map   = {}
-        self.nse_tokens  = []
-        self.bse_tokens  = []
-        self.sws         = None
+        self.auth_token      = auth_token
+        self.api_key         = api_key
+        self.client_code     = client_code
+        self.feed_token      = feed_token
+        self.angel_obj       = angel_obj
+        self.token_map       = {}
+        self.nse_tokens      = []
+        self.bse_tokens      = []
+        self.sws             = None
         self.is_ws_connected = False
 
     def refresh_angel_session(self):
@@ -379,16 +344,22 @@ class PriceStreamer:
         if cache.get("circuit_broken", False): return False
         try:
             print("[Engine] Regenerating verification tokens...")
-            password    = st.secrets["PASSWORD"]
-            totp_secret = st.secrets["TOTP_SECRET"]
+
+            # ── Direct os.environ read — no st.secrets ──
+            password    = os.environ.get("ANGEL_PASSWORD", "")
+            totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
+
+            if not password or not totp_secret:
+                print("[Engine] ❌ ANGEL_PASSWORD or ANGEL_TOTP_SECRET not set in environment")
+                return False
+
             self.angel_obj = SmartConnect(api_key=self.api_key)
-            totp = pyotp.TOTP(totp_secret).now()
-            session_data = self.angel_obj.generateSession(self.client_code, password, totp)
+            totp           = pyotp.TOTP(totp_secret).now()
+            session_data   = self.angel_obj.generateSession(self.client_code, password, totp)
+
             if session_data and session_data.get("status"):
                 self.auth_token = session_data["data"]["jwtToken"]
                 self.feed_token = session_data["data"].get("feedToken") or self.angel_obj.getfeedToken()
-                st.session_state["angel_jwt"]     = auth_token
-                st.session_state["angel_api_key"] = api_key
                 return True
             return False
         except Exception as e:
@@ -404,7 +375,6 @@ class PriceStreamer:
                     symbol, exchange = self.token_map[token]
                     update_price(symbol, exchange, ltp, "websocket")
                     reset_failure_count()
-                    
                     cache = load_cache()
                     if cache.get("mode") != "websocket":
                         force_set_mode("websocket")
@@ -416,7 +386,6 @@ class PriceStreamer:
         self.is_ws_connected = True
         reset_failure_count()
         force_set_mode("websocket")
-        
         token_list = []
         if self.nse_tokens: token_list.append({"exchangeType": 1, "tokens": self.nse_tokens})
         if self.bse_tokens: token_list.append({"exchangeType": 3, "tokens": self.bse_tokens})
@@ -431,37 +400,20 @@ class PriceStreamer:
         self.is_ws_connected = False
 
     def start_websocket(self):
-        """
-        Master supervisor loop.
-
-        Market hours  (9:15 – 3:30):  WebSocket → HTTP → yfinance
-        Outside hours (after 3:30,
-                       before 9:15,
-                       weekends):      yfinance every 15 minutes
-        """
-
-        # Tracks last yfinance run (outside market hours)
-        last_yf_refresh   = None
-        YF_REFRESH_MINS   = 15   # fetch fresh EOD prices every 15 min after close
+        last_yf_refresh = None
+        YF_REFRESH_MINS = 15
 
         while True:
             try:
                 print(f"[LOOP] tick at {ist_time_str()} | market_open={is_market_open()}")
 
-                # ══════════════════════════════════════════════════════════
-                #  OUTSIDE MARKET HOURS
-                #  → yfinance only, every 15 minutes
-                #  → no WebSocket attempt at all
-                # ══════════════════════════════════════════════════════════
                 if not is_market_open():
                     self.is_ws_connected = False
-
-                    now         = now_ist()
+                    now          = now_ist()
                     should_fetch = (
                         last_yf_refresh is None or
                         (now - last_yf_refresh).total_seconds() / 60 >= YF_REFRESH_MINS
                     )
-
                     if should_fetch:
                         stocks = get_all_watchlist_stocks()
                         if stocks:
@@ -469,37 +421,20 @@ class PriceStreamer:
                             try:
                                 run_yfinance_fallback()
                                 last_yf_refresh = now
-                                print(f"[After Hours] Done. Next fetch in {YF_REFRESH_MINS} min.")
                             except Exception as e:
                                 force_set_mode("offline")
                                 print(f"[After Hours] yfinance failed: {e}")
                         else:
-                            # No stocks in watchlist yet
                             force_set_mode("offline")
-                    else:
-                        mins_left = int(YF_REFRESH_MINS - (now - last_yf_refresh).total_seconds() / 60)
-                        print(f"[After Hours] Next yfinance fetch in {mins_left} min.")
-
-                    time.sleep(60)   # check every 60s, fetch every 15 min
+                    time.sleep(60)
                     continue
 
-                # ══════════════════════════════════════════════════════════
-                #  MARKET HOURS (9:15 – 3:30)
-                #  → WebSocket primary
-                #  → HTTP fallback if WS fails
-                #  → yfinance fallback if HTTP also fails
-                # ══════════════════════════════════════════════════════════
-
-                # Reset yfinance timer when market opens
-                # so we fetch immediately after close
                 last_yf_refresh = None
-
                 stocks = get_all_watchlist_stocks()
                 if not stocks:
                     time.sleep(10)
                     continue
 
-                # ── Circuit breaker check ──
                 cache = load_cache()
                 if cache.get("circuit_broken", False):
                     print("[Anti-Ban] Circuit broken — using HTTP polling...")
@@ -511,10 +446,8 @@ class PriceStreamer:
                     time.sleep(15)
                     continue
 
-                # ── Build token map ──
                 self.token_map, self.nse_tokens, self.bse_tokens = build_token_map(stocks)
 
-                # ── Patch unmapped tokens via yfinance in parallel ──
                 from stocks import get_stock_token
                 for stock in stocks:
                     try:    t = get_stock_token(stock.get("symbol", "").lstrip("$").strip().upper())
@@ -522,17 +455,14 @@ class PriceStreamer:
                     if not t:
                         run_single_yfinance_patch(stock.get("symbol"), stock.get("exchange", "NS"))
 
-                # ── No mapped tokens at all → full yfinance ──
                 if not self.token_map:
                     print("[Market Hours] No mapped tokens — using yfinance for all stocks")
                     run_yfinance_fallback()
                     time.sleep(15)
                     continue
 
-                # ── Refresh Angel One session ──
                 self.refresh_angel_session()
 
-                # ── Attempt WebSocket ──
                 print(f"[WS Engine] Connecting WebSocket at {ist_time_str()}...")
                 self.sws = SmartWebSocketV2(
                     self.auth_token,
@@ -548,31 +478,23 @@ class PriceStreamer:
 
                 network_worker = threading.Thread(target=self.sws.connect, daemon=True)
                 network_worker.start()
-                time.sleep(5)   # wait for handshake
+                time.sleep(5)
 
-                # ── Stay here while WS is healthy ──
                 while self.is_ws_connected and is_market_open():
                     time.sleep(1)
 
-                # ── WS dropped mid-session → fallback ──
                 if is_market_open() and not self.is_ws_connected:
                     fail_count = increment_failure_count()
                     print(f"[WS Engine] WebSocket dropped. Failures: {fail_count}/2")
-
-                    # Tier 1 → HTTP
                     http_ok = False
                     try:
                         run_http_polling(self.angel_obj)
                         http_ok = True
-                        print("[WS Engine] HTTP fallback succeeded.")
                     except Exception as e:
                         print(f"[WS Engine] HTTP fallback failed: {e}")
-
-                    # Tier 2 → yfinance (only if HTTP failed)
                     if not http_ok:
                         try:
                             run_yfinance_fallback()
-                            print("[WS Engine] yfinance fallback succeeded.")
                         except Exception as e:
                             print(f"[WS Engine] yfinance fallback also failed: {e}")
 
@@ -585,28 +507,37 @@ class PriceStreamer:
 
 
 # ══════════════════════════════════════════
-#  INIT ENGINE RESOURCE
+#  INIT ENGINE — v2: direct os.environ read
 # ══════════════════════════════════════════
 
 def init_price_streamer():
     print("[STARTUP] init_price_streamer() called")
-    print(f"[STARTUP] WATCHLIST_FILE = {WATCHLIST_FILE}")
-    print(f"[STARTUP] File exists = {os.path.exists(WATCHLIST_FILE)}")
-    stocks_check = get_all_watchlist_stocks()
-    print(f"[STARTUP] Stocks found = {[s.get('symbol') for s in stocks_check]}")
     status = {"connected": False, "error": ""}
     try:
-        api_key     = st.secrets["API_KEY"]
-        client_code = st.secrets["CLIENT_CODE"]
-        password    = st.secrets["PASSWORD"]
-        totp_secret = st.secrets["TOTP_SECRET"]
+        # ── Direct os.environ read — no st.secrets ──
+        api_key     = os.environ.get("ANGEL_API_KEY", "")
+        client_code = os.environ.get("ANGEL_CLIENT_ID", "")
+        password    = os.environ.get("ANGEL_PASSWORD", "")
+        totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
+
+        # Debug log
+        print(f"[STARTUP] ANGEL_API_KEY   = {'SET' if api_key     else 'NOT SET ❌'}")
+        print(f"[STARTUP] ANGEL_CLIENT_ID = {'SET' if client_code else 'NOT SET ❌'}")
+        print(f"[STARTUP] ANGEL_PASSWORD  = {'SET' if password    else 'NOT SET ❌'}")
+        print(f"[STARTUP] ANGEL_TOTP      = {'SET' if totp_secret else 'NOT SET ❌'}")
+
+        if not all([api_key, client_code, password, totp_secret]):
+            status["error"] = "One or more AngelOne credentials missing in environment variables"
+            print(f"[STARTUP] ❌ {status['error']}")
+            return status
 
         angel_obj    = SmartConnect(api_key=api_key)
         totp         = pyotp.TOTP(totp_secret).now()
         session_data = angel_obj.generateSession(client_code, password, totp)
 
-        if not session_data.get("status"):
-            status["error"] = session_data.get("message", "Login failed")
+        if not session_data or not session_data.get("status"):
+            status["error"] = session_data.get("message", "Login failed") if session_data else "No response"
+            print(f"[STARTUP] ❌ AngelOne login failed: {status['error']}")
             return status
 
         auth_token = session_data["data"]["jwtToken"]
@@ -616,19 +547,21 @@ def init_price_streamer():
             status["error"] = "Feed token missing"
             return status
 
+        print("[STARTUP] ✅ AngelOne login successful")
         streamer = PriceStreamer(auth_token, api_key, client_code, feed_token, angel_obj)
-        thread = threading.Thread(target=streamer.start_websocket, daemon=True)
+        thread   = threading.Thread(target=streamer.start_websocket, daemon=True)
         thread.start()
         status["connected"] = True
 
     except Exception as e:
         status["error"] = str(e)
+        print(f"[STARTUP] ❌ Exception: {e}")
 
     return status
 
 
 # ══════════════════════════════════════════
-#  STREAMLIT DASHBOARD UI VIEW
+#  STREAMLIT DASHBOARD UI
 # ══════════════════════════════════════════
 
 status     = init_price_streamer()
@@ -664,7 +597,7 @@ if status["connected"]:
     elif market_now:
         st.success("✅ Angel One Session Operational · Streamer processing prices across multi-channel fallbacks")
     else:
-        st.warning(f"⏰ System Active · Market Closed · Engine idling until opening bell.")
+        st.warning("⏰ System Active · Market Closed · Engine idling until opening bell.")
 else:
     st.error(f"❌ Initial Connection Failure: {status.get('error', 'Unknown Error')}")
 
