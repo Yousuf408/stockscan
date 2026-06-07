@@ -273,6 +273,8 @@ def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens: list,
                 result[symbol] = {
                     "high": high,
                     "low": low,
+                "http_high": high,      # ✨ ADD THIS
+                "http_low": low,        # ✨ ADD THIS
                     "source": "http",  # Marked as fallback
                     "tick_count": 1,   # Single candle, not multiple ticks
                     "error": "WebSocket unavailable - using HTTP"
