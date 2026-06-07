@@ -237,6 +237,44 @@ def get_ist_time_now() -> str:
     return get_ist_now().strftime("%H:%M")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PHASE 1 FIX: Smart Trading Date Logic (Weekday vs Weekend)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_trading_date_for_scan() -> str:
+    """
+    ✅ PHASE 1 FIX: Returns the correct date to look for 9:15 opening candle.
+    
+    Logic:
+    - If market is OPEN NOW (correct time AND weekday) → return TODAY
+    - If market is CLOSED (weekend OR after-hours) → return LAST TRADING DAY
+    - Automatically skips weekends when going back
+    
+    Examples:
+    - Sunday 10 AM → returns Friday's date
+    - Friday 16:00 (after market) → returns Friday's date
+    - Monday 09:30 (market open) → returns Monday's date
+    """
+    now = get_ist_now()
+    
+    # Check if market is open RIGHT NOW (time-based: 9:15-15:30)
+    mins = now.hour * 60 + now.minute
+    is_market_open_now = (9 * 60 + 15) <= mins <= (15 * 60 + 30)
+    
+    # Check if today is a weekday (0-4 = Mon-Fri, 5-6 = Sat-Sun)
+    is_weekday = now.weekday() < 5
+    
+    # ✅ If market is open in time AND today is weekday → use TODAY
+    if is_market_open_now and is_weekday:
+        return now.strftime("%Y-%m-%d")
+    
+    # ❌ Otherwise, go back to last trading day (skip weekends)
+    dt = now
+    while dt.weekday() >= 5:  # 5=Saturday, 6=Sunday
+        dt -= timedelta(days=1)
+    
+    return dt.strftime("%Y-%m-%d")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -340,7 +378,8 @@ def find_opening_candle_index(candles: list) -> int:
     if not candles:
         return -1
 
-    target_date = get_ist_today_str() if is_market_open() else get_last_trading_day_str()
+    # ✅ PHASE 1 FIX: Use smart trading date (handles weekends)
+    target_date = get_trading_date_for_scan()
 
     for i, c in enumerate(candles):
         ts        = str(c[0])
@@ -629,7 +668,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
                 opening_idx = find_opening_candle_index(candles)
                 if opening_idx >= 0:
-                    trading_date      = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+                    # ✅ PHASE 1 FIX: Use smart trading date
+                    trading_date = get_trading_date_for_scan()
                     candles_from_open = candles[opening_idx:]
                     new_status = check_historical_status(
                         signal, candles_from_open,
@@ -719,7 +759,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
 
-    trading_date = get_last_trading_day_str() if not is_market_open() else get_ist_today_str()
+    # ✅ PHASE 1 FIX: Use smart trading date
+    trading_date = get_trading_date_for_scan()
     f5_high = round(float(open_candle[2]), 2)
     f5_low  = round(float(open_candle[3]), 2)
     log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date}")
