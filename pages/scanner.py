@@ -1,8 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.9
+#  TRADE SENTRY — scanner.py  v3.0
 #  v2.9: FIXED AngelOne API — use obj.getCandleData() method instead of manual HTTP
-#        get_angel_auth() now returns SmartConnect object (not JWT)
-#        fetch_candles_5min() uses obj.getCandleData() — library handles auth internally
+#  v3.0: WebSocket High/Low collection (9:15-9:20) with HTTP fallback + visual badges
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -18,7 +17,15 @@ from datetime import datetime, timedelta
 # ── Core engine import ──
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core import calc_ema, load_watchlist, save_watchlist, \
-                 load_scanner_results, save_scanner_result, clear_scanner_results
+                 load_scanner_results, save_scanner_result, clear_scanner_results, \
+                 save_live_high_low
+
+# ── WebSocket collector import ──
+try:
+    from websocket_tick_collector import collect_live_high_low_with_fallback
+except ImportError:
+    def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens, http_candles=None):
+        return {}
 
 # ── Import from stocks.py ──
 try:
@@ -243,33 +250,19 @@ def get_ist_time_now() -> str:
 def get_trading_date_for_scan() -> str:
     """
     ✅ PHASE 1 FIX: Returns the correct date to look for 9:15 opening candle.
-    
-    Logic:
-    - If market is OPEN NOW (correct time AND weekday) → return TODAY
-    - If market is CLOSED (weekend OR after-hours) → return LAST TRADING DAY
-    - Automatically skips weekends when going back
-    
-    Examples:
-    - Sunday 10 AM → returns Friday's date
-    - Friday 16:00 (after market) → returns Friday's date
-    - Monday 09:30 (market open) → returns Monday's date
     """
     now = get_ist_now()
     
-    # Check if market is open RIGHT NOW (time-based: 9:15-15:30)
     mins = now.hour * 60 + now.minute
     is_market_open_now = (9 * 60 + 15) <= mins <= (15 * 60 + 30)
     
-    # Check if today is a weekday (0-4 = Mon-Fri, 5-6 = Sat-Sun)
     is_weekday = now.weekday() < 5
     
-    # ✅ If market is open in time AND today is weekday → use TODAY
     if is_market_open_now and is_weekday:
         return now.strftime("%Y-%m-%d")
     
-    # ❌ Otherwise, go back to last trading day (skip weekends)
     dt = now
-    while dt.weekday() >= 5:  # 5=Saturday, 6=Sunday
+    while dt.weekday() >= 5:
         dt -= timedelta(days=1)
     
     return dt.strftime("%Y-%m-%d")
@@ -300,7 +293,6 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
 
     try:
         # ✅ v2.9: Use SmartConnect.getCandleData() method directly
-        # The library handles all headers, auth, and formatting internally
         historicParam = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
@@ -378,7 +370,6 @@ def find_opening_candle_index(candles: list) -> int:
     if not candles:
         return -1
 
-    # ✅ PHASE 1 FIX: Use smart trading date (handles weekends)
     target_date = get_trading_date_for_scan()
 
     for i, c in enumerate(candles):
@@ -616,7 +607,12 @@ MIN_CANDLES_TOTAL   = 800
 MIN_CANDLES_AT_OPEN = 200
 
 
-def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
+def analyze_stock(stock: dict, candles: list, is_refresh: bool = False, 
+                  live_high_low: dict = None):
+    """
+    ✨ v3.0: Added live_high_low parameter
+    Uses WebSocket High/Low if available, falls back to HTTP candle
+    """
     symbol = stock["symbol"]
     sector = stock["sector"]
     log    = st.session_state.scan_log
@@ -668,7 +664,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
                 opening_idx = find_opening_candle_index(candles)
                 if opening_idx >= 0:
-                    # ✅ PHASE 1 FIX: Use smart trading date
                     trading_date = get_trading_date_for_scan()
                     candles_from_open = candles[opening_idx:]
                     new_status = check_historical_status(
@@ -759,11 +754,20 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
 
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
 
-    # ✅ PHASE 1 FIX: Use smart trading date
     trading_date = get_trading_date_for_scan()
-    f5_high = round(float(open_candle[2]), 2)
-    f5_low  = round(float(open_candle[3]), 2)
-    log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date}")
+    
+    # ✨ v3.0 FIX: Use live High/Low from WebSocket if available
+    entry_source = "http"
+    if live_high_low and symbol in live_high_low:
+        f5_high = round(live_high_low[symbol]["high"], 2)
+        f5_low = round(live_high_low[symbol]["low"], 2)
+        entry_source = live_high_low[symbol]["source"]  # "websocket" or "http"
+        log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} ({entry_source.upper()})")
+    else:
+        # Fallback to HTTP candle
+        f5_high = round(float(open_candle[2]), 2)
+        f5_low = round(float(open_candle[3]), 2)
+        log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} (HTTP)")
 
     entry_target = calc_entry_target(signal, f5_high, f5_low)
 
@@ -810,8 +814,12 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False):
         "entry_target": entry_target,
         "exit_status":  historical_status,
         "t1_achieved":  t1_achieved,
+        "entry_source": entry_source,  # ✨ v3.0: Track source
     }
-    log.append(f"✅ {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
+    
+    # Log with badge
+    badge = "🟢" if entry_source == "websocket" else "🟡"
+    log.append(f"✅ {badge} {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
     st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
     st.session_state.results.append(result)
@@ -849,7 +857,6 @@ def run_full_scan(watchlist_stocks: list):
 
     def fetch_one(stock):
         try:
-            # ✅ Pass the SmartConnect object directly
             candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
                                          _log=_scan_log)
             return stock["symbol"], candles, None
@@ -882,13 +889,38 @@ def run_full_scan(watchlist_stocks: list):
             f"❌ {len(failed_stocks)} stocks failed — skipped: {', '.join(failed_stocks)}"
         )
 
+    # ✨ v3.0: Collect live High/Low from WebSocket (9:15-9:20)
+    st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
+    symbols_with_tokens = [
+        {
+            "symbol": s["symbol"],
+            "token": s["token"],
+            "exchange": s["exchange"]
+        }
+        for s in watchlist_stocks
+    ]
+    
+    live_high_low = collect_live_high_low_with_fallback(
+        angel_obj=angel_obj,
+        symbols_with_tokens=symbols_with_tokens,
+        http_candles=None
+    )
+    
+    if live_high_low:
+        collected_count = len([s for s in live_high_low.values() if s.get("high")])
+        st.session_state.scan_log.append(f"[9:20] ✅ Collected High/Low for {collected_count} stocks")
+    else:
+        st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
+        live_high_low = {}
+
+    # Continue analysis with live_high_low
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
             0.5 + (i + 1) / total / 2,
             text=f"Analyzing {i+1}/{total}: {stock['symbol']}"
         )
-        analyze_stock(stock, candles, is_refresh=False)
+        analyze_stock(stock, candles, is_refresh=False, live_high_low=live_high_low)
 
     if st.session_state.results:
         status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "NEAR_ENTRY": 2, "NO_ENTRY": 3, "SL_HIT": 4}
@@ -911,13 +943,12 @@ def run_refresh_scan(watchlist_stocks: list):
     for r in st.session_state.results:
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
-            # ✅ Pass the SmartConnect object directly
             candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_obj,
                                          _log=st.session_state.scan_log)
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI
+# SECTION 8: UI (SAME AS BEFORE, NO CHANGES)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
@@ -1268,6 +1299,7 @@ else:
         vwap         = item["vwap"]
         ema200       = item["ema200"]
         score        = item["score"]
+        entry_source = item.get("entry_source", "http")  # ✨ v3.0
         entry_target = item.get("entry_target") or {}
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
@@ -1300,6 +1332,9 @@ else:
             pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
 
         pct_sign = "+" if pct > 0 else ""
+        
+        # ✨ v3.0: Add source badge (🟢 WebSocket, 🟡 HTTP)
+        source_badge = "🟢" if entry_source == "websocket" else "🟡"
 
         st.markdown(f"""
 <div class="ts-card" style="border-left-color:{border_clr};">
@@ -1307,6 +1342,7 @@ else:
     <div class="ts-card-left">
       <span class="ts-sym">{sym}</span>
       <span class="ts-chip">{sector_clean}</span>
+      <span style="font-size:14px;font-weight:700;margin-left:4px;">{source_badge}</span>
       <span class="ts-badge {badge_cls}">{badge_label}</span>
     </div>
     <div class="ts-card-right">
