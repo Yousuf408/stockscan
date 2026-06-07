@@ -1,7 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v3.0
+#  TRADE SENTRY — scanner.py  v3.0.1
 #  v2.9: FIXED AngelOne API — use obj.getCandleData() method instead of manual HTTP
 #  v3.0: WebSocket High/Low collection (9:15-9:20) with HTTP fallback + visual badges
+#  v3.0.1: FIXED live_high_low safety check (ensure always dict)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -905,30 +906,35 @@ def run_full_scan(watchlist_stocks: list):
         symbols_with_tokens=symbols_with_tokens,
         http_candles=None
     )
-    
+
+    # ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
+    if not live_high_low:
+        live_high_low = {}
+
     if live_high_low:
         collected_count = len([s for s in live_high_low.values() if s.get("high")])
         st.session_state.scan_log.append(f"[9:20] ✅ Collected High/Low for {collected_count} stocks")
     else:
         st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
-        live_high_low = {}
 
-     # ✨ NEW: Save High/Low to DB with HTTP comparison values
-for symbol, data in live_high_low.items():
-    if data.get("high") and data.get("low"):
-        save_live_high_low(
-            symbol=symbol,
-            exchange=data.get("exchange", "NSE"),
-            token=data.get("token", ""),
-            live_high=data["high"],
-            live_low=data["low"],
-            http_high=data.get("http_high"),    # ✨ Comparison values
-            http_low=data.get("http_low"),      # ✨ Comparison values
-            source=data["source"],
-            tick_count=data.get("tick_count", 0),
-            websocket_success=(data["source"] == "websocket")
-        )
-        
+    # ✨ NEW: Save High/Low to DB with HTTP comparison values
+    for symbol, data in live_high_low.items():
+        if data.get("high") and data.get("low"):
+            try:
+                save_live_high_low(
+                    symbol=symbol,
+                    exchange=data.get("exchange", "NSE"),
+                    token=data.get("token", ""),
+                    live_high=data["high"],
+                    live_low=data["low"],
+                    http_high=data.get("http_high"),
+                    http_low=data.get("http_low"),
+                    source=data["source"],
+                    tick_count=data.get("tick_count", 0),
+                    websocket_success=(data["source"] == "websocket")
+                )
+            except Exception as e:
+                st.session_state.scan_log.append(f"⚠️ [{symbol}] DB save failed: {e}")
 
     # Continue analysis with live_high_low
     for i, stock in enumerate(watchlist_stocks):
@@ -965,7 +971,7 @@ def run_refresh_scan(watchlist_stocks: list):
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI (SAME AS BEFORE, NO CHANGES)
+# SECTION 8: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
