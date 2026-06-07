@@ -1,18 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.7
-#  Changes from v2.5:
-#    - Added fetch_candles_1min() — fetches 1-min candles from AngelOne
-#    - Added get_f5_opening_levels() — Pine Script exact logic:
-#        F5 HIGH = max(HIGH of 9:15,9:16,9:17,9:18,9:19 one-min candles)
-#        F5 LOW  = min(LOW  of 9:15,9:16,9:17,9:18,9:19 one-min candles)
-#    - analyze_stock() now uses F5 levels for entry/SL instead of single candle
-#    - calc_entry_target() accepts f5_high, f5_low directly
-#    - check_historical_status() entry_price uses correct F5 level
-#    - All other logic, UI, filters unchanged
-#  Changes from v2.6:
-#    - Fixed get_last_trading_day_str() — removed early weekday return
-#      Now always walks back to last Mon-Fri, fixing Saturday/Sunday edge cases
-#      This caused 1-min API to get wrong date → fallback to 5min
+#  TRADE SENTRY — scanner.py  v2.8
+#  v2.8: Fixed AngelOne auth — removed st.secrets entirely
+#        Now reads credentials directly from os.environ (Railway compatible)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -39,10 +28,11 @@ except ImportError:
 
 # ── Auth — soft check only, scanner accessible to all ──
 _user_logged_in = bool(st.session_state.get("user_id"))
+
 def _auth_sign_in(email: str, password: str) -> dict:
     try:
-        url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL", "")).rstrip("/")
-        key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
         res = requests.post(
             f"{url}/auth/v1/token?grant_type=password",
             headers={"apikey": key, "Content-Type": "application/json"},
@@ -80,29 +70,33 @@ except Exception:
     WATCHLIST_NAMES = ["Today", "Yesterday", "New"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ANGEL ONE AUTH — v2.8 fix: direct os.environ, no st.secrets
+# ─────────────────────────────────────────────────────────────────────────────
+
 def get_angel_auth() -> dict:
     """
-    Always does a fresh AngelOne login — JWT tokens expire quickly.
-    Tries st.secrets first (Streamlit Cloud), falls back to os.environ (Railway).
+    Always does a fresh AngelOne login.
+    Reads credentials directly from os.environ (Railway env vars).
     """
     try:
         import pyotp
         from SmartApi import SmartConnect
 
-        # Try st.secrets first, fall back to os.environ
-        try:
-            api_key     = st.secrets["ANGEL_API_KEY"]
-            client_code = st.secrets["ANGEL_CLIENT_ID"]
-            password    = st.secrets["ANGEL_PASSWORD"]
-            totp_secret = st.secrets["ANGEL_TOTP_SECRET"]
-        except Exception:
-            api_key     = os.environ["ANGEL_API_KEY"]
-            client_code = os.environ["ANGEL_CLIENT_ID"]
-            password    = os.environ["ANGEL_PASSWORD"]
-            totp_secret = os.environ["ANGEL_TOTP_SECRET"]
+        # ── Read directly from Railway environment variables ──
+        api_key     = os.environ.get("ANGEL_API_KEY", "")
+        client_code = os.environ.get("ANGEL_CLIENT_ID", "")
+        password    = os.environ.get("ANGEL_PASSWORD", "")
+        totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
+
+        # ── Debug log — remove after confirming fix ──
+        print(f"[AngelAuth] api_key     = {'SET' if api_key     else 'NOT SET'}")
+        print(f"[AngelAuth] client_code = {'SET' if client_code else 'NOT SET'}")
+        print(f"[AngelAuth] password    = {'SET' if password    else 'NOT SET'}")
+        print(f"[AngelAuth] totp_secret = {'SET' if totp_secret else 'NOT SET'}")
 
         if not all([api_key, client_code, password, totp_secret]):
-            print("[AngelAuth] ❌ One or more credentials are empty")
+            print("[AngelAuth] ❌ One or more credentials missing in environment variables")
             return {}
 
         angel_obj    = SmartConnect(api_key=api_key)
@@ -114,12 +108,13 @@ def get_angel_auth() -> dict:
             print("[AngelAuth] ✅ Fresh login successful")
             return {"session": {"jwtToken": jwt, "apiKey": api_key}}
         else:
-            print(f"[AngelAuth] ❌ Login failed: {session_data.get('message')}")
+            msg = session_data.get("message", "Unknown error") if session_data else "No response"
+            print(f"[AngelAuth] ❌ Login failed: {msg}")
+            return {}
 
     except Exception as e:
         print(f"[AngelAuth] ❌ Exception: {e}")
-
-    return {}
+        return {}
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
@@ -170,15 +165,14 @@ def load_watchlist_stocks(tab: str) -> list:
                 continue
             sym = sym.replace(".NS", "").replace(".BO", "").split("-")[0].split(".")[0].strip()
 
-            # Fix: Supabase stores "EMPTY" string — treat it as missing
             raw_token = str(s.get("token") or "").strip()
             token     = raw_token if raw_token and raw_token.upper() not in ("EMPTY", "NONE", "") else ""
             token     = token or get_stock_token(sym) or ""
 
-            # Fix: Supabase stores "EMPTY" string for sector too
             raw_sector = str(s.get("sector") or "").strip()
             sector     = raw_sector if raw_sector and raw_sector.upper() not in ("EMPTY", "NONE", "") else ""
             sector     = sector or get_stock_sector(sym) or "GENERAL"
+
             stocks.append({
                 "symbol":   sym,
                 "token":    str(token),
@@ -250,9 +244,9 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None, _log: li
     Thread-safe: does NOT access st.session_state.
     Pass _log list from main thread if you want logging.
     """
-    log      = _log if _log is not None else []
-    is_open  = is_market_open()
-    end_date = get_ist_today_str() if is_open else get_last_trading_day_str()
+    log        = _log if _log is not None else []
+    is_open    = is_market_open()
+    end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
 
     if not symbol_token or str(symbol_token).strip() == "":
@@ -798,8 +792,6 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    # AngelOne rate limit: 3 req/sec, 180 req/min
-    # Batch of 3 with 1.5s gap = safe
     BATCH_SIZE  = 3
     BATCH_WAIT  = 1.5
 
@@ -818,7 +810,6 @@ def run_full_scan(watchlist_stocks: list):
     candles_map   = {}
     failed_stocks = []
 
-    # Capture scan_log reference ONCE in main thread before spawning threads
     _scan_log = st.session_state.scan_log
 
     def fetch_one(stock):
@@ -889,7 +880,7 @@ def run_refresh_scan(watchlist_stocks: list):
             analyze_stock(matched, candles, is_refresh=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI  — Variation B
+# SECTION 8: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
