@@ -913,6 +913,23 @@ def run_full_scan(watchlist_stocks: list):
         st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
         live_high_low = {}
 
+     # ✨ NEW: Save High/Low to DB with HTTP comparison values
+for symbol, data in live_high_low.items():
+    if data.get("high") and data.get("low"):
+        save_live_high_low(
+            symbol=symbol,
+            exchange=data.get("exchange", "NSE"),
+            token=data.get("token", ""),
+            live_high=data["high"],
+            live_low=data["low"],
+            http_high=data.get("http_high"),    # ✨ Comparison values
+            http_low=data.get("http_low"),      # ✨ Comparison values
+            source=data["source"],
+            tick_count=data.get("tick_count", 0),
+            websocket_success=(data["source"] == "websocket")
+        )
+        
+
     # Continue analysis with live_high_low
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
