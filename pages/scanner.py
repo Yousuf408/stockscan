@@ -1,7 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v2.8
-#  v2.8: Fixed AngelOne auth — removed st.secrets entirely
-#        Now reads credentials directly from os.environ (Railway compatible)
+#  TRADE SENTRY — scanner.py  v2.9
+#  v2.9: FIXED AngelOne API — use obj.getCandleData() method instead of manual HTTP
+#        get_angel_auth() now returns SmartConnect object (not JWT)
+#        fetch_candles_5min() uses obj.getCandleData() — library handles auth internally
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -71,13 +72,14 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ANGEL ONE AUTH — v2.8 fix: direct os.environ, no st.secrets
+# ANGEL ONE AUTH — v2.9 fix: Returns SmartConnect object, NOT JWT dict
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_angel_auth() -> dict:
+def get_angel_auth():
     """
     Always does a fresh AngelOne login.
     Reads credentials directly from os.environ (Railway env vars).
+    ✅ Returns the SmartConnect object itself (object handles all auth internally)
     """
     try:
         import pyotp
@@ -89,7 +91,7 @@ def get_angel_auth() -> dict:
         password    = os.environ.get("ANGEL_PASSWORD", "")
         totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
 
-        # ── Debug log — remove after confirming fix ──
+        # ── Debug log ──
         print(f"[AngelAuth] api_key     = {'SET' if api_key     else 'NOT SET'}")
         print(f"[AngelAuth] client_code = {'SET' if client_code else 'NOT SET'}")
         print(f"[AngelAuth] password    = {'SET' if password    else 'NOT SET'}")
@@ -97,24 +99,23 @@ def get_angel_auth() -> dict:
 
         if not all([api_key, client_code, password, totp_secret]):
             print("[AngelAuth] ❌ One or more credentials missing in environment variables")
-            return {}
+            return None
 
         angel_obj    = SmartConnect(api_key=api_key)
         totp         = pyotp.TOTP(totp_secret).now()
         session_data = angel_obj.generateSession(client_code, password, totp)
 
         if session_data and session_data.get("status"):
-            jwt = session_data["data"]["jwtToken"]
             print("[AngelAuth] ✅ Fresh login successful")
-            return {"session": {"jwtToken": jwt, "apiKey": api_key}}
+            return angel_obj  # ✅ Return the object itself
         else:
             msg = session_data.get("message", "Unknown error") if session_data else "No response"
             print(f"[AngelAuth] ❌ Login failed: {msg}")
-            return {}
+            return None
 
     except Exception as e:
         print(f"[AngelAuth] ❌ Exception: {e}")
-        return {}
+        return None
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
@@ -239,10 +240,12 @@ def get_ist_time_now() -> str:
 # SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None, _log: list = None):
+def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: list = None):
     """
     Thread-safe: does NOT access st.session_state.
     Pass _log list from main thread if you want logging.
+    
+    ✅ v2.9 FIX: Uses obj.getCandleData() method instead of manual HTTP requests
     """
     log        = _log if _log is not None else []
     is_open    = is_market_open()
@@ -253,36 +256,30 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None, _log: li
         log.append(f"❌ [{symbol}] Failed — Missing token in stocks.py")
         return None
 
-    if not angel_auth or not angel_auth.get("session"):
+    if not angel_obj:
         log.append(f"❌ [{symbol}] Failed — No AngelOne session")
         return None
 
     try:
-        headers = {
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {angel_auth['session'].get('jwtToken')}",
-            "X-UserType":    "USER",
-            "X-SourceID":    "WEB",
-            "X-PrivateKey":  angel_auth['session'].get('apiKey'),
-        }
-        payload = {
+        # ✅ v2.9: Use SmartConnect.getCandleData() method directly
+        # The library handles all headers, auth, and formatting internally
+        historicParam = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
             "interval":    "FIVE_MINUTE",
             "fromdate":    f"{start_date} 09:15",
             "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
-        res = requests.post(
-            "https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData",
-            json=payload, headers=headers, timeout=10,
-        )
-        if res.status_code == 200:
-            data   = res.json()
-            status = data.get("status")
-            msg    = data.get("message", "")
-            if status is True and isinstance(data.get("data"), list):
+        
+        response = angel_obj.getCandleData(historicParam)
+        
+        if response and isinstance(response, dict):
+            status = response.get("status")
+            msg    = response.get("message", "")
+            
+            if status is True and isinstance(response.get("data"), list):
                 rows = []
-                for c in data["data"]:
+                for c in response["data"]:
                     if isinstance(c, list) and len(c) >= 6:
                         raw_ts        = str(c[0])
                         ts_normalized = raw_ts.replace("T", " ")[:19]
@@ -293,12 +290,9 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_auth=None, _log: li
                 log.append(f"⚠️ [{symbol}] 0 rows returned — token '{symbol_token}' may be inactive")
             else:
                 log.append(f"❌ [{symbol}] API rejected — status={status} msg={msg}")
-        elif res.status_code == 429:
-            log.append(f"❌ [{symbol}] Rate limit hit (HTTP 429)")
-        elif res.status_code in (401, 403):
-            log.append(f"❌ [{symbol}] Auth expired (HTTP {res.status_code})")
         else:
-            log.append(f"❌ [{symbol}] HTTP {res.status_code}")
+            log.append(f"❌ [{symbol}] Unexpected response format")
+            
     except Exception as e:
         log.append(f"❌ [{symbol}] Exception: {e}")
 
@@ -801,8 +795,8 @@ def run_full_scan(watchlist_stocks: list):
     progress_bar = st.progress(0, text="Initialising scan...")
 
     # Get auth ONCE in main thread
-    angel_auth = get_angel_auth()
-    if angel_auth.get("session"):
+    angel_obj = get_angel_auth()
+    if angel_obj:
         st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
     else:
         st.session_state.scan_log.append("❌ AngelOne session unavailable — stocks will be skipped")
@@ -814,7 +808,8 @@ def run_full_scan(watchlist_stocks: list):
 
     def fetch_one(stock):
         try:
-            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_auth,
+            # ✅ Pass the SmartConnect object directly
+            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
                                          _log=_scan_log)
             return stock["symbol"], candles, None
         except Exception as e:
@@ -871,11 +866,12 @@ def run_full_scan(watchlist_stocks: list):
 def run_refresh_scan(watchlist_stocks: list):
     if not st.session_state.results:
         return
-    angel_auth = get_angel_auth()
+    angel_obj = get_angel_auth()
     for r in st.session_state.results:
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
-            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_auth,
+            # ✅ Pass the SmartConnect object directly
+            candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_obj,
                                          _log=st.session_state.scan_log)
             analyze_stock(matched, candles, is_refresh=True)
 
