@@ -902,11 +902,24 @@ def run_full_scan(watchlist_stocks: list):
         for s in watchlist_stocks
     ]
     
-    live_high_low = collect_live_high_low_with_fallback(
-        angel_obj=angel_obj,
-        symbols_with_tokens=symbols_with_tokens,
-        http_candles=None
-    )
+  print(f"\n[DEBUG] ═══════════════════════════════════════")
+print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
+print(f"[DEBUG] angel_obj = {angel_obj}")
+print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
+print(f"[DEBUG] symbols_with_tokens count = {len(symbols_with_tokens)}")
+print(f"[DEBUG] ═══════════════════════════════════════\n")
+
+live_high_low = collect_live_high_low_with_fallback(
+    angel_obj=angel_obj,
+    symbols_with_tokens=symbols_with_tokens,
+    http_candles=None
+)
+
+print(f"\n[DEBUG] ═══════════════════════════════════════")
+print(f"[DEBUG] collect_live_high_low_with_fallback() returned!")
+print(f"[DEBUG] Result type = {type(live_high_low)}")
+print(f"[DEBUG] Result keys = {list(live_high_low.keys())[:5] if live_high_low else 'None/Empty'}")
+print(f"[DEBUG] ═══════════════════════════════════════\n")
 
     # ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
     if not live_high_low:
