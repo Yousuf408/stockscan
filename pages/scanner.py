@@ -836,8 +836,8 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 3
-    BATCH_WAIT  = 1.5
+    BATCH_SIZE  = 2
+    BATCH_WAIT  = 2
 
     st.session_state.is_scanning  = True
     st.session_state.scan_log     = []
@@ -856,14 +856,17 @@ def run_full_scan(watchlist_stocks: list):
 
     _scan_log = st.session_state.scan_log
 
-    def fetch_one(stock):
-        try:
-            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
-                                         _log=_scan_log)
-            return stock["symbol"], candles, None
-        except Exception as e:
-            return stock["symbol"], None, str(e)
+   def fetch_one(stock):
+    time.sleep(1.0)  # ✨ ADD THIS LINE - 1 second delay
+    try:
+        # ✅ Pass the SmartConnect object directly
+        candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
+                                     _log=_scan_log)
+        return stock["symbol"], candles, None
+    except Exception as e:
+        return stock["symbol"], None, str(e)
 
+        
     batches = [watchlist_stocks[i:i+BATCH_SIZE]
                for i in range(0, total, BATCH_SIZE)]
     fetched = 0
