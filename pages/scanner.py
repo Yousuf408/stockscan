@@ -328,7 +328,6 @@ def fetch_exact_915_candle(stock: dict, angel_obj, _log: list = None) -> dict:
                     if "09:15" in raw_ts:
                         high = round(float(c[2]), 2)
                         low  = round(float(c[3]), 2)
-                        log.append(f"📐 [{symbol}] AngelOne exact 9:15 — H={high} L={low} ✅")
                         return {"high": high, "low": low}
 
         log.append(f"⚠️ [{symbol}] Could not get exact 9:15 from AngelOne — using yfinance value")
