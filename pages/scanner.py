@@ -1,8 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v3.0.1
-#  v2.9: FIXED AngelOne API — use obj.getCandleData() method instead of manual HTTP
-#  v3.0: WebSocket High/Low collection (9:15-9:20) with HTTP fallback + visual badges
-#  v3.0.1: FIXED live_high_low safety check (ensure always dict)
+#  TRADE SENTRY — scanner.py  v3.0.2
+#  v3.0.2: FIXED — debug prints inside run_full_scan() correctly
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -35,7 +33,6 @@ except ImportError:
     def get_stock_token(sym): return None
     def get_stock_sector(sym): return "GENERAL"
 
-# ── Auth — soft check only, scanner accessible to all ──
 _user_logged_in = bool(st.session_state.get("user_id"))
 
 def _auth_sign_in(email: str, password: str) -> dict:
@@ -80,33 +77,26 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ANGEL ONE AUTH — v2.9 fix: Returns SmartConnect object, NOT JWT dict
+# ANGEL ONE AUTH
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_angel_auth():
-    """
-    Always does a fresh AngelOne login.
-    Reads credentials directly from os.environ (Railway env vars).
-    ✅ Returns the SmartConnect object itself (object handles all auth internally)
-    """
     try:
         import pyotp
         from SmartApi import SmartConnect
 
-        # ── Read directly from Railway environment variables ──
         api_key     = os.environ.get("ANGEL_API_KEY", "")
         client_code = os.environ.get("ANGEL_CLIENT_ID", "")
         password    = os.environ.get("ANGEL_PASSWORD", "")
         totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
 
-        # ── Debug log ──
         print(f"[AngelAuth] api_key     = {'SET' if api_key     else 'NOT SET'}")
         print(f"[AngelAuth] client_code = {'SET' if client_code else 'NOT SET'}")
         print(f"[AngelAuth] password    = {'SET' if password    else 'NOT SET'}")
         print(f"[AngelAuth] totp_secret = {'SET' if totp_secret else 'NOT SET'}")
 
         if not all([api_key, client_code, password, totp_secret]):
-            print("[AngelAuth] ❌ One or more credentials missing in environment variables")
+            print("[AngelAuth] ❌ One or more credentials missing")
             return None
 
         angel_obj    = SmartConnect(api_key=api_key)
@@ -115,7 +105,7 @@ def get_angel_auth():
 
         if session_data and session_data.get("status"):
             print("[AngelAuth] ✅ Fresh login successful")
-            return angel_obj  # ✅ Return the object itself
+            return angel_obj
         else:
             msg = session_data.get("message", "Unknown error") if session_data else "No response"
             print(f"[AngelAuth] ❌ Login failed: {msg}")
@@ -244,41 +234,24 @@ def is_market_open() -> bool:
 def get_ist_time_now() -> str:
     return get_ist_now().strftime("%H:%M")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 1 FIX: Smart Trading Date Logic (Weekday vs Weekend)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def get_trading_date_for_scan() -> str:
-    """
-    ✅ PHASE 1 FIX: Returns the correct date to look for 9:15 opening candle.
-    """
-    now = get_ist_now()
-    
+    now  = get_ist_now()
     mins = now.hour * 60 + now.minute
     is_market_open_now = (9 * 60 + 15) <= mins <= (15 * 60 + 30)
-    
-    is_weekday = now.weekday() < 5
-    
+    is_weekday         = now.weekday() < 5
     if is_market_open_now and is_weekday:
         return now.strftime("%Y-%m-%d")
-    
     dt = now
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
-    
     return dt.strftime("%Y-%m-%d")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: list = None):
-    """
-    Thread-safe: does NOT access st.session_state.
-    Pass _log list from main thread if you want logging.
-    
-    ✅ v2.9 FIX: Uses obj.getCandleData() method instead of manual HTTP requests
-    """
     log        = _log if _log is not None else []
     is_open    = is_market_open()
     end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
@@ -293,7 +266,6 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
         return None
 
     try:
-        # ✅ v2.9: Use SmartConnect.getCandleData() method directly
         historicParam = {
             "exchange":    "NSE",
             "symboltoken": str(symbol_token).strip(),
@@ -301,13 +273,13 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
             "fromdate":    f"{start_date} 09:15",
             "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
-        
+
         response = angel_obj.getCandleData(historicParam)
-        
+
         if response and isinstance(response, dict):
             status = response.get("status")
             msg    = response.get("message", "")
-            
+
             if status is True and isinstance(response.get("data"), list):
                 rows = []
                 for c in response["data"]:
@@ -323,7 +295,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
                 log.append(f"❌ [{symbol}] API rejected — status={status} msg={msg}")
         else:
             log.append(f"❌ [{symbol}] Unexpected response format")
-            
+
     except Exception as e:
         log.append(f"❌ [{symbol}] Exception: {e}")
 
@@ -451,13 +423,13 @@ def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
     if low == 0:
         return False
     candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2: return False
-    if ema200 >= ema20: return False
+    if candle_range > 2.2:  return False
+    if ema200 >= ema20:     return False
     pct_ema_gap = ((ema20 - ema200) / ema200) * 100
-    if pct_ema_gap > 1.5: return False
-    if close <= vwap: return False
-    if close <= ema20: return False
-    if close <= ema200: return False
+    if pct_ema_gap > 1.5:  return False
+    if close <= vwap:       return False
+    if close <= ema20:      return False
+    if close <= ema200:     return False
     pct_from_ema20 = ((close - ema20) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
@@ -472,13 +444,13 @@ def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
     if low == 0:
         return False
     candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2: return False
-    if ema200 <= ema20: return False
+    if candle_range > 2.2:  return False
+    if ema200 <= ema20:     return False
     pct_ema_gap = ((ema200 - ema20) / ema200) * 100
-    if pct_ema_gap > 1.5: return False
-    if close >= vwap: return False
-    if close >= ema20: return False
-    if close >= ema200: return False
+    if pct_ema_gap > 1.5:  return False
+    if close >= vwap:       return False
+    if close >= ema20:      return False
+    if close >= ema200:     return False
     pct_from_ema20 = ((ema20 - close) / ema20) * 100
     if pct_from_ema20 > 2.0: return False
     return True
@@ -500,10 +472,8 @@ def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
 def check_sl_hit(signal: str, ltp: float, sl_price: float) -> bool:
     if not signal or ltp is None or sl_price is None:
         return False
-    if signal == "BUY":
-        return ltp <= sl_price
-    if signal == "SELL":
-        return ltp >= sl_price
+    if signal == "BUY":  return ltp <= sl_price
+    if signal == "SELL": return ltp >= sl_price
     return False
 
 
@@ -546,14 +516,10 @@ def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
             if signal == "SELL" and last_close > ema20_live:
                 return {"status": "EXIT", "triggered": True}
         return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "BUY"  and ltp >= target:
-        return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "SELL" and ltp <= target:
-        return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "BUY"  and ltp <= sl_price:
-        return {"status": "SL_HIT", "triggered": True}
-    if signal == "SELL" and ltp >= sl_price:
-        return {"status": "SL_HIT", "triggered": True}
+    if signal == "BUY"  and ltp >= target:  return {"status": "T1_ACHIEVE", "triggered": True}
+    if signal == "SELL" and ltp <= target:  return {"status": "T1_ACHIEVE", "triggered": True}
+    if signal == "BUY"  and ltp <= sl_price: return {"status": "SL_HIT",    "triggered": True}
+    if signal == "SELL" and ltp >= sl_price: return {"status": "SL_HIT",    "triggered": True}
     return {"status": "ACTIVE", "triggered": False}
 
 
@@ -592,10 +558,10 @@ def check_historical_status(signal: str, candles_from_open: list,
     for c in candles_to_check:
         high = float(c[2])
         low  = float(c[3])
-        if signal == "BUY"  and high >= target:    return "T1_ACHIEVE"
-        if signal == "SELL" and low  <= target:    return "T1_ACHIEVE"
-        if signal == "BUY"  and low  <= sl_price:  return "SL_HIT"
-        if signal == "SELL" and high >= sl_price:  return "SL_HIT"
+        if signal == "BUY"  and high >= target:   return "T1_ACHIEVE"
+        if signal == "SELL" and low  <= target:   return "T1_ACHIEVE"
+        if signal == "BUY"  and low  <= sl_price: return "SL_HIT"
+        if signal == "SELL" and high >= sl_price: return "SL_HIT"
 
     return "ACTIVE"
 
@@ -608,12 +574,8 @@ MIN_CANDLES_TOTAL   = 800
 MIN_CANDLES_AT_OPEN = 200
 
 
-def analyze_stock(stock: dict, candles: list, is_refresh: bool = False, 
+def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
                   live_high_low: dict = None):
-    """
-    ✨ v3.0: Added live_high_low parameter
-    Uses WebSocket High/Low if available, falls back to HTTP candle
-    """
     symbol = stock["symbol"]
     sector = stock["sector"]
     log    = st.session_state.scan_log
@@ -665,7 +627,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
 
                 opening_idx = find_opening_candle_index(candles)
                 if opening_idx >= 0:
-                    trading_date = get_trading_date_for_scan()
+                    trading_date      = get_trading_date_for_scan()
                     candles_from_open = candles[opening_idx:]
                     new_status = check_historical_status(
                         signal, candles_from_open,
@@ -688,13 +650,13 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
                 if new_status != current_status:
                     entry_price = et.get("entry", 0)
                     if new_status == "NEAR_ENTRY":
-                        _send_notification(symbol, "NEAR_ENTRY", round(ltp,2), entry_price, signal)
+                        _send_notification(symbol, "NEAR_ENTRY", round(ltp, 2), entry_price, signal)
                     elif new_status == "ACTIVE" and current_status == "NEAR_ENTRY":
-                        _send_notification(symbol, "ENTRY_HIT", round(ltp,2), entry_price, signal)
+                        _send_notification(symbol, "ENTRY_HIT", round(ltp, 2), entry_price, signal)
                     elif new_status == "T1_ACHIEVE":
-                        _send_notification(symbol, "T1_ACHIEVE", round(ltp,2), entry_price, signal)
+                        _send_notification(symbol, "T1_ACHIEVE", round(ltp, 2), entry_price, signal)
                     elif new_status == "SL_HIT":
-                        _send_notification(symbol, "SL_HIT", round(ltp,2), entry_price, signal)
+                        _send_notification(symbol, "SL_HIT", round(ltp, 2), entry_price, signal)
 
                 return r
         return None
@@ -753,21 +715,18 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         log.append(f"— {symbol}: No signal — {', '.join(reasons)}")
         return None
 
-    score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
-
+    score        = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
     trading_date = get_trading_date_for_scan()
-    
-    # ✨ v3.0 FIX: Use live High/Low from WebSocket if available
+
     entry_source = "http"
     if live_high_low and symbol in live_high_low:
-        f5_high = round(live_high_low[symbol]["high"], 2)
-        f5_low = round(live_high_low[symbol]["low"], 2)
-        entry_source = live_high_low[symbol]["source"]  # "websocket" or "http"
+        f5_high      = round(live_high_low[symbol]["high"], 2)
+        f5_low       = round(live_high_low[symbol]["low"],  2)
+        entry_source = live_high_low[symbol]["source"]
         log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} ({entry_source.upper()})")
     else:
-        # Fallback to HTTP candle
         f5_high = round(float(open_candle[2]), 2)
-        f5_low = round(float(open_candle[3]), 2)
+        f5_low  = round(float(open_candle[3]), 2)
         log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} (HTTP)")
 
     entry_target = calc_entry_target(signal, f5_high, f5_low)
@@ -815,10 +774,9 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         "entry_target": entry_target,
         "exit_status":  historical_status,
         "t1_achieved":  t1_achieved,
-        "entry_source": entry_source,  # ✨ v3.0: Track source
+        "entry_source": entry_source,
     }
-    
-    # Log with badge
+
     badge = "🟢" if entry_source == "websocket" else "🟡"
     log.append(f"✅ {badge} {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
@@ -829,6 +787,10 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 8: SCAN RUNNERS
+# ─────────────────────────────────────────────────────────────────────────────
+
 def run_full_scan(watchlist_stocks: list):
     if not watchlist_stocks:
         st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
@@ -836,11 +798,11 @@ def run_full_scan(watchlist_stocks: list):
 
     import concurrent.futures
 
-    BATCH_SIZE  = 2       # ✨ Reduced for rate limiting
-    BATCH_WAIT  = 2.0     # ✨ Increased for rate limiting
+    BATCH_SIZE = 2      # ✅ Reduced for rate limiting
+    BATCH_WAIT = 2.0    # ✅ Increased for rate limiting
 
-    st.session_state.is_scanning  = True
-    st.session_state.scan_log     = []
+    st.session_state.is_scanning = True
+    st.session_state.scan_log    = []
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
@@ -853,11 +815,10 @@ def run_full_scan(watchlist_stocks: list):
 
     candles_map   = {}
     failed_stocks = []
-
-    _scan_log = st.session_state.scan_log
+    _scan_log     = st.session_state.scan_log
 
     def fetch_one(stock):
-        time.sleep(1.0)  # ✨ 1 second delay per request to avoid rate limiting
+        time.sleep(1.0)  # ✅ 1 second delay per request to avoid rate limiting
         try:
             candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
                                          _log=_scan_log)
@@ -865,7 +826,7 @@ def run_full_scan(watchlist_stocks: list):
         except Exception as e:
             return stock["symbol"], None, str(e)
 
-    batches = [watchlist_stocks[i:i+BATCH_SIZE]
+    batches = [watchlist_stocks[i:i + BATCH_SIZE]
                for i in range(0, total, BATCH_SIZE)]
     fetched = 0
 
@@ -891,39 +852,40 @@ def run_full_scan(watchlist_stocks: list):
             f"❌ {len(failed_stocks)} stocks failed — skipped: {', '.join(failed_stocks)}"
         )
 
- # ✨ v3.0: Collect live High/Low from WebSocket (9:15-9:20)
-print(f"\n[DEBUG] ═══════════════════════════════════════")
-print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
-print(f"[DEBUG] angel_obj = {angel_obj}")
-print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
-print(f"[DEBUG] symbols_with_tokens count = {len(symbols_with_tokens)}")
-print(f"[DEBUG] ═══════════════════════════════════════\n")
+    # ✅ Collect live High/Low from WebSocket (INSIDE function — correct indentation)
+    st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
 
-st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
-symbols_with_tokens = [
-    {
-        "symbol": s["symbol"],
-        "token": s["token"],
-        "exchange": s["exchange"]
-    }
-    for s in watchlist_stocks
-]
+    symbols_with_tokens = [
+        {
+            "symbol":   s["symbol"],
+            "token":    s["token"],
+            "exchange": s["exchange"],
+        }
+        for s in watchlist_stocks
+    ]
 
-live_high_low = collect_live_high_low_with_fallback(
-    angel_obj=angel_obj,
-    symbols_with_tokens=symbols_with_tokens,
-    http_candles=None
-)
+    print(f"\n[DEBUG] ═══════════════════════════════════════")
+    print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
+    print(f"[DEBUG] angel_obj = {angel_obj}")
+    print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
+    print(f"[DEBUG] symbols_with_tokens count = {len(symbols_with_tokens)}")
+    print(f"[DEBUG] ═══════════════════════════════════════\n")
 
-print(f"\n[DEBUG] ═══════════════════════════════════════")
-print(f"[DEBUG] collect_live_high_low_with_fallback() returned!")
-print(f"[DEBUG] Result type = {type(live_high_low)}")
-print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
-print(f"[DEBUG] ═══════════════════════════════════════\n")
+    live_high_low = collect_live_high_low_with_fallback(
+        angel_obj=angel_obj,
+        symbols_with_tokens=symbols_with_tokens,
+        http_candles=None
+    )
 
-# ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
-if not live_high_low:
-    live_high_low = {}
+    print(f"\n[DEBUG] ═══════════════════════════════════════")
+    print(f"[DEBUG] collect_live_high_low_with_fallback() returned!")
+    print(f"[DEBUG] Result type  = {type(live_high_low)}")
+    print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
+    print(f"[DEBUG] ═══════════════════════════════════════\n")
+
+    # ✅ Safety check
+    if not live_high_low:
+        live_high_low = {}
 
     if live_high_low:
         collected_count = len([s for s in live_high_low.values() if s.get("high")])
@@ -931,7 +893,7 @@ if not live_high_low:
     else:
         st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
 
-    # ✨ NEW: Save High/Low to DB with HTTP comparison values
+    # Save High/Low to DB
     for symbol, data in live_high_low.items():
         if data.get("high") and data.get("low"):
             try:
@@ -950,7 +912,7 @@ if not live_high_low:
             except Exception as e:
                 st.session_state.scan_log.append(f"⚠️ [{symbol}] DB save failed: {e}")
 
-    # Continue analysis with live_high_low
+    # Analyze all stocks
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
@@ -984,8 +946,9 @@ def run_refresh_scan(watchlist_stocks: list):
                                          _log=st.session_state.scan_log)
             analyze_stock(matched, candles, is_refresh=True)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8: UI
+# SECTION 9: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
@@ -1013,24 +976,6 @@ tsRequestNotificationPermission();
 st.markdown("""
 <style>
 div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-.ts-btn-row { display:flex; gap:8px; align-items:center; margin:12px 0 4px; }
-.ts-btn {
-    display:inline-flex; align-items:center; gap:6px;
-    padding:7px 16px; border-radius:8px; font-size:13px; font-weight:600;
-    cursor:pointer; border:1.5px solid #d0d0d0; background:#ffffff;
-    color:#333333; text-decoration:none; white-space:nowrap;
-    font-family: 'SF Pro Text', system-ui, sans-serif;
-    transition: background 0.15s, border-color 0.15s;
-}
-.ts-btn:hover { background:#f5f5f5; border-color:#aaaaaa; }
-.ts-btn-primary { background:#111111; color:#ffffff; border-color:#111111; }
-.ts-btn-primary:hover { background:#333333; border-color:#333333; }
-div[data-testid="stPills"] button {
-    font-size:12px !important;
-    padding:4px 12px !important;
-    border-radius:20px !important;
-    font-weight:600 !important;
-}
 .ts-card {
     background:#ffffff; border:1px solid #ebebeb;
     border-left:4px solid #ebebeb;
@@ -1064,27 +1009,7 @@ div[data-testid="stPills"] button {
 
 stocks_to_scan = load_watchlist_stocks(st.session_state.selected_watchlist)
 mkt_open       = is_market_open()
-ist_time_str   = get_ist_now().strftime("%I:%M %p IST").lstrip("0")
-
-filter_sig       = "ALL"
-filter_min_vol   = ""
-filter_ema20     = ""
-filter_ema200    = ""
-filter_min_score = ""
-toggle_body_wick = False
-toggle_hide_sl   = False
-
-view = list(st.session_state.results)
-
-st.markdown("""
-<style>
-div[data-testid="stSelectbox"] > div > div {
-    background-color: #ffffff !important;
-    border: 1px solid #d0d0d0 !important;
-    border-radius: 8px !important;
-}
-</style>
-""", unsafe_allow_html=True)
+view           = list(st.session_state.results)
 
 st.markdown('<div style="margin-top:12px;"></div>', unsafe_allow_html=True)
 
@@ -1125,13 +1050,7 @@ if not _user_logged_in and row1_col2 and row1_col3:
     with row1_col2:
         st.markdown(
             '<div style="display:flex;align-items:center;height:38px;font-size:14px;font-weight:700;color:#111;">'
-            '🔒 <span class="login-full">&nbsp;<b>Results are not being saved.</b> Login to save permanently.</span>'
-            '<span class="login-short">&nbsp;<b>Results not saved.</b> Login to save.</span>'
-            '</div>'
-            '<style>'
-            '.login-short{display:none;}'
-            '@media(max-width:900px){.login-full{display:none;}.login-short{display:inline;}}'
-            '</style>',
+            '🔒 &nbsp;<b>Results are not being saved.</b> Login to save permanently.</div>',
             unsafe_allow_html=True
         )
     with row1_col3:
@@ -1141,13 +1060,11 @@ if not _user_logged_in and row1_col2 and row1_col3:
             st.rerun()
 
 with row1_col4:
-    sig_display = len(st.session_state.results)
-    wl_total    = len(stocks_to_scan)
     st.markdown(
         f'<div style="display:flex;align-items:center;height:38px;justify-content:flex-end;">'
         f'<span style="font-size:11px;font-weight:600;background:#f0f0f0;'
         f'color:#555;padding:5px 12px;border-radius:20px;white-space:nowrap;">'
-        f'{sig_display}/{wl_total} signals</span></div>',
+        f'{len(st.session_state.results)}/{len(stocks_to_scan)} signals</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -1186,15 +1103,7 @@ with btn_col1:
     scan_clicked = st.button("▷  Run scan", use_container_width=True,
                               disabled=len(stocks_to_scan) == 0)
 with btn_col2:
-    if st.session_state.results and st.session_state.get("last_auto_refresh", 0):
-        elapsed   = time.time() - st.session_state.get("last_auto_refresh", time.time())
-        remaining = max(0, 300 - int(elapsed))
-        mins      = remaining // 60
-        secs      = remaining % 60
-        btn_label = f"↺  Refresh  {mins}:{secs:02d}"
-    else:
-        btn_label = "↺  Refresh"
-    refresh_clicked = st.button(btn_label, use_container_width=True,
+    refresh_clicked = st.button("↺  Refresh", use_container_width=True,
                                  disabled=len(st.session_state.results) == 0)
 with btn_col3:
     clear_clicked = st.button("🗑  Clear", use_container_width=True)
@@ -1222,15 +1131,23 @@ if clear_clicked:
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
 
+filter_sig       = "ALL"
+filter_min_vol   = ""
+filter_ema20     = ""
+filter_ema200    = ""
+filter_min_score = ""
+toggle_body_wick = False
+toggle_hide_sl   = False
+
 if st.session_state.show_filters:
     with st.container(border=True):
         st.markdown("**⚙ Refine Filters**")
         col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
         with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
-        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="",               key="f_vol")
-        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="",   key="f_e20")
-        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="",  key="f_e200")
-        with col_f5:  filter_min_score = st.text_input("Score ≥", value="",              key="f_score")
+        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="", key="f_vol")
+        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="", key="f_e20")
+        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="", key="f_e200")
+        with col_f5:  filter_min_score = st.text_input("Score ≥", value="", key="f_score")
         tog1, tog2, tog3 = st.columns(3)
         with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
         with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
@@ -1336,7 +1253,7 @@ else:
         vwap         = item["vwap"]
         ema200       = item["ema200"]
         score        = item["score"]
-        entry_source = item.get("entry_source", "http")  # ✨ v3.0
+        entry_source = item.get("entry_source", "http")
         entry_target = item.get("entry_target") or {}
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
@@ -1368,9 +1285,7 @@ else:
             badge_label = "SELL";        bar_color = "#c0392b"
             pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
 
-        pct_sign = "+" if pct > 0 else ""
-        
-        # ✨ v3.0: Add source badge (🟢 WebSocket, 🟡 HTTP)
+        pct_sign     = "+" if pct > 0 else ""
         source_badge = "🟢" if entry_source == "websocket" else "🟡"
 
         st.markdown(f"""
