@@ -1151,14 +1151,14 @@ else:
         def fmt(v): return f"₹{v}" if v != "—" else "—"
 
         if exit_status == "T1_ACHIEVE":
-            border_clr = "#27ae60"; badge_cls = "ts-badge-t1achieve"; badge_label = "T1 Achieve ✅"; bar_color = "#27ae60"
+            border_clr = "#27ae60"; badge_cls = "ts-badge-t1achieve"; badge_label = f"T1 Achieve ✅ {sig}"; bar_color = "#27ae60"
             pct_clr = "#27ae60" if pct >= 0 else "#c0392b"
         elif exit_status == "SL_HIT":
-            border_clr = "#e87040"; badge_cls = "ts-badge-slhit"; badge_label = "SL HIT ✕"; bar_color = "#e87040"; pct_clr = "#d04a00"
+            border_clr = "#e87040"; badge_cls = "ts-badge-slhit"; badge_label = f"SL HIT ✕ {sig}"; bar_color = "#e87040"; pct_clr = "#d04a00"
         elif exit_status == "NEAR_ENTRY":
-            border_clr = "#e6a020"; badge_cls = "ts-badge-nearentry"; badge_label = "Near Entry 🔔"; bar_color = "#e6a020"; pct_clr = "#b36200"
+            border_clr = "#e6a020"; badge_cls = "ts-badge-nearentry"; badge_label = f"Near Entry 🔔 {sig}"; bar_color = "#e6a020"; pct_clr = "#b36200"
         elif exit_status == "NO_ENTRY":
-            border_clr = "#cccccc"; badge_cls = "ts-badge-noentry"; badge_label = "No Entry"; bar_color = "#aaaaaa"; pct_clr = "#888888"
+            border_clr = "#cccccc"; badge_cls = "ts-badge-noentry"; badge_label = f"No Entry {sig}"; bar_color = "#aaaaaa"; pct_clr = "#888888"
         elif sig == "BUY":
             border_clr = "#1a9c4a"; badge_cls = "ts-badge-buy"; badge_label = "BUY"; bar_color = "#1a9c4a"
             pct_clr = "#1a9c4a" if pct >= 0 else "#c0392b"
