@@ -221,14 +221,16 @@ def is_market_open() -> bool:
 def get_ist_time_now() -> str:
     return get_ist_now().strftime("%H:%M")
 
-def get_trading_date_for_scan() -> str:
-    now  = get_ist_now()
-    mins = now.hour * 60 + now.minute
-    is_market_open_now = (9 * 60 + 15) <= mins <= (15 * 60 + 30)
-    is_weekday         = now.weekday() < 5
-    if is_market_open_now and is_weekday:
-        return now.strftime("%Y-%m-%d")
-    dt = now
+def get_trading_date_for_scan(candles: list = None) -> str:
+    # Best approach — use last candle date from yfinance data
+    # Automatically handles weekends, holidays, early morning, market closed
+    if candles:
+        try:
+            return str(candles[-1][0]).split(" ")[0]
+        except Exception:
+            pass
+    # Fallback — last weekday
+    dt = get_ist_now()
     while dt.weekday() >= 5:
         dt -= timedelta(days=1)
     return dt.strftime("%Y-%m-%d")
@@ -351,15 +353,16 @@ def calc_vwap(candles: list):
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
 
-def find_opening_candle_index(candles: list) -> int:
+def find_opening_candle_index(candles: list, trading_date: str = None) -> int:
     if not candles:
         return -1
-    target_date = get_trading_date_for_scan()
+    if not trading_date:
+        trading_date = get_trading_date_for_scan(candles)
     for i, c in enumerate(candles):
         ts        = str(c[0])
         date_part = ts.split(" ")[0]
         time_part = ts.split(" ")[1] if " " in ts else ""
-        if date_part == target_date and time_part.startswith("09:15"):
+        if date_part == trading_date and time_part.startswith("09:15"):
             return i
     return -1
 
@@ -543,11 +546,11 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
                                "ema200": round(ema200_live, 2), "vwap": round(vwap_live, 2),
                                "pctChange": round(pct_change, 2)})
                     return r
-                opening_idx = find_opening_candle_index(candles)
+                trading_date_r = get_trading_date_for_scan(candles)
+                opening_idx    = find_opening_candle_index(candles, trading_date_r)
                 if opening_idx >= 0:
-                    trading_date      = get_trading_date_for_scan()
                     candles_from_open = candles[opening_idx:]
-                    new_status = check_historical_status(signal, candles_from_open, t1_val, sl_price, trading_date)
+                    new_status = check_historical_status(signal, candles_from_open, t1_val, sl_price, trading_date_r)
                 else:
                     new_status = current_status
                 r.update({"ltp": round(ltp, 2), "ema20": round(ema20_live, 2),
@@ -568,11 +571,12 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         return None
 
     # ── INITIAL SCAN PATH ──
-    opening_idx = find_opening_candle_index(candles)
+    trading_date = get_trading_date_for_scan(candles)
+    opening_idx  = find_opening_candle_index(candles, trading_date)
     debug_opening_candle(symbol, candles, opening_idx)
 
     if opening_idx < 0:
-        log.append(f"⚠️ {symbol}: No 9:15 candle found for {get_trading_date_for_scan()}")
+        log.append(f"⚠️ {symbol}: No 9:15 candle found for {trading_date}")
         return None
 
     open_candle     = candles[opening_idx]
@@ -614,8 +618,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         log.append(f"— {symbol}: No signal — {', '.join(reasons)}")
         return None
 
-    score        = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
-    trading_date = get_trading_date_for_scan()
+    score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
+    # trading_date already set above from candles
 
     # ── Scan only — no Entry/SL yet ──────────────────────────────────────────
     # entry_target = None (will be filled by Get Targets button)
