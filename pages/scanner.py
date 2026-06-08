@@ -902,7 +902,7 @@ def run_full_scan(watchlist_stocks: list):
         for s in watchlist_stocks
     ]
     
-  print(f"\n[DEBUG] ═══════════════════════════════════════")
+ print(f"\n[DEBUG] ═══════════════════════════════════════")
 print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
 print(f"[DEBUG] angel_obj = {angel_obj}")
 print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
@@ -918,7 +918,7 @@ live_high_low = collect_live_high_low_with_fallback(
 print(f"\n[DEBUG] ═══════════════════════════════════════")
 print(f"[DEBUG] collect_live_high_low_with_fallback() returned!")
 print(f"[DEBUG] Result type = {type(live_high_low)}")
-print(f"[DEBUG] Result keys = {list(live_high_low.keys())[:5] if live_high_low else 'None/Empty'}")
+print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
 print(f"[DEBUG] ═══════════════════════════════════════\n")
 
     # ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
