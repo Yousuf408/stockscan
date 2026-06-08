@@ -891,23 +891,23 @@ def run_full_scan(watchlist_stocks: list):
             f"❌ {len(failed_stocks)} stocks failed — skipped: {', '.join(failed_stocks)}"
         )
 
-    # ✨ v3.0: Collect live High/Low from WebSocket (9:15-9:20)
-    st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
-    symbols_with_tokens = [
-        {
-            "symbol": s["symbol"],
-            "token": s["token"],
-            "exchange": s["exchange"]
-        }
-        for s in watchlist_stocks
-    ]
-    
- print(f"\n[DEBUG] ═══════════════════════════════════════")
+ # ✨ v3.0: Collect live High/Low from WebSocket (9:15-9:20)
+print(f"\n[DEBUG] ═══════════════════════════════════════")
 print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
 print(f"[DEBUG] angel_obj = {angel_obj}")
 print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
 print(f"[DEBUG] symbols_with_tokens count = {len(symbols_with_tokens)}")
 print(f"[DEBUG] ═══════════════════════════════════════\n")
+
+st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
+symbols_with_tokens = [
+    {
+        "symbol": s["symbol"],
+        "token": s["token"],
+        "exchange": s["exchange"]
+    }
+    for s in watchlist_stocks
+]
 
 live_high_low = collect_live_high_low_with_fallback(
     angel_obj=angel_obj,
@@ -921,9 +921,9 @@ print(f"[DEBUG] Result type = {type(live_high_low)}")
 print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
 print(f"[DEBUG] ═══════════════════════════════════════\n")
 
-    # ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
-    if not live_high_low:
-        live_high_low = {}
+# ✨ v3.0.1 FIX: SAFETY CHECK - Ensure always dict
+if not live_high_low:
+    live_high_low = {}
 
     if live_high_low:
         collected_count = len([s for s in live_high_low.values() if s.get("high")])
