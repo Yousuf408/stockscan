@@ -802,21 +802,17 @@ def run_full_scan(watchlist_stocks: list):
         st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
         return
  
-    # ── Rate limit config ──────────────────────────────────────────────────────
-    # AngelOne getCandleData = 3 req/sec, 180 req/min
-    # 0.4s delay = 2.5 req/sec safely under limit
-    # But actual fetch takes ~0.6s network time on top
-    # So real gap = 0.4 + 0.6 = ~1s per stock = well under limit
-    FETCH_DELAY = 0.4   # seconds between each sequential request
-    RETRY_DELAY = 2.0   # longer pause before retrying failed stocks
+    import concurrent.futures
  
-    st.session_state.scan_running = True   # ← blocks auto_refresh during scan
-    st.session_state.is_scanning  = True
-    st.session_state.scan_log     = []
+    BATCH_SIZE = 2      # ✅ Reduced for rate limiting
+    BATCH_WAIT = 2.0    # ✅ Increased for rate limiting
+ 
+    st.session_state.is_scanning = True
+    st.session_state.scan_log    = []
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
  
-    # Get auth ONCE
+    # Get auth ONCE in main thread
     angel_obj = get_angel_auth()
     if angel_obj:
         st.session_state.scan_log.append("🔐 AngelOne session active — using real-time data")
@@ -824,66 +820,45 @@ def run_full_scan(watchlist_stocks: list):
         st.session_state.scan_log.append("❌ AngelOne session unavailable — stocks will be skipped")
  
     candles_map   = {}
-    failed_stocks = []   # store full stock dicts for retry
+    failed_stocks = []
+    _scan_log     = st.session_state.scan_log
  
-    # ── PHASE 1: Sequential fetch — no parallel, no burst ─────────────────────
-    for i, stock in enumerate(watchlist_stocks):
-        symbol = stock["symbol"]
- 
-        time.sleep(FETCH_DELAY)   # strict rate limit control — never skip this
- 
+    def fetch_one(stock):
+        time.sleep(1.0)  # ✅ 1 second delay per request to avoid rate limiting
         try:
-            candles = fetch_candles_5min(
-                stock["token"], symbol, angel_obj,
-                _log=st.session_state.scan_log
-            )
-            candles_map[symbol] = candles
-            if candles is None:
-                failed_stocks.append(stock)   # keep full dict for retry
- 
+            candles = fetch_candles_5min(stock["token"], stock["symbol"], angel_obj,
+                                         _log=_scan_log)
+            return stock["symbol"], candles, None
         except Exception as e:
-            failed_stocks.append(stock)
-            st.session_state.scan_log.append(f"❌ [{symbol}] {str(e)}")
+            return stock["symbol"], None, str(e)
  
-        progress_bar.progress(
-            (i + 1) / total / 2,
-            text=f"Fetching {i + 1}/{total}: {symbol}"
-        )
+    batches = [watchlist_stocks[i:i + BATCH_SIZE]
+               for i in range(0, total, BATCH_SIZE)]
+    fetched = 0
  
-    # ── PHASE 2: Retry failed stocks once with longer delay ───────────────────
+    for batch in batches:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
+            futures = {executor.submit(fetch_one, s): s for s in batch}
+            for future in concurrent.futures.as_completed(futures):
+                symbol, candles, error = future.result()
+                candles_map[symbol] = candles
+                fetched += 1
+                if candles is None:
+                    failed_stocks.append(symbol)
+                    if error:
+                        st.session_state.scan_log.append(f"❌ [{symbol}] {error}")
+                progress_bar.progress(
+                    fetched / total / 2,
+                    text=f"Fetching {fetched}/{total}: {symbol}"
+                )
+        time.sleep(BATCH_WAIT)
+ 
     if failed_stocks:
         st.session_state.scan_log.append(
-            f"⚠️ Retrying {len(failed_stocks)} failed stocks..."
+            f"❌ {len(failed_stocks)} stocks failed — skipped: {', '.join(failed_stocks)}"
         )
-        still_failed = []
  
-        for stock in failed_stocks:
-            symbol = stock["symbol"]
-            time.sleep(RETRY_DELAY)   # longer pause gives AngelOne breathing room
- 
-            try:
-                candles = fetch_candles_5min(
-                    stock["token"], symbol, angel_obj,
-                    _log=st.session_state.scan_log
-                )
-                candles_map[symbol] = candles
-                if candles is None:
-                    still_failed.append(symbol)
-                else:
-                    st.session_state.scan_log.append(f"✅ [{symbol}] retry succeeded")
- 
-            except Exception as e:
-                still_failed.append(symbol)
-                st.session_state.scan_log.append(
-                    f"❌ [{symbol}] retry failed — skipping"
-                )
- 
-        if still_failed:
-            st.session_state.scan_log.append(
-                f"❌ {len(still_failed)} stocks skipped after retry: {', '.join(still_failed)}"
-            )
- 
-    # ── PHASE 3: WebSocket High/Low collection (untouched) ────────────────────
+    # ✅ Collect live High/Low from WebSocket (INSIDE function — correct indentation)
     st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
  
     symbols_with_tokens = [
@@ -905,7 +880,7 @@ def run_full_scan(watchlist_stocks: list):
     live_high_low = collect_live_high_low_with_fallback(
         angel_obj=angel_obj,
         symbols_with_tokens=symbols_with_tokens,
-        http_candles=candles_map   # ✅ FIXED: pass candles_map so HTTP fallback works
+        http_candles=None
     )
  
     print(f"\n[DEBUG] ═══════════════════════════════════════")
@@ -914,21 +889,17 @@ def run_full_scan(watchlist_stocks: list):
     print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
     print(f"[DEBUG] ═══════════════════════════════════════\n")
  
-    # Safety check
+    # ✅ Safety check
     if not live_high_low:
         live_high_low = {}
  
     if live_high_low:
         collected_count = len([s for s in live_high_low.values() if s.get("high")])
-        st.session_state.scan_log.append(
-            f"[9:20] ✅ Collected High/Low for {collected_count} stocks"
-        )
+        st.session_state.scan_log.append(f"[9:20] ✅ Collected High/Low for {collected_count} stocks")
     else:
-        st.session_state.scan_log.append(
-            "[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles"
-        )
+        st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
  
-    # Save High/Low to DB (untouched)
+    # Save High/Low to DB
     for symbol, data in live_high_low.items():
         if data.get("high") and data.get("low"):
             try:
@@ -947,12 +918,12 @@ def run_full_scan(watchlist_stocks: list):
             except Exception as e:
                 st.session_state.scan_log.append(f"⚠️ [{symbol}] DB save failed: {e}")
  
-    # ── PHASE 4: Analyze all stocks (untouched) ───────────────────────────────
+    # Analyze all stocks
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
             0.5 + (i + 1) / total / 2,
-            text=f"Analyzing {i + 1}/{total}: {stock['symbol']}"
+            text=f"Analyzing {i+1}/{total}: {stock['symbol']}"
         )
         analyze_stock(stock, candles, is_refresh=False, live_high_low=live_high_low)
  
@@ -967,8 +938,7 @@ def run_full_scan(watchlist_stocks: list):
         )
  
     progress_bar.empty()
-    st.session_state.is_scanning  = False
-    st.session_state.scan_running = False   # ← unblock auto_refresh
+    st.session_state.is_scanning = False
  
  
 def run_refresh_scan(watchlist_stocks: list):
@@ -1363,7 +1333,7 @@ else:
 </div>
 """, unsafe_allow_html=True)
 
-if st.session_state.auto_refresh and is_market_open() and st.session_state.results and not st.session_state.get("scan_running", False):
+if st.session_state.auto_refresh and is_market_open() and st.session_state.results:
     last = st.session_state.get("last_auto_refresh", 0)
     if time.time() - last >= 300:
         run_refresh_scan(stocks_to_scan)
