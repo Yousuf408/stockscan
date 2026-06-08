@@ -22,7 +22,13 @@ from core import calc_ema, load_watchlist, save_watchlist, \
 # ── WebSocket collector import ──
 try:
     from websocket_tick_collector import collect_live_high_low_with_fallback
-except ImportError:
+    print("[IMPORT] ✅ websocket_tick_collector loaded successfully")
+except ImportError as e:
+    print(f"[IMPORT] ❌ ImportError: {e}")
+    def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens, http_candles=None):
+        return {}
+except Exception as e:
+    print(f"[IMPORT] ❌ Exception: {e}")
     def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens, http_candles=None):
         return {}
 
