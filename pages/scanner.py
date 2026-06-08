@@ -1,6 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v3.1.0
-#  v3.1.0: Dhan API integration for candle fetch — replaces AngelOne getCandleData
+#  TRADE SENTRY — scanner.py  v3.2.0
+#  v3.2.0: yfinance for candle fetch — replaces Dhan/AngelOne getCandleData
+#          AngelOne kept only for WebSocket High/Low collection
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -32,14 +33,14 @@ except Exception as e:
     def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens, http_candles=None):
         return {}
 
-# ── Dhan fetch import ──
+# ── yfinance fetch import ──
 try:
-    from dhan_fetch import fetch_candles_5min_dhan
-    DHAN_AVAILABLE = True
-    print("[IMPORT] ✅ dhan_fetch loaded successfully")
+    from yfinance_fetch import fetch_candles_5min_yfinance
+    YFINANCE_AVAILABLE = True
+    print("[IMPORT] ✅ yfinance_fetch loaded successfully")
 except Exception as e:
-    DHAN_AVAILABLE = False
-    print(f"[IMPORT] ❌ dhan_fetch failed: {e}")
+    YFINANCE_AVAILABLE = False
+    print(f"[IMPORT] ❌ yfinance_fetch failed: {e}")
 
 # ── Import from stocks.py ──
 try:
@@ -104,11 +105,6 @@ def get_angel_auth():
         client_code = os.environ.get("ANGEL_CLIENT_ID", "")
         password    = os.environ.get("ANGEL_PASSWORD", "")
         totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
-
-        print(f"[AngelAuth] api_key     = {'SET' if api_key     else 'NOT SET'}")
-        print(f"[AngelAuth] client_code = {'SET' if client_code else 'NOT SET'}")
-        print(f"[AngelAuth] password    = {'SET' if password    else 'NOT SET'}")
-        print(f"[AngelAuth] totp_secret = {'SET' if totp_secret else 'NOT SET'}")
 
         if not all([api_key, client_code, password, totp_secret]):
             print("[AngelAuth] ❌ One or more credentials missing")
@@ -264,7 +260,7 @@ def get_trading_date_for_scan() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4: DATA FETCH
+# SECTION 4: DATA FETCH — AngelOne fallback only
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: list = None):
@@ -306,7 +302,7 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
                                      float(c[3]), float(c[4]), float(c[5])])
                 if rows:
                     return rows
-                log.append(f"⚠️ [{symbol}] 0 rows returned — token '{symbol_token}' may be inactive")
+                log.append(f"⚠️ [{symbol}] 0 rows returned")
             else:
                 log.append(f"❌ [{symbol}] API rejected — status={status} msg={msg}")
         else:
@@ -812,46 +808,46 @@ def run_full_scan(watchlist_stocks: list):
         st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
         return
 
-    # ── Rate limit config ──────────────────────────────────────────────────────
-    # Dhan getCandleData = 5 req/sec (vs AngelOne 3/sec)
-    # 0.25s delay = 4 req/sec — safely under 5/sec limit
-    FETCH_DELAY = 0.25   # seconds between each sequential request
-    RETRY_DELAY = 1.5    # longer pause before retrying failed stocks
+    # yfinance has no rate limit — no delay needed between requests
+    # AngelOne fallback uses 0.4s delay to stay under 3/sec limit
+    FETCH_DELAY_ANGEL = 0.4
+    RETRY_DELAY       = 1.5
 
-    st.session_state.scan_running = True   # blocks auto_refresh during scan
+    st.session_state.scan_running = True
     st.session_state.is_scanning  = True
     st.session_state.scan_log     = []
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
-    # Get AngelOne auth (still needed for WebSocket fallback)
+    # AngelOne auth — only needed for WebSocket fallback
     angel_obj = get_angel_auth()
     if angel_obj:
         st.session_state.scan_log.append("🔐 AngelOne session active — using for WebSocket")
     else:
         st.session_state.scan_log.append("⚠️ AngelOne session unavailable")
 
-    if DHAN_AVAILABLE:
-        st.session_state.scan_log.append("🟢 Dhan API active — using for candle fetch")
+    if YFINANCE_AVAILABLE:
+        st.session_state.scan_log.append("🟢 yfinance active — fetching candles (no rate limit)")
     else:
-        st.session_state.scan_log.append("⚠️ Dhan unavailable — falling back to AngelOne")
+        st.session_state.scan_log.append("⚠️ yfinance unavailable — falling back to AngelOne")
 
     candles_map   = {}
     failed_stocks = []
 
-    # ── PHASE 1: Sequential fetch ──────────────────────────────────────────────
+    # ── PHASE 1: Fetch candles ─────────────────────────────────────────────────
     for i, stock in enumerate(watchlist_stocks):
         symbol = stock["symbol"]
 
-        time.sleep(FETCH_DELAY)
-
         try:
-            if DHAN_AVAILABLE:
-                candles = fetch_candles_5min_dhan(
-                    stock["token"], symbol,
+            if YFINANCE_AVAILABLE:
+                # yfinance — no delay needed, no rate limit
+                candles = fetch_candles_5min_yfinance(
+                    symbol,
                     _log=st.session_state.scan_log
                 )
             else:
+                # AngelOne fallback
+                time.sleep(FETCH_DELAY_ANGEL)
                 candles = fetch_candles_5min(
                     stock["token"], symbol, angel_obj,
                     _log=st.session_state.scan_log
@@ -870,7 +866,7 @@ def run_full_scan(watchlist_stocks: list):
             text=f"Fetching {i + 1}/{total}: {symbol}"
         )
 
-    # ── PHASE 2: Retry failed stocks once ─────────────────────────────────────
+    # ── PHASE 2: Retry failed stocks ──────────────────────────────────────────
     if failed_stocks:
         st.session_state.scan_log.append(
             f"⚠️ Retrying {len(failed_stocks)} failed stocks..."
@@ -882,9 +878,9 @@ def run_full_scan(watchlist_stocks: list):
             time.sleep(RETRY_DELAY)
 
             try:
-                if DHAN_AVAILABLE:
-                    candles = fetch_candles_5min_dhan(
-                        stock["token"], symbol,
+                if YFINANCE_AVAILABLE:
+                    candles = fetch_candles_5min_yfinance(
+                        symbol,
                         _log=st.session_state.scan_log
                     )
                 else:
@@ -905,39 +901,22 @@ def run_full_scan(watchlist_stocks: list):
 
         if still_failed:
             st.session_state.scan_log.append(
-                f"❌ {len(still_failed)} stocks skipped after retry: {', '.join(still_failed)}"
+                f"❌ {len(still_failed)} stocks skipped: {', '.join(still_failed)}"
             )
 
-    # ── PHASE 3: WebSocket High/Low collection ─────────────────────────────────
+    # ── PHASE 3: WebSocket High/Low ───────────────────────────────────────────
     st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
 
     symbols_with_tokens = [
-        {
-            "symbol":   s["symbol"],
-            "token":    s["token"],
-            "exchange": s["exchange"],
-        }
+        {"symbol": s["symbol"], "token": s["token"], "exchange": s["exchange"]}
         for s in watchlist_stocks
     ]
-
-    print(f"\n[DEBUG] ═══════════════════════════════════════")
-    print(f"[DEBUG] About to call collect_live_high_low_with_fallback()")
-    print(f"[DEBUG] angel_obj = {angel_obj}")
-    print(f"[DEBUG] angel_obj type = {type(angel_obj)}")
-    print(f"[DEBUG] symbols_with_tokens count = {len(symbols_with_tokens)}")
-    print(f"[DEBUG] ═══════════════════════════════════════\n")
 
     live_high_low = collect_live_high_low_with_fallback(
         angel_obj=angel_obj,
         symbols_with_tokens=symbols_with_tokens,
-        http_candles=candles_map   # ✅ FIXED: pass candles_map so HTTP fallback works
+        http_candles=candles_map
     )
-
-    print(f"\n[DEBUG] ═══════════════════════════════════════")
-    print(f"[DEBUG] collect_live_high_low_with_fallback() returned!")
-    print(f"[DEBUG] Result type  = {type(live_high_low)}")
-    print(f"[DEBUG] Result count = {len(live_high_low) if live_high_low else 0}")
-    print(f"[DEBUG] ═══════════════════════════════════════\n")
 
     if not live_high_low:
         live_high_low = {}
@@ -948,7 +927,6 @@ def run_full_scan(watchlist_stocks: list):
     else:
         st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
 
-    # Save High/Low to DB
     for symbol, data in live_high_low.items():
         if data.get("high") and data.get("low"):
             try:
@@ -967,7 +945,7 @@ def run_full_scan(watchlist_stocks: list):
             except Exception as e:
                 st.session_state.scan_log.append(f"⚠️ [{symbol}] DB save failed: {e}")
 
-    # ── PHASE 4: Analyze all stocks ────────────────────────────────────────────
+    # ── PHASE 4: Analyze ──────────────────────────────────────────────────────
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
@@ -988,7 +966,7 @@ def run_full_scan(watchlist_stocks: list):
 
     progress_bar.empty()
     st.session_state.is_scanning  = False
-    st.session_state.scan_running = False   # unblock auto_refresh
+    st.session_state.scan_running = False
 
 
 def run_refresh_scan(watchlist_stocks: list):
@@ -998,9 +976,9 @@ def run_refresh_scan(watchlist_stocks: list):
     for r in st.session_state.results:
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
-            if DHAN_AVAILABLE:
-                candles = fetch_candles_5min_dhan(
-                    matched["token"], matched["symbol"],
+            if YFINANCE_AVAILABLE:
+                candles = fetch_candles_5min_yfinance(
+                    matched["symbol"],
                     _log=st.session_state.scan_log
                 )
             else:
@@ -1010,7 +988,7 @@ def run_refresh_scan(watchlist_stocks: list):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 9: UI
+# SECTION 9: UI — unchanged
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
