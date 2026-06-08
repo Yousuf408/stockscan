@@ -1,403 +1,305 @@
 # ═════════════════════════════════════════════════════════════════════════════
-# TRADESENTRY — websocket_tick_collector.py v2.0
-# WebSocket Tick Collection (9:15-9:20 AM) with HTTP Fallback + DETAILED LOGGING
-# 
-# v2.0: Added actual WebSocket connection + comprehensive error logging
+# TRADESENTRY — websocket_tick_collector.py v3.0
+# CORRECT Angel One WebSocket using SmartWebSocketV2
 # ═════════════════════════════════════════════════════════════════════════════
 
 import os
 import json
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 from collections import defaultdict
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# WebSocket Tick Collection Class
-# ─────────────────────────────────────────────────────────────────────────────
-
-class WebSocketTickCollector:
-    """
-    Collects live ticks from Angel WebSocket (9:15-9:20 AM).
-    Stores ticks in memory for High/Low calculation.
-    """
-    
-    def __init__(self, angel_obj, symbols_with_tokens: list, collection_duration_secs: int = 300):
-        """
-        Args:
-            angel_obj: SmartConnect object (already authenticated)
-            symbols_with_tokens: [{"symbol": "RELIANCE", "token": "2885", "exchange": "NSE"}, ...]
-            collection_duration_secs: How long to collect (default 5 min = 300 sec)
-        """
-        self.angel_obj = angel_obj
-        self.symbols_with_tokens = symbols_with_tokens
-        self.collection_duration = collection_duration_secs
-        
-        # Store ticks in memory: {symbol: [tick1, tick2, ...]}
-        self.ticks = defaultdict(list)
-        
-        # Status tracking
-        self.is_collecting = False
-        self.start_time = None
-        self.end_time = None
-        self.error_message = None
-        self.tick_count = 0
-        self.ws = None
-        
-        print(f"[WebSocket] ✅ Initialized collector for {len(symbols_with_tokens)} symbols")
-        print(f"[WebSocket] Duration: {collection_duration_secs}s")
-    
-    def connect_and_collect(self) -> dict:
-        """
-        Main function: Connect to WebSocket and collect ticks.
-        
-        Returns:
-            {
-                symbol: {
-                    ticks: [tick1, tick2, ...],
-                    high: X.XX,
-                    low: Y.YY,
-                    tick_count: N
-                },
-                ...
-            }
-        """
-        try:
-            print(f"\n[WebSocket] ═══════════════════════════════════════")
-            print(f"[WebSocket] Starting WebSocket collection at {datetime.now(IST).strftime('%H:%M:%S')}")
-            print(f"[WebSocket] ═══════════════════════════════════════\n")
-            
-            self.is_collecting = True
-            self.start_time = datetime.now(IST)
-            
-            # Step 1: Check Angel Object
-            if not self.angel_obj:
-                self.error_message = "Angel object is None/invalid"
-                print(f"[WebSocket] ❌ {self.error_message}")
-                return {}
-            
-            print(f"[WebSocket] ✅ Angel object valid")
-            
-            # Step 2: Subscribe to all symbols
-            if not self._subscribe_to_symbols():
-                self.error_message = "Failed to subscribe to WebSocket"
-                print(f"[WebSocket] ❌ {self.error_message}")
-                return {}
-            
-            # Step 3: Collect ticks for 5 minutes
-            print(f"[WebSocket] ✅ Subscribed successfully!")
-            print(f"[WebSocket] 🔊 Listening for ticks for {self.collection_duration}s...\n")
-            self._collect_ticks()
-            
-            self.end_time = datetime.now(IST)
-            self.is_collecting = False
-            
-            # Step 4: Calculate High/Low from collected ticks
-            result = self._calculate_high_low()
-            
-            print(f"\n[WebSocket] ═══════════════════════════════════════")
-            print(f"[WebSocket] ✅ Collection complete")
-            print(f"[WebSocket] Total ticks collected: {self.tick_count}")
-            print(f"[WebSocket] Symbols with data: {len([r for r in result.values() if r.get('tick_count', 0) > 0])}")
-            print(f"[WebSocket] ═══════════════════════════════════════\n")
-            
-            return result
-            
-        except Exception as e:
-            self.error_message = str(e)
-            self.is_collecting = False
-            print(f"\n[WebSocket] ❌ EXCEPTION in connect_and_collect():")
-            print(f"[WebSocket] Type: {type(e).__name__}")
-            print(f"[WebSocket] Message: {e}")
-            print(f"[WebSocket] ═══════════════════════════════════════\n")
-            import traceback
-            traceback.print_exc()
-            return {}
-    
-    def _subscribe_to_symbols(self) -> bool:
-        """Subscribe to WebSocket for all symbols."""
-        try:
-            print(f"[WebSocket] 🔌 Attempting subscription...")
-            
-            # Group tokens by exchange
-            tokens_by_exchange = defaultdict(list)
-            for item in self.symbols_with_tokens:
-                exchange = 1 if item["exchange"] == "NSE" else 3  # 1=NSE, 3=BSE
-                tokens_by_exchange[exchange].append(item["token"])
-            
-            print(f"[WebSocket] 📊 Token groups:")
-            for exchange, tokens in tokens_by_exchange.items():
-                ex_name = "NSE" if exchange == 1 else "BSE"
-                print(f"[WebSocket]    {ex_name}: {len(tokens)} tokens")
-            
-            # Build subscription payload
-            token_list = []
-            for exchange, tokens in tokens_by_exchange.items():
-                token_list.append({
-                    "exchangeType": exchange,
-                    "tokens": tokens
-                })
-            
-            payload = {
-                "correlationID": "9_15_collection",
-                "action": 1,  # 1 = Subscribe
-                "params": {
-                    "mode": 2,  # 2 = Quote mode (includes OHLC + volume)
-                    "tokenList": token_list
-                }
-            }
-            
-            print(f"[WebSocket] 📤 Payload: {json.dumps(payload, indent=2)}")
-            
-            # Try to use angel_obj.subscribe() if available
-            try:
-                if hasattr(self.angel_obj, 'subscribe'):
-                    print(f"[WebSocket] ✅ Using angel_obj.subscribe() method")
-                    response = self.angel_obj.subscribe(payload)
-                    print(f"[WebSocket] ✅ Subscribe response: {response}")
-                    return True
-                else:
-                    print(f"[WebSocket] ⚠️ angel_obj.subscribe() method not found")
-                    print(f"[WebSocket] Available methods: {[m for m in dir(self.angel_obj) if not m.startswith('_')][:5]}...")
-                    return False
-            except Exception as e:
-                print(f"[WebSocket] ❌ Subscribe method failed: {type(e).__name__}: {e}")
-                return False
-            
-        except Exception as e:
-            print(f"[WebSocket] ❌ Error in _subscribe_to_symbols():")
-            print(f"[WebSocket] Type: {type(e).__name__}")
-            print(f"[WebSocket] Message: {e}")
-            return False
-    
-    def _collect_ticks(self):
-        """Collect ticks for specified duration."""
-        try:
-            print(f"[WebSocket] 👂 Collecting ticks...")
-            
-            elapsed = 0
-            tick_count_prev = 0
-            
-            while elapsed < self.collection_duration and self.is_collecting:
-                try:
-                    time.sleep(1)
-                    elapsed = (datetime.now(IST) - self.start_time).total_seconds()
-                    
-                    current_tick_count = sum(len(t) for t in self.ticks.values())
-                    if current_tick_count > tick_count_prev:
-                        print(f"[WebSocket] 📈 Ticks received: {current_tick_count} (elapsed: {elapsed:.0f}s)")
-                        tick_count_prev = current_tick_count
-                    
-                except Exception as e:
-                    print(f"[WebSocket] ⚠️ Error in tick reception: {e}")
-                    time.sleep(1)
-                    continue
-            
-            self.tick_count = sum(len(t) for t in self.ticks.values())
-            print(f"[WebSocket] ✅ Collection window closed (elapsed: {elapsed:.0f}s, ticks: {self.tick_count})")
-            
-        except Exception as e:
-            print(f"[WebSocket] ❌ Error in _collect_ticks():")
-            print(f"[WebSocket] Type: {type(e).__name__}")
-            print(f"[WebSocket] Message: {e}")
-    
-    def _calculate_high_low(self) -> dict:
-        """Calculate High/Low from collected ticks."""
-        result = {}
-        
-        print(f"\n[WebSocket] 📊 Calculating High/Low from ticks...")
-        
-        for symbol_data in self.symbols_with_tokens:
-            symbol = symbol_data["symbol"]
-            
-            ticks = self.ticks.get(symbol, [])
-            
-            if ticks:
-                prices = [float(tick.get("price", 0)) for tick in ticks if tick.get("price")]
-                
-                if prices:
-                    high = max(prices)
-                    low = min(prices)
-                    
-                    result[symbol] = {
-                        "ticks": ticks,
-                        "high": high,
-                        "low": low,
-                        "tick_count": len(ticks),
-                        "source": "websocket"
-                    }
-                    
-                    print(f"[WebSocket] ✅ {symbol}: H={high:.2f} L={low:.2f} ({len(ticks)} ticks)")
-                else:
-                    print(f"[WebSocket] ⚠️ {symbol}: Invalid tick prices")
-                    result[symbol] = {
-                        "high": None,
-                        "low": None,
-                        "tick_count": 0,
-                        "source": "websocket",
-                        "error": "Invalid tick data"
-                    }
-            else:
-                print(f"[WebSocket] ⚠️ {symbol}: No ticks collected")
-                result[symbol] = {
-                    "high": None,
-                    "low": None,
-                    "tick_count": 0,
-                    "source": "websocket",
-                    "error": "No ticks received"
-                }
-        
-        return result
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HTTP Fallback for High/Low
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_high_low_from_http_candle(candle: list) -> tuple:
-    """
-    Fallback: Get High/Low from historical candle data.
-    
-    Args:
-        candle: [timestamp, open, high, low, close, volume]
-    
-    Returns:
-        (high, low) tuple
-    """
-    try:
-        high = float(candle[2])
-        low = float(candle[3])
-        print(f"[HTTP Fallback] ✅ Parsed candle: H={high:.2f} L={low:.2f}")
-        return high, low
-    except Exception as e:
-        print(f"[HTTP Fallback] ❌ Error parsing candle: {type(e).__name__}: {e}")
-        return None, None
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main Function: Collect with Fallback
-# ─────────────────────────────────────────────────────────────────────────────
 
 def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens: list,
-                                       http_candles: dict = None) -> dict:
+                                        http_candles: dict = None) -> dict:
     """
-    Collect High/Low with fallback:
-    1. TRY: WebSocket (9:15-9:20 live ticks)
-    2. FALLBACK: HTTP (historical candle data)
-    
-    Args:
-        angel_obj: SmartConnect object
-        symbols_with_tokens: List of symbol dicts
-        http_candles: {symbol: candle} (fallback data)
-    
-    Returns:
-        {
-            symbol: {
-                high: X.XX,
-                low: Y.YY,
-                source: "websocket" or "http",
-                tick_count: N,
-                error: error_msg or None
-            },
-            ...
-        }
+    Collect High/Low using Angel One SmartWebSocketV2.
+    Falls back to HTTP candles if WebSocket fails.
     """
-    result = {}
-    
+
     print("\n" + "="*70)
     print("[Collection] STARTING HIGH/LOW COLLECTION")
-    print("="*70)
-    print(f"[Collection] Timestamp: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"[Collection] Symbols: {len(symbols_with_tokens)}")
+    print(f"[Collection] Time      : {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[Collection] Symbols   : {len(symbols_with_tokens)}")
     print("="*70 + "\n")
-    
-    # ✅ PHASE 1: Try WebSocket
-    print("[Collection] PHASE 1: Attempting WebSocket...")
+
+    # ── PHASE 1: Try SmartWebSocketV2 ────────────────────────────────────────
+    print("[Collection] PHASE 1: Attempting SmartWebSocketV2...")
     print("-"*70)
-    
+
     try:
-        if not angel_obj:
-            print("[Collection] ❌ Angel object is None")
-            raise Exception("Invalid angel_obj")
-        
-        collector = WebSocketTickCollector(
-            angel_obj=angel_obj,
-            symbols_with_tokens=symbols_with_tokens,
-            collection_duration_secs=300  # 5 minutes
-        )
-        
-        websocket_result = collector.connect_and_collect()
-        
-        # Check if we got valid results
-        valid_results = {k: v for k, v in websocket_result.items() if v.get("tick_count", 0) > 0}
-        
-        if valid_results and len(valid_results) >= (len(symbols_with_tokens) * 0.5):  # At least 50% success
-            print("\n[Collection] ✅ PHASE 1 SUCCESS: WebSocket provided sufficient data!")
-            return websocket_result
+        result = _collect_via_smartwebsocket(angel_obj, symbols_with_tokens)
+
+        valid = {k: v for k, v in result.items() if v.get("tick_count", 0) > 0}
+        print(f"[Collection] WebSocket valid symbols: {len(valid)} / {len(symbols_with_tokens)}")
+
+        if valid:
+            print("[Collection] ✅ PHASE 1 SUCCESS!")
+            return result
         else:
-            print(f"\n[Collection] ⚠️ PHASE 1 PARTIAL: Only {len(valid_results)} symbols with data")
-            print("[Collection] 🔄 Falling back to HTTP...")
-            
+            print("[Collection] ⚠️ PHASE 1: No ticks collected → falling back to HTTP")
+
     except Exception as e:
-        print(f"\n[Collection] ❌ PHASE 1 FAILED:")
-        print(f"[Collection] Type: {type(e).__name__}")
-        print(f"[Collection] Message: {e}")
-        print("[Collection] 🔄 Falling back to HTTP...")
         import traceback
+        print(f"[Collection] ❌ PHASE 1 FAILED: {type(e).__name__}: {e}")
         traceback.print_exc()
-    
-    # ❌ PHASE 2: Fallback to HTTP
+
+    # ── PHASE 2: HTTP Fallback ────────────────────────────────────────────────
     print("\n[Collection] PHASE 2: Using HTTP Fallback...")
     print("-"*70)
-    
+
+    result = {}
+
     if not http_candles:
-        print("[Collection] ❌ No HTTP fallback data available")
+        print("[Collection] ❌ No HTTP candle data provided")
         return result
-    
-    for symbol_data in symbols_with_tokens:
-        symbol = symbol_data["symbol"]
-        
+
+    for s in symbols_with_tokens:
+        symbol = s["symbol"]
         candle = http_candles.get(symbol)
-        
         if candle:
-            high, low = get_high_low_from_http_candle(candle)
-            
-            if high and low:
+            try:
+                high = float(candle[2])
+                low  = float(candle[3])
                 result[symbol] = {
-                    "high": high,
-                    "low": low,
+                    "high":     high,
+                    "low":      low,
                     "http_high": high,
-                    "http_low": low,
-                    "source": "http",
+                    "http_low":  low,
+                    "source":   "http",
                     "tick_count": 1,
-                    "error": "WebSocket unavailable - using HTTP"
+                    "error":    "WebSocket unavailable - using HTTP",
                 }
-                print(f"[HTTP Fallback] ✅ {symbol}: H={high:.2f} L={low:.2f}")
-            else:
-                result[symbol] = {
-                    "high": None,
-                    "low": None,
-                    "http_high": None,
-                    "http_low": None,
-                    "source": None,
-                    "error": "Failed to parse candle"
-                }
-                print(f"[HTTP Fallback] ❌ {symbol}: Parse failed")
+                print(f"[HTTP] ✅ {symbol}: H={high:.2f} L={low:.2f}")
+            except Exception as e:
+                print(f"[HTTP] ❌ {symbol}: Parse error — {e}")
         else:
+            print(f"[HTTP] ❌ {symbol}: No candle data")
+
+    print(f"\n[Collection] PHASE 2 COMPLETE: {len(result)} symbols")
+    return result
+
+
+def _collect_via_smartwebsocket(angel_obj, symbols_with_tokens: list,
+                                 duration_secs: int = 300) -> dict:
+    """
+    Real Angel One WebSocket using SmartWebSocketV2.
+    Collects ticks for duration_secs and returns High/Low per symbol.
+    """
+
+    # ── Step 1: Import SmartWebSocketV2 ──────────────────────────────────────
+    try:
+        from SmartApi.smartWebSocketV2 import SmartWebSocketV2
+        print("[WebSocket] ✅ SmartWebSocketV2 imported successfully")
+    except ImportError as e:
+        print(f"[WebSocket] ❌ Cannot import SmartWebSocketV2: {e}")
+        print("[WebSocket] Try: pip install smartapi-python --upgrade")
+        raise
+
+    # ── Step 2: Get credentials from angel_obj ────────────────────────────────
+    try:
+        api_key     = os.environ.get("ANGEL_API_KEY", "")
+        client_code = os.environ.get("ANGEL_CLIENT_ID", "")
+
+        # Get auth_token and feed_token from the session
+        profile     = angel_obj.getProfile(angel_obj.refresh_token)
+        feed_token  = angel_obj.feed_token
+        auth_token  = angel_obj.access_token
+
+        print(f"[WebSocket] ✅ Credentials ready")
+        print(f"[WebSocket]    api_key     = {'SET' if api_key     else '❌ NOT SET'}")
+        print(f"[WebSocket]    client_code = {'SET' if client_code else '❌ NOT SET'}")
+        print(f"[WebSocket]    feed_token  = {'SET' if feed_token  else '❌ NOT SET'}")
+        print(f"[WebSocket]    auth_token  = {'SET' if auth_token  else '❌ NOT SET'}")
+
+    except Exception as e:
+        print(f"[WebSocket] ❌ Failed to get credentials: {type(e).__name__}: {e}")
+        raise
+
+    # ── Step 3: Build token list ──────────────────────────────────────────────
+    # Angel One SmartWebSocketV2 token_list format:
+    # [{"exchangeType": 1, "tokens": ["2885", "1333", ...]}, ...]
+    tokens_by_exchange = defaultdict(list)
+    token_to_symbol    = {}
+
+    for s in symbols_with_tokens:
+        ex_type = 1 if s.get("exchange", "NSE") in ("NSE", "NS") else 3
+        tokens_by_exchange[ex_type].append(s["token"])
+        token_to_symbol[s["token"]] = s["symbol"]
+
+    token_list = [
+        {"exchangeType": ex, "tokens": toks}
+        for ex, toks in tokens_by_exchange.items()
+    ]
+
+    print(f"[WebSocket] 📊 Token list built:")
+    for item in token_list:
+        ex_name = "NSE" if item["exchangeType"] == 1 else "BSE"
+        print(f"[WebSocket]    {ex_name}: {len(item['tokens'])} tokens")
+
+    # ── Step 4: Storage for ticks ─────────────────────────────────────────────
+    ticks_storage = defaultdict(list)   # {symbol: [price1, price2, ...]}
+    ws_connected  = threading.Event()
+    ws_error      = {"msg": None}
+
+    # ── Step 5: Define callbacks ──────────────────────────────────────────────
+
+    def on_open(wsapp):
+        print(f"\n[WebSocket] ✅ CONNECTION OPENED at {datetime.now(IST).strftime('%H:%M:%S')}")
+        ws_connected.set()
+
+    def on_data(wsapp, message, data_type, continue_flag):
+        """Called for every tick received."""
+        try:
+            if isinstance(message, dict):
+                token = str(message.get("token", ""))
+                ltp   = message.get("last_traded_price", 0)
+
+                # Angel One sends LTP in paise (multiply by 0.01 to get rupees)
+                if ltp and ltp > 0:
+                    price  = ltp / 100.0
+                    symbol = token_to_symbol.get(token)
+                    if symbol:
+                        ticks_storage[symbol].append(price)
+                        if len(ticks_storage[symbol]) % 10 == 1:  # Log every 10th tick
+                            print(f"[WebSocket] 📈 {symbol}: LTP={price:.2f} ({len(ticks_storage[symbol])} ticks)")
+
+            elif isinstance(message, str):
+                print(f"[WebSocket] 📨 Text message: {message[:200]}")
+
+        except Exception as e:
+            print(f"[WebSocket] ⚠️ Error parsing tick: {e}")
+
+    def on_error(wsapp, error):
+        print(f"\n[WebSocket] ❌ ERROR: {type(error).__name__}: {error}")
+        ws_error["msg"] = str(error)
+
+    def on_close(wsapp):
+        print(f"\n[WebSocket] 🔌 CONNECTION CLOSED at {datetime.now(IST).strftime('%H:%M:%S')}")
+
+    # ── Step 6: Create SmartWebSocketV2 ──────────────────────────────────────
+    try:
+        print(f"\n[WebSocket] 🔌 Creating SmartWebSocketV2...")
+        sws = SmartWebSocketV2(
+            auth_token=auth_token,
+            api_key=api_key,
+            client_code=client_code,
+            feed_token=feed_token,
+            on_open=on_open,
+            on_data=on_data,
+            on_error=on_error,
+            on_close=on_close,
+            max_retry_attempt=3,
+        )
+        print(f"[WebSocket] ✅ SmartWebSocketV2 created")
+    except Exception as e:
+        print(f"[WebSocket] ❌ Failed to create SmartWebSocketV2: {type(e).__name__}: {e}")
+        raise
+
+    # ── Step 7: Subscribe in background thread ────────────────────────────────
+    CORRELATION_ID = "tradesentry_9_15"
+    MODE           = 2   # QUOTE mode (includes OHLC + LTP + Volume)
+
+    def run_ws():
+        try:
+            print(f"[WebSocket] ▶ Starting WebSocket in background thread...")
+            sws.connect()
+        except Exception as e:
+            print(f"[WebSocket] ❌ Thread error: {type(e).__name__}: {e}")
+            ws_error["msg"] = str(e)
+
+    ws_thread = threading.Thread(target=run_ws, daemon=True)
+    ws_thread.start()
+
+    # ── Step 8: Wait for connection ───────────────────────────────────────────
+    print(f"[WebSocket] ⏳ Waiting for connection (max 15s)...")
+    connected = ws_connected.wait(timeout=15)
+
+    if not connected:
+        print(f"[WebSocket] ❌ Connection timeout after 15s!")
+        print(f"[WebSocket]    Last error: {ws_error.get('msg', 'None')}")
+        print(f"[WebSocket]    Possible causes:")
+        print(f"[WebSocket]    1. IP not whitelisted (current Railway IP vs Angel One)")
+        print(f"[WebSocket]    2. feed_token expired or invalid")
+        print(f"[WebSocket]    3. Network/firewall blocking WebSocket")
+        try:
+            sws.close_connection()
+        except:
+            pass
+        raise Exception(f"WebSocket connection timeout. Error: {ws_error.get('msg')}")
+
+    print(f"[WebSocket] ✅ Connected! Subscribing to {len(symbols_with_tokens)} symbols...")
+
+    # ── Step 9: Subscribe to symbols ─────────────────────────────────────────
+    try:
+        sws.subscribe(CORRELATION_ID, MODE, token_list)
+        print(f"[WebSocket] ✅ Subscribed! Collecting ticks for {duration_secs}s...")
+    except Exception as e:
+        print(f"[WebSocket] ❌ Subscribe failed: {type(e).__name__}: {e}")
+        try:
+            sws.close_connection()
+        except:
+            pass
+        raise
+
+    # ── Step 10: Collect ticks for duration ───────────────────────────────────
+    start_time    = time.time()
+    last_log_time = start_time
+
+    while time.time() - start_time < duration_secs:
+        time.sleep(1)
+        elapsed = time.time() - start_time
+
+        # Log every 30 seconds
+        if time.time() - last_log_time >= 30:
+            total_ticks = sum(len(v) for v in ticks_storage.values())
+            syms_with   = len([s for s in ticks_storage if ticks_storage[s]])
+            print(f"[WebSocket] ⏱ {elapsed:.0f}s elapsed | "
+                  f"{total_ticks} ticks | {syms_with} symbols active")
+            last_log_time = time.time()
+
+        if ws_error["msg"] and not ticks_storage:
+            print(f"[WebSocket] ❌ Error during collection: {ws_error['msg']}")
+            break
+
+    # ── Step 11: Close connection ─────────────────────────────────────────────
+    print(f"\n[WebSocket] 🔌 Closing connection...")
+    try:
+        sws.close_connection()
+    except Exception as e:
+        print(f"[WebSocket] ⚠️ Close error (non-fatal): {e}")
+
+    total_ticks = sum(len(v) for v in ticks_storage.values())
+    print(f"[WebSocket] ✅ Collection done. Total ticks: {total_ticks}")
+
+    # ── Step 12: Calculate High/Low ───────────────────────────────────────────
+    result = {}
+    for s in symbols_with_tokens:
+        symbol = s["symbol"]
+        prices = ticks_storage.get(symbol, [])
+
+        if prices:
+            high = max(prices)
+            low  = min(prices)
             result[symbol] = {
-                "high": None,
-                "low": None,
-                "http_high": None,
-                "http_low": None,
-                "source": None,
-                "error": "No candle data available"
+                "high":       high,
+                "low":        low,
+                "source":     "websocket",
+                "tick_count": len(prices),
             }
-            print(f"[HTTP Fallback] ❌ {symbol}: No data")
-    
-    print("\n[Collection] ✅ PHASE 2 COMPLETE: HTTP fallback finished")
-    print("="*70)
-    print(f"[Collection] RESULT: {len([r for r in result.values() if r.get('high')])} symbols with High/Low")
-    print("="*70 + "\n")
-    
+            print(f"[WebSocket] ✅ {symbol}: H={high:.2f} L={low:.2f} ({len(prices)} ticks)")
+        else:
+            print(f"[WebSocket] ⚠️ {symbol}: No ticks received")
+            result[symbol] = {
+                "high":       None,
+                "low":        None,
+                "source":     "websocket",
+                "tick_count": 0,
+                "error":      "No ticks received",
+            }
+
     return result
