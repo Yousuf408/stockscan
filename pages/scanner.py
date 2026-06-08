@@ -680,8 +680,6 @@ def run_get_targets(watchlist_stocks: list):
     signal_count = len(st.session_state.results)
     progress_bar = st.progress(0, text="Fetching exact 9:15 candle from AngelOne...")
     log          = st.session_state.scan_log
-    trading_date = get_trading_date_for_scan()
-
     for i, result in enumerate(st.session_state.results):
         symbol = result["symbol"]
         signal = result["signal"]
@@ -728,10 +726,11 @@ def run_get_targets(watchlist_stocks: list):
         historical_status = "ACTIVE"
         if candles and opening_idx >= 0 and entry_target:
             candles_from_open = candles[opening_idx:]
+            td = get_trading_date_for_scan(candles)   # derive from candle data
             historical_status = check_historical_status(
                 signal, candles_from_open,
                 entry_target["target"], entry_target["sl"],
-                trading_date,
+                td,
                 f5_entry_price=entry_target["entry"]
             )
 
