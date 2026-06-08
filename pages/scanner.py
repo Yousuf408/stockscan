@@ -1,7 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — scanner.py  v3.2.0
-#  v3.2.0: yfinance for candle fetch — replaces Dhan/AngelOne getCandleData
-#          AngelOne kept only for WebSocket High/Low collection
+#  TRADE SENTRY — scanner.py  v3.3.0
+#  v3.3.0: 
+#    - yfinance PARALLEL fetch (20 workers) — max speed, no rate limit
+#    - AngelOne exact 9:15 candle for signal stocks only
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -33,9 +34,9 @@ except Exception as e:
     def collect_live_high_low_with_fallback(angel_obj, symbols_with_tokens, http_candles=None):
         return {}
 
-# ── yfinance fetch import ──
+# ── yfinance parallel fetch import ──
 try:
-    from yfinance_fetch import fetch_candles_5min_yfinance
+    from yfinance_fetch import fetch_all_candles_parallel, fetch_candles_5min_yfinance
     YFINANCE_AVAILABLE = True
     print("[IMPORT] ✅ yfinance_fetch loaded successfully")
 except Exception as e:
@@ -128,12 +129,7 @@ def get_angel_auth():
 
 
 def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, signal: str):
-    icons = {
-        "NEAR_ENTRY":  "🔔",
-        "ENTRY_HIT":   "✅",
-        "T1_ACHIEVE":  "🎯",
-        "SL_HIT":      "🛑",
-    }
+    icons = {"NEAR_ENTRY": "🔔", "ENTRY_HIT": "✅", "T1_ACHIEVE": "🎯", "SL_HIT": "🛑"}
     icon  = icons.get(alert_type, "🔔")
     title = f"TradeSentry — {symbol}"
     body  = f"{icon} {alert_type.replace('_', ' ')} | {signal} | LTP: ₹{ltp} | Entry: ₹{entry}"
@@ -141,10 +137,7 @@ def _send_notification(symbol: str, alert_type: str, ltp: float, entry: float, s
     st.components.v1.html(f"""
 <script>
 if ("Notification" in window && Notification.permission === "granted") {{
-    new Notification("{title}", {{
-        body: "{body}",
-        icon: "https://img.icons8.com/color/48/000000/stock-market.png"
-    }});
+    new Notification("{title}", {{ body: "{body}" }});
 }}
 </script>
 """, height=0)
@@ -152,12 +145,8 @@ if ("Notification" in window && Notification.permission === "granted") {{
     try:
         from core import _sb_insert, _get_user_id
         _sb_insert("notifications", [{
-            "user_id":    _get_user_id() or None,
-            "symbol":     symbol,
-            "signal":     signal,
-            "alert_type": alert_type,
-            "ltp":        ltp,
-            "entry":      entry,
+            "user_id": _get_user_id() or None, "symbol": symbol,
+            "signal": signal, "alert_type": alert_type, "ltp": ltp, "entry": entry,
         }])
     except Exception as e:
         print(f"[notification] Save failed: {e}")
@@ -175,19 +164,16 @@ def load_watchlist_stocks(tab: str) -> list:
                 continue
             sym = sym.replace(".NS", "").replace(".BO", "").split("-")[0].split(".")[0].strip()
 
-            raw_token = str(s.get("token") or "").strip()
-            token     = raw_token if raw_token and raw_token.upper() not in ("EMPTY", "NONE", "") else ""
-            token     = token or get_stock_token(sym) or ""
-
+            raw_token  = str(s.get("token") or "").strip()
+            token      = raw_token if raw_token and raw_token.upper() not in ("EMPTY", "NONE", "") else ""
+            token      = token or get_stock_token(sym) or ""
             raw_sector = str(s.get("sector") or "").strip()
             sector     = raw_sector if raw_sector and raw_sector.upper() not in ("EMPTY", "NONE", "") else ""
             sector     = sector or get_stock_sector(sym) or "GENERAL"
 
             stocks.append({
-                "symbol":   sym,
-                "token":    str(token),
-                "sector":   sector,
-                "exchange": s.get("exchange", "NS"),
+                "symbol": sym, "token": str(token),
+                "sector": sector, "exchange": s.get("exchange", "NS"),
             })
         return stocks
     except Exception as e:
@@ -200,15 +186,9 @@ def load_watchlist_stocks(tab: str) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 for _k, _v in [
-    ("results",              []),
-    ("is_scanning",          False),
-    ("selected_watchlist",   "Today"),
-    ("auto_refresh",         False),
-    ("scan_log",             []),
-    ("last_auto_refresh",    0),
-    ("show_filters",         False),
-    ("db_results_loaded",    False),
-    ("scan_running",         False),
+    ("results", []), ("is_scanning", False), ("selected_watchlist", "Today"),
+    ("auto_refresh", False), ("scan_log", []), ("last_auto_refresh", 0),
+    ("show_filters", False), ("db_results_loaded", False), ("scan_running", False),
 ]:
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -219,6 +199,7 @@ if not st.session_state["db_results_loaded"]:
         if db_results:
             st.session_state["results"] = db_results
     st.session_state["db_results_loaded"] = True
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3: DATE & TIME
@@ -260,19 +241,19 @@ def get_trading_date_for_scan() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4: DATA FETCH — AngelOne fallback only
+# SECTION 4: DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: list = None):
+    """AngelOne candle fetch — used for exact 9:15 candle of signal stocks"""
     log        = _log if _log is not None else []
     is_open    = is_market_open()
     end_date   = get_ist_today_str() if is_open else get_last_trading_day_str()
     start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=20)).strftime("%Y-%m-%d")
 
     if not symbol_token or str(symbol_token).strip() == "":
-        log.append(f"❌ [{symbol}] Failed — Missing token in stocks.py")
+        log.append(f"❌ [{symbol}] Failed — Missing token")
         return None
-
     if not angel_obj:
         log.append(f"❌ [{symbol}] Failed — No AngelOne session")
         return None
@@ -285,18 +266,16 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
             "fromdate":    f"{start_date} 09:15",
             "todate":      f"{end_date} 15:30" if not is_open else f"{end_date} {get_ist_time_now()}",
         }
-
         response = angel_obj.getCandleData(historicParam)
 
         if response and isinstance(response, dict):
             status = response.get("status")
             msg    = response.get("message", "")
-
             if status is True and isinstance(response.get("data"), list):
                 rows = []
                 for c in response["data"]:
                     if isinstance(c, list) and len(c) >= 6:
-                        raw_ts        = str(c[0])
+                        raw_ts = str(c[0])
                         ts_normalized = raw_ts.replace("T", " ")[:19]
                         rows.append([ts_normalized, float(c[1]), float(c[2]),
                                      float(c[3]), float(c[4]), float(c[5])])
@@ -314,6 +293,52 @@ def fetch_candles_5min(symbol_token: str, symbol: str, angel_obj=None, _log: lis
     return None
 
 
+def fetch_exact_915_candle(stock: dict, angel_obj, _log: list = None) -> dict:
+    """
+    Fetch exact 9:15 candle from AngelOne for a signal stock.
+    Returns { high, low } or None if failed.
+    """
+    log    = _log if _log is not None else []
+    symbol = stock["symbol"]
+    token  = stock["token"]
+
+    if not angel_obj or not token:
+        return None
+
+    is_open    = is_market_open()
+    today      = get_ist_today_str() if is_open else get_last_trading_day_str()
+    start_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    try:
+        time.sleep(0.35)   # 3/sec limit — safe delay
+        historicParam = {
+            "exchange":    "NSE",
+            "symboltoken": str(token).strip(),
+            "interval":    "FIVE_MINUTE",
+            "fromdate":    f"{start_date} 09:15",
+            "todate":      f"{today} 09:20",
+        }
+        response = angel_obj.getCandleData(historicParam)
+
+        if response and isinstance(response, dict) and response.get("status") is True:
+            data = response.get("data", [])
+            for c in data:
+                if isinstance(c, list) and len(c) >= 6:
+                    raw_ts = str(c[0]).replace("T", " ")[:19]
+                    if "09:15" in raw_ts:
+                        high = round(float(c[2]), 2)
+                        low  = round(float(c[3]), 2)
+                        log.append(f"📐 [{symbol}] AngelOne exact 9:15 — H={high} L={low} ✅")
+                        return {"high": high, "low": low}
+
+        log.append(f"⚠️ [{symbol}] Could not get exact 9:15 from AngelOne — using yfinance value")
+        return None
+
+    except Exception as e:
+        log.append(f"⚠️ [{symbol}] AngelOne 9:15 fetch error: {e}")
+        return None
+
+
 def fetch_daily_prev_close(symbol: str):
     return None
 
@@ -325,13 +350,10 @@ def fetch_daily_prev_close(symbol: str):
 def calc_vwap(candles: list):
     if not candles:
         return None
-
     last_ts      = str(candles[-1][0])
     session_date = last_ts.split(" ")[0]
-
     tpv_sum = vol_sum = 0.0
     session_count = 0
-
     for c in candles:
         ts_date = str(c[0]).split(" ")[0]
         if ts_date == session_date:
@@ -340,84 +362,67 @@ def calc_vwap(candles: list):
             tpv_sum += tp * vol
             vol_sum += vol
             session_count += 1
-
     if vol_sum == 0 or session_count == 0:
         for c in candles[-75:]:
             h, l, close, vol = float(c[2]), float(c[3]), float(c[4]), float(c[5])
             tp       = (h + l + close) / 3
             tpv_sum += tp * vol
             vol_sum += vol
-
     return tpv_sum / vol_sum if vol_sum > 0 else None
 
 
 def find_opening_candle_index(candles: list) -> int:
     if not candles:
         return -1
-
     target_date = get_trading_date_for_scan()
-
     for i, c in enumerate(candles):
         ts        = str(c[0])
         date_part = ts.split(" ")[0]
         time_part = ts.split(" ")[1] if " " in ts else ""
         if date_part == target_date and time_part.startswith("09:15"):
             return i
-
     return -1
 
 
 def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
     log = st.session_state.get("scan_log", [])
-
     if opening_idx < 0:
         log.append(f"🐛 DEBUG [{symbol}] — opening_idx = -1  (no 9:15 candle found)")
         return
-
-    open_candle = candles[opening_idx]
-    ts    = open_candle[0]
-    o     = float(open_candle[1])
-    high  = float(open_candle[2])
-    low   = float(open_candle[3])
-    close = float(open_candle[4])
-    vol   = float(open_candle[5])
-
+    open_candle      = candles[opening_idx]
+    ts               = open_candle[0]
+    o                = float(open_candle[1])
+    high             = float(open_candle[2])
+    low              = float(open_candle[3])
+    close            = float(open_candle[4])
+    vol              = float(open_candle[5])
     risk             = round(high - low, 2)
     candle_range_pct = round((risk / low * 100) if low > 0 else 0, 3)
-    entry_buy        = round(high, 2)
-    sl_buy           = round(low, 2)
-    target_buy       = round(entry_buy + risk, 2)
-    entry_sell       = round(low, 2)
-    sl_sell          = round(high, 2)
-    target_sell      = round(entry_sell - risk, 2)
-
     log.append("━" * 55)
     log.append(f"🐛 DEBUG [{symbol}]  opening_idx={opening_idx}")
     log.append(f"   Timestamp   : {ts}")
     log.append(f"   O={o}  H={high}  L={low}  C={close}  Vol={vol:,.0f}")
     log.append(f"   Candle range: {risk}  ({candle_range_pct}%)")
     log.append(f"   ── BUY scenario ──────────────────")
-    log.append(f"      Entry  = HIGH        = {entry_buy}")
-    log.append(f"      SL     = LOW         = {sl_buy}")
+    log.append(f"      Entry  = HIGH        = {round(high, 2)}")
+    log.append(f"      SL     = LOW         = {round(low, 2)}")
     log.append(f"      Risk   = H - L       = {risk}")
-    log.append(f"      T1     = {entry_buy} + {risk} = {target_buy}")
+    log.append(f"      T1     = {round(high, 2)} + {risk} = {round(high + risk, 2)}")
     log.append(f"   ── SELL scenario ─────────────────")
-    log.append(f"      Entry  = LOW         = {entry_sell}")
-    log.append(f"      SL     = HIGH        = {sl_sell}")
+    log.append(f"      Entry  = LOW         = {round(low, 2)}")
+    log.append(f"      SL     = HIGH        = {round(high, 2)}")
     log.append(f"      Risk   = H - L       = {risk}")
-    log.append(f"      T1     = {entry_sell} - {risk} = {target_sell}")
-    log.append(f"   ── Candles around opening_idx ────")
-
+    log.append(f"      T1     = {round(low, 2)} - {risk} = {round(low - risk, 2)}")
     start = max(0, opening_idx - 2)
     end   = min(len(candles), opening_idx + 3)
+    log.append(f"   ── Candles around opening_idx ────")
     for i in range(start, end):
         c      = candles[i]
         marker = "  ◀ OPENING CANDLE" if i == opening_idx else ""
         log.append(
             f"   [{i:>4}] {c[0]}  "
             f"O={float(c[1]):.2f}  H={float(c[2]):.2f}  "
-            f"L={float(c[3]):.2f}  C={float(c[4]):.2f}"
-            f"{marker}"
+            f"L={float(c[3]):.2f}  C={float(c[4]):.2f}{marker}"
         )
     log.append("━" * 55)
 
@@ -427,44 +432,34 @@ def debug_opening_candle(symbol: str, candles: list, opening_idx: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_buy_signal(open_candle, ema20, vwap, ema200) -> bool:
-    if None in (open_candle, ema20, vwap, ema200):
-        return False
+    if None in (open_candle, ema20, vwap, ema200): return False
     high  = float(open_candle[2])
     low   = float(open_candle[3])
     close = float(open_candle[4])
-    if low == 0:
-        return False
-    candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2:  return False
-    if ema200 >= ema20:     return False
-    pct_ema_gap = ((ema20 - ema200) / ema200) * 100
-    if pct_ema_gap > 1.5:  return False
-    if close <= vwap:       return False
-    if close <= ema20:      return False
-    if close <= ema200:     return False
-    pct_from_ema20 = ((close - ema20) / ema20) * 100
-    if pct_from_ema20 > 2.0: return False
+    if low == 0: return False
+    if ((high - low) / low) * 100 > 2.2: return False
+    if ema200 >= ema20: return False
+    if ((ema20 - ema200) / ema200) * 100 > 1.5: return False
+    if close <= vwap: return False
+    if close <= ema20: return False
+    if close <= ema200: return False
+    if ((close - ema20) / ema20) * 100 > 2.0: return False
     return True
 
 
 def is_sell_signal(open_candle, ema20, vwap, ema200) -> bool:
-    if None in (open_candle, ema20, vwap, ema200):
-        return False
+    if None in (open_candle, ema20, vwap, ema200): return False
     high  = float(open_candle[2])
     low   = float(open_candle[3])
     close = float(open_candle[4])
-    if low == 0:
-        return False
-    candle_range = ((high - low) / low) * 100
-    if candle_range > 2.2:  return False
-    if ema200 <= ema20:     return False
-    pct_ema_gap = ((ema200 - ema20) / ema200) * 100
-    if pct_ema_gap > 1.5:  return False
-    if close >= vwap:       return False
-    if close >= ema20:      return False
-    if close >= ema200:     return False
-    pct_from_ema20 = ((ema20 - close) / ema20) * 100
-    if pct_from_ema20 > 2.0: return False
+    if low == 0: return False
+    if ((high - low) / low) * 100 > 2.2: return False
+    if ema200 <= ema20: return False
+    if ((ema200 - ema20) / ema200) * 100 > 1.5: return False
+    if close >= vwap: return False
+    if close >= ema20: return False
+    if close >= ema200: return False
+    if ((ema20 - close) / ema20) * 100 > 2.0: return False
     return True
 
 
@@ -481,100 +476,46 @@ def calc_score(signal, ltp, volume, avg_volume, pct_change, ema200) -> float:
     return min(score, 6)
 
 
-def check_sl_hit(signal: str, ltp: float, sl_price: float) -> bool:
-    if not signal or ltp is None or sl_price is None:
-        return False
-    if signal == "BUY":  return ltp <= sl_price
-    if signal == "SELL": return ltp >= sl_price
-    return False
-
-
 def calc_entry_target(signal: str, f5_high: float, f5_low: float) -> dict:
-    if not signal or f5_high is None or f5_low is None:
-        return None
+    if not signal or f5_high is None or f5_low is None: return None
     if signal == "BUY":
-        entry  = f5_high
-        sl     = f5_low
-        risk   = entry - sl
-        target = entry + risk
+        entry = f5_high; sl = f5_low; risk = entry - sl; target = entry + risk
     elif signal == "SELL":
-        entry  = f5_low
-        sl     = f5_high
-        risk   = sl - entry
-        target = entry - risk
+        entry = f5_low; sl = f5_high; risk = sl - entry; target = entry - risk
     else:
         return None
-    return {
-        "entry":  round(entry,  2),
-        "sl":     round(sl,     2),
-        "target": round(target, 2),
-        "risk":   round(risk,   2),
-    }
-
-
-def check_exit_or_sl_hit(signal: str, ltp: float, entry: float, target: float,
-                          sl_price: float, candles: list, ema20_live: float,
-                          t1_already_achieved: bool = False,
-                          exit_already_triggered: bool = False) -> dict:
-    if not signal or ltp is None or entry is None or target is None or sl_price is None:
-        return {"status": "ACTIVE", "triggered": False}
-    if exit_already_triggered:
-        return {"status": "EXIT", "triggered": True}
-    if t1_already_achieved:
-        if candles and len(candles) >= 1:
-            last_close = float(candles[-1][4])
-            if signal == "BUY"  and last_close < ema20_live:
-                return {"status": "EXIT", "triggered": True}
-            if signal == "SELL" and last_close > ema20_live:
-                return {"status": "EXIT", "triggered": True}
-        return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "BUY"  and ltp >= target:  return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "SELL" and ltp <= target:  return {"status": "T1_ACHIEVE", "triggered": True}
-    if signal == "BUY"  and ltp <= sl_price: return {"status": "SL_HIT",    "triggered": True}
-    if signal == "SELL" and ltp >= sl_price: return {"status": "SL_HIT",    "triggered": True}
-    return {"status": "ACTIVE", "triggered": False}
+    return {"entry": round(entry, 2), "sl": round(sl, 2),
+            "target": round(target, 2), "risk": round(risk, 2)}
 
 
 def check_historical_status(signal: str, candles_from_open: list,
                              target: float, sl_price: float,
-                             trading_date: str,
-                             f5_entry_price: float = None) -> str:
+                             trading_date: str, f5_entry_price: float = None) -> str:
     if not candles_from_open or not signal or not target or not sl_price:
         return "ACTIVE"
-
-    candles_to_check = [
-        c for c in candles_from_open[1:]
-        if str(c[0]).split(" ")[0] == trading_date
-    ]
-
+    candles_to_check = [c for c in candles_from_open[1:]
+                        if str(c[0]).split(" ")[0] == trading_date]
     if not candles_to_check:
         return "ACTIVE"
-
     if f5_entry_price is not None:
         entry_price = f5_entry_price
     else:
         entry_price = float(candles_from_open[0][2]) if signal == "BUY" else float(candles_from_open[0][3])
-
     entry_hit = any(
         float(c[2]) >= entry_price if signal == "BUY" else float(c[3]) <= entry_price
         for c in candles_to_check
     )
-
     if not entry_hit:
         last_ltp = float(candles_to_check[-1][4])
         pct_from_entry = abs(last_ltp - entry_price) / entry_price * 100
-        if pct_from_entry <= 0.5:
-            return "NEAR_ENTRY"
+        if pct_from_entry <= 0.5: return "NEAR_ENTRY"
         return "NO_ENTRY"
-
     for c in candles_to_check:
-        high = float(c[2])
-        low  = float(c[3])
+        high = float(c[2]); low = float(c[3])
         if signal == "BUY"  and high >= target:   return "T1_ACHIEVE"
         if signal == "SELL" and low  <= target:   return "T1_ACHIEVE"
         if signal == "BUY"  and low  <= sl_price: return "SL_HIT"
         if signal == "SELL" and high >= sl_price: return "SL_HIT"
-
     return "ACTIVE"
 
 
@@ -587,7 +528,7 @@ MIN_CANDLES_AT_OPEN = 200
 
 
 def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
-                  live_high_low: dict = None):
+                  live_high_low: dict = None, angel_candles: dict = None):
     symbol = stock["symbol"]
     sector = stock["sector"]
     log    = st.session_state.scan_log
@@ -596,9 +537,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         log.append(f"❌ {symbol}: No data returned")
         return None
 
-    total = len(candles)
-    if total < MIN_CANDLES_TOTAL:
-        log.append(f"❌ {symbol}: Only {total} candles — need ≥ {MIN_CANDLES_TOTAL} (20 trading days)")
+    if len(candles) < MIN_CANDLES_TOTAL:
+        log.append(f"❌ {symbol}: Only {len(candles)} candles — need ≥ {MIN_CANDLES_TOTAL}")
         return None
 
     ema20_live  = calc_ema(candles, 20)
@@ -624,41 +564,23 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
                 et       = r.get("entry_target") or {}
                 sl_price = et.get("sl")
                 t1_val   = et.get("target")
-
                 current_status = r.get("exit_status", "ACTIVE")
-
                 if current_status in ("T1_ACHIEVE", "SL_HIT"):
-                    r.update({
-                        "ltp":       round(ltp, 2),
-                        "ema20":     round(ema20_live, 2),
-                        "ema200":    round(ema200_live, 2),
-                        "vwap":      round(vwap_live, 2),
-                        "pctChange": round(pct_change, 2),
-                    })
+                    r.update({"ltp": round(ltp, 2), "ema20": round(ema20_live, 2),
+                               "ema200": round(ema200_live, 2), "vwap": round(vwap_live, 2),
+                               "pctChange": round(pct_change, 2)})
                     return r
-
                 opening_idx = find_opening_candle_index(candles)
                 if opening_idx >= 0:
                     trading_date      = get_trading_date_for_scan()
                     candles_from_open = candles[opening_idx:]
-                    new_status = check_historical_status(
-                        signal, candles_from_open,
-                        t1_val, sl_price, trading_date
-                    )
+                    new_status = check_historical_status(signal, candles_from_open, t1_val, sl_price, trading_date)
                 else:
                     new_status = current_status
-
-                r.update({
-                    "ltp":         round(ltp, 2),
-                    "ema20":       round(ema20_live, 2),
-                    "ema200":      round(ema200_live, 2),
-                    "vwap":        round(vwap_live, 2),
-                    "pctChange":   round(pct_change, 2),
-                    "sl_hit":      new_status == "SL_HIT",
-                    "exit_status": new_status,
-                    "t1_achieved": new_status == "T1_ACHIEVE",
-                })
-
+                r.update({"ltp": round(ltp, 2), "ema20": round(ema20_live, 2),
+                           "ema200": round(ema200_live, 2), "vwap": round(vwap_live, 2),
+                           "pctChange": round(pct_change, 2), "sl_hit": new_status == "SL_HIT",
+                           "exit_status": new_status, "t1_achieved": new_status == "T1_ACHIEVE"})
                 if new_status != current_status:
                     entry_price = et.get("entry", 0)
                     if new_status == "NEAR_ENTRY":
@@ -669,7 +591,6 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
                         _send_notification(symbol, "T1_ACHIEVE", round(ltp, 2), entry_price, signal)
                     elif new_status == "SL_HIT":
                         _send_notification(symbol, "SL_HIT", round(ltp, 2), entry_price, signal)
-
                 return r
         return None
 
@@ -686,10 +607,7 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
     candles_at_open = candles[:opening_idx + 1]
 
     if len(candles_at_open) < MIN_CANDLES_AT_OPEN:
-        log.append(
-            f"⚠️ {symbol}: Only {len(candles_at_open)} candles before 9:15 — "
-            f"need ≥ {MIN_CANDLES_AT_OPEN} for EMA200"
-        )
+        log.append(f"⚠️ {symbol}: Only {len(candles_at_open)} candles before 9:15")
         return None
 
     ema20_at_open  = calc_ema(candles_at_open, 20)
@@ -716,47 +634,47 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         reasons = []
         h, l, c = float(open_candle[2]), float(open_candle[3]), float(open_candle[4])
         rng = ((h - l) / l * 100) if l > 0 else 0
-        if rng > 2.2:
-            reasons.append(f"candle range {rng:.2f}% > 2.2%")
+        if rng > 2.2: reasons.append(f"candle range {rng:.2f}% > 2.2%")
         if ema200_at_open and ema20_at_open:
             gap = abs(ema20_at_open - ema200_at_open) / ema200_at_open * 100
-            if gap > 1.5:
-                reasons.append(f"EMA gap {gap:.2f}% > 1.5%")
-        if not reasons:
-            reasons.append("price/VWAP/EMA directional conditions not met")
+            if gap > 1.5: reasons.append(f"EMA gap {gap:.2f}% > 1.5%")
+        if not reasons: reasons.append("price/VWAP/EMA directional conditions not met")
         log.append(f"— {symbol}: No signal — {', '.join(reasons)}")
         return None
 
     score        = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
     trading_date = get_trading_date_for_scan()
 
-    entry_source = "http"
-    if live_high_low and symbol in live_high_low:
+    # ── Use AngelOne exact 9:15 candle if available, else yfinance ──
+    entry_source = "yfinance"
+    if angel_candles and symbol in angel_candles and angel_candles[symbol]:
+        ac       = angel_candles[symbol]
+        f5_high  = ac["high"]
+        f5_low   = ac["low"]
+        entry_source = "angelone"
+        log.append(f"📐 {symbol} — HIGH={f5_high} LOW={f5_low} (AngelOne exact ✅)")
+    elif live_high_low and symbol in live_high_low:
         f5_high      = round(live_high_low[symbol]["high"], 2)
         f5_low       = round(live_high_low[symbol]["low"],  2)
         entry_source = live_high_low[symbol]["source"]
-        log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} ({entry_source.upper()})")
+        log.append(f"📐 {symbol} — HIGH={f5_high} LOW={f5_low} ({entry_source.upper()})")
     else:
         f5_high = round(float(open_candle[2]), 2)
         f5_low  = round(float(open_candle[3]), 2)
-        log.append(f"📐 {symbol} opening candle — HIGH={f5_high}  LOW={f5_low}  date={trading_date} (HTTP)")
+        log.append(f"📐 {symbol} — HIGH={f5_high} LOW={f5_low} (yfinance)")
 
     entry_target = calc_entry_target(signal, f5_high, f5_low)
 
     if entry_target:
         log.append(
             f"🎯 {symbol} {signal} — "
-            f"Entry={entry_target['entry']}  "
-            f"SL={entry_target['sl']}  "
-            f"Risk={entry_target['risk']}  "
-            f"T1={entry_target['target']}"
+            f"Entry={entry_target['entry']}  SL={entry_target['sl']}  "
+            f"Risk={entry_target['risk']}  T1={entry_target['target']}"
         )
 
     candles_from_open = candles[opening_idx:]
-
     historical_status = check_historical_status(
-        signal,
-        candles_from_open,
+        signal, candles_from_open,
         entry_target["target"] if entry_target else None,
         entry_target["sl"]     if entry_target else None,
         trading_date,
@@ -767,29 +685,20 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
     t1_achieved = historical_status in ("T1_ACHIEVE", "EXIT")
 
     result = {
-        "symbol":       symbol,
-        "sector":       sector or "GENERAL",
-        "signal":       signal,
-        "ltp":          round(ltp, 2),
-        "ema20":        round(ema20_live, 2),
-        "ema200":       round(ema200_live, 2),
-        "vwap":         round(vwap_live, 2),
-        "pctChange":    round(pct_change, 2),
-        "score":        round(float(score), 1),
-        "timestamp":    time.time(),
-        "volume":       last_vol,
-        "openPrice":    round(float(open_candle[1]), 2),
-        "highPrice":    round(f5_high, 2),
-        "lowPrice":     round(f5_low,  2),
-        "closePrice":   round(float(open_candle[4]), 2),
-        "sl_hit":       sl_hit_now,
-        "entry_target": entry_target,
-        "exit_status":  historical_status,
-        "t1_achieved":  t1_achieved,
+        "symbol": symbol, "sector": sector or "GENERAL", "signal": signal,
+        "ltp": round(ltp, 2), "ema20": round(ema20_live, 2),
+        "ema200": round(ema200_live, 2), "vwap": round(vwap_live, 2),
+        "pctChange": round(pct_change, 2), "score": round(float(score), 1),
+        "timestamp": time.time(), "volume": last_vol,
+        "openPrice": round(float(open_candle[1]), 2),
+        "highPrice": round(f5_high, 2), "lowPrice": round(f5_low, 2),
+        "closePrice": round(float(open_candle[4]), 2),
+        "sl_hit": sl_hit_now, "entry_target": entry_target,
+        "exit_status": historical_status, "t1_achieved": t1_achieved,
         "entry_source": entry_source,
     }
 
-    badge = "🟢" if entry_source == "websocket" else "🟡"
+    badge = "🟢" if entry_source == "angelone" else "🟡"
     log.append(f"✅ {badge} {symbol}: {signal} | score={score:.1f} | ltp={ltp:.2f}")
 
     st.session_state.results = [x for x in st.session_state.results if x["symbol"] != symbol]
@@ -808,151 +717,148 @@ def run_full_scan(watchlist_stocks: list):
         st.warning("No stocks in this watchlist. Add stocks from the Watchlist page first.")
         return
 
-    # yfinance has no rate limit — no delay needed between requests
-    # AngelOne fallback uses 0.4s delay to stay under 3/sec limit
-    FETCH_DELAY_ANGEL = 0.4
-    RETRY_DELAY       = 1.5
-
     st.session_state.scan_running = True
     st.session_state.is_scanning  = True
     st.session_state.scan_log     = []
     total        = len(watchlist_stocks)
     progress_bar = st.progress(0, text="Initialising scan...")
 
-    # AngelOne auth — only needed for WebSocket fallback
+    # AngelOne auth — for exact 9:15 candle fetch
     angel_obj = get_angel_auth()
     if angel_obj:
-        st.session_state.scan_log.append("🔐 AngelOne session active — using for WebSocket")
+        st.session_state.scan_log.append("🔐 AngelOne session active — for exact 9:15 candle")
     else:
-        st.session_state.scan_log.append("⚠️ AngelOne session unavailable")
+        st.session_state.scan_log.append("⚠️ AngelOne unavailable — will use yfinance values")
 
     if YFINANCE_AVAILABLE:
-        st.session_state.scan_log.append("🟢 yfinance active — fetching candles (no rate limit)")
-    else:
-        st.session_state.scan_log.append("⚠️ yfinance unavailable — falling back to AngelOne")
-
-    candles_map   = {}
-    failed_stocks = []
-
-    # ── PHASE 1: Fetch candles ─────────────────────────────────────────────────
-    for i, stock in enumerate(watchlist_stocks):
-        symbol = stock["symbol"]
-
-        try:
-            if YFINANCE_AVAILABLE:
-                # yfinance — no delay needed, no rate limit
-                candles = fetch_candles_5min_yfinance(
-                    symbol,
-                    _log=st.session_state.scan_log
-                )
-            else:
-                # AngelOne fallback
-                time.sleep(FETCH_DELAY_ANGEL)
-                candles = fetch_candles_5min(
-                    stock["token"], symbol, angel_obj,
-                    _log=st.session_state.scan_log
-                )
-
-            candles_map[symbol] = candles
-            if candles is None:
-                failed_stocks.append(stock)
-
-        except Exception as e:
-            failed_stocks.append(stock)
-            st.session_state.scan_log.append(f"❌ [{symbol}] {str(e)}")
-
-        progress_bar.progress(
-            (i + 1) / total / 2,
-            text=f"Fetching {i + 1}/{total}: {symbol}"
-        )
-
-    # ── PHASE 2: Retry failed stocks ──────────────────────────────────────────
-    if failed_stocks:
         st.session_state.scan_log.append(
-            f"⚠️ Retrying {len(failed_stocks)} failed stocks..."
+            f"🟢 yfinance active — parallel fetch ({min(20, total)} workers, no rate limit)"
         )
-        still_failed = []
+    else:
+        st.session_state.scan_log.append("⚠️ yfinance unavailable")
+        st.session_state.scan_running = False
+        st.session_state.is_scanning  = False
+        progress_bar.empty()
+        return
 
-        for stock in failed_stocks:
-            symbol = stock["symbol"]
-            time.sleep(RETRY_DELAY)
+    # ── PHASE 1: Parallel yfinance fetch ──────────────────────────────────────
+    progress_bar.progress(0.05, text=f"Fetching {total} stocks in parallel via yfinance...")
 
-            try:
-                if YFINANCE_AVAILABLE:
-                    candles = fetch_candles_5min_yfinance(
-                        symbol,
-                        _log=st.session_state.scan_log
-                    )
-                else:
-                    candles = fetch_candles_5min(
-                        stock["token"], symbol, angel_obj,
-                        _log=st.session_state.scan_log
-                    )
+    def progress_cb(done, tot, sym):
+        progress_bar.progress(
+            min(0.05 + (done / tot) * 0.40, 0.45),
+            text=f"Fetching {done}/{tot}: {sym}"
+        )
 
-                candles_map[symbol] = candles
-                if candles is None:
-                    still_failed.append(symbol)
-                else:
-                    st.session_state.scan_log.append(f"✅ [{symbol}] retry succeeded")
+    candles_map = fetch_all_candles_parallel(
+        watchlist_stocks,
+        _log=st.session_state.scan_log,
+        progress_callback=progress_cb
+    )
 
-            except Exception as e:
-                still_failed.append(symbol)
-                st.session_state.scan_log.append(f"❌ [{symbol}] retry failed — skipping")
+    fetched_count = len([v for v in candles_map.values() if v is not None])
+    st.session_state.scan_log.append(
+        f"✅ yfinance fetch complete — {fetched_count}/{total} stocks fetched"
+    )
 
-        if still_failed:
-            st.session_state.scan_log.append(
-                f"❌ {len(still_failed)} stocks skipped: {', '.join(still_failed)}"
+    # ── PHASE 2: First pass analysis — find signal stocks ─────────────────────
+    progress_bar.progress(0.45, text="Analysing stocks for signals...")
+    signal_stocks = []
+
+    for i, stock in enumerate(watchlist_stocks):
+        symbol  = stock["symbol"]
+        candles = candles_map.get(symbol)
+
+        if not candles or len(candles) < MIN_CANDLES_TOTAL:
+            continue
+
+        opening_idx = find_opening_candle_index(candles)
+        if opening_idx < 0:
+            continue
+
+        open_candle     = candles[opening_idx]
+        candles_at_open = candles[:opening_idx + 1]
+        if len(candles_at_open) < MIN_CANDLES_AT_OPEN:
+            continue
+
+        ema20_at_open  = calc_ema(candles_at_open, 20)
+        ema200_at_open = calc_ema(candles_at_open, 200)
+        vwap_at_open   = calc_vwap(candles_at_open)
+
+        if None in (ema20_at_open, ema200_at_open, vwap_at_open):
+            continue
+
+        has_signal = (
+            is_buy_signal(open_candle, ema20_at_open, vwap_at_open, ema200_at_open) or
+            is_sell_signal(open_candle, ema20_at_open, vwap_at_open, ema200_at_open)
+        )
+        if has_signal:
+            signal_stocks.append(stock)
+
+    st.session_state.scan_log.append(
+        f"🎯 {len(signal_stocks)} signal stocks found — fetching exact 9:15 candle from AngelOne"
+    )
+
+    # ── PHASE 3: AngelOne exact 9:15 candle for signal stocks only ────────────
+    angel_candles = {}
+
+    if angel_obj and signal_stocks:
+        progress_bar.progress(0.50, text=f"Fetching exact 9:15 candle for {len(signal_stocks)} signals...")
+        for i, stock in enumerate(signal_stocks):
+            result = fetch_exact_915_candle(stock, angel_obj, _log=st.session_state.scan_log)
+            if result:
+                angel_candles[stock["symbol"]] = result
+            progress_bar.progress(
+                0.50 + (i + 1) / len(signal_stocks) * 0.10,
+                text=f"AngelOne 9:15 fetch {i+1}/{len(signal_stocks)}: {stock['symbol']}"
             )
 
-    # ── PHASE 3: WebSocket High/Low ───────────────────────────────────────────
+    # ── PHASE 4: WebSocket High/Low ───────────────────────────────────────────
     st.session_state.scan_log.append("[9:15] Collecting live High/Low from WebSocket...")
-
     symbols_with_tokens = [
         {"symbol": s["symbol"], "token": s["token"], "exchange": s["exchange"]}
         for s in watchlist_stocks
     ]
-
     live_high_low = collect_live_high_low_with_fallback(
         angel_obj=angel_obj,
         symbols_with_tokens=symbols_with_tokens,
         http_candles=candles_map
     )
-
     if not live_high_low:
         live_high_low = {}
-
     if live_high_low:
         collected_count = len([s for s in live_high_low.values() if s.get("high")])
         st.session_state.scan_log.append(f"[9:20] ✅ Collected High/Low for {collected_count} stocks")
     else:
-        st.session_state.scan_log.append("[9:20] ⚠️ WebSocket collection unavailable, will use HTTP candles")
+        st.session_state.scan_log.append("[9:20] ⚠️ WebSocket unavailable, will use yfinance candles")
 
     for symbol, data in live_high_low.items():
         if data.get("high") and data.get("low"):
             try:
                 save_live_high_low(
-                    symbol=symbol,
-                    exchange=data.get("exchange", "NSE"),
-                    token=data.get("token", ""),
-                    live_high=data["high"],
-                    live_low=data["low"],
-                    http_high=data.get("http_high"),
-                    http_low=data.get("http_low"),
-                    source=data["source"],
+                    symbol=symbol, exchange=data.get("exchange", "NSE"),
+                    token=data.get("token", ""), live_high=data["high"],
+                    live_low=data["low"], http_high=data.get("http_high"),
+                    http_low=data.get("http_low"), source=data["source"],
                     tick_count=data.get("tick_count", 0),
                     websocket_success=(data["source"] == "websocket")
                 )
             except Exception as e:
                 st.session_state.scan_log.append(f"⚠️ [{symbol}] DB save failed: {e}")
 
-    # ── PHASE 4: Analyze ──────────────────────────────────────────────────────
+    # ── PHASE 5: Full analysis with exact candles ──────────────────────────────
     for i, stock in enumerate(watchlist_stocks):
         candles = candles_map.get(stock["symbol"])
         progress_bar.progress(
-            0.5 + (i + 1) / total / 2,
+            0.60 + (i + 1) / total * 0.40,
             text=f"Analyzing {i + 1}/{total}: {stock['symbol']}"
         )
-        analyze_stock(stock, candles, is_refresh=False, live_high_low=live_high_low)
+        analyze_stock(
+            stock, candles,
+            is_refresh=False,
+            live_high_low=live_high_low,
+            angel_candles=angel_candles
+        )
 
     if st.session_state.results:
         status_order = {"T1_ACHIEVE": 0, "ACTIVE": 1, "NEAR_ENTRY": 2, "NO_ENTRY": 3, "SL_HIT": 4}
@@ -977,10 +883,7 @@ def run_refresh_scan(watchlist_stocks: list):
         matched = next((s for s in watchlist_stocks if s["symbol"] == r["symbol"]), None)
         if matched:
             if YFINANCE_AVAILABLE:
-                candles = fetch_candles_5min_yfinance(
-                    matched["symbol"],
-                    _log=st.session_state.scan_log
-                )
+                candles = fetch_candles_5min_yfinance(matched["symbol"], _log=st.session_state.scan_log)
             else:
                 candles = fetch_candles_5min(matched["token"], matched["symbol"], angel_obj,
                                              _log=st.session_state.scan_log)
@@ -988,7 +891,7 @@ def run_refresh_scan(watchlist_stocks: list):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 9: UI — unchanged
+# SECTION 9: UI
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Trade Sentry — Scanner", layout="wide")
@@ -1018,9 +921,8 @@ st.markdown("""
 div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 .ts-card {
     background:#ffffff; border:1px solid #ebebeb;
-    border-left:4px solid #ebebeb;
-    border-radius:10px; padding:8px 12px;
-    margin-bottom:6px;
+    border-left:4px solid #ebebeb; border-radius:10px;
+    padding:8px 12px; margin-bottom:6px;
 }
 .ts-card-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
 .ts-card-left  { display:flex; align-items:center; gap:6px; }
@@ -1035,14 +937,8 @@ div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
 .ts-badge-exit      { color:#6c3fc5; background:#f0eaff; border:1px solid #c4a8f5; }
 .ts-badge-noentry   { color:#888888; background:#f5f5f5; border:1px solid #cccccc; }
 .ts-badge-nearentry { color:#b36200; background:#fff8ec; border:1px solid #ffd599; }
-.ts-meta  {
-    font-size:14px; color:#222222; font-family:monospace;
-    display:flex; gap:12px; align-items:center; margin-bottom:4px;
-}
-.ts-entry-row {
-    font-size:14px; font-family:monospace; color:#222222;
-    display:flex; gap:14px; align-items:center; margin-bottom:6px;
-}
+.ts-meta  { font-size:14px; color:#222222; font-family:monospace; display:flex; gap:12px; align-items:center; margin-bottom:4px; }
+.ts-entry-row { font-size:14px; font-family:monospace; color:#222222; display:flex; gap:14px; align-items:center; margin-bottom:6px; }
 .ts-entry-row span { font-weight:700; color:#111111; }
 </style>
 """, unsafe_allow_html=True)
@@ -1072,11 +968,9 @@ else:
 
 with row1_col1:
     selected_wl_display = st.selectbox(
-        "Watchlist",
-        WATCHLIST_DISPLAY,
+        "Watchlist", WATCHLIST_DISPLAY,
         index=WATCHLIST_DISPLAY.index(selected_display) if selected_display in WATCHLIST_DISPLAY else 0,
-        label_visibility="collapsed",
-        key="wl_selector",
+        label_visibility="collapsed", key="wl_selector",
     )
     selected_wl = selected_wl_display.rsplit(" (", 1)[0]
     if selected_wl != st.session_state.selected_watchlist:
@@ -1111,16 +1005,14 @@ with row1_col4:
 if not _user_logged_in and st.session_state.get("show_inline_login", False):
     with st.container(border=True):
         with st.form("inline_login_form"):
-            il_email = st.text_input("Email",    placeholder="you@email.com")
+            il_email = st.text_input("Email", placeholder="you@email.com")
             il_pass  = st.text_input("Password", placeholder="••••••••", type="password")
             col_s, col_c = st.columns(2)
             with col_s: il_submit = st.form_submit_button("Login",  use_container_width=True, type="primary")
             with col_c: il_cancel = st.form_submit_button("Cancel", use_container_width=True)
-
         if il_cancel:
             st.session_state["show_inline_login"] = False
             st.rerun()
-
         if il_submit:
             if not il_email or not il_pass:
                 st.error("Enter email and password.")
@@ -1138,13 +1030,10 @@ if not _user_logged_in and st.session_state.get("show_inline_login", False):
                     st.error(msg)
 
 btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
-
 with btn_col1:
-    scan_clicked = st.button("▷  Run scan", use_container_width=True,
-                              disabled=len(stocks_to_scan) == 0)
+    scan_clicked = st.button("▷  Run scan", use_container_width=True, disabled=len(stocks_to_scan) == 0)
 with btn_col2:
-    refresh_clicked = st.button("↺  Refresh", use_container_width=True,
-                                 disabled=len(st.session_state.results) == 0)
+    refresh_clicked = st.button("↺  Refresh", use_container_width=True, disabled=len(st.session_state.results) == 0)
 with btn_col3:
     clear_clicked = st.button("🗑  Clear", use_container_width=True)
 with btn_col4:
@@ -1171,52 +1060,45 @@ if clear_clicked:
     st.session_state.show_filters = False
     st.success("Scanner cleared.")
 
-filter_sig       = "ALL"
-filter_min_vol   = ""
-filter_ema20     = ""
-filter_ema200    = ""
-filter_min_score = ""
-toggle_body_wick = False
-toggle_hide_sl   = False
+filter_sig = "ALL"; filter_min_vol = ""; filter_ema20 = ""
+filter_ema200 = ""; filter_min_score = ""
+toggle_body_wick = False; toggle_hide_sl = False
 
 if st.session_state.show_filters:
     with st.container(border=True):
         st.markdown("**⚙ Refine Filters**")
         col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
-        with col_f1:  filter_sig       = st.selectbox("Signal",  ["ALL", "BUY", "SELL"], key="f_sig")
-        with col_f2:  filter_min_vol   = st.text_input("VOL ≥",  value="", key="f_vol")
-        with col_f3:  filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="", key="f_e20")
-        with col_f4:  filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="", key="f_e200")
-        with col_f5:  filter_min_score = st.text_input("Score ≥", value="", key="f_score")
+        with col_f1: filter_sig       = st.selectbox("Signal", ["ALL", "BUY", "SELL"], key="f_sig")
+        with col_f2: filter_min_vol   = st.text_input("VOL ≥", value="", key="f_vol")
+        with col_f3: filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="", key="f_e20")
+        with col_f4: filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="", key="f_e200")
+        with col_f5: filter_min_score = st.text_input("Score ≥", value="", key="f_score")
         tog1, tog2, tog3 = st.columns(3)
         with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
-        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks",           key="f_sl", value=False)
-        with tog3: auto_on          = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
-        if auto_on != st.session_state.auto_refresh:
-            st.session_state.auto_refresh = auto_on
+        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks", key="f_sl", value=False)
+        with tog3:
+            auto_on = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
+            if auto_on != st.session_state.auto_refresh:
+                st.session_state.auto_refresh = auto_on
 
 view = list(st.session_state.results)
-
 if filter_sig != "ALL":
     view = [r for r in view if r["signal"] == filter_sig]
 if filter_min_vol.strip():
-    try:    view = [r for r in view if r["volume"] >= float(filter_min_vol)]
+    try: view = [r for r in view if r["volume"] >= float(filter_min_vol)]
     except: pass
 if filter_ema20.strip():
-    try:    view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
+    try: view = [r for r in view if abs((r["ltp"]-r["ema20"])/r["ema20"]*100) <= float(filter_ema20)]
     except: pass
 if filter_ema200.strip():
-    try:    view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
+    try: view = [r for r in view if abs((r["ltp"]-r["ema200"])/r["ema200"]*100) <= float(filter_ema200)]
     except: pass
 if filter_min_score.strip():
-    try:    view = [r for r in view if r["score"] >= float(filter_min_score)]
+    try: view = [r for r in view if r["score"] >= float(filter_min_score)]
     except: pass
 if toggle_body_wick:
-    view = [
-        r for r in view
-        if (r["highPrice"] - r["lowPrice"]) > 0
-        and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5
-    ]
+    view = [r for r in view if (r["highPrice"] - r["lowPrice"]) > 0
+            and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5]
 if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
 
@@ -1240,9 +1122,7 @@ for sector in all_sectors:
     pill_options.append(label)
     display_label_to_sector[label] = sector
 
-selected_sector_label = st.pills("Sector", pill_options, default="All",
-                                  label_visibility="collapsed")
-
+selected_sector_label = st.pills("Sector", pill_options, default="All", label_visibility="collapsed")
 if selected_sector_label and selected_sector_label != "All":
     mapped_sector = display_label_to_sector.get(selected_sector_label)
     if mapped_sector:
@@ -1251,8 +1131,7 @@ if selected_sector_label and selected_sector_label != "All":
 if st.session_state.scan_log:
     signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
     with st.expander(
-        f"🔍 Scan Log — {len(signals_found)} signals | "
-        f"{len(st.session_state.scan_log) - len(signals_found)} skipped",
+        f"🔍 Scan Log — {len(signals_found)} signals | {len(st.session_state.scan_log) - len(signals_found)} skipped",
         expanded=(len(signals_found) == 0),
     ):
         for line in st.session_state.scan_log:
@@ -1266,8 +1145,7 @@ if not view:
 else:
     sl_hit_display = len([r for r in st.session_state.results if r.get("sl_hit", False)])
     st.markdown(f"""
-<div style="display:flex;justify-content:space-between;align-items:center;
-            margin-bottom:8px;padding:6px 4px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:6px 4px;">
   <div style="font-size:12px;color:#d04a00;font-weight:600;">
     {"🔴 <b>" + str(sl_hit_display) + "</b> SL Hit stock" + ("s" if sl_hit_display>1 else "") + " in results" if sl_hit_display else ""}
   </div>
@@ -1293,40 +1171,40 @@ else:
         vwap         = item["vwap"]
         ema200       = item["ema200"]
         score        = item["score"]
-        entry_source = item.get("entry_source", "http")
+        entry_source = item.get("entry_source", "yfinance")
         entry_target = item.get("entry_target") or {}
         mins_ago     = int((time.time() - item["timestamp"]) // 60)
         age_str      = "just now" if mins_ago < 1 else f"{mins_ago}m ago"
 
-        entry_val = entry_target.get("entry",  "—")
-        sl_val    = entry_target.get("sl",     "—")
-        t1_val    = entry_target.get("target", "—")
-        risk_val  = entry_target.get("risk",   "—")
+        entry_val = entry_target.get("entry", "—")
+        sl_val    = entry_target.get("sl",    "—")
+        t1_val    = entry_target.get("target","—")
+        risk_val  = entry_target.get("risk",  "—")
 
         if exit_status == "T1_ACHIEVE":
-            border_clr  = "#27ae60"; badge_cls = "ts-badge-t1achieve"
+            border_clr = "#27ae60"; badge_cls = "ts-badge-t1achieve"
             badge_label = "T1 Achieve ✅"; bar_color = "#27ae60"
-            pct_clr     = "#27ae60" if pct >= 0 else "#c0392b"
+            pct_clr = "#27ae60" if pct >= 0 else "#c0392b"
         elif exit_status == "SL_HIT":
-            border_clr  = "#e87040"; badge_cls = "ts-badge-slhit"
-            badge_label = "SL HIT ✕";   bar_color = "#e87040"; pct_clr = "#d04a00"
+            border_clr = "#e87040"; badge_cls = "ts-badge-slhit"
+            badge_label = "SL HIT ✕"; bar_color = "#e87040"; pct_clr = "#d04a00"
         elif exit_status == "NEAR_ENTRY":
-            border_clr  = "#e6a020"; badge_cls = "ts-badge-nearentry"
+            border_clr = "#e6a020"; badge_cls = "ts-badge-nearentry"
             badge_label = "Near Entry 🔔"; bar_color = "#e6a020"; pct_clr = "#b36200"
         elif exit_status == "NO_ENTRY":
-            border_clr  = "#cccccc"; badge_cls = "ts-badge-noentry"
-            badge_label = "No Entry";    bar_color = "#aaaaaa"; pct_clr = "#888888"
+            border_clr = "#cccccc"; badge_cls = "ts-badge-noentry"
+            badge_label = "No Entry"; bar_color = "#aaaaaa"; pct_clr = "#888888"
         elif sig == "BUY":
-            border_clr  = "#1a9c4a"; badge_cls = "ts-badge-buy"
-            badge_label = "BUY";         bar_color = "#1a9c4a"
-            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
+            border_clr = "#1a9c4a"; badge_cls = "ts-badge-buy"
+            badge_label = "BUY"; bar_color = "#1a9c4a"
+            pct_clr = "#1a9c4a" if pct >= 0 else "#c0392b"
         else:
-            border_clr  = "#c0392b"; badge_cls = "ts-badge-sell"
-            badge_label = "SELL";        bar_color = "#c0392b"
-            pct_clr     = "#1a9c4a" if pct >= 0 else "#c0392b"
+            border_clr = "#c0392b"; badge_cls = "ts-badge-sell"
+            badge_label = "SELL"; bar_color = "#c0392b"
+            pct_clr = "#1a9c4a" if pct >= 0 else "#c0392b"
 
         pct_sign     = "+" if pct > 0 else ""
-        source_badge = "🟢" if entry_source == "websocket" else "🟡"
+        source_badge = "🟢" if entry_source == "angelone" else "🟡"
 
         st.markdown(f"""
 <div class="ts-card" style="border-left-color:{border_clr};">
@@ -1334,7 +1212,7 @@ else:
     <div class="ts-card-left">
       <span class="ts-sym">{sym}</span>
       <span class="ts-chip">{sector_clean}</span>
-      <span style="font-size:14px;font-weight:700;margin-left:4px;">{source_badge}</span>
+      <span style="font-size:14px;font-weight:700;margin-left:4px;" title="{'AngelOne exact' if entry_source=='angelone' else 'yfinance'}">{source_badge}</span>
       <span class="ts-badge {badge_cls}">{badge_label}</span>
     </div>
     <div class="ts-card-right">
