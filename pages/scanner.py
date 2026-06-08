@@ -824,9 +824,10 @@ def run_full_scan(watchlist_stocks: list):
         analyze_stock(stock, candles, is_refresh=False, live_high_low=None)
 
     signal_count = len(st.session_state.results)
-    st.session_state.scan_log.append(
-        f"🎯 Scan complete — {signal_count} signals found | Click 'Get Targets' for Entry/SL/T1"
-    )
+
+    # Insert summary at TOP of scan log
+    summary = f"🎯 Scan complete — {signal_count} signals found | Click 'Get Targets' for Entry/SL/T1"
+    st.session_state.scan_log.insert(0, summary)
 
     if st.session_state.results:
         st.session_state.results.sort(
@@ -1094,10 +1095,11 @@ if selected_sector_label and selected_sector_label != "All":
         view = [r for r in view if r["sector"] == mapped_sector]
 
 if st.session_state.scan_log:
-    signals_found = [l for l in st.session_state.scan_log if l.startswith("✅")]
+    actual_signals = len(st.session_state.results)
+    total_log      = len(st.session_state.scan_log)
     with st.expander(
-        f"🔍 Scan Log — {len(signals_found)} signals | {len(st.session_state.scan_log) - len(signals_found)} skipped",
-        expanded=(len(signals_found) == 0),
+        f"🔍 Scan Log — {actual_signals} signals | {total_log - actual_signals} skipped",
+        expanded=(actual_signals == 0),
     ):
         for line in st.session_state.scan_log:
             st.markdown(line)
