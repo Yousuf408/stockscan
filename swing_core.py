@@ -412,13 +412,21 @@ def _fetch_single(symbol: str) -> dict:
 
 
 def _fetch_live_single(symbol: str) -> dict:
-    """Fetch only today's live candle. Used for refresh."""
+    """
+    Fetch latest available candle.
+    During market hours → today's in-progress candle.
+    After market close / holidays → last completed trading day.
+    Always returns the most recent available data.
+    """
     symbol = symbol.lstrip("$").strip().upper()
     try:
-        df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
+        df = yf.Ticker(f"{symbol}.NS").history(period="5d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 1:
             return {"symbol": symbol, "error": "No data"}
-        cur = df.iloc[-1]
+        df = df.dropna(subset=["Close", "Volume"])
+        if len(df) < 1:
+            return {"symbol": symbol, "error": "No clean data"}
+        cur = df.iloc[-1]  # always latest available
         return {
             "symbol": symbol, "error": None,
             "current_price": round(float(cur["Close"]), 2),
@@ -554,15 +562,26 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
         save_price_data_to_db(results)
 
     elif not is_today and db_data:
-        # ── PAST DATE PATH: hist from DB, use last hist day as "current" ──
+        # ── PAST DATE PATH: selected date as current, prev 5 as hist ──
         for sym in symbols:
             meta    = stock_meta.get(sym, {})
             db_rows = db_data.get(sym, [])
             if not db_rows:
                 errors.append({"symbol": sym, "error": "No data for selected date"})
                 continue
-            # Use the last available date as "current"
-            last_row = db_rows[-1]
+
+            # Filter out rows with any None OHLCV values
+            db_rows = [r for r in db_rows if all(
+                r.get(k) is not None for k in ["open", "high", "low", "close", "volume"]
+            )]
+            if not db_rows:
+                errors.append({"symbol": sym, "error": "No valid data for selected date"})
+                continue
+
+            # Last row = selected date = current candle
+            last_row  = db_rows[-1]
+            hist_rows = db_rows[:-1]
+
             live = {
                 "current_price": round(float(last_row["close"]), 2),
                 "current_open":  round(float(last_row["open"]),  2),
@@ -571,7 +590,6 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
                 "current_vol":   int(last_row["volume"]),
                 "current_date":  datetime.strptime(last_row["trade_date"], "%Y-%m-%d").strftime("%d %b"),
             }
-            hist_rows = db_rows[:-1]  # all except last = history
             if hist_rows:
                 results.append(_build_result_from_db(sym, hist_rows, live, meta))
             else:
