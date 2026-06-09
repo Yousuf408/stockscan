@@ -1,6 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.1
-#  Fixed: load_price_data_from_db added, all DB operations correct
+#  TRADE SENTRY — swing_core.py  v4.0
+#  v4.0: Date-driven architecture with swing_price_data table
+#        Auto-fetch on page load, DB-first for historical, live for today
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os, requests, yfinance as yf, statistics, time
@@ -65,10 +66,7 @@ def load_swing_stocks() -> list:
             timeout=10,
         )
         r.raise_for_status()
-        rows = r.json()
-        for row in rows:
-            row["symbol"] = row["symbol"].lstrip("$").strip().upper()
-        return rows
+        return r.json()
     except Exception as e:
         print(f"[swing_core] load error: {e}")
         return []
@@ -174,13 +172,17 @@ def _vol_signal(ratio: float) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_last_n_trading_days(ref_date: date, n: int = 10) -> list:
+    """
+    Returns last n trading days (Mon-Fri) before ref_date (exclusive).
+    Used to determine which dates to look up in swing_price_data.
+    """
     days = []
     d    = ref_date - timedelta(days=1)
     while len(days) < n:
-        if d.weekday() < 5:
+        if d.weekday() < 5:  # Mon=0 ... Fri=4
             days.append(d)
         d -= timedelta(days=1)
-    return list(reversed(days))
+    return list(reversed(days))  # oldest first
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 6 — PRICE DATA DB OPERATIONS
@@ -188,29 +190,28 @@ def get_last_n_trading_days(ref_date: date, n: int = 10) -> list:
 
 def load_price_data_from_db(symbols: list, from_date: date, to_date: date) -> dict:
     """
-    Load OHLCV from swing_price_data for date range.
-    Uses list of tuples for params to allow duplicate keys (gte + lte).
-    Returns {symbol: [rows sorted oldest first]}
+    Load OHLCV data from swing_price_data for given symbols and date range.
+    Returns dict: {symbol: [{trade_date, open, high, low, close, volume}, ...]}
     """
     try:
         uid = _get_user_id()
         if not uid or not symbols:
             return {}
-        params = [
-            ("select",     "symbol,trade_date,open,high,low,close,volume"),
-            ("user_id",    f"eq.{uid}"),
-            ("trade_date", f"gte.{from_date.isoformat()}"),
-            ("trade_date", f"lte.{to_date.isoformat()}"),
-            ("order",      "symbol.asc,trade_date.asc"),
-        ]
         r = requests.get(
             _price_table_url(),
             headers=_headers(),
-            params=params,
+            params={
+                "select":     "symbol,trade_date,open,high,low,close,volume",
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"gte.{from_date.isoformat()}",
+                "and":        f"(trade_date.lte.{to_date.isoformat()})",
+                "order":      "symbol.asc,trade_date.asc",
+            },
             timeout=15,
         )
         r.raise_for_status()
-        rows   = r.json()
+        rows = r.json()
+
         result = {}
         for row in rows:
             sym = row["symbol"]
@@ -225,12 +226,12 @@ def load_price_data_from_db(symbols: list, from_date: date, to_date: date) -> di
 
 def save_price_data_to_db(results: list):
     """
-    Save OHLCV to swing_price_data. Saves hist (ISO dates) + today.
-    Uses upsert. Called after threads complete — never inside workers.
+    Save OHLCV for all stocks to swing_price_data.
+    Saves both historical (hist_*) AND today's candle.
+    Uses upsert — safe to call multiple times.
+    Called AFTER all threads complete — never inside workers.
     """
-    uid = _get_user_id()
-    if not uid:
-        return
+    uid  = _get_user_id()
     hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
     rows = []
 
@@ -239,73 +240,89 @@ def save_price_data_to_db(results: list):
             continue
         sym = r["symbol"]
 
-        # Historical days — use all 10 ISO dates for DB save
-        hist_iso_dates = r.get("all_hist_iso_dates") or r.get("hist_iso_dates", [])
-        all_opens   = r.get("all_hist_opens",   r.get("hist_opens",   []))
-        all_highs   = r.get("all_hist_highs",   r.get("hist_highs",   []))
-        all_lows    = r.get("all_hist_lows",    r.get("hist_lows",    []))
-        all_closes  = r.get("all_hist_closes",  r.get("hist_closes",  []))
-        all_volumes = r.get("all_hist_volumes", r.get("hist_volumes", []))
+        # Save historical days (d1-d5 from yfinance)
+        hist_dates   = r.get("hist_dates",   [])
+        hist_opens   = r.get("hist_opens",   [])
+        hist_highs   = r.get("hist_highs",   [])
+        hist_lows    = r.get("hist_lows",    [])
+        hist_closes  = r.get("hist_closes",  [])
+        hist_volumes = r.get("hist_volumes", [])
 
-        for i, iso_date in enumerate(hist_iso_dates):
-            if i >= len(all_closes):
-                break
-            rows.append({
-                "user_id":    uid, "symbol": sym,
-                "trade_date": iso_date,
-                "open":       all_opens[i]   if i < len(all_opens)   else None,
-                "high":       all_highs[i]   if i < len(all_highs)   else None,
-                "low":        all_lows[i]    if i < len(all_lows)    else None,
-                "close":      all_closes[i],
-                "volume":     all_volumes[i] if i < len(all_volumes) else None,
-            })
+        for i, raw_date in enumerate(hist_dates):
+            try:
+                trade_date = datetime.strptime(
+                    raw_date + f" {date.today().year}", "%d %b %Y"
+                ).strftime("%Y-%m-%d")
+            except Exception:
+                continue
+            if i < len(hist_closes):
+                rows.append({
+                    "user_id":    uid,
+                    "symbol":     sym,
+                    "trade_date": trade_date,
+                    "open":       hist_opens[i]   if i < len(hist_opens)   else None,
+                    "high":       hist_highs[i]   if i < len(hist_highs)   else None,
+                    "low":        hist_lows[i]    if i < len(hist_lows)    else None,
+                    "close":      hist_closes[i],
+                    "volume":     hist_volumes[i] if i < len(hist_volumes) else None,
+                })
 
-        # Today's candle
+        # Save today's candle
         rows.append({
-            "user_id":    uid, "symbol": sym,
+            "user_id":    uid,
+            "symbol":     sym,
             "trade_date": date.today().isoformat(),
-            "open":   r.get("current_open"),
-            "high":   r.get("current_high"),
-            "low":    r.get("current_low"),
-            "close":  r.get("current_price"),
-            "volume": r.get("current_vol"),
+            "open":       r.get("current_open"),
+            "high":       r.get("current_high"),
+            "low":        r.get("current_low"),
+            "close":      r.get("current_price"),
+            "volume":     r.get("current_vol"),
         })
 
     if not rows:
         return
 
-    # Parallel upsert in batches of 200
-    url     = _price_table_url()
-    batches = [rows[i:i+200] for i in range(0, len(rows), 200)]
-
-    def _upload(batch):
+    # Upsert in batches of 200
+    for i in range(0, len(rows), 200):
+        batch = rows[i:i+200]
         try:
-            requests.post(url, headers=hdrs, json=batch, timeout=20).raise_for_status()
+            resp = requests.post(
+                _price_table_url(),
+                headers=hdrs,
+                json=batch,
+                timeout=20,
+            )
+            resp.raise_for_status()
         except Exception as e:
-            print(f"[swing_core] save batch error: {e}")
-
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        list(ex.map(_upload, batches))
+            print(f"[swing_core] save_price_data batch {i}: {e}")
 
 
 def check_db_has_data(symbols: list, trading_days: list) -> bool:
-    """Check if today's data exists for 80%+ of symbols."""
+    """
+    Check if DB already has price data for given symbols and dates.
+    Returns True if at least 80% of expected rows exist (allows for holidays/errors).
+    """
     try:
         uid = _get_user_id()
-        if not uid or not symbols:
+        if not uid or not symbols or not trading_days:
             return False
-        today = date.today().isoformat()
-        hdrs  = {**_headers(), "Prefer": "count=exact"}
+        from_d = trading_days[0].isoformat()
+        to_d   = trading_days[-1].isoformat()
         r = requests.get(
             _price_table_url(),
-            headers=hdrs,
-            params={"user_id": f"eq.{uid}", "trade_date": f"eq.{today}", "limit": "1"},
+            headers=_headers(),
+            params={
+                "select":     "symbol",
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"gte.{from_d}",
+                "and":        f"(trade_date.lte.{to_d})",
+            },
             timeout=10,
         )
         r.raise_for_status()
-        cr = r.headers.get("Content-Range", "")
-        count = int(cr.split("/")[-1]) if "/" in cr else len(r.json())
-        return count >= len(symbols) * 0.8
+        count    = len(r.json())
+        expected = len(symbols) * len(trading_days)
+        return count >= expected * 0.8
     except Exception:
         return False
 
@@ -330,6 +347,7 @@ def is_market_open() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_single(symbol: str) -> dict:
+    """Fetch 10 hist days + today from yfinance. Used when DB has no data."""
     symbol = symbol.lstrip("$").strip().upper()
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="15d", interval="1d", auto_adjust=True)
@@ -339,7 +357,7 @@ def _fetch_single(symbol: str) -> dict:
         if len(df) < 2:
             return {"symbol": symbol, "error": "Not enough clean data"}
 
-        hist = df.iloc[-11:-1] if len(df) >= 11 else df.iloc[:-1]
+        hist = df.iloc[-11:-1] if len(df) >= 11 else df.iloc[:-1]  # last 10 trading days
         cur  = df.iloc[-1]
 
         hist_closes  = hist["Close"].tolist()
@@ -348,7 +366,6 @@ def _fetch_single(symbol: str) -> dict:
         hist_highs   = hist["High"].tolist()
         hist_lows    = hist["Low"].tolist()
         hist_dates   = hist.index.strftime("%d %b").tolist()
-        hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()
 
         current_price = round(float(cur["Close"]), 2)
         current_open  = round(float(cur["Open"]),  2)
@@ -365,27 +382,19 @@ def _fetch_single(symbol: str) -> dict:
         vol_signal  = _vol_signal(vol_ratio)
         pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
-        # Use last 5 only for display — signals already calculated above on all 10
-        disp_slice = slice(-5, None)
-
         return {
             "symbol": symbol, "error": None,
-            "hist_dates":     hist_dates[disp_slice],
-            "hist_iso_dates": hist_iso[disp_slice],
-            "hist_opens":     [round(float(v), 2) for v in hist_opens[disp_slice]],
-            "hist_highs":     [round(float(v), 2) for v in hist_highs[disp_slice]],
-            "hist_lows":      [round(float(v), 2) for v in hist_lows[disp_slice]],
-            "hist_closes":    [round(float(v), 2) for v in hist_closes[disp_slice]],
-            "hist_volumes":   [int(v)             for v in hist_volumes[disp_slice]],
-            # Keep full 10 for signal reference
-            "all_hist_iso_dates": hist_iso,
-            "all_hist_closes":    [round(float(v), 2) for v in hist_closes],
-            "all_hist_volumes":   [int(v)             for v in hist_volumes],
-            "current_date":   current_date,  "current_price": current_price,
-            "current_open":   current_open,  "current_high":  current_high,
-            "current_low":    current_low,   "current_vol":   current_vol,
-            "max_close":  round(max_close, 2), "median_vol": int(median_vol),
-            "vol_ratio":  vol_ratio, "vol_signal": vol_signal,
+            "hist_dates":   hist_dates,
+            "hist_opens":   [round(float(v), 2) for v in hist_opens],
+            "hist_highs":   [round(float(v), 2) for v in hist_highs],
+            "hist_lows":    [round(float(v), 2) for v in hist_lows],
+            "hist_closes":  [round(float(v), 2) for v in hist_closes],
+            "hist_volumes": [int(v) for v in hist_volumes],
+            "current_date": current_date, "current_price": current_price,
+            "current_open": current_open, "current_high": current_high,
+            "current_low":  current_low,  "current_vol":  current_vol,
+            "max_close": round(max_close, 2), "median_vol": int(median_vol),
+            "vol_ratio": vol_ratio, "vol_signal": vol_signal,
             "pct_vs_high": pct_vs_high, "status": status,
         }
     except Exception as e:
@@ -393,6 +402,7 @@ def _fetch_single(symbol: str) -> dict:
 
 
 def _fetch_live_single(symbol: str) -> dict:
+    """Fetch only today's live candle. Used for refresh."""
     symbol = symbol.lstrip("$").strip().upper()
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
@@ -412,17 +422,26 @@ def _fetch_live_single(symbol: str) -> dict:
         return {"symbol": symbol, "error": str(e)}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 9 — BUILD RESULT FROM DB + LIVE
+# SECTION 9 — BUILD RESULT FROM DB + LIVE DATA
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_result_from_db(symbol: str, db_rows: list, live: dict, meta: dict) -> dict:
     """
-    All 10 rows for signal calculation.
-    Last 5 rows for candle display only.
+    Build full result from DB rows + live data.
+    db_rows: up to 10 rows sorted oldest first.
+    - Signal calculation uses all available rows
+    - Display uses last 5 rows only
     """
+    # Filter out any rows with None OHLCV values
+    db_rows = [r for r in db_rows if all(
+        r.get(k) is not None for k in ["open","high","low","close","volume"]
+    )]
+
+    # All rows for signal calculation
     all_closes  = [round(float(r["close"]),  2) for r in db_rows]
     all_volumes = [int(r["volume"])              for r in db_rows]
 
+    # Last 5 rows for display
     disp_rows    = db_rows[-5:]
     hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in disp_rows]
     hist_opens   = [round(float(r["open"]),   2) for r in disp_rows]
@@ -443,10 +462,9 @@ def _build_result_from_db(symbol: str, db_rows: list, live: dict, meta: dict) ->
 
     return {
         "symbol": symbol, "error": None,
-        "hist_dates":    hist_dates,  "hist_opens":   hist_opens,
-        "hist_highs":    hist_highs,  "hist_lows":    hist_lows,
-        "hist_closes":   hist_closes, "hist_volumes": hist_volumes,
-        "hist_iso_dates": [],  # not needed for DB path
+        "hist_dates":   hist_dates,   "hist_opens":   hist_opens,
+        "hist_highs":   hist_highs,   "hist_lows":    hist_lows,
+        "hist_closes":  hist_closes,  "hist_volumes": hist_volumes,
         "current_date":  live.get("current_date", ""),
         "current_price": current_price,
         "current_open":  live.get("current_open",  0),
@@ -468,6 +486,16 @@ def _build_result_from_db(symbol: str, db_rows: list, live: dict, meta: dict) ->
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 25) -> tuple:
+    """
+    Main scan runner — date-driven, DB-first architecture.
+
+    Flow:
+    1. Get last 10 trading days before selected_date
+    2. Check DB for historical data
+    3a. DB has data → read hist from DB + fetch only today's live (fast)
+    3b. DB missing → fetch full 15d from yfinance (slower, saves to DB after)
+    4. Build results using last 5 days for display, all 10 for signals
+    """
     if selected_date is None:
         selected_date = date.today()
 
@@ -477,13 +505,14 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
     symbols      = [s["symbol"] for s in stocks]
     results, errors = [], []
 
+    # Include selected_date in query so db_rows[-1] = selected date = current candle
     from_d  = trading_days[0]
-    to_d    = trading_days[-1]
+    to_d    = selected_date  # include selected date itself
     db_data = load_price_data_from_db(symbols, from_d, to_d)
     has_db  = check_db_has_data(symbols, trading_days)
 
     if has_db and is_today:
-        # FAST PATH — DB hist + live fetch only
+        # ── FAST PATH: hist from DB (exclude today) + live fetch ──
         live_results = {}
         batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
         for batch in batches:
@@ -494,27 +523,43 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
                     if not d.get("error"):
                         live_results[d["symbol"]] = d
 
+        today_str = date.today().isoformat()
         for sym in symbols:
             meta    = stock_meta.get(sym, {})
-            db_rows = db_data.get(sym, [])
-            live    = live_results.get(sym, {})
-            if db_rows and live:
+            # Exclude today and filter None values — live fetch handles today
+            db_rows = [r for r in db_data.get(sym, [])
+                       if r.get("trade_date") != today_str
+                       and all(r.get(k) is not None for k in ["open","high","low","close","volume"])]
+            live = live_results.get(sym, {})
+            if db_rows and len(db_rows) >= 3 and live:
                 results.append(_build_result_from_db(sym, db_rows, live, meta))
+            elif live:
+                full = _fetch_single(sym)
+                if not full.get("error"):
+                    full["screener_url"]  = meta.get("screener_url", f"https://www.screener.in/company/{sym}/")
+                    full["breakout_date"] = meta.get("breakout_date", "")
+                    full["notes"]         = meta.get("notes", "")
+                    full["db_id"]         = meta.get("id")
+                    full["source"]        = "yf"
+                    results.append(full)
+                else:
+                    errors.append({"symbol": sym, "error": full["error"]})
             else:
                 errors.append({"symbol": sym, "error": "Missing DB or live data"})
 
-        # Save today's live to DB outside threads
         save_price_data_to_db(results)
 
     elif not is_today and db_data:
-        # PAST DATE PATH — all from DB
+        # ── PAST DATE PATH: db_rows[-1] = selected date = current, rest = hist ──
         for sym in symbols:
             meta    = stock_meta.get(sym, {})
-            db_rows = db_data.get(sym, [])
+            db_rows = [r for r in db_data.get(sym, [])
+                       if all(r.get(k) is not None for k in ["open","high","low","close","volume"])]
             if not db_rows:
                 errors.append({"symbol": sym, "error": "No data for selected date"})
                 continue
-            last_row = db_rows[-1]
+            last_row  = db_rows[-1]   # selected date = current candle
+            hist_rows = db_rows[:-1]  # everything before = hist candles
             live = {
                 "current_price": round(float(last_row["close"]), 2),
                 "current_open":  round(float(last_row["open"]),  2),
@@ -523,14 +568,13 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
                 "current_vol":   int(last_row["volume"]),
                 "current_date":  datetime.strptime(last_row["trade_date"], "%Y-%m-%d").strftime("%d %b"),
             }
-            hist_rows = db_rows[:-1]
             if hist_rows:
                 results.append(_build_result_from_db(sym, hist_rows, live, meta))
             else:
                 errors.append({"symbol": sym, "error": "Insufficient history"})
 
     else:
-        # FULL FETCH — no DB data
+        # ── FULL FETCH: no DB data, fetch everything from yfinance ──
         batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
         for batch in batches:
             with ThreadPoolExecutor(max_workers=batch_size) as ex:
@@ -549,7 +593,7 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
                     else:
                         errors.append({"symbol": sym, "error": d["error"]})
 
-        # Save to DB after threads
+        # Save to DB after threads complete
         save_price_data_to_db(results)
 
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
@@ -558,14 +602,18 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
 
 
 def refresh_live_data(results: list, batch_size: int = 25) -> list:
+    """
+    Refresh only today's price + volume. Keeps hist unchanged.
+    DB save happens after all threads complete.
+    """
     if not results:
         return results
 
     symbols    = [r["symbol"] for r in results]
     result_map = {r["symbol"]: r for r in results}
+    batches    = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
     live_data  = {}
 
-    batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
     for batch in batches:
         with ThreadPoolExecutor(max_workers=batch_size) as ex:
             futures = {ex.submit(_fetch_live_single, sym): sym for sym in batch}
@@ -574,6 +622,7 @@ def refresh_live_data(results: list, batch_size: int = 25) -> list:
                 if not live.get("error"):
                     live_data[live["symbol"]] = live
 
+    # Build updated results
     updated = []
     for r in results:
         sym  = r["symbol"]
@@ -601,7 +650,7 @@ def refresh_live_data(results: list, batch_size: int = 25) -> list:
             "pct_vs_high": pct_vs_high, "status": status, "median_vol": int(median_vol),
         })
 
-    # Save today's updated data to DB
+    # Save to DB after threads complete
     save_price_data_to_db(updated)
 
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
