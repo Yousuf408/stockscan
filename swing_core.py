@@ -1,9 +1,7 @@
-# ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v3.0
-#  v3.0: Auto rolling 5d snapshot in swing_watchlist table
-#        First scan of day → fetch 5d OHLCV from yfinance + save to DB
-#        Subsequent scans  → read hist from DB + fetch only live price/vol
-#        No separate snapshot table, no manual button
+\# ══════════════════════════════════════════════════════════════════════════════
+#  TRADE SENTRY — swing_core.py  v2.1 (restored)
+#  Simple yfinance only — no DB snapshot, no AngelOne
+#  period=7d for fast fetch, median vol, 4 signals
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os, requests, yfinance as yf, statistics, time
@@ -54,7 +52,7 @@ def _table_url():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_swing_stocks() -> list:
-    """Load all swing stocks for current user including stored d1-d5 history."""
+    """Load all swing stocks for current user."""
     try:
         uid = _get_user_id()
         if not uid:
@@ -114,7 +112,7 @@ def delete_swing_stock(db_id: int):
 
 
 def bulk_add_swing_stocks(symbols: list) -> dict:
-    """Add multiple symbols at once. Returns {added, skipped, errors}."""
+    """Add multiple symbols at once."""
     uid      = _get_user_id()
     existing = {s["symbol"] for s in load_swing_stocks()}
     added, skipped, errors = [], [], []
@@ -147,7 +145,7 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_vol(v) -> str:
-    """Format volume in Indian style: Cr / L / K."""
+    """Format volume Indian style: Cr / L / K."""
     if v is None:
         return "—"
     v = int(v)
@@ -183,139 +181,104 @@ def _vol_signal(ratio: float) -> str:
     return f"🔴 Weak ({ratio})"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5 — SNAPSHOT: READ / WRITE d1-d5 in swing_watchlist
+# SECTION 5 — YFINANCE FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _snap_is_fresh(stock: dict) -> bool:
-    """Returns True if snap_updated_at is today's date."""
-    updated = stock.get("snap_updated_at")
-    if not updated:
-        return False
-    try:
-        snap_date = datetime.fromisoformat(updated.replace("Z","+00:00")).date()
-        return snap_date == date.today()
-    except Exception:
-        return False
-
-
-def _extract_hist_from_db(stock: dict) -> dict | None:
+def _fetch_single(symbol: str) -> dict:
     """
-    Pull d1-d5 OHLCV from a swing_watchlist DB row.
-    Returns dict with hist_* lists or None if incomplete.
-    """
-    try:
-        opens, highs, lows, closes, volumes, dates = [], [], [], [], [], []
-        for i in range(1, 6):
-            d = stock.get(f"d{i}_date")
-            o = stock.get(f"d{i}_open")
-            h = stock.get(f"d{i}_high")
-            l = stock.get(f"d{i}_low")
-            c = stock.get(f"d{i}_close")
-            v = stock.get(f"d{i}_volume")
-            if not all([d, o, h, l, c, v]):
-                return None
-            opens.append(round(float(o), 2))
-            highs.append(round(float(h), 2))
-            lows.append(round(float(l), 2))
-            closes.append(round(float(c), 2))
-            volumes.append(int(v))
-            # Format date for display
-            try:
-                dates.append(datetime.strptime(str(d), "%Y-%m-%d").strftime("%d %b"))
-            except Exception:
-                dates.append(str(d))
-        return {
-            "hist_opens":   opens,
-            "hist_highs":   highs,
-            "hist_lows":    lows,
-            "hist_closes":  closes,
-            "hist_volumes": volumes,
-            "hist_dates":   dates,
-        }
-    except Exception:
-        return None
-
-
-def _save_hist_to_db(db_id: int, hist: dict, h: dict = None):
-    """
-    Save 5d OHLCV into d1-d5 columns of swing_watchlist.
-    h = pre-built headers (required for thread safety — pass from main thread).
-    """
-    headers = h or _headers()
-    row = {"snap_updated_at": datetime.utcnow().isoformat()}
-    for i in range(5):
-        idx = i + 1
-        raw_date = hist["hist_dates"][i]
-        try:
-            parsed  = datetime.strptime(raw_date + f" {date.today().year}", "%d %b %Y")
-            db_date = parsed.strftime("%Y-%m-%d")
-        except Exception:
-            db_date = None
-        row[f"d{idx}_date"]   = db_date
-        row[f"d{idx}_open"]   = hist["hist_opens"][i]
-        row[f"d{idx}_high"]   = hist["hist_highs"][i]
-        row[f"d{idx}_low"]    = hist["hist_lows"][i]
-        row[f"d{idx}_close"]  = hist["hist_closes"][i]
-        row[f"d{idx}_volume"] = hist["hist_volumes"][i]
-
-    r = requests.patch(
-        f"{_table_url()}?id=eq.{db_id}",
-        headers=headers, json=row, timeout=10,
-    )
-    r.raise_for_status()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — YFINANCE FETCH
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _fetch_full(symbol: str) -> dict | None:
-    """
-    Fetch 5 historical days + today's live candle from yfinance.
-    Used on first scan of the day (snapshot stale).
+    Fetch 5 historical days + today from yfinance.
     period=7d covers weekends/holidays safely for 6 trading days.
     """
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="7d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 6:
-            return None
+            return {"symbol": symbol, "error": "Not enough data"}
         df = df.dropna(subset=["Close", "Volume"])
         if len(df) < 6:
-            return None
+            return {"symbol": symbol, "error": "Not enough clean data"}
 
         hist = df.iloc[-6:-1]   # 5 historical completed days
         cur  = df.iloc[-1]      # today / current
 
+        hist_closes  = hist["Close"].tolist()
+        hist_volumes = hist["Volume"].tolist()
+        hist_opens   = hist["Open"].tolist()
+        hist_highs   = hist["High"].tolist()
+        hist_lows    = hist["Low"].tolist()
+        hist_dates   = hist.index.strftime("%d %b").tolist()
+
+        current_price = round(float(cur["Close"]), 2)
+        current_open  = round(float(cur["Open"]),  2)
+        current_high  = round(float(cur["High"]),  2)
+        current_low   = round(float(cur["Low"]),   2)
+        current_vol   = int(cur["Volume"])
+        current_date  = df.index[-1].strftime("%d %b")
+
+        max_close       = max(hist_closes)
+        clean_vols      = [v for v in hist_volumes if v and v > 0]
+        median_vol      = statistics.median(clean_vols) if clean_vols else 1
+        vol_ratio       = round(current_vol / median_vol, 2) if median_vol > 0 else 0
+        status          = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
+        vol_signal      = _vol_signal(vol_ratio)
+        pct_vs_high     = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
+
         return {
-            "hist_dates":   hist.index.strftime("%d %b").tolist(),
-            "hist_opens":   [round(float(v), 2) for v in hist["Open"].tolist()],
-            "hist_highs":   [round(float(v), 2) for v in hist["High"].tolist()],
-            "hist_lows":    [round(float(v), 2) for v in hist["Low"].tolist()],
-            "hist_closes":  [round(float(v), 2) for v in hist["Close"].tolist()],
-            "hist_volumes": [int(v)             for v in hist["Volume"].tolist()],
-            "current_price": round(float(cur["Close"]), 2),
-            "current_open":  round(float(cur["Open"]),  2),
-            "current_high":  round(float(cur["High"]),  2),
-            "current_low":   round(float(cur["Low"]),   2),
-            "current_vol":   int(cur["Volume"]),
-            "current_date":  df.index[-1].strftime("%d %b"),
+            "symbol":        symbol,
+            "error":         None,
+            "hist_dates":    hist_dates,
+            "hist_opens":    [round(float(v), 2) for v in hist_opens],
+            "hist_highs":    [round(float(v), 2) for v in hist_highs],
+            "hist_lows":     [round(float(v), 2) for v in hist_lows],
+            "hist_closes":   [round(float(v), 2) for v in hist_closes],
+            "hist_volumes":  [int(v)             for v in hist_volumes],
+            "current_date":  current_date,
+            "current_price": current_price,
+            "current_open":  current_open,
+            "current_high":  current_high,
+            "current_low":   current_low,
+            "current_vol":   current_vol,
+            "max_close":     round(max_close, 2),
+            "median_vol":    int(median_vol),
+            "vol_ratio":     vol_ratio,
+            "vol_signal":    vol_signal,
+            "pct_vs_high":   pct_vs_high,
+            "status":        status,
         }
+
     except Exception as e:
-        print(f"[swing_core] _fetch_full {symbol}: {e}")
-        return None
+        return {"symbol": symbol, "error": str(e)}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 6 — MARKET HOURS + LIVE REFRESH
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_market_open() -> bool:
+    """Returns True if current IST time is within market hours 9:15–15:30 Mon–Fri."""
+    try:
+        import pytz
+        IST  = pytz.timezone("Asia/Kolkata")
+        now  = datetime.now(pytz.utc).astimezone(IST)
+        if now.weekday() >= 5:
+            return False
+        mins = now.hour * 60 + now.minute
+        return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
+    except Exception:
+        return False
 
 
-def _fetch_live_only(symbol: str) -> dict | None:
+def _fetch_live_single(symbol: str) -> dict:
     """
-    Fetch ONLY today's latest candle (price + volume).
-    Used on subsequent scans when hist is already in DB.
-    Much faster — minimal data.
+    Fetch ONLY today's live price + volume via yfinance period=2d.
+    Lightweight — used for refresh during market hours.
     """
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 1:
-            return None
+            return {"symbol": symbol, "error": "No data"}
         cur = df.iloc[-1]
         return {
+            "symbol":        symbol,
+            "error":         None,
             "current_price": round(float(cur["Close"]), 2),
             "current_open":  round(float(cur["Open"]),  2),
             "current_high":  round(float(cur["High"]),  2),
@@ -324,145 +287,109 @@ def _fetch_live_only(symbol: str) -> dict | None:
             "current_date":  df.index[-1].strftime("%d %b"),
         }
     except Exception as e:
-        print(f"[swing_core] _fetch_live {symbol}: {e}")
-        return None
+        return {"symbol": symbol, "error": str(e)}
+
+
+def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3) -> list:
+    """
+    Refresh only today's price + volume for all stocks in current results.
+    Keeps 5d historical data (hist_*) and all other fields unchanged.
+    Recalculates signals with new live data.
+    Returns updated results list.
+    """
+    if not results:
+        return results
+
+    symbols    = [r["symbol"] for r in results]
+    result_map = {r["symbol"]: r for r in results}
+    batches    = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
+    updated    = {}
+
+    for idx, batch in enumerate(batches):
+        with ThreadPoolExecutor(max_workers=batch_size) as ex:
+            futures = {ex.submit(_fetch_live_single, sym): sym for sym in batch}
+            for f in as_completed(futures):
+                live = f.result()
+                sym  = live["symbol"]
+                if live.get("error"):
+                    continue  # keep existing data if fetch fails
+
+                old = result_map.get(sym, {})
+
+                # Recalculate signals with new live data
+                hist_closes  = old.get("hist_closes", [])
+                hist_volumes = old.get("hist_volumes", [])
+                current_price = live["current_price"]
+                current_vol   = live["current_vol"]
+                max_close     = old.get("max_close", current_price)
+                clean_vols    = [v for v in hist_volumes if v and v > 0]
+                median_vol    = statistics.median(clean_vols) if clean_vols else 1
+                vol_ratio     = round(current_vol / median_vol, 2) if median_vol > 0 else 0
+                status        = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
+                vol_signal    = _vol_signal(vol_ratio)
+                pct_vs_high   = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
+
+                # Merge — update live fields only, keep hist unchanged
+                updated[sym] = {
+                    **old,
+                    "current_price": current_price,
+                    "current_open":  live["current_open"],
+                    "current_high":  live["current_high"],
+                    "current_low":   live["current_low"],
+                    "current_vol":   current_vol,
+                    "current_date":  live["current_date"],
+                    "vol_ratio":     vol_ratio,
+                    "vol_signal":    vol_signal,
+                    "pct_vs_high":   pct_vs_high,
+                    "status":        status,
+                    "median_vol":    int(median_vol),
+                }
+
+        if idx < len(batches) - 1:
+            time.sleep(pause)
+
+    # Return results with updates applied, preserving original order
+    final = []
+    for r in results:
+        sym = r["symbol"]
+        final.append(updated.get(sym, r))
+
+    priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
+    final.sort(key=lambda x: priority.get(x.get("status", ""), 3))
+    return final
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7 — PROCESS SINGLE STOCK
+# SECTION 7 — MAIN SCAN RUNNER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _process_stock(stock: dict, force_full: bool = False, h: dict = None) -> dict:
+def run_swing_scan(stocks: list, batch_size: int = 10, pause: float = 0.5):
     """
-    Process one stock.
-    h = pre-built auth headers passed from main thread (thread-safe).
-    - If snap is fresh: read hist from DB + fetch live only (fast)
-    - Otherwise: fetch full 5d from yfinance + save to DB (first scan of day)
+    Scan all stocks via yfinance in parallel batches.
+    Returns (results, errors).
     """
-    symbol = stock["symbol"]
-    db_id  = stock["id"]
-    fresh  = _snap_is_fresh(stock) and not force_full
-
-    if fresh:
-        # Fast path — read hist from DB
-        hist = _extract_hist_from_db(stock)
-        if hist:
-            live = _fetch_live_only(symbol)
-            if not live:
-                return {"symbol": symbol, "error": "Live fetch failed"}
-            source = "db"
-        else:
-            # DB has incomplete data — fall back to full fetch
-            fresh = False
-
-    if not fresh:
-        # Full fetch from yfinance
-        full = _fetch_full(symbol)
-        if not full:
-            return {"symbol": symbol, "error": "yfinance fetch failed"}
-        hist = {k: full[k] for k in ["hist_dates","hist_opens","hist_highs",
-                                      "hist_lows","hist_closes","hist_volumes"]}
-        live = {k: full[k] for k in ["current_price","current_open","current_high",
-                                      "current_low","current_vol","current_date"]}
-        # Save hist to DB for next scan (pass headers — thread safe)
-        try:
-            _save_hist_to_db(db_id, hist, h=h)
-        except Exception as e:
-            print(f"[swing_core] save hist failed for {symbol}: {e}")
-        source = "yf"
-
-    # Calculate signals
-    hist_closes  = hist["hist_closes"]
-    hist_volumes = hist["hist_volumes"]
-    current_price = live["current_price"]
-    current_vol   = live["current_vol"]
-
-    max_close       = max(hist_closes) if hist_closes else current_price
-    clean_vols      = [v for v in hist_volumes if v and v > 0]
-    median_vol      = statistics.median(clean_vols) if clean_vols else 1
-    vol_ratio       = round(current_vol / median_vol, 2) if median_vol > 0 else 0
-    status          = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
-    vol_signal      = _vol_signal(vol_ratio)
-    pct_vs_high     = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
-
-    return {
-        "symbol":        symbol,
-        "error":         None,
-        "source":        source,   # "db" = fast, "yf" = full fetch
-        # hist
-        "hist_dates":    hist["hist_dates"],
-        "hist_opens":    hist["hist_opens"],
-        "hist_highs":    hist["hist_highs"],
-        "hist_lows":     hist["hist_lows"],
-        "hist_closes":   hist["hist_closes"],
-        "hist_volumes":  hist["hist_volumes"],
-        # live
-        "current_date":  live["current_date"],
-        "current_price": current_price,
-        "current_open":  live["current_open"],
-        "current_high":  live["current_high"],
-        "current_low":   live["current_low"],
-        "current_vol":   current_vol,
-        # calculated
-        "max_close":     round(max_close, 2),
-        "median_vol":    int(median_vol),
-        "vol_ratio":     vol_ratio,
-        "vol_signal":    vol_signal,
-        "pct_vs_high":   pct_vs_high,
-        "status":        status,
-        # meta
-        "screener_url":  stock.get("screener_url", f"https://www.screener.in/company/{symbol}/"),
-        "breakout_date": stock.get("breakout_date", ""),
-        "notes":         stock.get("notes", ""),
-        "db_id":         db_id,
-    }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8 — MAIN SCAN RUNNER
-# ─────────────────────────────────────────────────────────────────────────────
-
-def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
-    """
-    Scan all stocks. Auto-detects whether to use DB cache or fetch fresh.
-    - Stocks with fresh snapshot: batch_size=15, pause=0.3 (live only, fast)
-    - Stocks needing full fetch:  batch_size=10, pause=0.5 (full yfinance, slower)
-
-    IMPORTANT: auth headers captured ONCE in main thread before workers launch.
-    st.session_state is not accessible inside ThreadPoolExecutor workers.
-    """
-    # Capture headers in main thread — workers cannot access st.session_state
-    auth_h = _headers()
-
-    # Split into fast (DB fresh) vs slow (needs full fetch)
-    fresh_stocks = [s for s in stocks if _snap_is_fresh(s) and _extract_hist_from_db(s)]
-    stale_stocks = [s for s in stocks if s not in fresh_stocks]
-
+    stock_meta      = {s["symbol"]: s for s in stocks}
     results, errors = [], []
+    symbols         = [s["symbol"] for s in stocks]
+    batches         = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
 
-    def _run_batch(batch, bs, ps):
-        batches = [batch[i:i+bs] for i in range(0, len(batch), bs)]
-        for idx, b in enumerate(batches):
-            with ThreadPoolExecutor(max_workers=bs) as ex:
-                # Pass auth_h to every worker so DB saves work inside threads
-                futures = {ex.submit(_process_stock, s, False, auth_h): s for s in b}
-                for f in as_completed(futures):
-                    d = f.result()
-                    if not d.get("error"):
-                        results.append(d)
-                    else:
-                        errors.append({"symbol": d["symbol"], "error": d["error"]})
-            if idx < len(batches) - 1:
-                time.sleep(ps)
+    for idx, batch in enumerate(batches):
+        with ThreadPoolExecutor(max_workers=batch_size) as ex:
+            futures = {ex.submit(_fetch_single, sym): sym for sym in batch}
+            for f in as_completed(futures):
+                d   = f.result()
+                sym = d["symbol"]
+                if not d.get("error"):
+                    m = stock_meta.get(sym, {})
+                    d["screener_url"]  = m.get("screener_url", f"https://www.screener.in/company/{sym}/")
+                    d["breakout_date"] = m.get("breakout_date", "")
+                    d["notes"]         = m.get("notes", "")
+                    d["db_id"]         = m.get("id")
+                    results.append(d)
+                else:
+                    errors.append({"symbol": sym, "error": d["error"]})
+        if idx < len(batches) - 1:
+            time.sleep(pause)
 
-    # Fast batch first (DB reads + live fetch only)
-    if fresh_stocks:
-        _run_batch(fresh_stocks, bs=15, ps=0.3)
-
-    # Slow batch (full yfinance fetch + save to DB)
-    if stale_stocks:
-        _run_batch(stale_stocks, bs=10, ps=0.5)
-
-    # Sort: BLASTING → READY → WATCH → rest
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
-
     return results, errors
