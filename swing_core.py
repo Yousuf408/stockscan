@@ -189,62 +189,41 @@ def get_last_n_trading_days(ref_date: date, n: int = 10) -> list:
     return list(reversed(days))  # oldest first
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — PRICE DATA DB OPERATIONS
+# SECTION 6 — PRICE DATA DB OPERATIONS (OPTIMIZED V4.1)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_price_data_from_db(symbols: list, from_date: date, to_date: date) -> dict:
-    """
-    Load OHLCV data from swing_price_data for given symbols and date range.
-    Returns dict: {symbol: [{trade_date, open, high, low, close, volume}, ...]}
-    """
+def save_batch_worker(url, headers, batch):
+    """Worker function to write to database in parallel threads"""
     try:
-        uid = _get_user_id()
-        if not uid or not symbols:
-            return {}
-        r = requests.get(
-            _price_table_url(),
-            headers=_headers(),
-            params={
-                "select":     "symbol,trade_date,open,high,low,close,volume",
-                "user_id":    f"eq.{uid}",
-                "trade_date": f"gte.{from_date.isoformat()}",
-                "and":        f"(trade_date.lte.{to_date.isoformat()})",
-                "order":      "symbol.asc,trade_date.asc",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        rows = r.json()
-
-        result = {}
-        for row in rows:
-            sym = row["symbol"]
-            if sym not in result:
-                result[sym] = []
-            result[sym].append(row)
-        return result
+        resp = requests.post(url, headers=headers, json=batch, timeout=15)
+        resp.raise_for_status()
+        return True
     except Exception as e:
-        print(f"[swing_core] load_price_data error: {e}")
-        return {}
-
+        print(f"[swing_core] Batch write failure: {e}")
+        return False
 
 def save_price_data_to_db(results: list):
     """
-    Save OHLCV for all stocks to swing_price_data.
-    Saves both historical (hist_iso_dates) AND today's candle.
-    Uses upsert — safe to call multiple times.
-    Called AFTER all threads complete — never inside workers.
+    Saves OHLCV data using high-speed parallel upserts.
+    Replaces slow sequential REST loops.
     """
     uid  = _get_user_id()
-    hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
-    rows = []
+    if not uid:
+        return
 
+    # Use standard Supabase upsert parsing headers
+    hdrs = {
+        **_headers(), 
+        "Prefer": "resolution=merge-duplicates" # Keeps your DB architecture clean
+    }
+    
+    rows = []
     for r in results:
         if r.get("error"):
             continue
         sym = r["symbol"]
 
-        # Save historical days — use ISO dates directly (no year parsing issues)
+        # 1. Historical Data Clean Assembly
         hist_iso_dates = r.get("hist_iso_dates", [])
         hist_opens     = r.get("hist_opens",     [])
         hist_highs     = r.get("hist_highs",     [])
@@ -266,7 +245,7 @@ def save_price_data_to_db(results: list):
                 "volume":     hist_volumes[i] if i < len(hist_volumes) else None,
             })
 
-        # Save today's candle
+        # 2. Add Current Live Day Candle
         rows.append({
             "user_id":    uid,
             "symbol":     sym,
@@ -281,46 +260,49 @@ def save_price_data_to_db(results: list):
     if not rows:
         return
 
-    # Upsert in batches of 200
-    for i in range(0, len(rows), 200):
-        batch = rows[i:i+200]
-        try:
-            resp = requests.post(
-                _price_table_url(),
-                headers=hdrs,
-                json=batch,
-                timeout=20,
-            )
-            resp.raise_for_status()
-        except Exception as e:
-            print(f"[swing_core] save_price_data batch {i}: {e}")
+    # Chunk into 200 records per API payload
+    batches = [rows[i:i+200] for i in range(0, len(rows), 200)]
+    
+    # Execute batch uploads in parallel instead of waiting sequentially
+    url = _price_table_url()
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(save_batch_worker, url, hdrs, b) for b in batches]
+        for future in as_completed(futures):
+            pass # Suppresses locking and maintains thread velocity
 
 
 def check_db_has_data(symbols: list, trading_days: list) -> bool:
     """
-    Check if DB has today's data for at least 80% of symbols.
-    We only check today because:
-    - First scan fetches full history + saves everything
-    - Subsequent scans same day use DB (fast path)
-    - Next day: today becomes new, triggers fresh fetch again
+    Optimized data presence validation using head verification 
+    instead of unpacking massive JSON lists.
     """
     try:
         uid = _get_user_id()
         if not uid or not symbols:
             return False
         today = date.today().isoformat()
+        
+        # Pull count natively via HTTP Prefer headers instead of loading huge arrays
+        hdrs = {**_headers(), "Prefer": "count=exact"}
         r = requests.get(
             _price_table_url(),
-            headers=_headers(),
+            headers=hdrs,
             params={
-                "select":     "symbol",
                 "user_id":    f"eq.{uid}",
                 "trade_date": f"eq.{today}",
+                "limit":      "1" # We only care about the count metadata header
             },
             timeout=10,
         )
         r.raise_for_status()
-        count    = len(r.json())
+        
+        # Extract total count from Content-Range header if present, otherwise fall back to len
+        content_range = r.headers.get("Content-Range")
+        if content_range and "/" in content_range:
+            count = int(content_range.split("/")[-1])
+        else:
+            count = len(r.json())
+            
         expected = len(symbols)
         return count >= expected * 0.8
     except Exception:
