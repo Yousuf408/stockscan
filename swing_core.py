@@ -382,24 +382,14 @@ def _fetch_single(symbol: str) -> dict:
         vol_signal  = _vol_signal(vol_ratio)
         pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
-        # Last 5 only for display (candles + volume SVG)
-        hist_iso = hist.index.strftime("%Y-%m-%d").tolist()
         return {
             "symbol": symbol, "error": None,
-            # Display — last 5 only
-            "hist_dates":   hist_dates[-5:],
-            "hist_opens":   [round(float(v), 2) for v in hist_opens[-5:]],
-            "hist_highs":   [round(float(v), 2) for v in hist_highs[-5:]],
-            "hist_lows":    [round(float(v), 2) for v in hist_lows[-5:]],
-            "hist_closes":  [round(float(v), 2) for v in hist_closes[-5:]],
-            "hist_volumes": [int(v)             for v in hist_volumes[-5:]],
-            # All 10 for DB save
-            "all_hist_iso_dates": hist_iso,
-            "all_hist_opens":   [round(float(v), 2) for v in hist_opens],
-            "all_hist_highs":   [round(float(v), 2) for v in hist_highs],
-            "all_hist_lows":    [round(float(v), 2) for v in hist_lows],
-            "all_hist_closes":  [round(float(v), 2) for v in hist_closes],
-            "all_hist_volumes": [int(v)             for v in hist_volumes],
+            "hist_dates":   hist_dates,
+            "hist_opens":   [round(float(v), 2) for v in hist_opens],
+            "hist_highs":   [round(float(v), 2) for v in hist_highs],
+            "hist_lows":    [round(float(v), 2) for v in hist_lows],
+            "hist_closes":  [round(float(v), 2) for v in hist_closes],
+            "hist_volumes": [int(v) for v in hist_volumes],
             "current_date": current_date, "current_price": current_price,
             "current_open": current_open, "current_high": current_high,
             "current_low":  current_low,  "current_vol":  current_vol,
@@ -412,21 +402,13 @@ def _fetch_single(symbol: str) -> dict:
 
 
 def _fetch_live_single(symbol: str) -> dict:
-    """
-    Fetch latest available candle.
-    During market hours → today's in-progress candle.
-    After market close / holidays → last completed trading day.
-    Always returns the most recent available data.
-    """
+    """Fetch only today's live candle. Used for refresh."""
     symbol = symbol.lstrip("$").strip().upper()
     try:
-        df = yf.Ticker(f"{symbol}.NS").history(period="5d", interval="1d", auto_adjust=True)
+        df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 1:
             return {"symbol": symbol, "error": "No data"}
-        df = df.dropna(subset=["Close", "Volume"])
-        if len(df) < 1:
-            return {"symbol": symbol, "error": "No clean data"}
-        cur = df.iloc[-1]  # always latest available
+        cur = df.iloc[-1]
         return {
             "symbol": symbol, "error": None,
             "current_price": round(float(cur["Close"]), 2),
@@ -518,14 +500,14 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
     symbols      = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # Load hist from DB — last 10 trading days
+    # Include selected_date in query so db_rows[-1] = selected date = current candle
     from_d  = trading_days[0]
-    to_d    = trading_days[-1]
+    to_d    = selected_date  # include selected date itself
     db_data = load_price_data_from_db(symbols, from_d, to_d)
     has_db  = check_db_has_data(symbols, trading_days)
 
     if has_db and is_today:
-        # ── FAST PATH: hist from DB + live fetch only ──
+        # ── FAST PATH: hist from DB (exclude today) + live fetch ──
         live_results = {}
         batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
         for batch in batches:
@@ -536,15 +518,17 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
                     if not d.get("error"):
                         live_results[d["symbol"]] = d
 
+        today_str = date.today().isoformat()
         for sym in symbols:
             meta    = stock_meta.get(sym, {})
-            db_rows = db_data.get(sym, [])
-            live    = live_results.get(sym, {})
-            # Need at least 5 hist rows for display — else fall to full fetch
+            # Exclude today and filter None values — live fetch handles today
+            db_rows = [r for r in db_data.get(sym, [])
+                       if r.get("trade_date") != today_str
+                       and all(r.get(k) is not None for k in ["open","high","low","close","volume"])]
+            live = live_results.get(sym, {})
             if db_rows and len(db_rows) >= 5 and live:
                 results.append(_build_result_from_db(sym, db_rows, live, meta))
             elif live:
-                # Not enough DB history — fetch full from yfinance for this stock
                 full = _fetch_single(sym)
                 if not full.get("error"):
                     full["screener_url"]  = meta.get("screener_url", f"https://www.screener.in/company/{sym}/")
@@ -558,30 +542,19 @@ def run_swing_scan(stocks: list, selected_date: date = None, batch_size: int = 2
             else:
                 errors.append({"symbol": sym, "error": "Missing DB or live data"})
 
-        # Save today's live data to DB (outside threads)
         save_price_data_to_db(results)
 
     elif not is_today and db_data:
-        # ── PAST DATE PATH: selected date as current, prev 5 as hist ──
+        # ── PAST DATE PATH: db_rows[-1] = selected date = current, rest = hist ──
         for sym in symbols:
             meta    = stock_meta.get(sym, {})
-            db_rows = db_data.get(sym, [])
+            db_rows = [r for r in db_data.get(sym, [])
+                       if all(r.get(k) is not None for k in ["open","high","low","close","volume"])]
             if not db_rows:
                 errors.append({"symbol": sym, "error": "No data for selected date"})
                 continue
-
-            # Filter out rows with any None OHLCV values
-            db_rows = [r for r in db_rows if all(
-                r.get(k) is not None for k in ["open", "high", "low", "close", "volume"]
-            )]
-            if not db_rows:
-                errors.append({"symbol": sym, "error": "No valid data for selected date"})
-                continue
-
-            # Last row = selected date = current candle
-            last_row  = db_rows[-1]
-            hist_rows = db_rows[:-1]
-
+            last_row  = db_rows[-1]   # selected date = current candle
+            hist_rows = db_rows[:-1]  # everything before = hist candles
             live = {
                 "current_price": round(float(last_row["close"]), 2),
                 "current_open":  round(float(last_row["open"]),  2),
