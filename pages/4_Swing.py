@@ -13,7 +13,8 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from styles import apply_styles, sidebar_brand, page_header
 from swing_core import (
     load_swing_stocks, add_swing_stock, update_swing_stock,
-    delete_swing_stock, bulk_add_swing_stocks, run_swing_scan, fmt_vol,
+    delete_swing_stock, bulk_add_swing_stocks, run_swing_scan,
+    fmt_vol, refresh_live_data, is_market_open,
 )
 
 try:
@@ -99,7 +100,7 @@ st.markdown("""
 # ── Session state ──
 for k, v in [("sw_results",[]),("sw_errors",[]),("sw_scan_time",None),
               ("sw_show_manage",False),("sw_stocks_cache",None),
-              ("sw_db_count",0),("sw_yf_count",0)]:
+              ("sw_last_refresh",None),("sw_auto_refresh",True)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -219,6 +220,19 @@ def border_color(status):
 stocks       = load_cached()
 total_stocks = len(stocks)
 
+# ── Auto-refresh logic — silent, market hours only ──
+REFRESH_INTERVAL = 300  # 5 minutes
+if (st.session_state.sw_auto_refresh
+        and st.session_state.sw_results
+        and is_market_open()):
+    last = st.session_state.sw_last_refresh
+    now  = time.time()
+    if last is None or (now - last) >= REFRESH_INTERVAL:
+        updated = refresh_live_data(st.session_state.sw_results)
+        st.session_state.sw_results    = updated
+        st.session_state.sw_last_refresh = now
+        st.rerun()
+
 c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
 
 with c1:
@@ -232,28 +246,39 @@ with c2:
                  disabled=total_stocks == 0, type="primary"):
         with st.spinner(f"Scanning {total_stocks} stocks..."):
             results, errors = run_swing_scan(stocks)
-            st.session_state.sw_results   = results
-            st.session_state.sw_errors    = errors
-            st.session_state.sw_scan_time = time.time()
-            # Count how many were served from DB vs fresh fetch
-            db_count = sum(1 for r in results if r.get("source") == "db")
-            yf_count = sum(1 for r in results if r.get("source") == "yf")
-            st.session_state.sw_db_count  = db_count
-            st.session_state.sw_yf_count  = yf_count
+            st.session_state.sw_results      = results
+            st.session_state.sw_errors       = errors
+            st.session_state.sw_scan_time    = time.time()
+            st.session_state.sw_last_refresh = time.time()
         st.rerun()
 
 with c3:
-    if st.button("🗑 Clear", use_container_width=True,
-                 disabled=len(st.session_state.sw_results) == 0):
-        st.session_state.sw_results   = []
-        st.session_state.sw_errors    = []
-        st.session_state.sw_scan_time = None
+    market_open = is_market_open()
+    refresh_disabled = not st.session_state.sw_results or not market_open
+    refresh_label = "🔄 Refresh" if market_open else "🔄 Closed"
+    if st.button(refresh_label, use_container_width=True,
+                 disabled=refresh_disabled,
+                 help="Refresh today's price & volume (market hours only)"):
+        with st.spinner("Refreshing live data..."):
+            updated = refresh_live_data(st.session_state.sw_results)
+            st.session_state.sw_results      = updated
+            st.session_state.sw_last_refresh = time.time()
         st.rerun()
 
 with c4:
+    if st.button("🗑 Clear", use_container_width=True,
+                 disabled=len(st.session_state.sw_results) == 0):
+        st.session_state.sw_results      = []
+        st.session_state.sw_errors       = []
+        st.session_state.sw_scan_time    = None
+        st.session_state.sw_last_refresh = None
+        st.rerun()
+
+with c5:
     st.markdown(
         f"<div style='padding-top:8px;font-size:12px;color:#7a8394;'>"
-        f"📋 <b style='color:#0f1117'>{total_stocks}</b> stocks</div>",
+        f"📋 <b style='color:#0f1117'>{total_stocks}</b> stocks"
+        f"{'&nbsp;&nbsp;🟢 Live' if is_market_open() else '&nbsp;&nbsp;🔴 Closed'}</div>",
         unsafe_allow_html=True,
     )
 
@@ -263,16 +288,16 @@ with c5:
         blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
         ready    = sum(1 for r in st.session_state.sw_results if r.get("status") == "READY")
         watch    = sum(1 for r in st.session_state.sw_results if r.get("status") == "WATCH")
-        db_c     = st.session_state.get("sw_db_count", 0)
-        yf_c     = st.session_state.get("sw_yf_count", 0)
-        src_info = f"⚡ {db_c} from DB · 🌐 {yf_c} fetched" if (db_c or yf_c) else ""
+        last_ref = ""
+        if st.session_state.sw_last_refresh:
+            rt = datetime.fromtimestamp(st.session_state.sw_last_refresh).strftime("%I:%M %p")
+            last_ref = f"&nbsp;&nbsp;🔄 {rt}"
         st.markdown(
             f"<div style='display:flex;gap:16px;align-items:center;padding-top:8px;flex-wrap:wrap;'>"
             f"<span style='font-size:12px;color:#7c3aed;font-weight:700;'>🔥 {blasting}</span>"
             f"<span style='font-size:12px;color:#00a854;font-weight:700;'>✅ {ready}</span>"
             f"<span style='font-size:12px;color:#d97706;font-weight:700;'>👁 {watch}</span>"
-            f"<span style='font-size:11px;color:#9ca3af;'>Last scan: {t}</span>"
-            f"<span style='font-size:11px;color:#9ca3af;'>{src_info}</span>"
+            f"<span style='font-size:11px;color:#9ca3af;'>Scan: {t}{last_ref}</span>"
             f"</div>",
             unsafe_allow_html=True,
         )
