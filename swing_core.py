@@ -239,23 +239,25 @@ def save_price_data_to_db(results: list):
             continue
         sym = r["symbol"]
 
-        # Historical days — use ISO dates directly
-        for i, iso_date in enumerate(r.get("hist_iso_dates", [])):
-            opens   = r.get("hist_opens",   [])
-            highs   = r.get("hist_highs",   [])
-            lows    = r.get("hist_lows",    [])
-            closes  = r.get("hist_closes",  [])
-            volumes = r.get("hist_volumes", [])
-            if i >= len(closes):
+        # Historical days — use all 10 ISO dates for DB save
+        hist_iso_dates = r.get("all_hist_iso_dates") or r.get("hist_iso_dates", [])
+        all_opens   = r.get("all_hist_opens",   r.get("hist_opens",   []))
+        all_highs   = r.get("all_hist_highs",   r.get("hist_highs",   []))
+        all_lows    = r.get("all_hist_lows",    r.get("hist_lows",    []))
+        all_closes  = r.get("all_hist_closes",  r.get("hist_closes",  []))
+        all_volumes = r.get("all_hist_volumes", r.get("hist_volumes", []))
+
+        for i, iso_date in enumerate(hist_iso_dates):
+            if i >= len(all_closes):
                 break
             rows.append({
                 "user_id":    uid, "symbol": sym,
                 "trade_date": iso_date,
-                "open":       opens[i]   if i < len(opens)   else None,
-                "high":       highs[i]   if i < len(highs)   else None,
-                "low":        lows[i]    if i < len(lows)    else None,
-                "close":      closes[i],
-                "volume":     volumes[i] if i < len(volumes) else None,
+                "open":       all_opens[i]   if i < len(all_opens)   else None,
+                "high":       all_highs[i]   if i < len(all_highs)   else None,
+                "low":        all_lows[i]    if i < len(all_lows)    else None,
+                "close":      all_closes[i],
+                "volume":     all_volumes[i] if i < len(all_volumes) else None,
             })
 
         # Today's candle
@@ -363,15 +365,22 @@ def _fetch_single(symbol: str) -> dict:
         vol_signal  = _vol_signal(vol_ratio)
         pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
+        # Use last 5 only for display — signals already calculated above on all 10
+        disp_slice = slice(-5, None)
+
         return {
             "symbol": symbol, "error": None,
-            "hist_dates":     hist_dates,
-            "hist_iso_dates": hist_iso,
-            "hist_opens":     [round(float(v), 2) for v in hist_opens],
-            "hist_highs":     [round(float(v), 2) for v in hist_highs],
-            "hist_lows":      [round(float(v), 2) for v in hist_lows],
-            "hist_closes":    [round(float(v), 2) for v in hist_closes],
-            "hist_volumes":   [int(v)             for v in hist_volumes],
+            "hist_dates":     hist_dates[disp_slice],
+            "hist_iso_dates": hist_iso[disp_slice],
+            "hist_opens":     [round(float(v), 2) for v in hist_opens[disp_slice]],
+            "hist_highs":     [round(float(v), 2) for v in hist_highs[disp_slice]],
+            "hist_lows":      [round(float(v), 2) for v in hist_lows[disp_slice]],
+            "hist_closes":    [round(float(v), 2) for v in hist_closes[disp_slice]],
+            "hist_volumes":   [int(v)             for v in hist_volumes[disp_slice]],
+            # Keep full 10 for signal reference
+            "all_hist_iso_dates": hist_iso,
+            "all_hist_closes":    [round(float(v), 2) for v in hist_closes],
+            "all_hist_volumes":   [int(v)             for v in hist_volumes],
             "current_date":   current_date,  "current_price": current_price,
             "current_open":   current_open,  "current_high":  current_high,
             "current_low":    current_low,   "current_vol":   current_vol,
