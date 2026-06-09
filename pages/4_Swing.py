@@ -117,14 +117,23 @@ def refresh_cache():
 # SVG HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def price_svg(opens, highs, lows, closes, dates, w=185, h=62):
+def price_svg(opens, highs, lows, closes, dates,
+              cur_open=None, cur_high=None, cur_low=None, cur_close=None,
+              cur_date=None, w=200, h=62):
     if not closes:
         return f'<svg width="{w}" height="{h}"><text x="6" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
+
+    has_cur = all(v is not None for v in [cur_open, cur_high, cur_low, cur_close])
+
     n   = len(closes)
-    pad = 6
-    bw  = 20
-    gap = max(4, (w - pad*2 - bw*n) // max(n-1, 1))
+    pad = 4
+    bw  = 16
+    gap = 5
+
+    # Scale using all prices including today
     all_p = [v for v in highs + lows if v and v > 0]
+    if has_cur:
+        all_p += [cur_high, cur_low]
     if not all_p:
         return f'<svg width="{w}" height="{h}"></svg>'
     mn, mx = min(all_p), max(all_p)
@@ -134,6 +143,8 @@ def price_svg(opens, highs, lows, closes, dates, w=185, h=62):
         return round(pad + (h - pad*2 - 10) * (1 - (v - mn) / rng), 1)
 
     parts = []
+
+    # 5 historical candles
     for i in range(n):
         x  = pad + i*(bw+gap)
         cx = x + bw//2
@@ -150,7 +161,30 @@ def price_svg(opens, highs, lows, closes, dates, w=185, h=62):
         parts.append(
             f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{lbl}</text>'
         )
-    return f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">{"".join(parts)}</svg>'
+
+    # Separator + today's candle
+    if has_cur:
+        sep_x = pad + n*(bw+gap) + 2
+        parts.append(
+            f'<line x1="{sep_x}" x2="{sep_x}" y1="{pad}" y2="{h-12}" '
+            f'stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>'
+        )
+        cx    = sep_x + 5 + bw//2
+        tx    = sep_x + 5
+        green = cur_close >= cur_open
+        col   = "#7c3aed"  # always purple for today
+        body_y = sy(max(cur_open, cur_close))
+        body_h = max(2, abs(sy(cur_open) - sy(cur_close)))
+        lbl = cur_date.split(" ")[0] if cur_date else "today"
+        parts.append(
+            f'<line x1="{cx}" x2="{cx}" y1="{sy(cur_high)}" y2="{sy(cur_low)}" stroke="{col}" stroke-width="1.2"/>'
+            f'<rect x="{tx}" y="{body_y}" width="{bw}" height="{body_h}" '
+            f'fill="{col}30" stroke="{col}" stroke-width="1.5" rx="2"/>'
+            f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="{col}" font-weight="500">{lbl}</text>'
+        )
+
+    total_w = (sep_x + 5 + bw + pad) if has_cur else (pad + n*(bw+gap))
+    return f'<svg width="{total_w}" height="{h}" viewBox="0 0 {total_w} {h}">{"".join(parts)}</svg>'
 
 
 def volume_svg(hist_vols, cur_vol, median_vol, w=195, h=62):
@@ -385,20 +419,43 @@ if st.session_state.sw_show_manage:
 all_results = st.session_state.sw_results
 
 if all_results:
-    b_n = sum(1 for r in all_results if r.get("status") == "BLASTING")
-    r_n = sum(1 for r in all_results if r.get("status") == "READY")
-    w_n = sum(1 for r in all_results if r.get("status") == "WATCH")
-    a_n = len(all_results)
+    b_n  = sum(1 for r in all_results if r.get("status") == "BLASTING")
+    r_n  = sum(1 for r in all_results if r.get("status") == "READY")
+    w_n  = sum(1 for r in all_results if r.get("status") == "WATCH")
+    a_n  = len(all_results)
+    ex_n = sum(1 for r in all_results if "Explosive" in r.get("vol_signal",""))
+    st_n = sum(1 for r in all_results if "Strong"    in r.get("vol_signal",""))
+    bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal",""))
+    wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal",""))
 
-    opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})"]
-    sel  = st.pills("Filter", opts, default=opts[0], label_visibility="collapsed")
+    # Row 1 — Status filter
+    status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})"]
+    sel_status  = st.pills("Status", status_opts, default=status_opts[0],
+                           label_visibility="collapsed")
 
-    if   sel and "BLASTING" in sel: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel and "READY"    in sel: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel and "WATCH"    in sel: view = [r for r in all_results if r.get("status") == "WATCH"]
-    else:                           view = all_results
+    # Row 2 — Vol signal filter
+    vol_opts   = ["All signals", f"🔥 Explosive ({ex_n})", f"🟢 Strong ({st_n})",
+                  f"🟡 Build ({bu_n})", f"🔴 Weak ({wk_n})"]
+    sel_vol    = st.pills("Vol signal", vol_opts, default=vol_opts[0],
+                          label_visibility="collapsed")
 
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    # Apply status filter
+    if   sel_status and "BLASTING" in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel_status and "READY"    in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH"    in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
+    else:                                          view = all_results
+
+    # Apply vol signal filter on top
+    if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal","")]
+    elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal","")]
+    elif sel_vol and "Build"     in sel_vol: view = [r for r in view if "Build"     in r.get("vol_signal","")]
+    elif sel_vol and "Weak"      in sel_vol: view = [r for r in view if "Weak"      in r.get("vol_signal","")]
+
+    st.markdown(
+        f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 8px;'>"
+        f"Showing {len(view)} stocks</div>",
+        unsafe_allow_html=True,
+    )
 else:
     view = []
 
@@ -426,7 +483,7 @@ COL = [1.4, 2.0, 2.1, 1.2, 1.3, 1.8, 1.0, 0.9]
 
 # ── Header ──
 header = st.columns(COL)
-labels = ["Stock", "Price candles — 5d", "Volume — 5d hist | current",
+labels = ["Stock", "Price candles — 5d | today", "Volume — 5d hist | current",
           "LTP", "Today H / L", "Vol signal", "Status", "Screener"]
 for col, lbl in zip(header, labels):
     col.markdown(
@@ -446,6 +503,11 @@ for r in view:
         r.get("hist_opens", []),  r.get("hist_highs", []),
         r.get("hist_lows", []),   r.get("hist_closes", []),
         r.get("hist_dates", []),
+        cur_open  = r.get("current_open"),
+        cur_high  = r.get("current_high"),
+        cur_low   = r.get("current_low"),
+        cur_close = r.get("current_price"),
+        cur_date  = r.get("current_date"),
     )
     v_svg = volume_svg(
         r.get("hist_volumes", []),
