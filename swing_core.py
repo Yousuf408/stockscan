@@ -361,7 +361,8 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
                       save_d6: bool = True) -> list:
     """
     Refresh only today's price + volume for all stocks in current results.
-    save_d6: if True saves to DB (manual refresh). False for auto-refresh to avoid session issues.
+    All DB saves happen AFTER threads complete — never inside thread workers.
+    save_d6: False for silent auto-refresh, True for manual refresh button.
     """
     if not results:
         return results
@@ -370,6 +371,7 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
     result_map = {r["symbol"]: r for r in results}
     batches    = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
     updated    = {}
+    live_data  = {}  # collect all live data — DB saves happen after threads done
 
     for idx, batch in enumerate(batches):
         with ThreadPoolExecutor(max_workers=batch_size) as ex:
@@ -378,13 +380,11 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
                 live = f.result()
                 sym  = live["symbol"]
                 if live.get("error"):
-                    continue  # keep existing data if fetch fails
+                    continue
 
-                old = result_map.get(sym, {})
-
-                # Recalculate signals with new live data
-                hist_closes  = old.get("hist_closes", [])
-                hist_volumes = old.get("hist_volumes", [])
+                old           = result_map.get(sym, {})
+                hist_closes   = old.get("hist_closes", [])
+                hist_volumes  = old.get("hist_volumes", [])
                 current_price = live["current_price"]
                 current_vol   = live["current_vol"]
                 max_close     = old.get("max_close", current_price)
@@ -395,7 +395,6 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
                 vol_signal    = _vol_signal(vol_ratio)
                 pct_vs_high   = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
-                # Merge — update live fields only, keep hist unchanged
                 updated[sym] = {
                     **old,
                     "current_price": current_price,
@@ -410,20 +409,20 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
                     "status":        status,
                     "median_vol":    int(median_vol),
                 }
-                # Save today's candle to d6
-                db_id = old.get("db_id")
-                if db_id and save_d6:
-                    _save_d6(db_id, live)
+                live_data[sym] = live  # store for DB save later
 
         if idx < len(batches) - 1:
             time.sleep(pause)
 
-    # Return results with updates applied, preserving original order
-    final = []
-    for r in results:
-        sym = r["symbol"]
-        final.append(updated.get(sym, r))
+    # ── DB saves happen HERE — completely outside ThreadPoolExecutor ──
+    if save_d6:
+        for sym, live in live_data.items():
+            db_id = result_map.get(sym, {}).get("db_id")
+            if db_id:
+                _save_d6(db_id, live)
 
+    # Return updated results in original order, re-sorted by status
+    final = [updated.get(r["symbol"], r) for r in results]
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     final.sort(key=lambda x: priority.get(x.get("status", ""), 3))
     return final
@@ -436,6 +435,7 @@ def run_swing_scan(stocks: list, batch_size: int = 10, pause: float = 0.5):
     """
     Scan all stocks via yfinance in parallel batches.
     Returns (results, errors).
+    DB saves happen AFTER all threads complete — never inside workers.
     """
     stock_meta      = {s["symbol"]: s for s in stocks}
     results, errors = [], []
@@ -455,14 +455,17 @@ def run_swing_scan(stocks: list, batch_size: int = 10, pause: float = 0.5):
                     d["notes"]         = m.get("notes", "")
                     d["db_id"]         = m.get("id")
                     results.append(d)
-                    # Save d1-d5 hist + d6 today to DB
-                    if m.get("id"):
-                        _save_d1_to_d5(m["id"], d)
-                        _save_d6(m["id"], d)
                 else:
                     errors.append({"symbol": sym, "error": d["error"]})
         if idx < len(batches) - 1:
             time.sleep(pause)
+
+    # ── DB saves — completely outside ThreadPoolExecutor ──
+    for d in results:
+        db_id = d.get("db_id")
+        if db_id:
+            _save_d1_to_d5(db_id, d)
+            _save_d6(db_id, d)
 
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
