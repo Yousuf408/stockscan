@@ -197,22 +197,58 @@ def is_market_open() -> bool:
         return False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — DB: CHECK IF TODAY'S DATA EXISTS
+# SECTION 6 — DB: CHECK IF LAST TRADING DAY DATA EXISTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def db_has_today(symbols: list) -> bool:
+def _get_last_trading_day() -> str:
     """
-    Check if ANY ONE symbol has today's date in swing_price_data.
-    If yes → all symbols have today's data (they're always scanned together).
+    Returns the last trading day (Mon-Fri) as YYYY-MM-DD string.
+    - During market hours (9:15-15:30 on weekday) → today
+    - Pre-market / post-market / weekend → most recent weekday
+    Examples:
+      Wednesday 2AM  → Tuesday (yesterday)
+      Wednesday 10AM → Wednesday (today, market open)
+      Saturday       → Friday
+      Sunday         → Friday
+      Monday 8AM     → Friday
+    """
+    import pytz
+    IST = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(pytz.utc).astimezone(IST)
+
+    # If market is currently open → today is the trading day
+    mins = now.hour * 60 + now.minute
+    market_open_now = (now.weekday() < 5) and ((9 * 60 + 15) <= mins <= (15 * 60 + 30))
+
+    if market_open_now:
+        return now.date().isoformat()
+
+    # Otherwise → go back to find last weekday
+    d = now.date()
+    # If market hasn't opened yet today (pre-market on a weekday), go to yesterday
+    # If weekend, go back to Friday
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:   # 5=Sat, 6=Sun
+        d -= timedelta(days=1)
+    return d.isoformat()
+
+
+def db_has_last_trading_day(symbols: list) -> bool:
+    """
+    Check if ANY ONE symbol has the last trading day's date in swing_price_data.
+    If yes → all symbols have that data (they're always scanned together).
     Single lightweight DB query — just needs 1 row back.
+
+    Example: Wednesday 2AM → checks for Tuesday (9th June).
+    DB has 9th June → returns True → load everything from DB instantly.
     """
     if not symbols:
         return False
     try:
-        uid     = _get_user_id()
-        today   = date.today().isoformat()
-        # Pick first symbol only — if it's there, all are there
-        first   = symbols[0]
+        uid          = _get_user_id()
+        last_trd_day = _get_last_trading_day()
+        first        = symbols[0]   # check one symbol only — if it's there, all are there
+        print(f"[swing_core] Checking DB for last trading day: {last_trd_day}")
         r = requests.get(
             _price_table_url(),
             headers=_headers(),
@@ -220,15 +256,17 @@ def db_has_today(symbols: list) -> bool:
                 "select":     "trade_date",
                 "user_id":    f"eq.{uid}",
                 "symbol":     f"eq.{first}",
-                "trade_date": f"eq.{today}",
+                "trade_date": f"eq.{last_trd_day}",
                 "limit":      "1",
             },
             timeout=8,
         )
         r.raise_for_status()
-        return len(r.json()) > 0
+        found = len(r.json()) > 0
+        print(f"[swing_core] DB has {last_trd_day}: {found}")
+        return found
     except Exception as e:
-        print(f"[swing_core] db_has_today check failed: {e}")
+        print(f"[swing_core] db_has_last_trading_day check failed: {e}")
         return False
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -594,23 +632,25 @@ def _fetch_live_single(symbol: str) -> dict:
 
 def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
     """
-    Smart scan — DB-first when today's data exists, yfinance otherwise.
+    Smart scan — DB-first when last trading day data exists, yfinance otherwise.
 
     FLOW:
-      1. Check if today's date exists in DB for first symbol (1 fast query)
-      2a. TODAY IN DB → load ALL symbols from DB (1 query) → instant results
-      2b. NOT IN DB   → fetch all from yfinance → save full data to DB async
+      1. Find last trading day (e.g. Wednesday 2AM → Tuesday 9th June)
+      2. Check if DB has that date for first symbol (1 fast query)
+      3a. IN DB     → load ALL symbols from DB (1 query) → instant results
+      3b. NOT IN DB → fetch all from yfinance → save to DB async
 
-    This means:
-    - First scan of day: yfinance fetch + DB save (happens once)
-    - Every scan after:  pure DB load (instant, zero yfinance calls)
+    Examples:
+      Wednesday 2AM → checks 9th Jun in DB → found → DB path (instant)
+      Wednesday 10AM (market open) → checks 10th Jun → not found → yfinance
+      Wednesday 4PM → checks 10th Jun → found (saved at open) → DB path
     """
     stock_meta = {s["symbol"]: s for s in stocks}
     symbols    = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # ── STEP 1: Check if today's data already in DB ───────────────────────────
-    today_in_db = db_has_today(symbols)
+    # ── STEP 1: Check if last trading day data is in DB ──────────────────────
+    today_in_db = db_has_last_trading_day(symbols)
 
     if today_in_db:
         # ── PATH A: Load everything from DB (1 query) ─────────────────────────
