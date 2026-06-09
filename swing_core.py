@@ -204,6 +204,49 @@ def _save_d6(db_id: int, live: dict):
     except Exception as e:
         print(f"[swing_core] d6 save failed id={db_id}: {e}")
 
+
+def _save_d1_to_d5(db_id: int, result: dict):
+    """
+    Save 5 historical candles into d1-d5 columns of swing_watchlist.
+    Called after every scan — rolls forward automatically each day
+    since yfinance always returns the latest 5 completed trading days.
+    Same _headers() method that works for D6.
+    """
+    try:
+        hist_dates   = result.get("hist_dates",   [])
+        hist_opens   = result.get("hist_opens",   [])
+        hist_highs   = result.get("hist_highs",   [])
+        hist_lows    = result.get("hist_lows",    [])
+        hist_closes  = result.get("hist_closes",  [])
+        hist_volumes = result.get("hist_volumes", [])
+
+        if len(hist_closes) < 5:
+            return
+
+        row = {}
+        for i in range(5):
+            idx = i + 1
+            raw_date = hist_dates[i] if i < len(hist_dates) else ""
+            try:
+                parsed  = datetime.strptime(raw_date + f" {date.today().year}", "%d %b %Y")
+                db_date = parsed.strftime("%Y-%m-%d")
+            except Exception:
+                db_date = date.today().isoformat()
+            row[f"d{idx}_date"]   = db_date
+            row[f"d{idx}_open"]   = hist_opens[i]
+            row[f"d{idx}_high"]   = hist_highs[i]
+            row[f"d{idx}_low"]    = hist_lows[i]
+            row[f"d{idx}_close"]  = hist_closes[i]
+            row[f"d{idx}_volume"] = hist_volumes[i]
+
+        r = requests.patch(
+            f"{_table_url()}?id=eq.{db_id}",
+            headers=_headers(), json=row, timeout=10,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[swing_core] d1-d5 save failed id={db_id}: {e}")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5 — YFINANCE FETCH
 # ─────────────────────────────────────────────────────────────────────────────
@@ -413,8 +456,9 @@ def run_swing_scan(stocks: list, batch_size: int = 10, pause: float = 0.5):
                     d["notes"]         = m.get("notes", "")
                     d["db_id"]         = m.get("id")
                     results.append(d)
-                    # Save today's candle to d6 in background
+                    # Save d1-d5 hist + d6 today to DB
                     if m.get("id"):
+                        _save_d1_to_d5(m["id"], d)
                         _save_d6(m["id"], d)
                 else:
                     errors.append({"symbol": sym, "error": d["error"]})
