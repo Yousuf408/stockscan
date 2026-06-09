@@ -592,64 +592,66 @@ def _build_result_from_df(symbol: str, df) -> dict:
 def _fetch_all_yf_bulk(symbols: list) -> dict:
     """
     FAST PATH — single yf.download() call for ALL symbols at once.
-    Same approach as Prewatch scanner — one HTTP request, ~5 seconds for 800+ stocks.
+    EXACTLY matches Prewatch scanner approach — same params, same column access.
 
-    Returns: { symbol: result_dict }  (or { symbol: {"error": "..."} } on failure)
+    Prewatch key params that make it fast:
+      - period="2y"           → yfinance batches large requests efficiently
+      - group_by="ticker"     → data["RELIANCE.NS"]["Close"] — direct stock access
+      - auto_adjust=False     → no price adjustment overhead
+      - progress=False        → no console output overhead
 
-    yf.download returns a multi-index DataFrame:
-        data["Close"]["RELIANCE.NS"]  → Series for that stock
-        data["Open"]["TCS.NS"]        → etc.
+    With group_by="ticker", column structure is:
+      data["RELIANCE.NS"]           → DataFrame with Open/High/Low/Close/Volume
+      data["RELIANCE.NS"]["Close"] → Series for that stock
 
-    For any stock that fails in bulk (NaN / missing), falls back to _fetch_single_yf.
+    Returns: { symbol: result_dict or {"error": "..."} }
     """
-    tickers     = [f"{sym}.NS" for sym in symbols]
-    ticker_str  = " ".join(tickers)
-    sym_map     = {f"{sym}.NS": sym for sym in symbols}   # "RELIANCE.NS" → "RELIANCE"
-    results     = {}
+    import pandas as pd
+
+    tickers    = [f"{sym}.NS" for sym in symbols]
+    ticker_str = " ".join(tickers)
+    sym_map    = {f"{sym}.NS": sym for sym in symbols}   # "RELIANCE.NS" → "RELIANCE"
+    results    = {}
 
     try:
-        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks")
+        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks (Prewatch style)")
         data = yf.download(
-            tickers    = ticker_str,
-            period     = "15d",          # 15 calendar days → 8-10 trading days → always 6+
-            interval   = "1d",
-            auto_adjust= True,
-            progress   = False,
-            threads    = True,           # yfinance internal threading
+            tickers      = ticker_str,
+            period       = "2y",         # same as Prewatch — enables fast server-side batching
+            interval     = "1d",
+            group_by     = "ticker",     # data[ticker][field] — direct access like Prewatch
+            auto_adjust  = False,        # same as Prewatch — no adjustment overhead
+            progress     = False,        # no console noise
         )
 
         if data is None or data.empty:
             print("[swing_core] yf.download returned empty — falling back to per-stock")
             return {sym: {"symbol": sym, "error": "Bulk download empty"} for sym in symbols}
 
-        # yf.download with multiple tickers returns multi-index columns: (field, ticker)
-        # With single ticker it returns flat columns — handle both cases
-        is_multi = isinstance(data.columns, __import__("pandas").MultiIndex)
-
         for ticker, sym in sym_map.items():
             try:
-                if is_multi:
-                    # Multi-ticker: slice one stock's OHLCV out of the multi-index
-                    df = data.xs(ticker, axis=1, level=1)
+                # group_by="ticker" → access exactly like Prewatch: bulk_df[ns_ticker]
+                if ticker in data.columns.levels[0]:
+                    df_stock = data[ticker].copy()
                 else:
-                    # Single ticker (edge case): data is already flat
-                    df = data.copy()
-
-                df = df.dropna(subset=["Close", "Volume"])
-
-                if len(df) < 6:
-                    # Not enough rows — fallback to individual fetch for this stock
-                    results[sym] = {"symbol": sym, "error": f"Only {len(df)} rows in bulk data"}
+                    results[sym] = {"symbol": sym, "error": "Ticker not in bulk data"}
                     continue
 
-                results[sym] = _build_result_from_df(sym, df)
+                # Drop rows where Close or Volume is missing
+                df_stock = df_stock.dropna(subset=["Close", "Volume"])
+
+                if len(df_stock) < 6:
+                    results[sym] = {"symbol": sym, "error": f"Only {len(df_stock)} rows"}
+                    continue
+
+                results[sym] = _build_result_from_df(sym, df_stock)
 
             except Exception as e:
-                results[sym] = {"symbol": sym, "error": f"Bulk parse error: {e}"}
+                results[sym] = {"symbol": sym, "error": f"Parse error: {e}"}
 
     except Exception as e:
-        print(f"[swing_core] yf.download failed entirely: {e} — falling back to per-stock")
-        return {sym: {"symbol": sym, "error": f"Bulk download failed: {e}"} for sym in symbols}
+        print(f"[swing_core] yf.download failed: {e} — will fallback per-stock")
+        return {sym: {"symbol": sym, "error": f"Bulk failed: {e}"} for sym in symbols}
 
     return results
 
