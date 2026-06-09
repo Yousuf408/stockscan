@@ -1,5 +1,9 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v3.0
+#  TRADE SENTRY — swing_core.py  v3.1
+#  v3.1 FIXES:
+#    - period="2y" → "10d" in _fetch_all_yf_bulk (50x less data)
+#    - _load_all_from_db uses Range: 0-9999 header (bypasses Supabase 1000 row limit)
+#
 #  v3.0 ARCHITECTURE — Smart DB-first, zero redundant fetches:
 #
 #  ON SCAN:
@@ -205,30 +209,20 @@ def _get_last_trading_day() -> str:
     Returns the last trading day (Mon-Fri) as YYYY-MM-DD string.
     - During market hours (9:15-15:30 on weekday) → today
     - Pre-market / post-market / weekend → most recent weekday
-    Examples:
-      Wednesday 2AM  → Tuesday (yesterday)
-      Wednesday 10AM → Wednesday (today, market open)
-      Saturday       → Friday
-      Sunday         → Friday
-      Monday 8AM     → Friday
     """
     import pytz
     IST = pytz.timezone("Asia/Kolkata")
     now = datetime.now(pytz.utc).astimezone(IST)
 
-    # If market is currently open → today is the trading day
     mins = now.hour * 60 + now.minute
     market_open_now = (now.weekday() < 5) and ((9 * 60 + 15) <= mins <= (15 * 60 + 30))
 
     if market_open_now:
         return now.date().isoformat()
 
-    # Otherwise → go back to find last weekday
     d = now.date()
-    # If market hasn't opened yet today (pre-market on a weekday), go to yesterday
-    # If weekend, go back to Friday
     d -= timedelta(days=1)
-    while d.weekday() >= 5:   # 5=Sat, 6=Sun
+    while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d.isoformat()
 
@@ -236,18 +230,14 @@ def _get_last_trading_day() -> str:
 def db_has_last_trading_day(symbols: list) -> bool:
     """
     Check if ANY ONE symbol has the last trading day's date in swing_price_data.
-    If yes → all symbols have that data (they're always scanned together).
-    Single lightweight DB query — just needs 1 row back.
-
-    Example: Wednesday 2AM → checks for Tuesday (9th June).
-    DB has 9th June → returns True → load everything from DB instantly.
+    Single lightweight DB query.
     """
     if not symbols:
         return False
     try:
         uid          = _get_user_id()
         last_trd_day = _get_last_trading_day()
-        first        = symbols[0]   # check one symbol only — if it's there, all are there
+        first        = symbols[0]
         print(f"[swing_core] Checking DB for last trading day: {last_trd_day}")
         r = requests.get(
             _price_table_url(),
@@ -271,29 +261,36 @@ def db_has_last_trading_day(symbols: list) -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7 — DB: LOAD ALL PRICE DATA (1 QUERY FOR ALL SYMBOLS)
+# ── FIX v3.1: Range: 0-9999 header bypasses Supabase 1000 row default limit ──
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_all_from_db(symbols: list) -> dict:
     """
-    Load last 6 trading days of OHLCV from swing_price_data for all symbols.
-    Single query → returns {symbol: [rows oldest→newest]}.
-    Uses 10 calendar days window to guarantee 6 trading days.
+    Load last 14 calendar days of OHLCV from swing_price_data for all symbols.
+    Single query with Range header → returns {symbol: [rows oldest→newest]}.
+
+    FIX v3.1: Supabase default limit is 1000 rows. With 850 stocks × 6 days
+    = 5100 rows needed, the old code silently truncated after ~200 stocks,
+    causing the rest to fall back to yfinance one by one (the slow path).
+    Range: 0-9999 returns all rows in one shot — no pagination needed.
     """
     try:
-        uid      = _get_user_id()
-        from_d   = (date.today() - timedelta(days=10)).isoformat()
-        to_d     = date.today().isoformat()
+        uid    = _get_user_id()
+        from_d = (date.today() - timedelta(days=14)).isoformat()
+
+        # Override Supabase default 1000 row limit — get all rows in one shot
+        headers = {**_headers(), "Range-Unit": "items", "Range": "0-9999"}
 
         r = requests.get(
             _price_table_url(),
-            headers=_headers(),
+            headers=headers,
             params={
                 "select":     "symbol,trade_date,open,high,low,close,volume",
                 "user_id":    f"eq.{uid}",
                 "trade_date": f"gte.{from_d}",
                 "order":      "symbol.asc,trade_date.asc",
             },
-            timeout=15,
+            timeout=20,
         )
         r.raise_for_status()
         rows = r.json()
@@ -303,11 +300,12 @@ def _load_all_from_db(symbols: list) -> dict:
             sym = row["symbol"]
             if sym not in result:
                 result[sym] = []
-            # Only include rows with complete OHLCV
             if all(row.get(k) is not None for k in ["open", "high", "low", "close", "volume"]):
                 result[sym].append(row)
 
+        print(f"[swing_core] DB loaded {len(rows)} rows for {len(result)} symbols")
         return result
+
     except Exception as e:
         print(f"[swing_core] _load_all_from_db error: {e}")
         return {}
@@ -318,9 +316,8 @@ def _load_all_from_db(symbols: list) -> dict:
 
 def _save_to_db_async(results: list):
     """
-    Save all OHLCV rows to swing_price_data after scan completes.
+    Save today's OHLCV row to swing_price_data after refresh.
     Runs in background thread — never blocks the UI.
-    Uses upsert (resolution=merge-duplicates) so safe to call multiple times.
     """
     def _do_save():
         uid  = _get_user_id()
@@ -333,17 +330,6 @@ def _save_to_db_async(results: list):
             if r.get("error"):
                 continue
             sym = r["symbol"]
-
-            # Save 5 historical rows
-            for i, raw_date in enumerate(r.get("hist_dates", [])):
-                try:
-                    # hist_dates are like "09 Jun" — reconstruct full date
-                    # We store the actual date string from yfinance index separately
-                    pass
-                except Exception:
-                    continue
-
-            # Save today's candle — always have this
             rows.append({
                 "user_id":    uid,
                 "symbol":     sym,
@@ -378,7 +364,6 @@ def _save_full_to_db_async(results: list):
     """
     Save ALL rows (5 hist + today) with proper ISO dates.
     Called after first-time yfinance fetch.
-    hist_iso_dates must be set on the result dict.
     """
     def _do_save():
         uid  = _get_user_id()
@@ -392,7 +377,6 @@ def _save_full_to_db_async(results: list):
                 continue
             sym = r["symbol"]
 
-            # Save 5 historical rows using ISO dates
             hist_iso  = r.get("hist_iso_dates", [])
             hist_o    = r.get("hist_opens",   [])
             hist_h    = r.get("hist_highs",   [])
@@ -413,7 +397,6 @@ def _save_full_to_db_async(results: list):
                         "volume":     hist_v[i] if i < len(hist_v) else None,
                     })
 
-            # Save today's candle
             rows.append({
                 "user_id":    uid,
                 "symbol":     sym,
@@ -452,24 +435,19 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
     Build a full result dict from DB rows for one symbol.
     all_rows: sorted oldest→newest, includes today as last row.
     - last row  = today's candle  → current_* (purple candle)
-    - prev 5    = hist candles    → hist_* (grey/green/red candles)
-    Signal calculations use ALL rows (up to 10) for accuracy.
+    - prev rows = hist candles    → hist_* (grey/green/red candles)
     """
     if not all_rows:
         return None
 
-    # Split: today = last row, hist = everything before
     today_row = all_rows[-1]
-    hist_rows = all_rows[:-1]   # up to 9 rows
+    hist_rows = all_rows[:-1]
 
-    # For DISPLAY: always show exactly 5 hist candles (last 5)
     disp_rows = hist_rows[-5:] if len(hist_rows) >= 5 else hist_rows
 
-    # For SIGNALS: use all hist rows for better median/max accuracy
     all_closes  = [float(r["close"])  for r in hist_rows]
     all_volumes = [int(r["volume"])   for r in hist_rows]
 
-    # Display data (exactly 5 or fewer if new stock)
     hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in disp_rows]
     hist_opens   = [round(float(r["open"]),   2) for r in disp_rows]
     hist_highs   = [round(float(r["high"]),   2) for r in disp_rows]
@@ -477,7 +455,6 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
     hist_closes  = [round(float(r["close"]),  2) for r in disp_rows]
     hist_volumes = [int(r["volume"])              for r in disp_rows]
 
-    # Current candle (purple)
     current_price = round(float(today_row["close"]),  2)
     current_open  = round(float(today_row["open"]),   2)
     current_high  = round(float(today_row["high"]),   2)
@@ -485,7 +462,6 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
     current_vol   = int(today_row["volume"])
     current_date  = datetime.strptime(today_row["trade_date"], "%Y-%m-%d").strftime("%d %b")
 
-    # Signals from all hist rows
     max_close   = max(all_closes)  if all_closes  else current_price
     clean_vols  = [v for v in all_volumes if v and v > 0]
     median_vol  = statistics.median(clean_vols) if clean_vols else 1
@@ -498,28 +474,24 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
         "symbol":        sym,
         "error":         None,
         "source":        "db",
-        # 5 hist candles for display
         "hist_dates":    hist_dates,
         "hist_opens":    hist_opens,
         "hist_highs":    hist_highs,
         "hist_lows":     hist_lows,
         "hist_closes":   hist_closes,
         "hist_volumes":  hist_volumes,
-        # current candle (purple)
         "current_date":  current_date,
         "current_price": current_price,
         "current_open":  current_open,
         "current_high":  current_high,
         "current_low":   current_low,
         "current_vol":   current_vol,
-        # signal fields
         "max_close":     round(max_close, 2),
         "median_vol":    int(median_vol),
         "vol_ratio":     vol_ratio,
         "vol_signal":    vol_signal,
         "pct_vs_high":   pct_vs_high,
         "status":        status,
-        # metadata
         "screener_url":  meta.get("screener_url",  f"https://www.screener.in/company/{sym}/"),
         "breakout_date": meta.get("breakout_date", ""),
         "notes":         meta.get("notes",         ""),
@@ -527,26 +499,24 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 10 — YFINANCE FETCH (used only when DB has no data for today)
+# SECTION 10 — YFINANCE FETCH
+# ── FIX v3.1: period="10d" instead of "2y" — 50x less data to download ──────
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_result_from_df(symbol: str, df) -> dict:
     """
     Shared helper — builds the full result dict from a single-stock DataFrame.
-    Called by both bulk fetch and single fallback fetch.
-    df must already be dropna'd and have at least 6 rows.
-    Keeps all keys identical so DB save, signal logic, display are unaffected.
     """
-    hist = df.iloc[-6:-1]   # exactly 5 completed trading days
-    cur  = df.iloc[-1]      # most recent (today or last trading day)
+    hist = df.iloc[-6:-1]
+    cur  = df.iloc[-1]
 
     hist_closes  = hist["Close"].tolist()
     hist_volumes = hist["Volume"].tolist()
     hist_opens   = hist["Open"].tolist()
     hist_highs   = hist["High"].tolist()
     hist_lows    = hist["Low"].tolist()
-    hist_dates   = hist.index.strftime("%d %b").tolist()       # display: "09 Jun"
-    hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()    # for DB:  "2025-06-09"
+    hist_dates   = hist.index.strftime("%d %b").tolist()
+    hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()
 
     current_price = round(float(cur["Close"]), 2)
     current_open  = round(float(cur["Open"]),  2)
@@ -592,36 +562,28 @@ def _build_result_from_df(symbol: str, df) -> dict:
 def _fetch_all_yf_bulk(symbols: list) -> dict:
     """
     FAST PATH — single yf.download() call for ALL symbols at once.
-    EXACTLY matches Prewatch scanner approach — same params, same column access.
 
-    Prewatch key params that make it fast:
-      - period="2y"           → yfinance batches large requests efficiently
-      - group_by="ticker"     → data["RELIANCE.NS"]["Close"] — direct stock access
-      - auto_adjust=False     → no price adjustment overhead
-      - progress=False        → no console output overhead
-
-    With group_by="ticker", column structure is:
-      data["RELIANCE.NS"]           → DataFrame with Open/High/Low/Close/Volume
-      data["RELIANCE.NS"]["Close"] → Series for that stock
-
-    Returns: { symbol: result_dict or {"error": "..."} }
+    FIX v3.1: period changed from "2y" to "10d"
+    Old: 850 stocks × 2 years  = ~425,000 rows downloaded
+    New: 850 stocks × 10 days  = ~8,500 rows downloaded  (50x less data)
+    We only need 6 trading days so 10 calendar days is more than enough.
     """
     import pandas as pd
 
     tickers    = [f"{sym}.NS" for sym in symbols]
     ticker_str = " ".join(tickers)
-    sym_map    = {f"{sym}.NS": sym for sym in symbols}   # "RELIANCE.NS" → "RELIANCE"
+    sym_map    = {f"{sym}.NS": sym for sym in symbols}
     results    = {}
 
     try:
-        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks (Prewatch style)")
+        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks (period=10d)")
         data = yf.download(
             tickers      = ticker_str,
-            period       = "2y",         # same as Prewatch — enables fast server-side batching
+            period       = "10d",        # FIX v3.1: was "2y" — 50x less data
             interval     = "1d",
-            group_by     = "ticker",     # data[ticker][field] — direct access like Prewatch
-            auto_adjust  = False,        # same as Prewatch — no adjustment overhead
-            progress     = False,        # no console noise
+            group_by     = "ticker",
+            auto_adjust  = False,
+            progress     = False,
         )
 
         if data is None or data.empty:
@@ -630,14 +592,12 @@ def _fetch_all_yf_bulk(symbols: list) -> dict:
 
         for ticker, sym in sym_map.items():
             try:
-                # group_by="ticker" → access exactly like Prewatch: bulk_df[ns_ticker]
                 if ticker in data.columns.levels[0]:
                     df_stock = data[ticker].copy()
                 else:
                     results[sym] = {"symbol": sym, "error": "Ticker not in bulk data"}
                     continue
 
-                # Drop rows where Close or Volume is missing
                 df_stock = df_stock.dropna(subset=["Close", "Volume"])
 
                 if len(df_stock) < 6:
@@ -659,8 +619,7 @@ def _fetch_all_yf_bulk(symbols: list) -> dict:
 def _fetch_single_yf(symbol: str) -> dict:
     """
     Fallback — fetch one stock individually.
-    Used when: bulk download fails for a specific stock, or DB path needs a single missing stock.
-    Keeps identical return keys as _build_result_from_df.
+    Used when bulk download fails for a specific stock.
     """
     symbol = symbol.lstrip("$").strip().upper()
     try:
@@ -713,25 +672,40 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
     Smart scan — DB-first when last trading day data exists, yfinance otherwise.
 
     FLOW:
-      1. Find last trading day (e.g. Wednesday 2AM → Tuesday 9th June)
+      1. Find last trading day (e.g. Wednesday 2AM → Tuesday)
       2. Check if DB has that date for first symbol (1 fast query)
       3a. IN DB     → load ALL symbols from DB (1 query) → instant results
       3b. NOT IN DB → fetch all from yfinance → save to DB async
-
-    Examples:
-      Wednesday 2AM → checks 9th Jun in DB → found → DB path (instant)
-      Wednesday 10AM (market open) → checks 10th Jun → not found → yfinance
-      Wednesday 4PM → checks 10th Jun → found (saved at open) → DB path
     """
     stock_meta = {s["symbol"]: s for s in stocks}
     symbols    = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # ── Bulk fetch all symbols in one yf.download call (Prewatch style) ──────
-    print(f"[swing_core] bulk yf.download — {len(symbols)} stocks")
+    # ── STEP 1: Check DB for last trading day (one lightweight query) ─────────
+    if db_has_last_trading_day(symbols):
+        print(f"[swing_core] DB hit — loading all {len(symbols)} stocks from DB")
+        all_db_rows = _load_all_from_db(symbols)
+
+        for sym in symbols:
+            rows = all_db_rows.get(sym, [])
+            if len(rows) >= 2:
+                meta   = stock_meta.get(sym, {})
+                result = _build_from_db_rows(sym, rows, meta)
+                if result:
+                    results.append(result)
+                else:
+                    errors.append({"symbol": sym, "error": "DB build failed"})
+            else:
+                errors.append({"symbol": sym, "error": f"Only {len(rows)} DB rows"})
+
+        priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
+        results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
+        return results, errors
+
+    # ── STEP 2: DB miss — fetch from yfinance, then save async ───────────────
+    print(f"[swing_core] DB miss — bulk yf.download for {len(symbols)} stocks")
     bulk = _fetch_all_yf_bulk(symbols)
 
-    # Process bulk results
     fallback_syms = []
     for sym in symbols:
         d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
@@ -745,7 +719,7 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
         else:
             fallback_syms.append(sym)
 
-    # Per-stock fallback for any that failed in bulk
+    # Per-stock fallback only for bulk failures (should be rare)
     if fallback_syms:
         print(f"[swing_core] fallback per-stock for {len(fallback_syms)} stocks")
         with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
@@ -763,7 +737,9 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
                 else:
                     errors.append({"symbol": sym, "error": d["error"]})
 
-    # Sort by signal priority
+    # Save to DB async so NEXT scan loads instantly from DB
+    _save_full_to_db_async(results)
+
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
     return results, errors
