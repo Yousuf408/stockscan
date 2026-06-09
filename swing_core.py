@@ -1,4 +1,4 @@
-\# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #  TRADE SENTRY — swing_core.py  v2.1 (restored)
 #  Simple yfinance only — no DB snapshot, no AngelOne
 #  period=7d for fast fetch, median vol, 4 signals
