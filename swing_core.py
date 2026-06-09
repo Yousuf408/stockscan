@@ -382,14 +382,24 @@ def _fetch_single(symbol: str) -> dict:
         vol_signal  = _vol_signal(vol_ratio)
         pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
+        # Last 5 only for display (candles + volume SVG)
+        hist_iso = hist.index.strftime("%Y-%m-%d").tolist()
         return {
             "symbol": symbol, "error": None,
-            "hist_dates":   hist_dates,
-            "hist_opens":   [round(float(v), 2) for v in hist_opens],
-            "hist_highs":   [round(float(v), 2) for v in hist_highs],
-            "hist_lows":    [round(float(v), 2) for v in hist_lows],
-            "hist_closes":  [round(float(v), 2) for v in hist_closes],
-            "hist_volumes": [int(v) for v in hist_volumes],
+            # Display — last 5 only
+            "hist_dates":   hist_dates[-5:],
+            "hist_opens":   [round(float(v), 2) for v in hist_opens[-5:]],
+            "hist_highs":   [round(float(v), 2) for v in hist_highs[-5:]],
+            "hist_lows":    [round(float(v), 2) for v in hist_lows[-5:]],
+            "hist_closes":  [round(float(v), 2) for v in hist_closes[-5:]],
+            "hist_volumes": [int(v)             for v in hist_volumes[-5:]],
+            # All 10 for DB save
+            "all_hist_iso_dates": hist_iso,
+            "all_hist_opens":   [round(float(v), 2) for v in hist_opens],
+            "all_hist_highs":   [round(float(v), 2) for v in hist_highs],
+            "all_hist_lows":    [round(float(v), 2) for v in hist_lows],
+            "all_hist_closes":  [round(float(v), 2) for v in hist_closes],
+            "all_hist_volumes": [int(v)             for v in hist_volumes],
             "current_date": current_date, "current_price": current_price,
             "current_open": current_open, "current_high": current_high,
             "current_low":  current_low,  "current_vol":  current_vol,
