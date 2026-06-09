@@ -405,6 +405,7 @@ def _fetch_single(symbol: str) -> dict:
 def _fetch_live_single(symbol: str) -> dict:
     """Fetch only today's live candle. Used for refresh."""
     symbol = symbol.lstrip("$").strip().upper()
+    try:
         df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 1:
             return {"symbol": symbol, "error": "No data"}
