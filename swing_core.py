@@ -45,6 +45,23 @@ def _headers():
         "Prefer":        "return=representation",
     }
 
+def _service_headers():
+    """
+    Use Supabase service role key for DB writes inside threads.
+    Service role bypasses RLS — safe because we control the code.
+    Set SUPABASE_SERVICE_KEY in Railway environment variables.
+    Get it from: Supabase Dashboard → Settings → API → service_role key
+    """
+    url, anon_key = _get_config()
+    service_key   = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    key           = service_key if service_key else anon_key
+    return {
+        "apikey":        key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation",
+    }
+
 def _table_url():
     url, _ = _get_config()
     return f"{url}/rest/v1/swing_watchlist"
@@ -239,9 +256,9 @@ def _extract_hist_from_db(stock: dict) -> dict | None:
 def _save_hist_to_db(db_id: int, hist: dict, h: dict = None):
     """
     Save 5d OHLCV into d1-d5 columns of swing_watchlist.
-    h = pre-built headers (required for thread safety — pass from main thread).
+    Uses service role key to bypass RLS — safe for background thread writes.
     """
-    headers = h or _headers()
+    headers = _service_headers()   # always use service key for writes
     row = {"snap_updated_at": datetime.utcnow().isoformat()}
     for i in range(5):
         idx = i + 1
