@@ -727,79 +727,41 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
     symbols    = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # ── STEP 1: Check if last trading day data is in DB ──────────────────────
-    today_in_db = db_has_last_trading_day(symbols)
+    # ── Bulk fetch all symbols in one yf.download call (Prewatch style) ──────
+    print(f"[swing_core] bulk yf.download — {len(symbols)} stocks")
+    bulk = _fetch_all_yf_bulk(symbols)
 
-    if today_in_db:
-        # ── PATH A: Load everything from DB (1 query) ─────────────────────────
-        print(f"[swing_core] DB HIT — loading {len(symbols)} stocks from DB")
-        db_data = _load_all_from_db(symbols)
+    # Process bulk results
+    fallback_syms = []
+    for sym in symbols:
+        d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
+        if not d.get("error"):
+            m = stock_meta.get(sym, {})
+            d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
+            d["breakout_date"] = m.get("breakout_date", "")
+            d["notes"]         = m.get("notes",         "")
+            d["db_id"]         = m.get("id")
+            results.append(d)
+        else:
+            fallback_syms.append(sym)
 
-        for sym in symbols:
-            meta    = stock_meta.get(sym, {})
-            rows    = db_data.get(sym, [])
-
-            if not rows or len(rows) < 2:
-                # Fallback: fetch this one stock from yfinance
-                d = _fetch_single_yf(sym)
+    # Per-stock fallback for any that failed in bulk
+    if fallback_syms:
+        print(f"[swing_core] fallback per-stock for {len(fallback_syms)} stocks")
+        with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
+            futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms}
+            for f in as_completed(futures):
+                d   = f.result()
+                sym = d["symbol"]
                 if not d.get("error"):
-                    d["screener_url"]  = meta.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                    d["breakout_date"] = meta.get("breakout_date", "")
-                    d["notes"]         = meta.get("notes",         "")
-                    d["db_id"]         = meta.get("id")
+                    m = stock_meta.get(sym, {})
+                    d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
+                    d["breakout_date"] = m.get("breakout_date", "")
+                    d["notes"]         = m.get("notes",         "")
+                    d["db_id"]         = m.get("id")
                     results.append(d)
                 else:
                     errors.append({"symbol": sym, "error": d["error"]})
-                continue
-
-            result = _build_from_db_rows(sym, rows, meta)
-            if result:
-                results.append(result)
-            else:
-                errors.append({"symbol": sym, "error": "Could not build from DB rows"})
-
-    else:
-        # ── PATH B: Fetch from yfinance — SINGLE BULK CALL for all stocks ─────
-        print(f"[swing_core] DB MISS — bulk yf.download for {len(symbols)} stocks")
-
-        # Step 1: One HTTP request for all symbols (like Prewatch)
-        bulk = _fetch_all_yf_bulk(symbols)
-
-        # Step 2: Process results — fallback per-stock for any that failed in bulk
-        fallback_syms = []
-        for sym in symbols:
-            d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
-            if not d.get("error"):
-                m = stock_meta.get(sym, {})
-                d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                d["breakout_date"] = m.get("breakout_date", "")
-                d["notes"]         = m.get("notes",         "")
-                d["db_id"]         = m.get("id")
-                results.append(d)
-            else:
-                fallback_syms.append(sym)
-
-        # Step 3: Per-stock fallback for any that failed in bulk (parallel, small set)
-        if fallback_syms:
-            print(f"[swing_core] Falling back to per-stock for {len(fallback_syms)} stocks")
-            with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
-                futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms}
-                for f in as_completed(futures):
-                    d   = f.result()
-                    sym = d["symbol"]
-                    if not d.get("error"):
-                        m = stock_meta.get(sym, {})
-                        d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                        d["breakout_date"] = m.get("breakout_date", "")
-                        d["notes"]         = m.get("notes",         "")
-                        d["db_id"]         = m.get("id")
-                        results.append(d)
-                    else:
-                        errors.append({"symbol": sym, "error": d["error"]})
-
-        # Step 4: Save full data (5 hist + today) to DB async — won't block return
-        if results:
-            _save_full_to_db_async(results)
 
     # Sort by signal priority
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
