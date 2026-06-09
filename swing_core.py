@@ -530,11 +530,135 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
 # SECTION 10 — YFINANCE FETCH (used only when DB has no data for today)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _build_result_from_df(symbol: str, df) -> dict:
+    """
+    Shared helper — builds the full result dict from a single-stock DataFrame.
+    Called by both bulk fetch and single fallback fetch.
+    df must already be dropna'd and have at least 6 rows.
+    Keeps all keys identical so DB save, signal logic, display are unaffected.
+    """
+    hist = df.iloc[-6:-1]   # exactly 5 completed trading days
+    cur  = df.iloc[-1]      # most recent (today or last trading day)
+
+    hist_closes  = hist["Close"].tolist()
+    hist_volumes = hist["Volume"].tolist()
+    hist_opens   = hist["Open"].tolist()
+    hist_highs   = hist["High"].tolist()
+    hist_lows    = hist["Low"].tolist()
+    hist_dates   = hist.index.strftime("%d %b").tolist()       # display: "09 Jun"
+    hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()    # for DB:  "2025-06-09"
+
+    current_price = round(float(cur["Close"]), 2)
+    current_open  = round(float(cur["Open"]),  2)
+    current_high  = round(float(cur["High"]),  2)
+    current_low   = round(float(cur["Low"]),   2)
+    current_vol   = int(cur["Volume"])
+    current_date  = df.index[-1].strftime("%d %b")
+
+    max_close   = max(hist_closes)
+    clean_vols  = [v for v in hist_volumes if v and v > 0]
+    median_vol  = statistics.median(clean_vols) if clean_vols else 1
+    vol_ratio   = round(current_vol / median_vol, 2) if median_vol > 0 else 0
+    status      = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
+    vol_signal  = _vol_signal(vol_ratio)
+    pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
+
+    return {
+        "symbol":          symbol,
+        "error":           None,
+        "source":          "yfinance",
+        "hist_dates":      hist_dates,
+        "hist_iso_dates":  hist_iso,
+        "hist_opens":      [round(float(v), 2) for v in hist_opens],
+        "hist_highs":      [round(float(v), 2) for v in hist_highs],
+        "hist_lows":       [round(float(v), 2) for v in hist_lows],
+        "hist_closes":     [round(float(v), 2) for v in hist_closes],
+        "hist_volumes":    [int(v)             for v in hist_volumes],
+        "current_date":    current_date,
+        "current_price":   current_price,
+        "current_open":    current_open,
+        "current_high":    current_high,
+        "current_low":     current_low,
+        "current_vol":     current_vol,
+        "max_close":       round(max_close, 2),
+        "median_vol":      int(median_vol),
+        "vol_ratio":       vol_ratio,
+        "vol_signal":      vol_signal,
+        "pct_vs_high":     pct_vs_high,
+        "status":          status,
+    }
+
+
+def _fetch_all_yf_bulk(symbols: list) -> dict:
+    """
+    FAST PATH — single yf.download() call for ALL symbols at once.
+    Same approach as Prewatch scanner — one HTTP request, ~5 seconds for 800+ stocks.
+
+    Returns: { symbol: result_dict }  (or { symbol: {"error": "..."} } on failure)
+
+    yf.download returns a multi-index DataFrame:
+        data["Close"]["RELIANCE.NS"]  → Series for that stock
+        data["Open"]["TCS.NS"]        → etc.
+
+    For any stock that fails in bulk (NaN / missing), falls back to _fetch_single_yf.
+    """
+    tickers     = [f"{sym}.NS" for sym in symbols]
+    ticker_str  = " ".join(tickers)
+    sym_map     = {f"{sym}.NS": sym for sym in symbols}   # "RELIANCE.NS" → "RELIANCE"
+    results     = {}
+
+    try:
+        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks")
+        data = yf.download(
+            tickers    = ticker_str,
+            period     = "15d",          # 15 calendar days → 8-10 trading days → always 6+
+            interval   = "1d",
+            auto_adjust= True,
+            progress   = False,
+            threads    = True,           # yfinance internal threading
+        )
+
+        if data is None or data.empty:
+            print("[swing_core] yf.download returned empty — falling back to per-stock")
+            return {sym: {"symbol": sym, "error": "Bulk download empty"} for sym in symbols}
+
+        # yf.download with multiple tickers returns multi-index columns: (field, ticker)
+        # With single ticker it returns flat columns — handle both cases
+        is_multi = isinstance(data.columns, __import__("pandas").MultiIndex)
+
+        for ticker, sym in sym_map.items():
+            try:
+                if is_multi:
+                    # Multi-ticker: slice one stock's OHLCV out of the multi-index
+                    df = data.xs(ticker, axis=1, level=1)
+                else:
+                    # Single ticker (edge case): data is already flat
+                    df = data.copy()
+
+                df = df.dropna(subset=["Close", "Volume"])
+
+                if len(df) < 6:
+                    # Not enough rows — fallback to individual fetch for this stock
+                    results[sym] = {"symbol": sym, "error": f"Only {len(df)} rows in bulk data"}
+                    continue
+
+                results[sym] = _build_result_from_df(sym, df)
+
+            except Exception as e:
+                results[sym] = {"symbol": sym, "error": f"Bulk parse error: {e}"}
+
+    except Exception as e:
+        print(f"[swing_core] yf.download failed entirely: {e} — falling back to per-stock")
+        return {sym: {"symbol": sym, "error": f"Bulk download failed: {e}"} for sym in symbols}
+
+    return results
+
+
 def _fetch_single_yf(symbol: str) -> dict:
     """
-    Fetch 5 hist days + today from yfinance.
-    period=15d guarantees enough trading days even after long holidays.
-    Stores hist_iso_dates (full YYYY-MM-DD) for DB save alongside hist_dates (display).
+    Fallback — fetch one stock individually.
+    Used when: bulk download fails for a specific stock, or DB path needs a single missing stock.
+    Keeps identical return keys as _build_result_from_df.
     """
     symbol = symbol.lstrip("$").strip().upper()
     try:
@@ -549,56 +673,8 @@ def _fetch_single_yf(symbol: str) -> dict:
         if len(df) < 6:
             return {"symbol": symbol, "error": f"Only {len(df)} trading days available"}
 
-        hist = df.iloc[-6:-1]   # exactly 5 completed trading days
-        cur  = df.iloc[-1]      # today / most recent
+        return _build_result_from_df(symbol, df)
 
-        hist_closes  = hist["Close"].tolist()
-        hist_volumes = hist["Volume"].tolist()
-        hist_opens   = hist["Open"].tolist()
-        hist_highs   = hist["High"].tolist()
-        hist_lows    = hist["Low"].tolist()
-        hist_dates   = hist.index.strftime("%d %b").tolist()           # display: "09 Jun"
-        hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()        # for DB: "2025-06-09"
-
-        current_price = round(float(cur["Close"]), 2)
-        current_open  = round(float(cur["Open"]),  2)
-        current_high  = round(float(cur["High"]),  2)
-        current_low   = round(float(cur["Low"]),   2)
-        current_vol   = int(cur["Volume"])
-        current_date  = df.index[-1].strftime("%d %b")
-
-        max_close   = max(hist_closes)
-        clean_vols  = [v for v in hist_volumes if v and v > 0]
-        median_vol  = statistics.median(clean_vols) if clean_vols else 1
-        vol_ratio   = round(current_vol / median_vol, 2) if median_vol > 0 else 0
-        status      = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
-        vol_signal  = _vol_signal(vol_ratio)
-        pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
-
-        return {
-            "symbol":          symbol,
-            "error":           None,
-            "source":          "yfinance",
-            "hist_dates":      hist_dates,
-            "hist_iso_dates":  hist_iso,              # used for DB save
-            "hist_opens":      [round(float(v), 2) for v in hist_opens],
-            "hist_highs":      [round(float(v), 2) for v in hist_highs],
-            "hist_lows":       [round(float(v), 2) for v in hist_lows],
-            "hist_closes":     [round(float(v), 2) for v in hist_closes],
-            "hist_volumes":    [int(v)             for v in hist_volumes],
-            "current_date":    current_date,
-            "current_price":   current_price,
-            "current_open":    current_open,
-            "current_high":    current_high,
-            "current_low":     current_low,
-            "current_vol":     current_vol,
-            "max_close":       round(max_close, 2),
-            "median_vol":      int(median_vol),
-            "vol_ratio":       vol_ratio,
-            "vol_signal":      vol_signal,
-            "pct_vs_high":     pct_vs_high,
-            "status":          status,
-        }
     except Exception as e:
         return {"symbol": symbol, "error": str(e)}
 
@@ -681,13 +757,31 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
                 errors.append({"symbol": sym, "error": "Could not build from DB rows"})
 
     else:
-        # ── PATH B: Fetch from yfinance (first scan of day) ───────────────────
-        print(f"[swing_core] DB MISS — fetching {len(symbols)} stocks from yfinance")
-        batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
+        # ── PATH B: Fetch from yfinance — SINGLE BULK CALL for all stocks ─────
+        print(f"[swing_core] DB MISS — bulk yf.download for {len(symbols)} stocks")
 
-        for idx, batch in enumerate(batches):
-            with ThreadPoolExecutor(max_workers=batch_size) as ex:
-                futures = {ex.submit(_fetch_single_yf, sym): sym for sym in batch}
+        # Step 1: One HTTP request for all symbols (like Prewatch)
+        bulk = _fetch_all_yf_bulk(symbols)
+
+        # Step 2: Process results — fallback per-stock for any that failed in bulk
+        fallback_syms = []
+        for sym in symbols:
+            d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
+            if not d.get("error"):
+                m = stock_meta.get(sym, {})
+                d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
+                d["breakout_date"] = m.get("breakout_date", "")
+                d["notes"]         = m.get("notes",         "")
+                d["db_id"]         = m.get("id")
+                results.append(d)
+            else:
+                fallback_syms.append(sym)
+
+        # Step 3: Per-stock fallback for any that failed in bulk (parallel, small set)
+        if fallback_syms:
+            print(f"[swing_core] Falling back to per-stock for {len(fallback_syms)} stocks")
+            with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
+                futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms}
                 for f in as_completed(futures):
                     d   = f.result()
                     sym = d["symbol"]
@@ -701,10 +795,7 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
                     else:
                         errors.append({"symbol": sym, "error": d["error"]})
 
-            if idx < len(batches) - 1:
-                time.sleep(0.5)
-
-        # Save full data (5 hist + today) to DB async — won't block return
+        # Step 4: Save full data (5 hist + today) to DB async — won't block return
         if results:
             _save_full_to_db_async(results)
 
