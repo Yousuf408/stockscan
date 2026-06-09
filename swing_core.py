@@ -1,8 +1,14 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v3.1
+#  TRADE SENTRY — swing_core.py  v3.2
+#  v3.2 FIXES:
+#    - _fetch_all_yf_bulk: chunked into 200 tickers per batch (was one 800+ string)
+#    - _fetch_all_yf_bulk: period="1mo" (was "10d" which timed out on large lists)
+#    - _fetch_all_yf_bulk: handles single-ticker flat column edge case
+#    - _load_all_from_db: Range: 0-9999 header (bypasses Supabase 1000 row limit)
+#
 #  v3.1 FIXES:
 #    - period="2y" → "10d" in _fetch_all_yf_bulk (50x less data)
-#    - _load_all_from_db uses Range: 0-9999 header (bypasses Supabase 1000 row limit)
+#    - _load_all_from_db uses Range: 0-9999 header
 #
 #  v3.0 ARCHITECTURE — Smart DB-first, zero redundant fetches:
 #
@@ -434,8 +440,8 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
     """
     Build a full result dict from DB rows for one symbol.
     all_rows: sorted oldest→newest, includes today as last row.
-    - last row  = today's candle  → current_* (purple candle)
-    - prev rows = hist candles    → hist_* (grey/green/red candles)
+    - last row  = today's candle  → current_*
+    - prev rows = hist candles    → hist_*
     """
     if not all_rows:
         return None
@@ -500,7 +506,7 @@ def _build_from_db_rows(sym: str, all_rows: list, meta: dict) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 10 — YFINANCE FETCH
-# ── FIX v3.1: period="10d" instead of "2y" — 50x less data to download ──────
+# ── FIX v3.2: chunked into 200 tickers per batch, period="1mo" ───────────────
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_result_from_df(symbol: str, df) -> dict:
@@ -561,70 +567,89 @@ def _build_result_from_df(symbol: str, df) -> dict:
 
 def _fetch_all_yf_bulk(symbols: list) -> dict:
     """
-    FAST PATH — single yf.download() call for ALL symbols at once.
+    FAST PATH — yf.download() in chunks of 200 tickers.
 
-    FIX v3.1: period changed from "2y" to "10d"
-    Old: 850 stocks × 2 years  = ~425,000 rows downloaded
-    New: 850 stocks × 10 days  = ~8,500 rows downloaded  (50x less data)
-    We only need 6 trading days so 10 calendar days is more than enough.
+    FIX v3.2:
+      - Chunked into 200 tickers per batch. Passing 800+ tickers in one string
+        causes yfinance to silently drop many stocks or time out — only ~100
+        would come back. Chunks of 200 are reliable.
+      - period="1mo" — gives ~22 rows per stock, enough for 6 trading days,
+        and reliable for large batches. "10d" was too short and caused timeouts.
+      - Handles single-ticker flat column edge case (no multi-level columns).
     """
     import pandas as pd
 
-    tickers    = [f"{sym}.NS" for sym in symbols]
-    ticker_str = " ".join(tickers)
-    sym_map    = {f"{sym}.NS": sym for sym in symbols}
-    results    = {}
+    sym_map     = {f"{sym}.NS": sym for sym in symbols}
+    results     = {}
+    all_tickers = list(sym_map.keys())
 
-    try:
-        print(f"[swing_core] yf.download bulk — {len(symbols)} stocks (period=10d)")
-        data = yf.download(
-            tickers      = ticker_str,
-            period       = "10d",        # FIX v3.1: was "2y" — 50x less data
-            interval     = "1d",
-            group_by     = "ticker",
-            auto_adjust  = False,
-            progress     = False,
-        )
+    # Split into chunks of 200 — yfinance reliable limit per batch
+    chunks = [all_tickers[i:i+200] for i in range(0, len(all_tickers), 200)]
+    print(f"[swing_core] yf.download — {len(symbols)} stocks in {len(chunks)} chunks of 200")
 
-        if data is None or data.empty:
-            print("[swing_core] yf.download returned empty — falling back to per-stock")
-            return {sym: {"symbol": sym, "error": "Bulk download empty"} for sym in symbols}
+    for chunk_idx, chunk in enumerate(chunks):
+        ticker_str = " ".join(chunk)
+        try:
+            print(f"[swing_core] chunk {chunk_idx+1}/{len(chunks)} — {len(chunk)} tickers")
+            data = yf.download(
+                tickers      = ticker_str,
+                period       = "1mo",        # ~22 rows, reliable for large batches
+                interval     = "1d",
+                group_by     = "ticker",
+                auto_adjust  = False,
+                progress     = False,
+            )
 
-        for ticker, sym in sym_map.items():
-            try:
-                if ticker in data.columns.levels[0]:
-                    df_stock = data[ticker].copy()
-                else:
-                    results[sym] = {"symbol": sym, "error": "Ticker not in bulk data"}
-                    continue
+            if data is None or data.empty:
+                print(f"[swing_core] chunk {chunk_idx+1} returned empty")
+                for ticker in chunk:
+                    sym = sym_map[ticker]
+                    results[sym] = {"symbol": sym, "error": "Chunk download empty"}
+                continue
 
-                df_stock = df_stock.dropna(subset=["Close", "Volume"])
+            for ticker in chunk:
+                sym = sym_map[ticker]
+                try:
+                    if len(chunk) == 1:
+                        # Single ticker returns flat columns, not multi-level
+                        df_stock = data.copy()
+                    elif ticker in data.columns.levels[0]:
+                        df_stock = data[ticker].copy()
+                    else:
+                        results[sym] = {"symbol": sym, "error": "Ticker not in chunk data"}
+                        continue
 
-                if len(df_stock) < 6:
-                    results[sym] = {"symbol": sym, "error": f"Only {len(df_stock)} rows"}
-                    continue
+                    df_stock = df_stock.dropna(subset=["Close", "Volume"])
 
-                results[sym] = _build_result_from_df(sym, df_stock)
+                    if len(df_stock) < 6:
+                        results[sym] = {"symbol": sym, "error": f"Only {len(df_stock)} rows"}
+                        continue
 
-            except Exception as e:
-                results[sym] = {"symbol": sym, "error": f"Parse error: {e}"}
+                    results[sym] = _build_result_from_df(sym, df_stock)
 
-    except Exception as e:
-        print(f"[swing_core] yf.download failed: {e} — will fallback per-stock")
-        return {sym: {"symbol": sym, "error": f"Bulk failed: {e}"} for sym in symbols}
+                except Exception as e:
+                    results[sym] = {"symbol": sym, "error": f"Parse error: {e}"}
 
+        except Exception as e:
+            print(f"[swing_core] chunk {chunk_idx+1} failed: {e}")
+            for ticker in chunk:
+                sym = sym_map[ticker]
+                results[sym] = {"symbol": sym, "error": f"Chunk failed: {e}"}
+
+    success = sum(1 for v in results.values() if not v.get("error"))
+    print(f"[swing_core] bulk complete — {success}/{len(symbols)} successful")
     return results
 
 
 def _fetch_single_yf(symbol: str) -> dict:
     """
     Fallback — fetch one stock individually.
-    Used when bulk download fails for a specific stock.
+    Used when bulk chunk fails for a specific stock.
     """
     symbol = symbol.lstrip("$").strip().upper()
     try:
         df = yf.Ticker(f"{symbol}.NS").history(
-            period="15d", interval="1d", auto_adjust=True
+            period="1mo", interval="1d", auto_adjust=True
         )
         if df is None or df.empty:
             return {"symbol": symbol, "error": "No data from yfinance"}
@@ -675,7 +700,7 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
       1. Find last trading day (e.g. Wednesday 2AM → Tuesday)
       2. Check if DB has that date for first symbol (1 fast query)
       3a. IN DB     → load ALL symbols from DB (1 query) → instant results
-      3b. NOT IN DB → fetch all from yfinance → save to DB async
+      3b. NOT IN DB → fetch all from yfinance in chunks → save to DB async
     """
     stock_meta = {s["symbol"]: s for s in stocks}
     symbols    = [s["symbol"] for s in stocks]
@@ -702,8 +727,8 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
         results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
         return results, errors
 
-    # ── STEP 2: DB miss — fetch from yfinance, then save async ───────────────
-    print(f"[swing_core] DB miss — bulk yf.download for {len(symbols)} stocks")
+    # ── STEP 2: DB miss — fetch from yfinance in chunks, then save async ─────
+    print(f"[swing_core] DB miss — chunked yf.download for {len(symbols)} stocks")
     bulk = _fetch_all_yf_bulk(symbols)
 
     fallback_syms = []
@@ -719,9 +744,9 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
         else:
             fallback_syms.append(sym)
 
-    # Per-stock fallback only for bulk failures (should be rare)
+    # Per-stock fallback only for genuine failures (should be rare with chunking)
     if fallback_syms:
-        print(f"[swing_core] fallback per-stock for {len(fallback_syms)} stocks")
+        print(f"[swing_core] per-stock fallback for {len(fallback_syms)} stocks")
         with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
             futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms}
             for f in as_completed(futures):
