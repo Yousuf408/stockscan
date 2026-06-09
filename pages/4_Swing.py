@@ -149,22 +149,31 @@ def border_color(status):
     return {"BLASTING":"#7c3aed","READY":"#00a854","WATCH":"#f59e0b"}.get(status,"#e0e3e8")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LOAD DATA
+# LOAD DATA (FIXED STATE ARCHITECTURE)
 # ─────────────────────────────────────────────────────────────────────────────
 stocks       = load_cached()
 total_stocks = len(stocks)
 
-# ── Auto-fetch on load or date change ──
+# Ensure track state exists to prevent rerun loop traps
+if "sw_scan_status" not in st.session_state:
+    st.session_state.sw_scan_status = "idle"  # idle, scanning, completed, failed
+
 def _trigger_scan(selected_date):
+    st.session_state.sw_scan_status = "scanning"
     with st.spinner(f"Loading {total_stocks} stocks for {selected_date.strftime('%d %b %Y')}..."):
         results, errors = run_swing_scan(stocks, selected_date=selected_date)
-        st.session_state.sw_results      = results
-        st.session_state.sw_errors       = errors
+        st.session_state.sw_results      = results if results else []
+        st.session_state.sw_errors       = errors if errors else []
         st.session_state.sw_scan_time    = time.time()
         st.session_state.sw_last_refresh = time.time()
+        
+        if results:
+            st.session_state.sw_scan_status = "completed"
+        else:
+            st.session_state.sw_scan_status = "failed"
 
-# Auto-load on first open
-if not st.session_state.sw_results and total_stocks > 0:
+# Auto-load safeguard: Only scan if it hasn't been tried yet for this session state
+if st.session_state.sw_scan_status == "idle" and total_stocks > 0:
     _trigger_scan(st.session_state.sw_selected_date)
     st.rerun()
 
@@ -192,7 +201,6 @@ with c1:
         st.rerun()
 
 with c2:
-    # Date picker — calendar widget
     selected = st.date_input(
         "Date", value=st.session_state.sw_selected_date,
         max_value=date.today(),
@@ -203,7 +211,9 @@ with c2:
         st.session_state.sw_results       = []
         st.session_state.sw_errors        = []
         st.session_state.sw_scan_time     = None
+        st.session_state.sw_scan_status   = "idle"  # <--- Reset to allow fresh scan
         st.rerun()
+        
 
 with c3:
     if st.button("🔄 Refresh", use_container_width=True,
@@ -223,8 +233,8 @@ with c4:
         st.session_state.sw_errors       = []
         st.session_state.sw_scan_time    = None
         st.session_state.sw_last_refresh = None
+        st.session_state.sw_scan_status  = "idle"  # <--- Reset to allow fresh scan
         st.rerun()
-
 with c5:
     if st.session_state.sw_scan_time:
         t        = datetime.fromtimestamp(st.session_state.sw_scan_time).strftime("%I:%M %p")
