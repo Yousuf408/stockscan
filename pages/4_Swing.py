@@ -288,15 +288,16 @@ with c2:
 
 with c3:
     market_open = is_market_open()
-    refresh_disabled = not st.session_state.sw_results or not market_open
-    refresh_label = "🔄 Refresh" if market_open else "🔄 Closed"
+    refresh_disabled = not st.session_state.sw_results
+    refresh_label = "🔄 Refresh" if market_open else "🔄 Refresh"
     if st.button(refresh_label, use_container_width=True,
                  disabled=refresh_disabled,
-                 help="Refresh today's price & volume (market hours only)"):
+                 help="Refresh today's price & volume" + (" (market closed)" if not market_open else "")):
         with st.spinner("Refreshing live data..."):
             updated = refresh_live_data(st.session_state.sw_results)
             st.session_state.sw_results      = updated
             st.session_state.sw_last_refresh = time.time()
+        st.toast("🔄 Live data refreshed", icon="✅")
         st.rerun()
 
 with c4:
