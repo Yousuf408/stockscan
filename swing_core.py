@@ -236,18 +236,18 @@ def _extract_hist_from_db(stock: dict) -> dict | None:
         return None
 
 
-def _save_hist_to_db(db_id: int, hist: dict):
+def _save_hist_to_db(db_id: int, hist: dict, h: dict = None):
     """
     Save 5d OHLCV into d1-d5 columns of swing_watchlist.
-    hist keys: hist_opens, hist_highs, hist_lows, hist_closes, hist_volumes, hist_dates
+    h = pre-built headers (required for thread safety — pass from main thread).
     """
+    headers = h or _headers()
     row = {"snap_updated_at": datetime.utcnow().isoformat()}
     for i in range(5):
         idx = i + 1
-        # Parse date back to YYYY-MM-DD for DB
-        raw_date = hist["hist_dates"][i]  # "08 Jun" format
+        raw_date = hist["hist_dates"][i]
         try:
-            parsed = datetime.strptime(raw_date + f" {date.today().year}", "%d %b %Y")
+            parsed  = datetime.strptime(raw_date + f" {date.today().year}", "%d %b %Y")
             db_date = parsed.strftime("%Y-%m-%d")
         except Exception:
             db_date = None
@@ -260,7 +260,7 @@ def _save_hist_to_db(db_id: int, hist: dict):
 
     r = requests.patch(
         f"{_table_url()}?id=eq.{db_id}",
-        headers=_headers(), json=row, timeout=10,
+        headers=headers, json=row, timeout=10,
     )
     r.raise_for_status()
 
@@ -331,11 +331,12 @@ def _fetch_live_only(symbol: str) -> dict | None:
 # SECTION 7 — PROCESS SINGLE STOCK
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _process_stock(stock: dict, force_full: bool = False) -> dict:
+def _process_stock(stock: dict, force_full: bool = False, h: dict = None) -> dict:
     """
-    Process one stock:
-    - If snap is fresh and not force_full: read hist from DB + fetch live only
-    - Otherwise: fetch full 5d + live from yfinance + save hist to DB
+    Process one stock.
+    h = pre-built auth headers passed from main thread (thread-safe).
+    - If snap is fresh: read hist from DB + fetch live only (fast)
+    - Otherwise: fetch full 5d from yfinance + save to DB (first scan of day)
     """
     symbol = stock["symbol"]
     db_id  = stock["id"]
@@ -362,9 +363,9 @@ def _process_stock(stock: dict, force_full: bool = False) -> dict:
                                       "hist_lows","hist_closes","hist_volumes"]}
         live = {k: full[k] for k in ["current_price","current_open","current_high",
                                       "current_low","current_vol","current_date"]}
-        # Save hist to DB for next scan
+        # Save hist to DB for next scan (pass headers — thread safe)
         try:
-            _save_hist_to_db(db_id, hist)
+            _save_hist_to_db(db_id, hist, h=h)
         except Exception as e:
             print(f"[swing_core] save hist failed for {symbol}: {e}")
         source = "yf"
@@ -424,8 +425,13 @@ def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
     Scan all stocks. Auto-detects whether to use DB cache or fetch fresh.
     - Stocks with fresh snapshot: batch_size=15, pause=0.3 (live only, fast)
     - Stocks needing full fetch:  batch_size=10, pause=0.5 (full yfinance, slower)
-    Returns (results, errors).
+
+    IMPORTANT: auth headers captured ONCE in main thread before workers launch.
+    st.session_state is not accessible inside ThreadPoolExecutor workers.
     """
+    # Capture headers in main thread — workers cannot access st.session_state
+    auth_h = _headers()
+
     # Split into fast (DB fresh) vs slow (needs full fetch)
     fresh_stocks = [s for s in stocks if _snap_is_fresh(s) and _extract_hist_from_db(s)]
     stale_stocks = [s for s in stocks if s not in fresh_stocks]
@@ -436,14 +442,15 @@ def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
         batches = [batch[i:i+bs] for i in range(0, len(batch), bs)]
         for idx, b in enumerate(batches):
             with ThreadPoolExecutor(max_workers=bs) as ex:
-                futures = {ex.submit(_process_stock, s): s for s in b}
+                # Pass auth_h to every worker so DB saves work inside threads
+                futures = {ex.submit(_process_stock, s, False, auth_h): s for s in b}
                 for f in as_completed(futures):
                     d = f.result()
                     if not d.get("error"):
                         results.append(d)
                     else:
                         errors.append({"symbol": d["symbol"], "error": d["error"]})
-            if idx < len(batches)-1:
+            if idx < len(batches) - 1:
                 time.sleep(ps)
 
     # Fast batch first (DB reads + live fetch only)
