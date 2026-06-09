@@ -621,7 +621,19 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
     score = calc_score(signal, ltp, last_vol, avg_vol, pct_change, ema200_live)
     # trading_date already set above from candles
 
-    # ── Scan only — no Entry/SL yet ──────────────────────────────────────────
+    # ── Check 9:20 candle (2nd candle) for profit booking ────────────────────
+    second_candle_idx = opening_idx + 1
+    second_candle_profit_booking = False
+    if second_candle_idx < len(candles):
+        second_candle = candles[second_candle_idx]
+        sc_open  = float(second_candle[1])
+        sc_close = float(second_candle[4])
+        sc_ts    = str(second_candle[0])
+        if "09:20" in sc_ts:
+            if signal == "BUY"  and sc_close < sc_open:   # bearish = profit booking on buy
+                second_candle_profit_booking = True
+            elif signal == "SELL" and sc_close > sc_open:  # bullish = profit booking on sell
+                second_candle_profit_booking = True
     # entry_target = None (will be filled by Get Targets button)
     # entry_source = "pending"
 
@@ -643,7 +655,8 @@ def analyze_stock(stock: dict, candles: list, is_refresh: bool = False,
         "highPrice":    round(float(open_candle[2]), 2),
         "lowPrice":     round(float(open_candle[3]), 2),
         "closePrice":   round(float(open_candle[4]), 2),
-        "candles_opening_idx": opening_idx,   # stored for Get Targets later
+        "candles_opening_idx":        opening_idx,
+        "second_candle_profit_booking": second_candle_profit_booking,
         "sl_hit":       False,
         "entry_target": None,     # filled by Get Targets
         "exit_status":  "ACTIVE",
@@ -1027,7 +1040,7 @@ if clear_clicked:
 
 filter_sig = "ALL"; filter_min_vol = ""; filter_ema20 = ""
 filter_ema200 = ""; filter_min_score = ""
-toggle_body_wick = False; toggle_hide_sl = False
+toggle_body_wick = False; toggle_hide_sl = False; toggle_profit_booking = False
 
 if st.session_state.show_filters:
     with st.container(border=True):
@@ -1038,10 +1051,11 @@ if st.session_state.show_filters:
         with col_f3: filter_ema20     = st.text_input("EMA20 % from LTP ≤", value="", key="f_e20")
         with col_f4: filter_ema200    = st.text_input("EMA200 % from LTP ≤", value="", key="f_e200")
         with col_f5: filter_min_score = st.text_input("Score ≥", value="", key="f_score")
-        tog1, tog2, tog3 = st.columns(3)
-        with tog1: toggle_body_wick = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
-        with tog2: toggle_hide_sl   = st.toggle("Hide SL Hit stocks", key="f_sl", value=False)
-        with tog3:
+        tog1, tog2, tog3, tog4 = st.columns(4)
+        with tog1: toggle_body_wick      = st.toggle("Body > Wick (≥50% of range)", key="f_bw")
+        with tog2: toggle_hide_sl        = st.toggle("Hide SL Hit stocks", key="f_sl", value=False)
+        with tog3: toggle_profit_booking = st.toggle("2nd Candle Profit Booking", key="f_pb")
+        with tog4:
             auto_on = st.checkbox("Auto-Refresh (5-min loops)", value=st.session_state.auto_refresh, key="f_ar")
             if auto_on != st.session_state.auto_refresh:
                 st.session_state.auto_refresh = auto_on
@@ -1066,6 +1080,8 @@ if toggle_body_wick:
             and abs(r["closePrice"] - r["openPrice"]) / (r["highPrice"] - r["lowPrice"]) >= 0.5]
 if toggle_hide_sl:
     view = [r for r in view if not r.get("sl_hit", False)]
+if toggle_profit_booking:
+    view = [r for r in view if r.get("second_candle_profit_booking", False)]
 
 buy_count        = len([r for r in view if r["signal"] == "BUY"  and r.get("exit_status", "ACTIVE") == "ACTIVE"])
 sell_count       = len([r for r in view if r["signal"] == "SELL" and r.get("exit_status", "ACTIVE") == "ACTIVE"])
