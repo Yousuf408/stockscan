@@ -256,16 +256,20 @@ total_stocks = len(stocks)
 
 # ── Auto-refresh logic — silent, market hours only ──
 REFRESH_INTERVAL = 300  # 5 minutes
-if (st.session_state.sw_auto_refresh
-        and st.session_state.sw_results
-        and is_market_open()):
-    last = st.session_state.sw_last_refresh
-    now  = time.time()
-    if last is not None and (now - last) >= REFRESH_INTERVAL:
-        updated = refresh_live_data(st.session_state.sw_results, save_d6=False)
-        st.session_state.sw_results      = updated
-        st.session_state.sw_last_refresh = now
-        st.rerun()
+_now = time.time()
+_last = st.session_state.sw_last_refresh
+_should_refresh = (
+    st.session_state.sw_auto_refresh
+    and bool(st.session_state.sw_results)
+    and is_market_open()
+    and _last is not None
+    and (_now - _last) >= REFRESH_INTERVAL
+)
+if _should_refresh:
+    st.session_state.sw_last_refresh = _now  # update BEFORE refresh to prevent double-trigger
+    updated = refresh_live_data(st.session_state.sw_results, save_d6=False)
+    st.session_state.sw_results = updated
+    # Do NOT st.rerun() here — let page render naturally with updated data
 
 c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
 
