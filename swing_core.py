@@ -1,4 +1,5 @@
-# swing_core.py v2.0
+# swing_core.py v2.1
+# v2.1: period 20d→7d for faster fetch, update_swing_stock restored, full error handling
 import os, requests, yfinance as yf, statistics, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -62,6 +63,22 @@ def delete_swing_stock(db_id):
     r = requests.delete(f"{_table_url()}?id=eq.{db_id}", headers=_headers(), timeout=10)
     r.raise_for_status()
 
+def update_swing_stock(db_id: int, updates: dict):
+    """Update breakout_date, screener_url, or notes for a swing stock."""
+    allowed = {"screener_url", "breakout_date", "notes", "symbol"}
+    clean   = {k: v for k, v in updates.items() if k in allowed}
+    if not clean:
+        return
+    r = requests.patch(
+        f"{_table_url()}?id=eq.{db_id}",
+        headers=_headers(),
+        json=clean,
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 def bulk_add_swing_stocks(symbols):
     uid = _get_user_id()
     existing = {s["symbol"] for s in load_swing_stocks()}
@@ -108,7 +125,7 @@ def _vol_signal(ratio):
 
 def _fetch_single(symbol):
     try:
-        df = yf.Ticker(f"{symbol}.NS").history(period="20d", interval="1d", auto_adjust=True)
+        df = yf.Ticker(f"{symbol}.NS").history(period="7d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 6:
             return {"symbol": symbol, "error": "Not enough data"}
         df = df.dropna(subset=["Close","Volume"])
