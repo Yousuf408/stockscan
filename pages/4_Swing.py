@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v2.1
-#  Swing Scanner — fixed column alignment, correct order, period=7d
-#  Columns: STOCK | PRICE CANDLES 5D | VOLUME 5D+CUR | LTP | H/L | VOL SIGNAL | STATUS | SCREENER
+#  TRADE SENTRY — pages/4_Swing.py  v2.2
+#  Fixed: column alignment using st.columns() not HTML table
+#  Added: 📸 Snapshot button
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -21,7 +21,6 @@ try:
 except Exception:
     WATCHLIST_PUSH = False
 
-# ── Page config ──
 st.set_page_config(page_title="Swing · TradeSentry", layout="wide",
                    page_icon="📈", initial_sidebar_state="collapsed")
 apply_styles()
@@ -35,82 +34,66 @@ if not st.session_state.get("user_id"):
 
 page_header("Swing Scanner", "Positional trade setups — 5d + current")
 
-# ── CSS ──
 st.markdown("""
 <style>
-.sw-wrap { overflow-x: auto; width: 100%; }
-.sw-table {
-    width: 100%; border-collapse: collapse;
-    font-family: 'Inter', sans-serif;
-    table-layout: fixed;
-}
-.sw-th {
+.sw-header-row {
+    display: grid;
+    grid-template-columns: 140px 200px 210px 120px 130px 180px 100px 90px;
+    background: #f8f9fb;
+    border-top: 1px solid #e0e3e8;
+    border-bottom: 2px solid #e0e3e8;
+    padding: 8px 0;
     font-size: 10px; font-weight: 600; color: #7a8394;
     text-transform: uppercase; letter-spacing: 0.07em;
-    padding: 10px 12px; background: #f8f9fb;
-    border-bottom: 2px solid #e0e3e8;
-    white-space: nowrap; text-align: left;
 }
-.sw-td {
-    padding: 12px 12px;
+.sw-header-row div { padding: 0 10px; }
+
+.sw-data-row {
+    display: grid;
+    grid-template-columns: 140px 200px 210px 120px 130px 180px 100px 90px;
     border-bottom: 1px solid #f0f2f5;
-    vertical-align: middle;
+    align-items: center;
+    min-height: 80px;
 }
-.sw-row:hover .sw-td { background: #fafbfc; }
+.sw-data-row:hover { background: #fafbfc; }
+.sw-data-row div  { padding: 10px 10px; }
+
 .sw-sym {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 14px; font-weight: 700; color: #0f1117;
+    font-size: 13px; font-weight: 700; color: #0f1117;
 }
 .sw-bd { font-size: 10px; color: #9ca3af; margin-top: 3px; }
 .sw-ltp {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 15px; font-weight: 700; color: #0f1117;
+    font-size: 14px; font-weight: 700; color: #0f1117;
 }
-.sw-pct { font-size: 10px; font-family: monospace; margin-top: 2px; }
-.sw-hl  { font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.8; }
+.sw-pct { font-size: 10px; font-family: monospace; margin-top: 3px; }
+.sw-hl  { font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.9; }
 .sw-vsig { font-size: 12px; font-weight: 600; }
-.sw-vsub { font-size: 10px; color: #9ca3af; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.sw-vsub { font-size: 10px; color: #9ca3af; font-family: 'JetBrains Mono', monospace; margin-top: 3px; }
+.sw-med  { font-size: 9px; color: #f59e0b; margin-top: 3px; }
 .sw-badge-B {
-    background: #ede9fe; color: #3C3489;
-    border: 1px solid #7c3aed40;
-    font-size: 11px; font-weight: 700;
-    padding: 3px 10px; border-radius: 10px;
-    white-space: nowrap; display: inline-block;
+    background: #ede9fe; color: #3C3489; border: 1px solid #7c3aed40;
+    font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 10px;
+    display: inline-block; white-space: nowrap;
 }
 .sw-badge-R {
-    background: #f0faf5; color: #0F6E56;
-    border: 1px solid #1D9E7540;
-    font-size: 11px; font-weight: 700;
-    padding: 3px 10px; border-radius: 10px;
-    white-space: nowrap; display: inline-block;
+    background: #f0faf5; color: #0F6E56; border: 1px solid #1D9E7540;
+    font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 10px;
+    display: inline-block; white-space: nowrap;
 }
 .sw-badge-W {
-    background: #fffbeb; color: #854F0B;
-    border: 1px solid #f59e0b40;
-    font-size: 11px; font-weight: 700;
-    padding: 3px 10px; border-radius: 10px;
-    white-space: nowrap; display: inline-block;
+    background: #fffbeb; color: #854F0B; border: 1px solid #f59e0b40;
+    font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 10px;
+    display: inline-block; white-space: nowrap;
 }
 .sw-link {
     font-size: 12px; color: #2563eb;
     text-decoration: none; font-weight: 500;
 }
 .sw-link:hover { text-decoration: underline; }
-.sw-med { font-size: 9px; color: #f59e0b; margin-top: 2px; }
 </style>
 """, unsafe_allow_html=True)
-
-# ── Column widths (px) — must match header and data exactly ──
-COL_WIDTHS = {
-    "stock":   "150px",
-    "candles": "200px",
-    "volume":  "200px",
-    "ltp":     "120px",
-    "hl":      "130px",
-    "signal":  "170px",
-    "status":  "110px",
-    "link":    "90px",
-}
 
 # ── Session state ──
 for k, v in [("sw_results",[]),("sw_errors",[]),("sw_scan_time",None),
@@ -131,14 +114,16 @@ def refresh_cache():
 # SVG HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def price_svg(opens, highs, lows, closes, dates, w=190, h=60):
+def price_svg(opens, highs, lows, closes, dates, w=185, h=62):
     if not closes:
-        return f'<svg width="{w}" height="{h}"><text x="10" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
+        return f'<svg width="{w}" height="{h}"><text x="6" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
     n   = len(closes)
     pad = 6
-    bw  = 18
-    gap = (w - pad*2 - bw*n) // max(n-1, 1)
-    all_p = [v for v in highs+lows if v > 0]
+    bw  = 20
+    gap = max(4, (w - pad*2 - bw*n) // max(n-1, 1))
+    all_p = [v for v in highs + lows if v and v > 0]
+    if not all_p:
+        return f'<svg width="{w}" height="{h}"></svg>'
     mn, mx = min(all_p), max(all_p)
     rng = mx - mn or 1
 
@@ -147,8 +132,8 @@ def price_svg(opens, highs, lows, closes, dates, w=190, h=60):
 
     parts = []
     for i in range(n):
-        x   = pad + i*(bw+gap)
-        cx  = x + bw//2
+        x  = pad + i*(bw+gap)
+        cx = x + bw//2
         o, h2, l2, c = opens[i], highs[i], lows[i], closes[i]
         green  = c >= o
         col    = "#00a854" if green else "#e53935"
@@ -159,26 +144,25 @@ def price_svg(opens, highs, lows, closes, dates, w=190, h=60):
             f'<rect x="{x}" y="{body_y}" width="{bw}" height="{body_h}" fill="{col}" rx="2"/>'
         )
         lbl = dates[i].split(" ")[0] if i < len(dates) else str(i+1)
-        parts.append(f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{lbl}</text>')
-
+        parts.append(
+            f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{lbl}</text>'
+        )
     return f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}">{"".join(parts)}</svg>'
 
 
-def volume_svg(hist_vols, cur_vol, median_vol, w=190, h=60):
-    n     = len(hist_vols)
-    pad   = 6
-    bw    = 16
-    gap   = 5
+def volume_svg(hist_vols, cur_vol, median_vol, w=195, h=62):
+    n        = len(hist_vols)
+    pad      = 4
+    bw       = 18
+    gap      = 5
     bar_area = h - pad - 14
-    all_v = [v for v in hist_vols if v > 0] + ([cur_vol] if cur_vol else [])
-    mx    = max(all_v) if all_v else 1
+    all_v    = [v for v in hist_vols if v and v > 0] + ([cur_vol] if cur_vol else [])
+    mx       = max(all_v) if all_v else 1
 
     def bh(v):
         return max(3, int((v / mx) * bar_area))
 
     parts = []
-
-    # 5 historical bars
     for i, v in enumerate(hist_vols):
         x  = pad + i*(bw+gap)
         h2 = bh(v)
@@ -189,25 +173,25 @@ def volume_svg(hist_vols, cur_vol, median_vol, w=190, h=60):
             f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{i+1}</text>'
         )
 
-    # Separator
-    sep = pad + n*(bw+gap) + 1
-    parts.append(f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-14}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
-
-    # Current bar
-    cx  = sep + 5
-    ch2 = bh(cur_vol) if cur_vol else 3
-    cy  = h - 14 - ch2
-    ratio = round(cur_vol / median_vol, 2) if median_vol > 0 else 0
-    cur_col = "#7c3aed" if ratio > 2.0 else "#2563eb"
+    sep = pad + n*(bw+gap) + 2
     parts.append(
-        f'<rect x="{cx}" y="{cy}" width="{bw}" height="{ch2}" '
-        f'fill="{cur_col}25" stroke="{cur_col}" stroke-width="1.2" rx="2"/>'
-        f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cur_col}">cur</text>'
+        f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-14}" '
+        f'stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>'
     )
 
-    # Median line across hist bars only
-    if median_vol > 0 and mx > 0:
-        med_y = round(h - 14 - bh(median_vol), 1)
+    cx   = sep + 4
+    ch2  = bh(cur_vol) if cur_vol else 3
+    cy   = h - 14 - ch2
+    ratio = round(cur_vol / median_vol, 2) if median_vol and median_vol > 0 else 0
+    cc   = "#7c3aed" if ratio > 2.0 else "#2563eb"
+    parts.append(
+        f'<rect x="{cx}" y="{cy}" width="{bw}" height="{ch2}" '
+        f'fill="{cc}25" stroke="{cc}" stroke-width="1.5" rx="2"/>'
+        f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">cur</text>'
+    )
+
+    if median_vol and median_vol > 0:
+        med_y  = round(h - 14 - bh(median_vol), 1)
         med_x2 = pad + n*(bw+gap) - gap
         parts.append(
             f'<line x1="{pad}" x2="{med_x2}" y1="{med_y}" y2="{med_y}" '
@@ -219,16 +203,13 @@ def volume_svg(hist_vols, cur_vol, median_vol, w=190, h=60):
 
 
 def status_badge(status):
-    cls = {"BLASTING": "sw-badge-B", "READY": "sw-badge-R", "WATCH": "sw-badge-W"}.get(status, "")
-    ico = {"BLASTING": "🔥", "READY": "✅", "WATCH": "👁"}.get(status, "")
-    if not cls:
-        return "—"
+    cls = {"BLASTING":"sw-badge-B","READY":"sw-badge-R","WATCH":"sw-badge-W"}.get(status,"")
+    ico = {"BLASTING":"🔥","READY":"✅","WATCH":"👁"}.get(status,"")
+    if not cls: return "—"
     return f'<span class="{cls}">{ico} {status}</span>'
 
-
 def border_color(status):
-    return {"BLASTING": "#7c3aed", "READY": "#00a854", "WATCH": "#f59e0b"}.get(status, "#e0e3e8")
-
+    return {"BLASTING":"#7c3aed","READY":"#00a854","WATCH":"#f59e0b"}.get(status,"#e0e3e8")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONTROL BAR
@@ -236,7 +217,7 @@ def border_color(status):
 stocks       = load_cached()
 total_stocks = len(stocks)
 
-c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
+c1, c2, c3, c4, c5, c6 = st.columns([1.1, 1.1, 1.1, 0.8, 0.8, 3])
 
 with c1:
     lbl = "✕ Manage" if st.session_state.sw_show_manage else "⚙ Manage Stocks"
@@ -255,6 +236,23 @@ with c2:
         st.rerun()
 
 with c3:
+    if st.button("📸 Snapshot", use_container_width=True,
+                 disabled=total_stocks == 0,
+                 help="Save today's 5d historical data to DB. Run this at/after market close (3:30 PM)."):
+        with st.spinner(f"Taking snapshot for {total_stocks} stocks..."):
+            try:
+                from swing_core import save_swing_snapshot
+                saved, failed = save_swing_snapshot(stocks)
+                if saved:
+                    st.success(f"✅ Snapshot saved for {saved} stocks.")
+                if failed:
+                    st.warning(f"⚠ {failed} stocks failed.")
+            except ImportError:
+                st.warning("Snapshot function not yet available — coming soon.")
+            except Exception as e:
+                st.error(str(e))
+
+with c4:
     if st.button("🗑 Clear", use_container_width=True,
                  disabled=len(st.session_state.sw_results) == 0):
         st.session_state.sw_results   = []
@@ -262,14 +260,14 @@ with c3:
         st.session_state.sw_scan_time = None
         st.rerun()
 
-with c4:
+with c5:
     st.markdown(
         f"<div style='padding-top:8px;font-size:12px;color:#7a8394;'>"
         f"📋 <b style='color:#0f1117'>{total_stocks}</b> stocks</div>",
         unsafe_allow_html=True,
     )
 
-with c5:
+with c6:
     if st.session_state.sw_scan_time:
         t        = datetime.fromtimestamp(st.session_state.sw_scan_time).strftime("%I:%M %p")
         blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
@@ -295,10 +293,10 @@ if st.session_state.sw_show_manage:
 
     with t1:
         with st.form("add_form", clear_on_submit=True):
-            a1, a2 = st.columns([1, 2])
+            a1, a2 = st.columns([1,2])
             with a1: sym  = st.text_input("NSE Symbol *", placeholder="HEROMOTOCO")
             with a2: url  = st.text_input("Screener URL (optional)")
-            a3, a4 = st.columns([1, 2])
+            a3, a4 = st.columns([1,2])
             with a3: bd   = st.date_input("Breakout Date (optional)", value=None)
             with a4: note = st.text_input("Notes (optional)")
             if st.form_submit_button("➕ Add", type="primary"):
@@ -317,7 +315,7 @@ if st.session_state.sw_show_manage:
         txt = st.text_area("Symbols — one per line or comma separated", height=150,
                            placeholder="HEROMOTOCO\nTITAN\nHDFCBANK")
         if st.button("📋 Add All", type="primary"):
-            raw  = txt.replace(",", "\n").splitlines()
+            raw  = txt.replace(",","\n").splitlines()
             syms = [s.strip().upper() for s in raw if s.strip()]
             if syms:
                 with st.spinner(f"Adding {len(syms)} stocks..."):
@@ -338,31 +336,26 @@ if st.session_state.sw_show_manage:
                 r1, r2, r3, r4, r5 = st.columns([2, 2, 3, 2, 1])
                 with r1: st.markdown(f"**`{s['symbol']}`**")
                 with r2:
-                    bd_val = s.get("breakout_date") or "—"
-                    st.markdown(f"<span style='font-size:11px;color:#9ca3af;'>{bd_val}</span>",
-                                unsafe_allow_html=True)
+                    st.markdown(
+                        f"<span style='font-size:11px;color:#9ca3af;'>{s.get('breakout_date') or '—'}</span>",
+                        unsafe_allow_html=True)
                 with r3:
-                    n_val = s.get("notes") or ""
-                    st.markdown(f"<span style='font-size:11px;color:#9ca3af;'>{n_val[:40]}</span>",
-                                unsafe_allow_html=True)
+                    st.markdown(
+                        f"<span style='font-size:11px;color:#9ca3af;'>{(s.get('notes') or '')[:40]}</span>",
+                        unsafe_allow_html=True)
                 with r4:
                     new_bd = st.date_input("", value=None, key=f"ebd_{s['id']}",
                                            label_visibility="collapsed")
                     if new_bd:
                         try:
                             update_swing_stock(s["id"], {"breakout_date": str(new_bd)})
-                            refresh_cache()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(str(e))
+                            refresh_cache(); st.rerun()
+                        except Exception as e: st.error(str(e))
                 with r5:
                     if st.button("✕", key=f"del_{s['id']}"):
                         try:
-                            delete_swing_stock(s["id"])
-                            refresh_cache()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(str(e))
+                            delete_swing_stock(s["id"]); refresh_cache(); st.rerun()
+                        except Exception as e: st.error(str(e))
 
     st.markdown("---")
 
@@ -380,21 +373,17 @@ if all_results:
     opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})"]
     sel  = st.pills("Filter", opts, default=opts[0], label_visibility="collapsed")
 
-    if sel and "BLASTING" in sel:
-        view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel and "READY" in sel:
-        view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel and "WATCH" in sel:
-        view = [r for r in all_results if r.get("status") == "WATCH"]
-    else:
-        view = all_results
+    if   sel and "BLASTING" in sel: view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel and "READY"    in sel: view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel and "WATCH"    in sel: view = [r for r in all_results if r.get("status") == "WATCH"]
+    else:                           view = all_results
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 else:
     view = []
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EMPTY / READY STATES
+# EMPTY STATE
 # ─────────────────────────────────────────────────────────────────────────────
 if not all_results:
     if total_stocks == 0:
@@ -409,37 +398,25 @@ if not all_results:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RESULTS TABLE
+# RESULTS — using st.columns() for perfect alignment
 # ─────────────────────────────────────────────────────────────────────────────
-cw = COL_WIDTHS
 
-# Table header
-st.markdown(f"""
-<div class="sw-wrap">
-<table class="sw-table">
-<colgroup>
-  <col style="width:{cw['stock']}">
-  <col style="width:{cw['candles']}">
-  <col style="width:{cw['volume']}">
-  <col style="width:{cw['ltp']}">
-  <col style="width:{cw['hl']}">
-  <col style="width:{cw['signal']}">
-  <col style="width:{cw['status']}">
-  <col style="width:{cw['link']}">
-</colgroup>
-<thead><tr>
-  <th class="sw-th">Stock</th>
-  <th class="sw-th">Price candles — 5d</th>
-  <th class="sw-th">Volume — 5d hist | current</th>
-  <th class="sw-th">LTP</th>
-  <th class="sw-th">Today H / L</th>
-  <th class="sw-th">Vol signal</th>
-  <th class="sw-th">Status</th>
-  <th class="sw-th">Screener</th>
-</tr></thead>
-<tbody>
-""", unsafe_allow_html=True)
+# Column ratios — these stay consistent for header and every data row
+COL = [1.4, 2.0, 2.1, 1.2, 1.3, 1.8, 1.0, 0.9]
 
+# ── Header ──
+header = st.columns(COL)
+labels = ["Stock", "Price candles — 5d", "Volume — 5d hist | current",
+          "LTP", "Today H / L", "Vol signal", "Status", "Screener"]
+for col, lbl in zip(header, labels):
+    col.markdown(
+        f"<div style='font-size:10px;font-weight:600;color:#7a8394;"
+        f"text-transform:uppercase;letter-spacing:0.07em;"
+        f"padding:8px 4px;border-bottom:2px solid #e0e3e8;'>{lbl}</div>",
+        unsafe_allow_html=True,
+    )
+
+# ── Data rows ──
 for r in view:
     sym    = r["symbol"]
     status = r.get("status", "")
@@ -466,51 +443,87 @@ for r in view:
     med_v   = fmt_vol(r.get("median_vol"))
     bd      = r.get("breakout_date") or "—"
     s_url   = r.get("screener_url", f"https://www.screener.in/company/{sym}/")
-    badge   = status_badge(status)
 
-    st.markdown(f"""
-<tr class="sw-row" style="border-left:3px solid {bc};">
-  <td class="sw-td">
-    <div class="sw-sym">{sym}</div>
-    <div class="sw-bd">{bd}</div>
-  </td>
-  <td class="sw-td">{p_svg}</td>
-  <td class="sw-td">
-    {v_svg}
-    <div class="sw-med">— median {med_v}</div>
-  </td>
-  <td class="sw-td">
-    <div class="sw-ltp">₹{ltp:,.2f}</div>
-    <div class="sw-pct" style="color:{pct_col};">{pct:+.1f}% vs 5d high</div>
-  </td>
-  <td class="sw-td">
-    <div class="sw-hl" style="color:#00a854;">H: ₹{h_val:,.2f}</div>
-    <div class="sw-hl" style="color:#e53935;">L: ₹{l_val:,.2f}</div>
-  </td>
-  <td class="sw-td">
-    <div class="sw-vsig">{vsig}</div>
-    <div class="sw-vsub">{cur_v} / med {med_v}</div>
-  </td>
-  <td class="sw-td">{badge}</td>
-  <td class="sw-td"><a href="{s_url}" target="_blank" class="sw-link">Screener ↗</a></td>
-</tr>
-""", unsafe_allow_html=True)
+    # Row container with left border
+    st.markdown(
+        f"<div style='border-left:3px solid {bc};margin-bottom:0;"
+        f"border-bottom:1px solid #f0f2f5;'></div>",
+        unsafe_allow_html=True,
+    )
 
-st.markdown("</tbody></table></div>", unsafe_allow_html=True)
+    row = st.columns(COL)
+
+    # 0 — Stock
+    row[0].markdown(
+        f"<div style='padding:8px 4px;'>"
+        f"<div class='sw-sym'>{sym}</div>"
+        f"<div class='sw-bd'>{bd}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # 1 — Price candles
+    row[1].markdown(
+        f"<div style='padding:4px 0;'>{p_svg}</div>",
+        unsafe_allow_html=True,
+    )
+
+    # 2 — Volume bars
+    row[2].markdown(
+        f"<div style='padding:4px 0;'>{v_svg}"
+        f"<div class='sw-med'>— median {med_v}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # 3 — LTP
+    row[3].markdown(
+        f"<div style='padding:8px 4px;'>"
+        f"<div class='sw-ltp'>₹{ltp:,.2f}</div>"
+        f"<div class='sw-pct' style='color:{pct_col};'>{pct:+.1f}% vs 5d high</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # 4 — Today H/L
+    row[4].markdown(
+        f"<div style='padding:8px 4px;'>"
+        f"<div class='sw-hl' style='color:#00a854;'>H: ₹{h_val:,.2f}</div>"
+        f"<div class='sw-hl' style='color:#e53935;'>L: ₹{l_val:,.2f}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # 5 — Vol signal
+    row[5].markdown(
+        f"<div style='padding:8px 4px;'>"
+        f"<div class='sw-vsig'>{vsig}</div>"
+        f"<div class='sw-vsub'>{cur_v} / med {med_v}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    # 6 — Status badge
+    row[6].markdown(
+        f"<div style='padding:8px 4px;'>{status_badge(status)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    # 7 — Screener link
+    row[7].markdown(
+        f"<div style='padding:8px 4px;'>"
+        f"<a href='{s_url}' target='_blank' class='sw-link'>Screener ↗</a></div>",
+        unsafe_allow_html=True,
+    )
 
 # ── Push to watchlist ──
-ready_blast = [r for r in view if r.get("status") in ("BLASTING", "READY")]
+ready_blast = [r for r in view if r.get("status") in ("BLASTING","READY")]
 if ready_blast and WATCHLIST_PUSH:
     try:
-        wl_names = get_user_watchlist_names() if st.session_state.get("user_id") else ["Today", "Yesterday", "New"]
+        wl_names = get_user_watchlist_names() if st.session_state.get("user_id") else ["Today","Yesterday","New"]
     except Exception:
-        wl_names = ["Today", "Yesterday", "New"]
+        wl_names = ["Today","Yesterday","New"]
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     st.markdown("**Push to Watchlist**")
     for r in ready_blast:
         sym = r["symbol"]
-        p1, p2, p3 = st.columns([2, 2, 1])
+        p1, p2, p3 = st.columns([2,2,1])
         with p1:
             st.markdown(f"`{sym}` {status_badge(r.get('status',''))}",
                         unsafe_allow_html=True)
@@ -523,11 +536,11 @@ if ready_blast and WATCHLIST_PUSH:
                     add_to_watchlist(chosen, {
                         "symbol":    sym,
                         "status":    "BUY",
-                        "lastPrice": r.get("current_price", 0),
-                        "entry":     r.get("current_price", 0),
-                        "sl":        round(r.get("current_low", 0) * 0.99, 2),
-                        "target1":   round(r.get("current_price", 0) * 1.05, 2),
-                        "target2":   round(r.get("current_price", 0) * 1.10, 2),
+                        "lastPrice": r.get("current_price",0),
+                        "entry":     r.get("current_price",0),
+                        "sl":        round(r.get("current_low",0)*0.99, 2),
+                        "target1":   round(r.get("current_price",0)*1.05, 2),
+                        "target2":   round(r.get("current_price",0)*1.10, 2),
                         "note":      f"Swing {r.get('status','')} — {r.get('vol_ratio',0)}x vol",
                     })
                     st.success(f"✅ {sym} → {chosen}")
