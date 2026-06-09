@@ -227,7 +227,7 @@ def load_price_data_from_db(symbols: list, from_date: date, to_date: date) -> di
 def save_price_data_to_db(results: list):
     """
     Save OHLCV for all stocks to swing_price_data.
-    Saves both historical (hist_*) AND today's candle.
+    Saves both historical (hist_iso_dates) AND today's candle.
     Uses upsert — safe to call multiple times.
     Called AFTER all threads complete — never inside workers.
     """
@@ -240,32 +240,27 @@ def save_price_data_to_db(results: list):
             continue
         sym = r["symbol"]
 
-        # Save historical days (d1-d5 from yfinance)
-        hist_dates   = r.get("hist_dates",   [])
-        hist_opens   = r.get("hist_opens",   [])
-        hist_highs   = r.get("hist_highs",   [])
-        hist_lows    = r.get("hist_lows",    [])
-        hist_closes  = r.get("hist_closes",  [])
-        hist_volumes = r.get("hist_volumes", [])
+        # Save historical days — use ISO dates directly (no year parsing issues)
+        hist_iso_dates = r.get("hist_iso_dates", [])
+        hist_opens     = r.get("hist_opens",     [])
+        hist_highs     = r.get("hist_highs",     [])
+        hist_lows      = r.get("hist_lows",      [])
+        hist_closes    = r.get("hist_closes",    [])
+        hist_volumes   = r.get("hist_volumes",   [])
 
-        for i, raw_date in enumerate(hist_dates):
-            try:
-                trade_date = datetime.strptime(
-                    raw_date + f" {date.today().year}", "%d %b %Y"
-                ).strftime("%Y-%m-%d")
-            except Exception:
-                continue
-            if i < len(hist_closes):
-                rows.append({
-                    "user_id":    uid,
-                    "symbol":     sym,
-                    "trade_date": trade_date,
-                    "open":       hist_opens[i]   if i < len(hist_opens)   else None,
-                    "high":       hist_highs[i]   if i < len(hist_highs)   else None,
-                    "low":        hist_lows[i]    if i < len(hist_lows)    else None,
-                    "close":      hist_closes[i],
-                    "volume":     hist_volumes[i] if i < len(hist_volumes) else None,
-                })
+        for i, iso_date in enumerate(hist_iso_dates):
+            if i >= len(hist_closes):
+                break
+            rows.append({
+                "user_id":    uid,
+                "symbol":     sym,
+                "trade_date": iso_date,
+                "open":       hist_opens[i]   if i < len(hist_opens)   else None,
+                "high":       hist_highs[i]   if i < len(hist_highs)   else None,
+                "low":        hist_lows[i]    if i < len(hist_lows)    else None,
+                "close":      hist_closes[i],
+                "volume":     hist_volumes[i] if i < len(hist_volumes) else None,
+            })
 
         # Save today's candle
         rows.append({
@@ -299,29 +294,30 @@ def save_price_data_to_db(results: list):
 
 def check_db_has_data(symbols: list, trading_days: list) -> bool:
     """
-    Check if DB already has price data for given symbols and dates.
-    Returns True if at least 80% of expected rows exist (allows for holidays/errors).
+    Check if DB has today's data for at least 80% of symbols.
+    We only check today because:
+    - First scan fetches full history + saves everything
+    - Subsequent scans same day use DB (fast path)
+    - Next day: today becomes new, triggers fresh fetch again
     """
     try:
         uid = _get_user_id()
-        if not uid or not symbols or not trading_days:
+        if not uid or not symbols:
             return False
-        from_d = trading_days[0].isoformat()
-        to_d   = trading_days[-1].isoformat()
+        today = date.today().isoformat()
         r = requests.get(
             _price_table_url(),
             headers=_headers(),
             params={
                 "select":     "symbol",
                 "user_id":    f"eq.{uid}",
-                "trade_date": f"gte.{from_d}",
-                "and":        f"(trade_date.lte.{to_d})",
+                "trade_date": f"eq.{today}",
             },
             timeout=10,
         )
         r.raise_for_status()
         count    = len(r.json())
-        expected = len(symbols) * len(trading_days)
+        expected = len(symbols)
         return count >= expected * 0.8
     except Exception:
         return False
@@ -384,7 +380,8 @@ def _fetch_single(symbol: str) -> dict:
 
         return {
             "symbol": symbol, "error": None,
-            "hist_dates":   hist_dates,
+            "hist_dates":     hist_dates,   # "%d %b" for display
+            "hist_iso_dates": hist.index.strftime("%Y-%m-%d").tolist(),  # ISO for DB save
             "hist_opens":   [round(float(v), 2) for v in hist_opens],
             "hist_highs":   [round(float(v), 2) for v in hist_highs],
             "hist_lows":    [round(float(v), 2) for v in hist_lows],
