@@ -261,9 +261,9 @@ if (st.session_state.sw_auto_refresh
         and is_market_open()):
     last = st.session_state.sw_last_refresh
     now  = time.time()
-    if last is None or (now - last) >= REFRESH_INTERVAL:
-        updated = refresh_live_data(st.session_state.sw_results)
-        st.session_state.sw_results    = updated
+    if last is not None and (now - last) >= REFRESH_INTERVAL:
+        updated = refresh_live_data(st.session_state.sw_results, save_d6=False)
+        st.session_state.sw_results      = updated
         st.session_state.sw_last_refresh = now
         st.rerun()
 
