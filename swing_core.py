@@ -45,23 +45,6 @@ def _headers():
         "Prefer":        "return=representation",
     }
 
-def _service_headers():
-    """
-    Use Supabase service role key for DB writes inside threads.
-    Service role bypasses RLS — safe because we control the code.
-    Set SUPABASE_SERVICE_KEY in Railway environment variables.
-    Get it from: Supabase Dashboard → Settings → API → service_role key
-    """
-    url, anon_key = _get_config()
-    service_key   = os.environ.get("SUPABASE_SERVICE_KEY", "")
-    key           = service_key if service_key else anon_key
-    return {
-        "apikey":        key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type":  "application/json",
-        "Prefer":        "return=representation",
-    }
-
 def _table_url():
     url, _ = _get_config()
     return f"{url}/rest/v1/swing_watchlist"
@@ -256,9 +239,9 @@ def _extract_hist_from_db(stock: dict) -> dict | None:
 def _save_hist_to_db(db_id: int, hist: dict, h: dict = None):
     """
     Save 5d OHLCV into d1-d5 columns of swing_watchlist.
-    Uses service role key to bypass RLS — safe for background thread writes.
+    h = pre-built headers (required for thread safety — pass from main thread).
     """
-    headers = _service_headers()   # always use service key for writes
+    headers = h or _headers()
     row = {"snap_updated_at": datetime.utcnow().isoformat()}
     for i in range(5):
         idx = i + 1
@@ -282,140 +265,15 @@ def _save_hist_to_db(db_id: int, hist: dict, h: dict = None):
     r.raise_for_status()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — ANGEL ONE AUTH + FETCH (primary) + YFINANCE (fallback)
+# SECTION 6 — YFINANCE FETCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_angel_obj():
+def _fetch_full(symbol: str) -> dict | None:
     """
-    Create AngelOne session. Called ONCE in main thread before scan.
-    Returns angel_obj or None if credentials missing / login fails.
+    Fetch 5 historical days + today's live candle from yfinance.
+    Used on first scan of the day (snapshot stale).
+    period=7d covers weekends/holidays safely for 6 trading days.
     """
-    try:
-        import pyotp
-        from SmartApi import SmartConnect
-
-        api_key     = os.environ.get("ANGEL_API_KEY", "")
-        client_code = os.environ.get("ANGEL_CLIENT_ID", "")
-        password    = os.environ.get("ANGEL_PASSWORD", "")
-        totp_secret = os.environ.get("ANGEL_TOTP_SECRET", "")
-
-        if not all([api_key, client_code, password, totp_secret]):
-            print("[swing_core] AngelOne credentials missing — using yfinance only")
-            return None
-
-        obj          = SmartConnect(api_key=api_key)
-        totp         = pyotp.TOTP(totp_secret).now()
-        session_data = obj.generateSession(client_code, password, totp)
-
-        if session_data and session_data.get("status"):
-            print("[swing_core] ✅ AngelOne session active")
-            return obj
-        else:
-            print(f"[swing_core] ❌ AngelOne login failed: {session_data}")
-            return None
-    except Exception as e:
-        print(f"[swing_core] AngelOne init error: {e}")
-        return None
-
-
-def _angel_fetch_full(symbol: str, token: str, angel_obj) -> dict | None:
-    """
-    Fetch 5 historical days + today via AngelOne getCandleData ONE_DAY.
-    Returns same structure as _yf_fetch_full or None on failure.
-    """
-    try:
-        from datetime import timedelta
-        today     = date.today()
-        from_date = (today - timedelta(days=10)).strftime("%Y-%m-%d 00:00")
-        to_date   = today.strftime("%Y-%m-%d 23:59")
-
-        resp = angel_obj.getCandleData({
-            "exchange":    "NSE",
-            "symboltoken": str(token),
-            "interval":    "ONE_DAY",
-            "fromdate":    from_date,
-            "todate":      to_date,
-        })
-
-        if not resp or resp.get("status") is not True:
-            return None
-
-        rows = resp.get("data", [])
-        if not rows or len(rows) < 6:
-            return None
-
-        # rows format: [timestamp, open, high, low, close, volume]
-        hist_rows = rows[-6:-1]   # 5 historical
-        cur_row   = rows[-1]      # today
-
-        def parse_date(ts):
-            try:
-                return datetime.fromisoformat(ts[:10]).strftime("%d %b")
-            except Exception:
-                return str(ts)[:5]
-
-        return {
-            "hist_dates":    [parse_date(r[0]) for r in hist_rows],
-            "hist_opens":    [round(float(r[1]), 2) for r in hist_rows],
-            "hist_highs":    [round(float(r[2]), 2) for r in hist_rows],
-            "hist_lows":     [round(float(r[3]), 2) for r in hist_rows],
-            "hist_closes":   [round(float(r[4]), 2) for r in hist_rows],
-            "hist_volumes":  [int(r[5])             for r in hist_rows],
-            "current_price": round(float(cur_row[4]), 2),
-            "current_open":  round(float(cur_row[1]), 2),
-            "current_high":  round(float(cur_row[2]), 2),
-            "current_low":   round(float(cur_row[3]), 2),
-            "current_vol":   int(cur_row[5]),
-            "current_date":  parse_date(cur_row[0]),
-            "source":        "angel",
-        }
-    except Exception as e:
-        print(f"[swing_core] AngelOne full fetch {symbol}: {e}")
-        return None
-
-
-def _angel_fetch_live(symbol: str, token: str, angel_obj) -> dict | None:
-    """
-    Fetch only today's candle via AngelOne (fast path — live only).
-    """
-    try:
-        today = date.today()
-        resp  = angel_obj.getCandleData({
-            "exchange":    "NSE",
-            "symboltoken": str(token),
-            "interval":    "ONE_DAY",
-            "fromdate":    today.strftime("%Y-%m-%d 00:00"),
-            "todate":      today.strftime("%Y-%m-%d 23:59"),
-        })
-
-        if not resp or resp.get("status") is not True:
-            return None
-
-        rows = resp.get("data", [])
-        if not rows:
-            return None
-
-        cur = rows[-1]
-        def parse_date(ts):
-            try: return datetime.fromisoformat(ts[:10]).strftime("%d %b")
-            except: return str(ts)[:5]
-
-        return {
-            "current_price": round(float(cur[4]), 2),
-            "current_open":  round(float(cur[1]), 2),
-            "current_high":  round(float(cur[2]), 2),
-            "current_low":   round(float(cur[3]), 2),
-            "current_vol":   int(cur[5]),
-            "current_date":  parse_date(cur[0]),
-            "source":        "angel",
-        }
-    except Exception as e:
-        print(f"[swing_core] AngelOne live fetch {symbol}: {e}")
-        return None
-
-
-def _yf_fetch_full(symbol: str) -> dict | None:
-    """Fetch 5 historical + today from yfinance. Fallback."""
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="7d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 6:
@@ -423,30 +281,35 @@ def _yf_fetch_full(symbol: str) -> dict | None:
         df = df.dropna(subset=["Close", "Volume"])
         if len(df) < 6:
             return None
-        hist = df.iloc[-6:-1]
-        cur  = df.iloc[-1]
+
+        hist = df.iloc[-6:-1]   # 5 historical completed days
+        cur  = df.iloc[-1]      # today / current
+
         return {
-            "hist_dates":    hist.index.strftime("%d %b").tolist(),
-            "hist_opens":    [round(float(v), 2) for v in hist["Open"]],
-            "hist_highs":    [round(float(v), 2) for v in hist["High"]],
-            "hist_lows":     [round(float(v), 2) for v in hist["Low"]],
-            "hist_closes":   [round(float(v), 2) for v in hist["Close"]],
-            "hist_volumes":  [int(v)             for v in hist["Volume"]],
+            "hist_dates":   hist.index.strftime("%d %b").tolist(),
+            "hist_opens":   [round(float(v), 2) for v in hist["Open"].tolist()],
+            "hist_highs":   [round(float(v), 2) for v in hist["High"].tolist()],
+            "hist_lows":    [round(float(v), 2) for v in hist["Low"].tolist()],
+            "hist_closes":  [round(float(v), 2) for v in hist["Close"].tolist()],
+            "hist_volumes": [int(v)             for v in hist["Volume"].tolist()],
             "current_price": round(float(cur["Close"]), 2),
             "current_open":  round(float(cur["Open"]),  2),
             "current_high":  round(float(cur["High"]),  2),
             "current_low":   round(float(cur["Low"]),   2),
             "current_vol":   int(cur["Volume"]),
             "current_date":  df.index[-1].strftime("%d %b"),
-            "source":        "yfinance",
         }
     except Exception as e:
-        print(f"[swing_core] yfinance full {symbol}: {e}")
+        print(f"[swing_core] _fetch_full {symbol}: {e}")
         return None
 
 
-def _yf_fetch_live(symbol: str) -> dict | None:
-    """Fetch only today's candle from yfinance. Fallback."""
+def _fetch_live_only(symbol: str) -> dict | None:
+    """
+    Fetch ONLY today's latest candle (price + volume).
+    Used on subsequent scans when hist is already in DB.
+    Much faster — minimal data.
+    """
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period="2d", interval="1d", auto_adjust=True)
         if df is None or len(df) < 1:
@@ -459,94 +322,67 @@ def _yf_fetch_live(symbol: str) -> dict | None:
             "current_low":   round(float(cur["Low"]),   2),
             "current_vol":   int(cur["Volume"]),
             "current_date":  df.index[-1].strftime("%d %b"),
-            "source":        "yfinance",
         }
     except Exception as e:
-        print(f"[swing_core] yfinance live {symbol}: {e}")
+        print(f"[swing_core] _fetch_live {symbol}: {e}")
         return None
-
-
-def _fetch_full(symbol: str, token: str = None, angel_obj=None) -> dict | None:
-    """
-    Fetch 5 historical days + today.
-    Priority: AngelOne (if token + session) → yfinance fallback.
-    """
-    if token and angel_obj:
-        result = _angel_fetch_full(symbol, token, angel_obj)
-        if result:
-            return result
-        print(f"[swing_core] AngelOne failed for {symbol} — falling back to yfinance")
-    return _yf_fetch_full(symbol)
-
-
-def _fetch_live_only(symbol: str, token: str = None, angel_obj=None) -> dict | None:
-    """
-    Fetch only today's live candle.
-    Priority: AngelOne (if token + session) → yfinance fallback.
-    """
-    if token and angel_obj:
-        result = _angel_fetch_live(symbol, token, angel_obj)
-        if result:
-            return result
-        print(f"[swing_core] AngelOne live failed for {symbol} — falling back to yfinance")
-    return _yf_fetch_live(symbol)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7 — PROCESS SINGLE STOCK
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _process_stock(stock: dict, force_full: bool = False, h: dict = None,
-                   angel_obj=None) -> dict:
+def _process_stock(stock: dict, force_full: bool = False, h: dict = None) -> dict:
     """
     Process one stock.
-    angel_obj: AngelOne session passed from main thread (thread-safe).
-    h: pre-built Supabase auth headers (thread-safe).
-    - snap fresh  → read hist from DB + fetch live only (fast)
-    - snap stale  → fetch full 5d + save to DB (first scan of day)
-    AngelOne used if angel_token present, yfinance fallback otherwise.
+    h = pre-built auth headers passed from main thread (thread-safe).
+    - If snap is fresh: read hist from DB + fetch live only (fast)
+    - Otherwise: fetch full 5d from yfinance + save to DB (first scan of day)
     """
     symbol = stock["symbol"]
     db_id  = stock["id"]
-    token  = stock.get("angel_token") or None
     fresh  = _snap_is_fresh(stock) and not force_full
 
     if fresh:
+        # Fast path — read hist from DB
         hist = _extract_hist_from_db(stock)
         if hist:
-            live = _fetch_live_only(symbol, token, angel_obj)
+            live = _fetch_live_only(symbol)
             if not live:
                 return {"symbol": symbol, "error": "Live fetch failed"}
-            source = live.get("source", "db")
+            source = "db"
         else:
+            # DB has incomplete data — fall back to full fetch
             fresh = False
 
     if not fresh:
-        full = _fetch_full(symbol, token, angel_obj)
+        # Full fetch from yfinance
+        full = _fetch_full(symbol)
         if not full:
-            return {"symbol": symbol, "error": "All data sources failed"}
+            return {"symbol": symbol, "error": "yfinance fetch failed"}
         hist = {k: full[k] for k in ["hist_dates","hist_opens","hist_highs",
                                       "hist_lows","hist_closes","hist_volumes"]}
         live = {k: full[k] for k in ["current_price","current_open","current_high",
                                       "current_low","current_vol","current_date"]}
-        source = full.get("source", "yfinance")
+        # Save hist to DB for next scan (pass headers — thread safe)
         try:
             _save_hist_to_db(db_id, hist, h=h)
         except Exception as e:
             print(f"[swing_core] save hist failed for {symbol}: {e}")
+        source = "yf"
 
     # Calculate signals
-    hist_closes   = hist["hist_closes"]
-    hist_volumes  = hist["hist_volumes"]
+    hist_closes  = hist["hist_closes"]
+    hist_volumes = hist["hist_volumes"]
     current_price = live["current_price"]
     current_vol   = live["current_vol"]
 
-    max_close    = max(hist_closes) if hist_closes else current_price
-    clean_vols   = [v for v in hist_volumes if v and v > 0]
-    median_vol   = statistics.median(clean_vols) if clean_vols else 1
-    vol_ratio    = round(current_vol / median_vol, 2) if median_vol > 0 else 0
-    status       = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
-    vol_signal   = _vol_signal(vol_ratio)
-    pct_vs_high  = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
+    max_close       = max(hist_closes) if hist_closes else current_price
+    clean_vols      = [v for v in hist_volumes if v and v > 0]
+    median_vol      = statistics.median(clean_vols) if clean_vols else 1
+    vol_ratio       = round(current_vol / median_vol, 2) if median_vol > 0 else 0
+    status          = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
+    vol_signal      = _vol_signal(vol_ratio)
+    pct_vs_high     = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
     return {
         "symbol":        symbol,
@@ -586,15 +422,17 @@ def _process_stock(stock: dict, force_full: bool = False, h: dict = None,
 
 def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
     """
-    Scan all stocks.
-    - AngelOne session created ONCE in main thread, passed to all workers
-    - Stocks with fresh DB snapshot: read hist + fetch live only (fast)
-    - Stocks with stale snapshot: fetch full 5d + save to DB (slower, once/day)
-    """
-    # Capture auth in main thread — workers can't access st.session_state
-    auth_h    = _headers()
-    angel_obj = get_angel_obj()   # None if credentials missing or login fails
+    Scan all stocks. Auto-detects whether to use DB cache or fetch fresh.
+    - Stocks with fresh snapshot: batch_size=15, pause=0.3 (live only, fast)
+    - Stocks needing full fetch:  batch_size=10, pause=0.5 (full yfinance, slower)
 
+    IMPORTANT: auth headers captured ONCE in main thread before workers launch.
+    st.session_state is not accessible inside ThreadPoolExecutor workers.
+    """
+    # Capture headers in main thread — workers cannot access st.session_state
+    auth_h = _headers()
+
+    # Split into fast (DB fresh) vs slow (needs full fetch)
     fresh_stocks = [s for s in stocks if _snap_is_fresh(s) and _extract_hist_from_db(s)]
     stale_stocks = [s for s in stocks if s not in fresh_stocks]
 
@@ -604,10 +442,8 @@ def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
         batches = [batch[i:i+bs] for i in range(0, len(batch), bs)]
         for idx, b in enumerate(batches):
             with ThreadPoolExecutor(max_workers=bs) as ex:
-                futures = {
-                    ex.submit(_process_stock, s, False, auth_h, angel_obj): s
-                    for s in b
-                }
+                # Pass auth_h to every worker so DB saves work inside threads
+                futures = {ex.submit(_process_stock, s, False, auth_h): s for s in b}
                 for f in as_completed(futures):
                     d = f.result()
                     if not d.get("error"):
@@ -617,12 +453,16 @@ def run_swing_scan(stocks: list, batch_size: int = 15, pause: float = 0.3):
             if idx < len(batches) - 1:
                 time.sleep(ps)
 
+    # Fast batch first (DB reads + live fetch only)
     if fresh_stocks:
         _run_batch(fresh_stocks, bs=15, ps=0.3)
 
+    # Slow batch (full yfinance fetch + save to DB)
     if stale_stocks:
         _run_batch(stale_stocks, bs=10, ps=0.5)
 
+    # Sort: BLASTING → READY → WATCH → rest
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
+
     return results, errors
