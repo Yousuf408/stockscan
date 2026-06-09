@@ -1,7 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v2.2
-#  Fixed: column alignment using st.columns() not HTML table
-#  Added: 📸 Snapshot button
+#  TRADE SENTRY — pages/4_Swing.py  v2.3
+#  v2.3: Removed snapshot button — auto rolling snapshot in swing_core v3.0
+#        First scan of day fetches full 5d + saves to DB automatically
+#        Subsequent scans read hist from DB + fetch live only (fast)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -97,7 +98,8 @@ st.markdown("""
 
 # ── Session state ──
 for k, v in [("sw_results",[]),("sw_errors",[]),("sw_scan_time",None),
-              ("sw_show_manage",False),("sw_stocks_cache",None)]:
+              ("sw_show_manage",False),("sw_stocks_cache",None),
+              ("sw_db_count",0),("sw_yf_count",0)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -217,7 +219,7 @@ def border_color(status):
 stocks       = load_cached()
 total_stocks = len(stocks)
 
-c1, c2, c3, c4, c5, c6 = st.columns([1.1, 1.1, 1.1, 0.8, 0.8, 3])
+c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
 
 with c1:
     lbl = "✕ Manage" if st.session_state.sw_show_manage else "⚙ Manage Stocks"
@@ -233,26 +235,14 @@ with c2:
             st.session_state.sw_results   = results
             st.session_state.sw_errors    = errors
             st.session_state.sw_scan_time = time.time()
+            # Count how many were served from DB vs fresh fetch
+            db_count = sum(1 for r in results if r.get("source") == "db")
+            yf_count = sum(1 for r in results if r.get("source") == "yf")
+            st.session_state.sw_db_count  = db_count
+            st.session_state.sw_yf_count  = yf_count
         st.rerun()
 
 with c3:
-    if st.button("📸 Snapshot", use_container_width=True,
-                 disabled=total_stocks == 0,
-                 help="Save today's 5d historical data to DB. Run this at/after market close (3:30 PM)."):
-        with st.spinner(f"Taking snapshot for {total_stocks} stocks..."):
-            try:
-                from swing_core import save_swing_snapshot
-                saved, failed = save_swing_snapshot(stocks)
-                if saved:
-                    st.success(f"✅ Snapshot saved for {saved} stocks.")
-                if failed:
-                    st.warning(f"⚠ {failed} stocks failed.")
-            except ImportError:
-                st.warning("Snapshot function not yet available — coming soon.")
-            except Exception as e:
-                st.error(str(e))
-
-with c4:
     if st.button("🗑 Clear", use_container_width=True,
                  disabled=len(st.session_state.sw_results) == 0):
         st.session_state.sw_results   = []
@@ -260,25 +250,30 @@ with c4:
         st.session_state.sw_scan_time = None
         st.rerun()
 
-with c5:
+with c4:
     st.markdown(
         f"<div style='padding-top:8px;font-size:12px;color:#7a8394;'>"
         f"📋 <b style='color:#0f1117'>{total_stocks}</b> stocks</div>",
         unsafe_allow_html=True,
     )
 
-with c6:
+with c5:
     if st.session_state.sw_scan_time:
         t        = datetime.fromtimestamp(st.session_state.sw_scan_time).strftime("%I:%M %p")
         blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
         ready    = sum(1 for r in st.session_state.sw_results if r.get("status") == "READY")
         watch    = sum(1 for r in st.session_state.sw_results if r.get("status") == "WATCH")
+        db_c     = st.session_state.get("sw_db_count", 0)
+        yf_c     = st.session_state.get("sw_yf_count", 0)
+        src_info = f"⚡ {db_c} from DB · 🌐 {yf_c} fetched" if (db_c or yf_c) else ""
         st.markdown(
-            f"<div style='display:flex;gap:16px;align-items:center;padding-top:8px;'>"
+            f"<div style='display:flex;gap:16px;align-items:center;padding-top:8px;flex-wrap:wrap;'>"
             f"<span style='font-size:12px;color:#7c3aed;font-weight:700;'>🔥 {blasting}</span>"
             f"<span style='font-size:12px;color:#00a854;font-weight:700;'>✅ {ready}</span>"
             f"<span style='font-size:12px;color:#d97706;font-weight:700;'>👁 {watch}</span>"
-            f"<span style='font-size:11px;color:#9ca3af;'>Last scan: {t}</span></div>",
+            f"<span style='font-size:11px;color:#9ca3af;'>Last scan: {t}</span>"
+            f"<span style='font-size:11px;color:#9ca3af;'>{src_info}</span>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
