@@ -357,12 +357,11 @@ def _fetch_live_single(symbol: str) -> dict:
         return {"symbol": symbol, "error": str(e)}
 
 
-def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3) -> list:
+def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3,
+                      save_d6: bool = True) -> list:
     """
     Refresh only today's price + volume for all stocks in current results.
-    Keeps 5d historical data (hist_*) and all other fields unchanged.
-    Recalculates signals with new live data.
-    Returns updated results list.
+    save_d6: if True saves to DB (manual refresh). False for auto-refresh to avoid session issues.
     """
     if not results:
         return results
@@ -413,7 +412,7 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3) -
                 }
                 # Save today's candle to d6
                 db_id = old.get("db_id")
-                if db_id:
+                if db_id and save_d6:
                     _save_d6(db_id, live)
 
         if idx < len(batches) - 1:
