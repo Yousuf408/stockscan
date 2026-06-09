@@ -180,6 +180,30 @@ def _vol_signal(ratio: float) -> str:
     if ratio > 1.0: return f"🟡 Build ({ratio})"
     return f"🔴 Weak ({ratio})"
 
+
+def _save_d6(db_id: int, live: dict):
+    """
+    Save today's live candle into d6 columns of swing_watchlist.
+    Called after every scan and every refresh.
+    Uses same _headers() as all other CRUD operations.
+    """
+    try:
+        row = {
+            "d6_date":   date.today().isoformat(),
+            "d6_open":   live.get("current_open"),
+            "d6_high":   live.get("current_high"),
+            "d6_low":    live.get("current_low"),
+            "d6_close":  live.get("current_price"),
+            "d6_volume": live.get("current_vol"),
+        }
+        r = requests.patch(
+            f"{_table_url()}?id=eq.{db_id}",
+            headers=_headers(), json=row, timeout=10,
+        )
+        r.raise_for_status()
+    except Exception as e:
+        print(f"[swing_core] d6 save failed id={db_id}: {e}")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5 — YFINANCE FETCH
 # ─────────────────────────────────────────────────────────────────────────────
@@ -344,6 +368,10 @@ def refresh_live_data(results: list, batch_size: int = 15, pause: float = 0.3) -
                     "status":        status,
                     "median_vol":    int(median_vol),
                 }
+                # Save today's candle to d6
+                db_id = old.get("db_id")
+                if db_id:
+                    _save_d6(db_id, live)
 
         if idx < len(batches) - 1:
             time.sleep(pause)
@@ -385,6 +413,9 @@ def run_swing_scan(stocks: list, batch_size: int = 10, pause: float = 0.5):
                     d["notes"]         = m.get("notes", "")
                     d["db_id"]         = m.get("id")
                     results.append(d)
+                    # Save today's candle to d6 in background
+                    if m.get("id"):
+                        _save_d6(m["id"], d)
                 else:
                     errors.append({"symbol": sym, "error": d["error"]})
         if idx < len(batches) - 1:
