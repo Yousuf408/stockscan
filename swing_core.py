@@ -343,9 +343,10 @@ def _save_to_db_async(results: list):
     """
     Save today's OHLCV row to swing_price_data after refresh.
     Runs in background thread.
+    v3.5 FIX: uid captured in main thread — st.session_state not accessible in daemon threads.
     """
+    uid = _get_user_id()  # capture here, in main thread context
     def _do_save():
-        uid  = _get_user_id()
         hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
         rows = []
 
@@ -389,9 +390,10 @@ def _save_hist_to_db_async(results: list):
     """
     v3.3: Save only HIST candles (5 rows per stock), not current.
     Current candle is always live from yfinance, never persisted.
+    v3.5 FIX: uid captured in main thread — st.session_state not accessible in daemon threads.
     """
+    uid = _get_user_id()  # capture here, in main thread context
     def _do_save():
-        uid  = _get_user_id()
         hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
         rows = []
 
