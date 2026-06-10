@@ -20,6 +20,7 @@ from swing_core import (
     delete_swing_stock, bulk_add_swing_stocks,
     load_from_db, sync_5d_history, refresh_live,
     populate_status_history,                        # ← NEW v4.1
+    get_intraday_watch,                             # ← NEW v4.2
     fmt_vol, is_market_open,
 )
 
@@ -447,7 +448,7 @@ if all_results:
     bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal", ""))
     wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal", ""))
 
-    status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})"]
+    status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
     sel_status  = st.pills("Status", status_opts, default=status_opts[0],
                            label_visibility="collapsed")
 
@@ -456,10 +457,11 @@ if all_results:
     sel_vol  = st.pills("Vol signal", vol_opts, default=vol_opts[0],
                         label_visibility="collapsed")
 
-    if   sel_status and "BLASTING" in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel_status and "READY"    in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel_status and "WATCH"    in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
-    else:                                          view = all_results
+    if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel_status and "READY"          in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH"          in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
+    elif sel_status and "Intraday Watch" in sel_status: view = []  # handled separately below
+    else:                                               view = all_results
 
     if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
     elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
@@ -488,6 +490,161 @@ if not all_results:
             <div style='font-size:12px;margin-top:6px;'>Click 🔄 Sync 5D to populate price data</div>
         </div>""", unsafe_allow_html=True)
     st.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTRADAY WATCH SECTION  ← NEW v4.2
+# ─────────────────────────────────────────────────────────────────────────────
+if sel_status and "Intraday Watch" in sel_status:
+
+    # ── CSS for intraday table cells ──
+    st.markdown("""
+    <style>
+    .iw-cell {
+        border-radius: 6px; padding: 4px 6px; text-align: center;
+        font-size: 11px; font-weight: 600; min-width: 54px;
+        display: inline-block; line-height: 1.6;
+    }
+    .iw-weak     { background:#fff0f0; color:#dc2626; border:1px solid #fca5a5; }
+    .iw-build    { background:#fffbeb; color:#d97706; border:1px solid #fcd34d; }
+    .iw-strong   { background:#f0faf5; color:#16a34a; border:1px solid #86efac; }
+    .iw-explosive{ background:#fff7ed; color:#ea580c; border:1px solid #fdba74; }
+    .iw-none     { background:#f9fafb; color:#9ca3af; border:1px solid #e5e7eb; }
+    .iw-sym      { font-family:monospace; font-size:13px; font-weight:700; color:#0f1117; }
+    .iw-price    { font-size:11px; color:#6b7280; margin-top:2px; }
+    .iw-hdr      { font-size:10px; font-weight:600; color:#7a8394;
+                   text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Load intraday data ──
+    if "sw_intraday" not in st.session_state:
+        with st.spinner("Loading intraday watch data..."):
+            st.session_state.sw_intraday = get_intraday_watch()
+
+    iw_data = st.session_state.sw_intraday
+
+    if not iw_data:
+        st.info("No data in swing_status_history. Click 📊 Populate History first.")
+        st.stop()
+
+    # ── Filter pills ──
+    iw_all_n    = len(iw_data)
+    iw_4w_n     = sum(1 for r in iw_data if r["consec_weak"] >= 4)
+    iw_near_n   = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
+    iw_vol50_n  = sum(1 for r in iw_data if r["min_vol"] >= 50000)
+
+    iw_filter_opts = [
+        f"All ({iw_all_n})",
+        f"4+ Weak Days ({iw_4w_n})",
+        f"Near High <3% ({iw_near_n})",
+        f"Vol > 50K ({iw_vol50_n})",
+    ]
+    sel_iw = st.pills("Intraday Filter", iw_filter_opts,
+                      default=iw_filter_opts[0], label_visibility="collapsed")
+
+    # Apply filter
+    if   sel_iw and "4+ Weak"   in sel_iw: iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
+    elif sel_iw and "Near High" in sel_iw: iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
+    elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
+    else:                                   iw_view = iw_data
+
+    st.markdown(
+        f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 12px;'>"
+        f"Showing {len(iw_view)} stocks</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Build date header columns from first stock's days ──
+    if iw_view:
+        sample_days  = iw_view[0]["days"]
+        date_labels  = [d["date_label"] for d in sample_days]
+        n_days       = len(date_labels)
+
+        # ── Helper: cell html ──
+        def _iw_cell(status, vol_signal, vol_ratio):
+            if   "Explosive" in vol_signal: cls = "iw-explosive"
+            elif "Strong"    in vol_signal: cls = "iw-strong"
+            elif "Build"     in vol_signal: cls = "iw-build"
+            elif "Weak"      in vol_signal: cls = "iw-weak"
+            else:                           cls = "iw-none"
+            st_init = {"BLASTING": "B", "READY": "R", "WATCH": "W", "NONE": "—"}.get(status, "—")
+            ratio_s = f"{vol_ratio:.1f}x"
+            return (
+                f'<div class="iw-cell {cls}">'
+                f'<div>{st_init} {_iw_emoji(vol_signal)}</div>'
+                f'<div style="font-size:9px;font-weight:400;">{ratio_s}</div>'
+                f'</div>'
+            )
+
+        def _iw_emoji(vol_signal):
+            if "Explosive" in vol_signal: return "🔥"
+            if "Strong"    in vol_signal: return "🟢"
+            if "Build"     in vol_signal: return "🟡"
+            if "Weak"      in vol_signal: return "🔴"
+            return "—"
+
+        def _live_cell(live_signal):
+            if "Explosive" in live_signal: return "🔥"
+            if "Strong"    in live_signal: return "🟢"
+            if "Build"     in live_signal: return "🟡"
+            if "Weak"      in live_signal: return "🔴"
+            return "—"
+
+        # ── Header row ──
+        hdr_cols = st.columns([1.2] + [0.7]*n_days + [0.5])
+        hdr_cols[0].markdown('<div class="iw-hdr">Stock</div>', unsafe_allow_html=True)
+        for i, lbl in enumerate(date_labels):
+            hdr_cols[i+1].markdown(f'<div class="iw-hdr">{lbl}</div>', unsafe_allow_html=True)
+        hdr_cols[-1].markdown('<div class="iw-hdr">Live</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='border-bottom:2px solid #e0e3e8;margin-bottom:4px;'></div>",
+                    unsafe_allow_html=True)
+
+        # ── Data rows ──
+        for r in iw_view:
+            sym        = r["symbol"]
+            live_price = r["live_price"]
+            pct        = r["pct_vs_high"]
+            pct_col    = "#16a34a" if pct >= 0 else "#dc2626"
+            days       = r["days"]
+
+            row_cols = st.columns([1.2] + [0.7]*n_days + [0.5])
+
+            # Stock + price
+            row_cols[0].markdown(
+                f'<div style="padding:4px 0;">'
+                f'<div class="iw-sym">{sym}</div>'
+                f'<div class="iw-price">₹{live_price:,.2f}</div>'
+                f'<div style="font-size:9px;color:{pct_col};">{pct:+.1f}% vs 8d high</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            # Day cells — pad with empty if symbol has fewer than n_days rows
+            for i in range(n_days):
+                if i < len(days):
+                    d    = days[i]
+                    cell = _iw_cell(d["status"], d["vol_signal"], d["vol_ratio"])
+                else:
+                    cell = f'<div class="iw-cell iw-none">—</div>'
+                row_cols[i+1].markdown(
+                    f'<div style="padding:2px 0;">{cell}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Live signal
+            row_cols[-1].markdown(
+                f'<div style="padding:6px 0;font-size:18px;text-align:center;">'
+                f'{_live_cell(r["live_signal"])}</div>',
+                unsafe_allow_html=True,
+            )
+
+            st.markdown(
+                "<div style='border-bottom:1px solid #f0f2f5;margin:2px 0;'></div>",
+                unsafe_allow_html=True,
+            )
+
+    st.stop()  # Don't show regular results table when Intraday tab is active
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RESULTS TABLE
