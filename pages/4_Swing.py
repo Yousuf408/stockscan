@@ -495,102 +495,53 @@ if not all_results:
 # INTRADAY WATCH SECTION  ← NEW v4.2
 # ─────────────────────────────────────────────────────────────────────────────
 if sel_status and "Intraday Watch" in sel_status:
-
-    # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
-        with st.spinner("Loading intraday watch data..."):
+        with st.spinner("Loading..."):
             st.session_state.sw_intraday = get_intraday_watch()
-
+    
     iw_data = st.session_state.sw_intraday
-
     if not iw_data:
-        st.info("No data in swing_status_history. Click 📊 Populate History first.")
+        st.info("No data. Click 📊 Populate History first.")
         st.stop()
-
-    # ── Filter pills ──
-    iw_all_n    = len(iw_data)
-    iw_4w_n     = sum(1 for r in iw_data if r["consec_weak"] >= 4)
-    iw_near_n   = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
-    iw_vol50_n  = sum(1 for r in iw_data if r["min_vol"] >= 50000)
-
-    iw_filter_opts = [
-        f"All ({iw_all_n})",
-        f"4+ Weak Days ({iw_4w_n})",
-        f"Near High <3% ({iw_near_n})",
-        f"Vol > 50K ({iw_vol50_n})",
-    ]
-    sel_iw = st.pills("Intraday Filter", iw_filter_opts,
-                      default=iw_filter_opts[0], label_visibility="collapsed")
-
-    # Apply filter
-    if   sel_iw and "4+ Weak"   in sel_iw: iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
-    elif sel_iw and "Near High" in sel_iw: iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
-    elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
-    else:                                   iw_view = iw_data
-
-    st.markdown(
-        f"<div style='font-size:11px;color:var(--color-text-secondary);padding:8px 0 12px;'>"
-        f"Showing {len(iw_view)} stocks</div>",
-        unsafe_allow_html=True,
-    )
-
-    if iw_view:
-        sample_days = iw_view[0]["days"]
-        date_labels = [d["date_label"] for d in sample_days]
-        n_days      = len(date_labels)
-
-        # ── Cell color map ──
-        def _cell_bg_border(vol_signal):
-            if "Explosive" in vol_signal:
-                return "#FFF7ED", "#C2410C", "#FDBA74"
-            elif "Strong" in vol_signal:
-                return "#EAF3DE", "#3B6D11", "#86EFAC"
-            elif "Build" in vol_signal:
-                return "#FFFBEB", "#D97706", "#FCD34D"
-            elif "Weak" in vol_signal:
-                return "#FCEBEB", "#A32D2D", "#F5C1C1"
-            else:
-                return "#F9FAFB", "#9CA3AF", "#E5E7EB"
-
-        def _status_letter(status):
-            return {"BLASTING": "B", "READY": "R", "WATCH": "W", "NONE": "—"}.get(status, "—")
-
-        # ── Build HTML table ──
-        html = f'<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;overflow:hidden;"><table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;"><thead><tr style="border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary);"><th style="text-align:left;padding:12px 14px;font-weight:500;color:var(--color-text-secondary);width:140px;font-size:11px;">STOCK</th>'
-
-        for lbl in date_labels:
-            html += f'<th style="text-align:center;padding:12px 6px;font-weight:500;color:var(--color-text-secondary);font-size:10px;">{lbl}</th>'
-
-        html += f'<th style="text-align:center;padding:12px 6px;font-weight:500;color:var(--color-text-secondary);font-size:10px;">LIVE</th></tr></thead><tbody>'
-
-        for r in iw_view:
-            sym = r["symbol"]
-            prc = r["live_price"]
-            pct = r["pct_vs_high"]
-            pct_col = "#16a34a" if pct >= 0 else "#DC2626"
-            days = r["days"]
-
-            html += f'<tr style="border-bottom:0.5px solid var(--color-border-tertiary);"><td style="padding:12px 14px;"><span style="font-weight:600;font-size:13px;color:var(--color-text-primary);">{sym}</span><br><span style="font-size:11px;color:var(--color-text-secondary);">₹{prc:,.0f}</span><br><span style="font-size:10px;color:{pct_col};">{pct:+.1f}%</span></td>'
-
-            for i in range(n_days):
-                if i < len(days):
-                    d = days[i]
-                    bg, txt, bdr = _cell_bg_border(d["vol_signal"])
-                    st_letter = _status_letter(d["status"])
-                    ratio = f"{d['vol_ratio']:.1f}x"
-                    html += f'<td style="padding:8px 6px;text-align:center;"><div style="background:{bg};color:{txt};border:0.5px solid {bdr};border-radius:4px;padding:6px 4px;font-size:11px;font-weight:500;"><div>{st_letter}</div><div>{ratio}</div></div></td>'
-                else:
-                    html += f'<td style="padding:8px 6px;"><div style="text-align:center;color:var(--color-text-secondary);">—</div></td>'
-
-            live_emoji = "🔥" if "Explosive" in r["live_signal"] else ("🟢" if "Strong" in r["live_signal"] else ("🟡" if "Build" in r["live_signal"] else ("🔴" if "Weak" in r["live_signal"] else "—")))
-            html += f'<td style="padding:8px 6px;text-align:center;font-size:18px;">{live_emoji}</td></tr>'
-
-        html += '</tbody></table></div>'
-
-        st.markdown(html, unsafe_allow_html=True)
-
+    
+    iw_all_n = len(iw_data)
+    iw_4w_n = sum(1 for r in iw_data if r["consec_weak"] >= 4)
+    iw_near_n = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
+    iw_vol50_n = sum(1 for r in iw_data if r["min_vol"] >= 50000)
+    
+    sel_iw = st.pills("Intraday Filter", 
+                      [f"All ({iw_all_n})", f"4+ Weak ({iw_4w_n})", 
+                       f"Near High ({iw_near_n})", f"Vol>50K ({iw_vol50_n})"],
+                      default=f"All ({iw_all_n})", label_visibility="collapsed")
+    
+    if "4+ Weak" in sel_iw: iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
+    elif "Near High" in sel_iw: iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
+    elif "Vol>50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
+    else: iw_view = iw_data
+    
+    st.markdown(f"<div style='font-size:12px;color:#9ca3af;padding:12px 0;'>Showing {len(iw_view)} stocks</div>", unsafe_allow_html=True)
+    
+    def _vol_emoji(vol_sig):
+        return "🔥" if "Explosive" in vol_sig else ("🟢" if "Strong" in vol_sig else ("🟡" if "Build" in vol_sig else "🔴"))
+    
+    for r in iw_view:
+        card = f'<div style="background:white;border:0.5px solid #e5e7eb;border-radius:8px;padding:24px;margin-bottom:16px;"><div style="margin-bottom:16px;"><div style="font-size:20px;font-weight:700;color:#0f1117;">{r["symbol"]}</div>'
+        card += f'<div style="font-size:15px;color:#6b7280;margin:6px 0 0 0;">₹{r["live_price"]:,.0f}</div>'
+        pct_col = "#16a34a" if r["pct_vs_high"] >= 0 else "#dc2626"
+        card += f'<div style="font-size:13px;color:{pct_col};margin:3px 0 0 0;">{r["pct_vs_high"]:+.1f}%</div></div>'
+        card += '<div style="display:flex;gap:20px;overflow-x:auto;padding-bottom:8px;">'
+        
+        for d in r["days"]:
+            cat = {"BLASTING": "BLASTING", "READY": "READY", "WATCH": "WATCH"}.get(d["status"], "—")
+            card += f'<div style="text-align:center;flex-shrink:0;"><div style="font-size:12px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase;font-weight:500;">{d["date_label"]}</div>'
+            card += f'<div style="font-size:28px;margin-bottom:6px;">{_vol_emoji(d["vol_signal"])}</div>'
+            card += f'<div style="font-size:13px;font-weight:600;color:#0f1117;">{cat}</div>'
+            card += f'<div style="font-size:12px;color:#6b7280;margin-top:4px;">{d["vol_ratio"]:.1f}x</div></div>'
+        
+        card += f'<div style="text-align:center;flex-shrink:0;"><div style="font-size:12px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase;font-weight:500;">LIVE</div><div style="font-size:28px;">{_vol_emoji(r["live_signal"])}</div></div></div>'
+        st.markdown(card, unsafe_allow_html=True)
+    
     st.stop()
-
 # ─────────────────────────────────────────────────────────────────────────────
 # RESULTS TABLE
 # ─────────────────────────────────────────────────────────────────────────────
