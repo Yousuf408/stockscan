@@ -314,7 +314,7 @@ def load_from_db() -> tuple:
     try:
         r = requests.get(
             _url("swing_hist_data"),
-            headers={**_headers(), "Range-Unit": "items", "Range": "0-9999"},
+            headers={**_headers(), "Range-Unit": "items", "Range": "0-49999"},
             params={
                 "select":     "symbol,trade_date,open,high,low,close,volume",
                 "user_id":    f"eq.{uid}",
