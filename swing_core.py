@@ -65,6 +65,29 @@ def _url(table: str) -> str:
     url, _ = _get_config()
     return f"{url}/rest/v1/{table}"
 
+def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
+    """
+    Paginate through Supabase 1000-row hard limit.
+    Fetches all rows in batches of 1000 until exhausted.
+    """
+    all_rows = []
+    offset   = 0
+    limit    = 1000
+    while True:
+        r = requests.get(
+            _url(table),
+            headers={**_headers(), "Range-Unit": "items", "Range": f"{offset}-{offset+limit-1}"},
+            params={"user_id": f"eq.{uid}", **extra_params},
+            timeout=20,
+        )
+        r.raise_for_status()
+        batch = r.json()
+        all_rows.extend(batch)
+        if len(batch) < limit:
+            break  # last page reached
+        offset += limit
+    return all_rows
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 2 — SWING WATCHLIST CRUD
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,22 +332,15 @@ def load_from_db() -> tuple:
     symbols   = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # ── Query 1: swing_hist_data — last 10 calendar days covers 5+ trading days ──
+    # ── Query 1: swing_hist_data — paginated to bypass Supabase 1000-row limit ──
     from_d = (date.today() - timedelta(days=14)).isoformat()
     try:
-        r = requests.get(
-            _url("swing_hist_data"),
-            headers={**_headers(), "Range-Unit": "items", "Range": "0-49999"},
-            params={
-                "select":     "symbol,trade_date,open,high,low,close,volume",
-                "user_id":    f"eq.{uid}",
-                "trade_date": f"gte.{from_d}",
-                "order":      "symbol.asc,trade_date.asc",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        hist_rows = r.json()
+        hist_rows = _fetch_all_rows("swing_hist_data", uid, {
+            "select":     "symbol,trade_date,open,high,low,close,volume",
+            "trade_date": f"gte.{from_d}",
+            "order":      "symbol.asc,trade_date.asc",
+        })
+        print(f"[swing_core] load_from_db — fetched {len(hist_rows)} hist rows")
     except Exception as e:
         print(f"[swing_core] load_from_db hist query error: {e}")
         return [], [{"symbol": "ALL", "error": f"DB hist read failed: {e}"}]
@@ -339,21 +355,15 @@ def load_from_db() -> tuple:
     for sym in hist_map:
         hist_map[sym] = sorted(hist_map[sym], key=lambda x: x["trade_date"])[-HIST_DAYS:]
 
-    # ── Query 2: swing_live_data — one row per symbol ──
+    # ── Query 2: swing_live_data — paginated to bypass Supabase 1000-row limit ──
     live_map = {}
     try:
-        r = requests.get(
-            _url("swing_live_data"),
-            headers={**_headers(), "Range-Unit": "items", "Range": "0-49999"},
-            params={
-                "select":  "symbol,trade_date,open,high,low,close,volume",
-                "user_id": f"eq.{uid}",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        for row in r.json():
+        live_rows = _fetch_all_rows("swing_live_data", uid, {
+            "select": "symbol,trade_date,open,high,low,close,volume",
+        })
+        for row in live_rows:
             live_map[row["symbol"]] = row
+        print(f"[swing_core] load_from_db — fetched {len(live_rows)} live rows")
     except Exception as e:
         print(f"[swing_core] load_from_db live query error: {e}")
         # Non-fatal — continue without live data
@@ -461,26 +471,20 @@ def sync_5d_history() -> dict:
     required_days    = _last_n_trading_days(HIST_DAYS)  # last 5 trading days as date objects
     required_iso     = {d.isoformat() for d in required_days}
 
-    # ── Step 1: Load existing dates from DB ──
+    # ── Step 1: Load existing dates from DB — paginated ──
     from_d = (min(required_days) - timedelta(days=1)).isoformat()
     existing_map = {}  # {symbol: set of existing iso date strings}
     try:
-        r = requests.get(
-            _url("swing_hist_data"),
-            headers={**_headers(), "Range-Unit": "items", "Range": "0-49999"},
-            params={
-                "select":     "symbol,trade_date",
-                "user_id":    f"eq.{uid}",
-                "trade_date": f"gte.{from_d}",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        for row in r.json():
+        existing_rows = _fetch_all_rows("swing_hist_data", uid, {
+            "select":     "symbol,trade_date",
+            "trade_date": f"gte.{from_d}",
+        })
+        for row in existing_rows:
             sym = row["symbol"]
             if sym not in existing_map:
                 existing_map[sym] = set()
             existing_map[sym].add(row["trade_date"])
+        print(f"[swing_core] sync_5d — found {len(existing_map)} symbols in DB")
     except Exception as e:
         print(f"[swing_core] sync_5d existing dates query error: {e}")
 
