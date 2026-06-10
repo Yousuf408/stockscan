@@ -645,7 +645,7 @@ for r in view:
 
     st.markdown(
         f"<div style='border-left:3px solid {bc};margin-bottom:0;"
-        f"border-bottom:1px solid #f0f2f5;'></div>",
+        f"border-bottom:1px solid #ffffff;'></div>",
         unsafe_allow_html=True,
     )
 
