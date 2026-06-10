@@ -1,23 +1,28 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.0
-#  Complete rewrite. Clean architecture.
+#  TRADE SENTRY — swing_core.py  v4.1
+#  v4.1: Added populate_status_history() — saves last 10 days status snapshot
+#        to swing_status_history table. Called by "Populate History" button.
+#        Nothing else changed from v4.0.
 #
 #  TABLES:
-#    swing_watchlist  — master symbol list (user's tracked stocks)
-#    swing_hist_data  — last 5 trading days OHLCV per symbol (no NULLs ever)
-#    swing_live_data  — today's live price per symbol, one row, overwritten
+#    swing_watchlist      — master symbol list (user's tracked stocks)
+#    swing_hist_data      — last 5 trading days OHLCV per symbol (no NULLs ever)
+#    swing_live_data      — today's live price per symbol, one row, overwritten
+#    swing_status_history — last 10 days status+vol snapshot per symbol
 #
 #  FLOW:
-#    Page load      → load_from_db()     — reads both tables, instant, no yfinance
-#    Sync 5D button → sync_5d_history()  — fetch only MISSING days from yfinance
-#    Refresh Live   → refresh_live()     — fetch today only, update swing_live_data
+#    Page load             → load_from_db()            — reads both tables, instant, no yfinance
+#    Sync 5D button        → sync_5d_history()         — fetch only MISSING days from yfinance
+#    Refresh Live          → refresh_live()            — fetch today only, update swing_live_data
+#    Populate History btn  → populate_status_history() — calc + save last 10 days snapshots
 #
 #  RULES:
 #    - No NULLs ever saved to DB
-#    - yfinance period="7d" max — never "3mo"
+#    - yfinance period="7d" max for hist/live — "15d" only for populate_history
 #    - uid always captured in main thread before any daemon thread
 #    - swing_hist_data keeps exactly last 5 trading days per symbol
 #    - swing_live_data keeps exactly 1 row per symbol (upsert)
+#    - swing_status_history keeps last 10 trading days per symbol
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os, requests, yfinance as yf, statistics, threading
@@ -28,7 +33,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # SECTION 1 — CONFIG & SUPABASE HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-HIST_DAYS = 5  # number of trading days to show in chart
+HIST_DAYS    = 5   # number of trading days to show in chart
+HISTORY_DAYS = 10  # number of days to keep in swing_status_history
 
 def _get_config():
     try:
@@ -84,7 +90,7 @@ def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
         batch = r.json()
         all_rows.extend(batch)
         if len(batch) < limit:
-            break  # last page reached
+            break
         offset += limit
     return all_rows
 
@@ -204,17 +210,17 @@ def is_market_open() -> bool:
 def _last_n_trading_days(n: int) -> list:
     """
     Returns last N trading days (Mon-Fri) as date objects, most recent last.
-    Looks back up to 30 calendar days to find N trading days.
+    Starts from yesterday — today belongs in swing_live_data, not hist.
     """
     import pytz
-    IST  = pytz.timezone("Asia/Kolkata")
-    now  = datetime.now(pytz.utc).astimezone(IST)
+    IST   = pytz.timezone("Asia/Kolkata")
+    now   = datetime.now(pytz.utc).astimezone(IST)
     today = now.date()
 
     days = []
-    d    = today - timedelta(days=1)  # start from yesterday — today belongs in swing_live_data, not hist
+    d    = today - timedelta(days=1)
     while len(days) < n:
-        if d.weekday() < 5:  # Mon-Fri
+        if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
 
@@ -246,7 +252,6 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     if not hist_rows:
         return None
 
-    # Hist fields
     hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in hist_rows]
     hist_opens   = [round(float(r["open"]),   2) for r in hist_rows]
     hist_highs   = [round(float(r["high"]),   2) for r in hist_rows]
@@ -254,7 +259,6 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     hist_closes  = [round(float(r["close"]),  2) for r in hist_rows]
     hist_volumes = [int(r["volume"])              for r in hist_rows]
 
-    # Live fields — fallback to last hist row if no live data
     if live_row:
         current_price = round(float(live_row["close"]), 2)
         current_open  = round(float(live_row["open"]),  2)
@@ -263,7 +267,6 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
         current_vol   = int(live_row["volume"])
         current_date  = datetime.strptime(live_row["trade_date"], "%Y-%m-%d").strftime("%d %b")
     else:
-        # No live data — use last hist row as current
         last          = hist_rows[-1]
         current_price = round(float(last["close"]), 2)
         current_open  = round(float(last["open"]),  2)
@@ -283,28 +286,24 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     return {
         "symbol":        sym,
         "error":         None,
-        # hist
         "hist_dates":    hist_dates,
         "hist_opens":    hist_opens,
         "hist_highs":    hist_highs,
         "hist_lows":     hist_lows,
         "hist_closes":   hist_closes,
         "hist_volumes":  hist_volumes,
-        # live
         "current_date":  current_date,
         "current_price": current_price,
         "current_open":  current_open,
         "current_high":  current_high,
         "current_low":   current_low,
         "current_vol":   current_vol,
-        # signals
         "max_close":     round(max_close, 2),
         "median_vol":    int(median_vol),
         "vol_ratio":     vol_ratio,
         "vol_signal":    vol_signal,
         "pct_vs_high":   pct_vs_high,
         "status":        status,
-        # meta
         "screener_url":  meta.get("screener_url",  f"https://www.screener.in/company/{sym}/"),
         "breakout_date": meta.get("breakout_date", ""),
         "notes":         meta.get("notes",         ""),
@@ -319,9 +318,6 @@ def load_from_db() -> tuple:
     """
     Page load function. Reads swing_hist_data + swing_live_data.
     No yfinance. Returns (results, errors) in ~1 second.
-
-    Returns whatever is in DB — even if symbol has only 1-2 hist rows.
-    Symbols with zero hist rows are skipped silently.
     """
     stocks = load_swing_stocks()
     if not stocks:
@@ -332,7 +328,6 @@ def load_from_db() -> tuple:
     symbols   = [s["symbol"] for s in stocks]
     results, errors = [], []
 
-    # ── Query 1: swing_hist_data — paginated to bypass Supabase 1000-row limit ──
     from_d = (date.today() - timedelta(days=14)).isoformat()
     try:
         hist_rows = _fetch_all_rows("swing_hist_data", uid, {
@@ -345,7 +340,6 @@ def load_from_db() -> tuple:
         print(f"[swing_core] load_from_db hist query error: {e}")
         return [], [{"symbol": "ALL", "error": f"DB hist read failed: {e}"}]
 
-    # Group hist rows by symbol — take last HIST_DAYS rows
     hist_map = {}
     for row in hist_rows:
         sym = row["symbol"]
@@ -355,7 +349,6 @@ def load_from_db() -> tuple:
     for sym in hist_map:
         hist_map[sym] = sorted(hist_map[sym], key=lambda x: x["trade_date"])[-HIST_DAYS:]
 
-    # ── Query 2: swing_live_data — paginated to bypass Supabase 1000-row limit ──
     live_map = {}
     try:
         live_rows = _fetch_all_rows("swing_live_data", uid, {
@@ -366,13 +359,10 @@ def load_from_db() -> tuple:
         print(f"[swing_core] load_from_db — fetched {len(live_rows)} live rows")
     except Exception as e:
         print(f"[swing_core] load_from_db live query error: {e}")
-        # Non-fatal — continue without live data
 
-    # ── Build results ──
     for sym in symbols:
         hist = hist_map.get(sym, [])
         if not hist:
-            # No hist data yet — skip, will appear after Sync 5D
             continue
         live   = live_map.get(sym)
         meta   = meta_map.get(sym, {})
@@ -380,7 +370,6 @@ def load_from_db() -> tuple:
         if result:
             results.append(result)
 
-    # Sort by status priority
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
 
@@ -394,7 +383,6 @@ def load_from_db() -> tuple:
 def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
     """
     Bulk yfinance download for given symbols.
-    Returns dict: {symbol: DataFrame row list} or {symbol: error}
     Chunked at 200 tickers per batch.
     """
     import pandas as pd
@@ -453,27 +441,19 @@ def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
 def sync_5d_history() -> dict:
     """
     Smart sync — fetches only MISSING trading days from yfinance.
-
-    Steps:
-    1. Load existing dates from swing_hist_data per symbol
-    2. Calculate last HIST_DAYS trading days
-    3. Find which dates are missing per symbol
-    4. Fetch only missing data from yfinance (period="7d")
-    5. Save new complete OHLCV rows to swing_hist_data (no NULLs)
-    6. Delete rows older than last HIST_DAYS trading days per symbol
+    Saves to swing_hist_data. Deletes rows older than HIST_DAYS.
     """
-    uid    = _get_user_id()  # capture in main thread
+    uid    = _get_user_id()
     stocks = load_swing_stocks()
     if not stocks:
         return {"synced": 0, "skipped": 0, "errors": []}
 
-    symbols          = [s["symbol"] for s in stocks]
-    required_days    = _last_n_trading_days(HIST_DAYS)  # last 5 trading days as date objects
-    required_iso     = {d.isoformat() for d in required_days}
+    symbols       = [s["symbol"] for s in stocks]
+    required_days = _last_n_trading_days(HIST_DAYS)
+    required_iso  = {d.isoformat() for d in required_days}
 
-    # ── Step 1: Load existing dates from DB — paginated ──
     from_d = (min(required_days) - timedelta(days=1)).isoformat()
-    existing_map = {}  # {symbol: set of existing iso date strings}
+    existing_map = {}
     try:
         existing_rows = _fetch_all_rows("swing_hist_data", uid, {
             "select":     "symbol,trade_date",
@@ -488,8 +468,7 @@ def sync_5d_history() -> dict:
     except Exception as e:
         print(f"[swing_core] sync_5d existing dates query error: {e}")
 
-    # ── Step 2: Find symbols that need fetching ──
-    need_fetch = []  # symbols with at least one missing day
+    need_fetch = []
     skip_count = 0
     for sym in symbols:
         existing = existing_map.get(sym, set())
@@ -504,10 +483,9 @@ def sync_5d_history() -> dict:
     if not need_fetch:
         return {"synced": 0, "skipped": skip_count, "errors": []}
 
-    # ── Step 3: Fetch from yfinance ──
     bulk    = _fetch_yf_bulk(need_fetch, period="7d")
     errors  = []
-    to_save = []  # list of complete OHLCV row dicts
+    to_save = []
 
     for sym in need_fetch:
         res = bulk.get(sym, {"error": "Not in bulk result"})
@@ -517,17 +495,13 @@ def sync_5d_history() -> dict:
 
         df = res["df"]
 
-        # Build rows for each required trading day
         for req_date in required_days:
-            iso = req_date.isoformat()
-            # Find matching row in df
+            iso      = req_date.isoformat()
             matching = df[df.index.date == req_date] if not df.empty else None
             if matching is None or matching.empty:
-                continue  # that day not in yfinance data (holiday etc)
+                continue
 
             row_data = matching.iloc[0]
-
-            # Skip if any OHLCV is null/zero — enforce no NULLs rule
             o = float(row_data["Open"])
             h = float(row_data["High"])
             l = float(row_data["Low"])
@@ -548,7 +522,6 @@ def sync_5d_history() -> dict:
                 "volume":     v,
             })
 
-    # ── Step 4: Save to swing_hist_data (upsert) ──
     synced = 0
     if to_save:
         hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
@@ -568,8 +541,6 @@ def sync_5d_history() -> dict:
                 print(f"[swing_core] sync_5d save error batch {i}: {e}")
                 errors.append({"symbol": "batch", "error": str(e)})
 
-    # ── Step 5: Delete old rows beyond HIST_DAYS per symbol ──
-    # Delete anything older than the oldest required trading day
     oldest_required = min(required_days).isoformat()
 
     def _delete_old():
@@ -601,21 +572,16 @@ def refresh_live() -> dict:
     """
     Fetch today's live OHLCV from yfinance for all symbols.
     Saves/overwrites one row per symbol in swing_live_data.
-    Returns (results, errors) after updating DB.
     """
-    uid    = _get_user_id()  # capture in main thread
+    uid    = _get_user_id()
     stocks = load_swing_stocks()
     if not stocks:
         return {"updated": 0, "errors": []}
 
     symbols = [s["symbol"] for s in stocks]
-
-    # Fetch today + yesterday (period="2d") — today's candle only
-    bulk   = _fetch_yf_bulk(symbols, period="2d")
-    errors = []
+    bulk    = _fetch_yf_bulk(symbols, period="2d")
+    errors  = []
     to_save = []
-
-    today = date.today()
 
     for sym in symbols:
         res = bulk.get(sym, {"error": "Not in bulk result"})
@@ -628,7 +594,6 @@ def refresh_live() -> dict:
             errors.append({"symbol": sym, "error": "Empty df"})
             continue
 
-        # Always take the last row — most recent available candle
         row_data   = df.iloc[-1]
         trade_date = df.index[-1].date().isoformat()
 
@@ -653,7 +618,6 @@ def refresh_live() -> dict:
             "volume":     v,
         })
 
-    # Upsert into swing_live_data — unique on (user_id, symbol)
     updated = 0
     if to_save:
         hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
@@ -675,3 +639,131 @@ def refresh_live() -> dict:
 
     print(f"[swing_core] refresh_live complete — {updated} updated, {len(errors)} errors")
     return {"updated": updated, "errors": errors}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 7 — POPULATE STATUS HISTORY  ← NEW in v4.1
+# ─────────────────────────────────────────────────────────────────────────────
+
+def populate_status_history() -> dict:
+    """
+    v4.1: Populate swing_status_history with last HISTORY_DAYS (10) trading days.
+
+    For each symbol × each day:
+      - Use 5-row context window ending on that day to calculate median_vol
+      - Calculate vol_ratio, vol_signal, status using same logic as _build_result()
+      - Save to swing_status_history (upsert — safe to run multiple times)
+    Delete rows older than HISTORY_DAYS trading days.
+
+    Returns: {"saved": int, "errors": list}
+    """
+    uid    = _get_user_id()  # capture in main thread
+    stocks = load_swing_stocks()
+    if not stocks:
+        return {"saved": 0, "errors": []}
+
+    symbols       = [s["symbol"] for s in stocks]
+    required_days = _last_n_trading_days(HISTORY_DAYS)  # last 10 trading days
+
+    print(f"[swing_core] populate_history — {len(symbols)} symbols, {HISTORY_DAYS} days")
+
+    # period="15d" guarantees 10 trading days (covers 2 weekends + holidays)
+    bulk    = _fetch_yf_bulk(symbols, period="15d")
+    errors  = []
+    to_save = []
+
+    for sym in symbols:
+        res = bulk.get(sym, {"error": "Not in bulk result"})
+        if "error" in res:
+            errors.append({"symbol": sym, "error": res["error"]})
+            continue
+
+        df = res["df"]
+        if df.empty:
+            errors.append({"symbol": sym, "error": "Empty df"})
+            continue
+
+        for req_date in required_days:
+            matching = df[df.index.date == req_date] if not df.empty else None
+            if matching is None or matching.empty:
+                continue  # holiday or no data for this day
+
+            row_data = matching.iloc[0]
+            c = float(row_data["Close"])
+            v = int(row_data["Volume"])
+
+            if not c or not v:
+                continue
+
+            # Context: up to 5 rows ending on req_date for median/status calc
+            df_before = df[df.index.date <= req_date]
+            if len(df_before) < 2:
+                continue
+
+            context    = df_before.tail(5)
+            ctx_closes = [float(x) for x in context["Close"].tolist()]
+            ctx_vols   = [int(x)   for x in context["Volume"].tolist()]
+
+            max_close  = max(ctx_closes) if ctx_closes else c
+            clean_vols = [x for x in ctx_vols if x > 0]
+            median_vol = statistics.median(clean_vols) if clean_vols else 1
+            vol_ratio  = round(v / median_vol, 2) if median_vol > 0 else 0
+            vs         = _vol_signal(vol_ratio)
+            st         = _calc_status(c, max_close, v, ctx_vols, vol_ratio)
+
+            # Strip ratio from vol_signal for clean DB storage e.g. "🔥 Explosive"
+            vs_clean = vs.split("(")[0].strip()
+
+            to_save.append({
+                "user_id":    uid,
+                "symbol":     sym,
+                "trade_date": req_date.isoformat(),
+                "close":      round(c, 2),
+                "volume":     v,
+                "vol_ratio":  vol_ratio,
+                "vol_signal": vs_clean,
+                "status":     st if st else "NONE",
+            })
+
+    # Upsert to swing_status_history
+    saved = 0
+    if to_save:
+        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        for i in range(0, len(to_save), 200):
+            batch = to_save[i:i+200]
+            try:
+                resp = requests.post(
+                    _url("swing_status_history"),
+                    headers=hdrs,
+                    json=batch,
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                saved += len(batch)
+                print(f"[swing_core] populate_history saved batch {i} — {len(batch)} rows")
+            except Exception as e:
+                print(f"[swing_core] populate_history save error batch {i}: {e}")
+                errors.append({"symbol": "batch", "error": str(e)})
+
+    # Delete rows older than HISTORY_DAYS in background
+    oldest = min(required_days).isoformat()
+
+    def _delete_old_history():
+        try:
+            resp = requests.delete(
+                _url("swing_status_history"),
+                headers=_headers(),
+                params={
+                    "user_id":    f"eq.{uid}",
+                    "trade_date": f"lt.{oldest}",
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            print(f"[swing_core] populate_history deleted rows older than {oldest}")
+        except Exception as e:
+            print(f"[swing_core] populate_history delete error: {e}")
+
+    threading.Thread(target=_delete_old_history, daemon=True).start()
+
+    print(f"[swing_core] populate_history complete — {saved} rows saved, {len(errors)} errors")
+    return {"saved": saved, "errors": errors}
