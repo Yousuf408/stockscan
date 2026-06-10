@@ -1,5 +1,13 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v3.3
+#  TRADE SENTRY — swing_core.py  v3.4
+#  v3.4 FIXES (candle date bug — stale DB hist rows showing May data):
+#    - _load_all_from_db: window tightened 14→10 days + strictly take last 5
+#      rows per symbol after sort (eliminates stale May/old rows from DB)
+#    - run_swing_scan DB-hit path: guard changed >= 1 → >= 5; symbols with
+#      < 5 DB hist rows are pushed to yfinance fallback + saved to DB so
+#      next scan is instantly correct
+#    EVERYTHING ELSE UNCHANGED FROM v3.3
+#
 #  v3.3 FIXES & FEATURES:
 #    - HYBRID APPROACH: hist candles from DB, current candle always live from yfinance
 #    - Parallel execution: DB load + yfinance current fetch run together
@@ -268,7 +276,7 @@ def db_has_last_trading_day(symbols: list) -> bool:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7 — DB: LOAD ALL PRICE DATA (HIST CANDLES ONLY)
-# ── v3.3: Loads only 5 hist candles per stock (current fetched live) ─────────
+# ── v3.4 FIX: 10-day window (not 14) + strictly take last 5 rows per symbol ──
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_all_from_db(symbols: list) -> dict:
@@ -276,10 +284,19 @@ def _load_all_from_db(symbols: list) -> dict:
     Load last 5 HIST candles from swing_price_data for all symbols.
     Does NOT include current candle — that comes from live yfinance fetch.
     Single query with Range header.
+
+    v3.4 FIX:
+      - Window tightened from 14 → 10 calendar days.
+        10 days = 7 trading days guaranteed (weekends + 1 holiday buffer).
+        14 days was pulling stale May rows when June data was sparse.
+      - After loading, rows are sorted by trade_date and sliced to the
+        last 5 per symbol. This is the strict guarantee that we never
+        show old data even if the DB has gaps between months.
     """
     try:
         uid    = _get_user_id()
-        from_d = (date.today() - timedelta(days=14)).isoformat()
+        # v3.4: 10 calendar days covers exactly 7 trading days (2 weekends + buffer)
+        from_d = (date.today() - timedelta(days=10)).isoformat()
 
         headers = {**_headers(), "Range-Unit": "items", "Range": "0-9999"}
 
@@ -304,6 +321,12 @@ def _load_all_from_db(symbols: list) -> dict:
                 result[sym] = []
             if all(row.get(k) is not None for k in ["open", "high", "low", "close", "volume"]):
                 result[sym].append(row)
+
+        # v3.4 FIX: sort by date and take only the 5 most recent rows per symbol.
+        # Without this, symbols that have old DB rows (e.g. from May) mixed with
+        # recent ones would pass the >= 1 guard and show stale candles.
+        for sym in result:
+            result[sym] = sorted(result[sym], key=lambda x: x["trade_date"])[-5:]
 
         print(f"[swing_core] DB loaded {len(rows)} rows for {len(result)} symbols")
         return result
@@ -487,7 +510,7 @@ def _build_from_db_rows(sym: str, all_rows: list, live_current: dict, meta: dict
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 10 — YFINANCE FETCH
-# ── v3.3: period="3mo" to guarantee 5+ hist candles, guard logic ───────────────
+# ── v3.3: period="3mo" to guarantee 5+ hist candles, guard logic ─────────────
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_result_from_df(symbol: str, df) -> dict:
@@ -680,17 +703,21 @@ def _fetch_live_single(symbol: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 11 — MAIN SCAN RUNNER
-# ── v3.3: HYBRID APPROACH — DB hist + yfinance live current in parallel ──────
+# ── v3.4 FIX: DB-hit path now requires >= 5 rows per symbol.               ──
+# ──           Symbols with < 5 rows fall back to yfinance + save to DB.    ──
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
     """
-    v3.3: Smart hybrid scan.
+    v3.4: Smart hybrid scan.
 
     DB HIT (data exists for today):
-      Thread 1: Load 5 hist candles from DB (instant)
-      Thread 2: Fetch current price from yfinance (parallel, live)
-      Merge → 5 hist + 1 current per stock
+      Symbols with >= 5 DB hist rows:
+        Thread 1: 5 hist candles from DB (instant)
+        Thread 2: current price from yfinance (parallel, live)
+        Merge → 5 hist + 1 current
+      Symbols with < 5 DB hist rows:
+        → yfinance fallback (bulk download) + save hist to DB
 
     DB MISS (first scan of day):
       Fetch all 6 candles from yfinance
@@ -705,32 +732,74 @@ def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
         print(f"[swing_core] DB hit — hybrid load: hist from DB + current from yfinance")
         all_db_rows = _load_all_from_db(symbols)
 
-        # Parallel fetch: DB hist + yfinance current together
-        with ThreadPoolExecutor(max_workers=min(50, len(symbols))) as ex:
-            # Batch current price fetches
-            fetch_futures = {
-                ex.submit(_fetch_live_current, sym): sym
-                for sym in symbols
-            }
+        # v3.4 FIX: split symbols — those with enough DB hist vs those needing yfinance
+        db_ok_syms  = [sym for sym in symbols if len(all_db_rows.get(sym, [])) >= 5]
+        yf_fallback = [sym for sym in symbols if sym not in db_ok_syms]
 
-            for f in as_completed(fetch_futures):
-                sym = fetch_futures[f]
-                try:
-                    live = f.result()
-                except Exception as e:
-                    errors.append({"symbol": sym, "error": f"Live fetch failed: {e}"})
-                    continue
+        if yf_fallback:
+            print(f"[swing_core] {len(yf_fallback)} symbols have < 5 DB rows — yfinance fallback")
+        print(f"[swing_core] {len(db_ok_syms)} symbols using DB hist path")
 
-                rows = all_db_rows.get(sym, [])
-                if len(rows) >= 1:
+        # ── DB-ok path: parallel live fetch for symbols with full DB hist ────
+        if db_ok_syms:
+            with ThreadPoolExecutor(max_workers=min(50, len(db_ok_syms))) as ex:
+                fetch_futures = {
+                    ex.submit(_fetch_live_current, sym): sym
+                    for sym in db_ok_syms
+                }
+                for f in as_completed(fetch_futures):
+                    sym = fetch_futures[f]
+                    try:
+                        live = f.result()
+                    except Exception as e:
+                        errors.append({"symbol": sym, "error": f"Live fetch failed: {e}"})
+                        continue
+
+                    rows = all_db_rows.get(sym, [])
                     meta   = stock_meta.get(sym, {})
                     result = _build_from_db_rows(sym, rows, live, meta)
                     if result:
                         results.append(result)
                     else:
-                        errors.append({"symbol": sym, "error": "Hybrid build failed"})
+                        # build failed — push to yfinance fallback
+                        yf_fallback.append(sym)
+
+        # ── yfinance fallback for symbols missing enough DB hist ─────────────
+        if yf_fallback:
+            bulk = _fetch_all_yf_bulk(yf_fallback)
+            fallback_syms2 = []
+            for sym in yf_fallback:
+                d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
+                if not d.get("error"):
+                    m = stock_meta.get(sym, {})
+                    d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
+                    d["breakout_date"] = m.get("breakout_date", "")
+                    d["notes"]         = m.get("notes",         "")
+                    d["db_id"]         = m.get("id")
+                    results.append(d)
                 else:
-                    errors.append({"symbol": sym, "error": f"No DB hist rows"})
+                    fallback_syms2.append(sym)
+
+            # per-stock fallback if bulk also failed
+            if fallback_syms2:
+                with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms2))) as ex:
+                    futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms2}
+                    for f in as_completed(futures):
+                        d   = f.result()
+                        sym = d["symbol"]
+                        if not d.get("error"):
+                            m = stock_meta.get(sym, {})
+                            d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
+                            d["breakout_date"] = m.get("breakout_date", "")
+                            d["notes"]         = m.get("notes",         "")
+                            d["db_id"]         = m.get("id")
+                            results.append(d)
+                        else:
+                            errors.append({"symbol": sym, "error": d["error"]})
+
+            # Save fresh hist to DB so next scan uses the fast DB path
+            yf_results = [r for r in results if r.get("symbol") in set(yf_fallback)]
+            _save_hist_to_db_async(yf_results)
 
         priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
         results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
