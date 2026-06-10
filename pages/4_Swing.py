@@ -209,7 +209,7 @@ def volume_svg(hist_vols, cur_vol, median_vol, w=195, h=62):
         parts.append(
             f'<rect x="{x}" y="{y}" width="{bw}" height="{h2}" '
             f'fill="#e8eaed" stroke="#c4c9d4" stroke-width="0.5" rx="2"/>'
-            f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{i+1}</text>'
+            f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{dates[i].split(" ")[0] if i < len(dates) else i+1}</text>'
         )
 
     sep = pad + n*(bw+gap) + 2
