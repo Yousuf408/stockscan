@@ -496,26 +496,6 @@ if not all_results:
 # ─────────────────────────────────────────────────────────────────────────────
 if sel_status and "Intraday Watch" in sel_status:
 
-    # ── CSS for intraday table cells ──
-    st.markdown("""
-    <style>
-    .iw-cell {
-        border-radius: 6px; padding: 4px 6px; text-align: center;
-        font-size: 11px; font-weight: 600; min-width: 54px;
-        display: inline-block; line-height: 1.6;
-    }
-    .iw-weak     { background:#fff0f0; color:#dc2626; border:1px solid #fca5a5; }
-    .iw-build    { background:#fffbeb; color:#d97706; border:1px solid #fcd34d; }
-    .iw-strong   { background:#f0faf5; color:#16a34a; border:1px solid #86efac; }
-    .iw-explosive{ background:#fff7ed; color:#ea580c; border:1px solid #fdba74; }
-    .iw-none     { background:#f9fafb; color:#9ca3af; border:1px solid #e5e7eb; }
-    .iw-sym      { font-family:monospace; font-size:13px; font-weight:700; color:#0f1117; }
-    .iw-price    { font-size:11px; color:#6b7280; margin-top:2px; }
-    .iw-hdr      { font-size:10px; font-weight:600; color:#7a8394;
-                   text-transform:uppercase; letter-spacing:0.06em; padding:4px 0; }
-    </style>
-    """, unsafe_allow_html=True)
-
     # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
         with st.spinner("Loading intraday watch data..."):
@@ -549,102 +529,67 @@ if sel_status and "Intraday Watch" in sel_status:
     else:                                   iw_view = iw_data
 
     st.markdown(
-        f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 12px;'>"
+        f"<div style='font-size:11px;color:var(--color-text-secondary);padding:8px 0 12px;'>"
         f"Showing {len(iw_view)} stocks</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Build date header columns from first stock's days ──
     if iw_view:
-        sample_days  = iw_view[0]["days"]
-        date_labels  = [d["date_label"] for d in sample_days]
-        n_days       = len(date_labels)
+        sample_days = iw_view[0]["days"]
+        date_labels = [d["date_label"] for d in sample_days]
+        n_days      = len(date_labels)
 
-        # ── Helper: cell html ──
-        def _iw_cell(status, vol_signal, vol_ratio):
-            if   "Explosive" in vol_signal: cls = "iw-explosive"
-            elif "Strong"    in vol_signal: cls = "iw-strong"
-            elif "Build"     in vol_signal: cls = "iw-build"
-            elif "Weak"      in vol_signal: cls = "iw-weak"
-            else:                           cls = "iw-none"
-            st_init = {"BLASTING": "B", "READY": "R", "WATCH": "W", "NONE": "—"}.get(status, "—")
-            ratio_s = f"{vol_ratio:.1f}x"
-            return (
-                f'<div class="iw-cell {cls}">'
-                f'<div>{st_init} {_iw_emoji(vol_signal)}</div>'
-                f'<div style="font-size:9px;font-weight:400;">{ratio_s}</div>'
-                f'</div>'
-            )
+        # ── Cell color map ──
+        def _cell_bg_border(vol_signal):
+            if "Explosive" in vol_signal:
+                return "#FFF7ED", "#C2410C", "#FDBA74"
+            elif "Strong" in vol_signal:
+                return "#EAF3DE", "#3B6D11", "#86EFAC"
+            elif "Build" in vol_signal:
+                return "#FFFBEB", "#D97706", "#FCD34D"
+            elif "Weak" in vol_signal:
+                return "#FCEBEB", "#A32D2D", "#F5C1C1"
+            else:
+                return "#F9FAFB", "#9CA3AF", "#E5E7EB"
 
-        def _iw_emoji(vol_signal):
-            if "Explosive" in vol_signal: return "🔥"
-            if "Strong"    in vol_signal: return "🟢"
-            if "Build"     in vol_signal: return "🟡"
-            if "Weak"      in vol_signal: return "🔴"
-            return "—"
+        def _status_letter(status):
+            return {"BLASTING": "B", "READY": "R", "WATCH": "W", "NONE": "—"}.get(status, "—")
 
-        def _live_cell(live_signal):
-            if "Explosive" in live_signal: return "🔥"
-            if "Strong"    in live_signal: return "🟢"
-            if "Build"     in live_signal: return "🟡"
-            if "Weak"      in live_signal: return "🔴"
-            return "—"
+        # ── Build HTML table ──
+        html = f'<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;overflow:hidden;"><table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;"><thead><tr style="border-bottom:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary);"><th style="text-align:left;padding:12px 14px;font-weight:500;color:var(--color-text-secondary);width:140px;font-size:11px;">STOCK</th>'
 
-        # ── Header row ──
-        hdr_cols = st.columns([1.2] + [0.7]*n_days + [0.5])
-        hdr_cols[0].markdown('<div class="iw-hdr">Stock</div>', unsafe_allow_html=True)
-        for i, lbl in enumerate(date_labels):
-            hdr_cols[i+1].markdown(f'<div class="iw-hdr">{lbl}</div>', unsafe_allow_html=True)
-        hdr_cols[-1].markdown('<div class="iw-hdr">Live</div>', unsafe_allow_html=True)
+        for lbl in date_labels:
+            html += f'<th style="text-align:center;padding:12px 6px;font-weight:500;color:var(--color-text-secondary);font-size:10px;">{lbl}</th>'
 
-        st.markdown("<div style='border-bottom:2px solid #e0e3e8;margin-bottom:4px;'></div>",
-                    unsafe_allow_html=True)
+        html += f'<th style="text-align:center;padding:12px 6px;font-weight:500;color:var(--color-text-secondary);font-size:10px;">LIVE</th></tr></thead><tbody>'
 
-        # ── Data rows ──
         for r in iw_view:
-            sym        = r["symbol"]
-            live_price = r["live_price"]
-            pct        = r["pct_vs_high"]
-            pct_col    = "#16a34a" if pct >= 0 else "#dc2626"
-            days       = r["days"]
+            sym = r["symbol"]
+            prc = r["live_price"]
+            pct = r["pct_vs_high"]
+            pct_col = "#16a34a" if pct >= 0 else "#DC2626"
+            days = r["days"]
 
-            row_cols = st.columns([1.2] + [0.7]*n_days + [0.5])
+            html += f'<tr style="border-bottom:0.5px solid var(--color-border-tertiary);"><td style="padding:12px 14px;"><span style="font-weight:600;font-size:13px;color:var(--color-text-primary);">{sym}</span><br><span style="font-size:11px;color:var(--color-text-secondary);">₹{prc:,.0f}</span><br><span style="font-size:10px;color:{pct_col};">{pct:+.1f}%</span></td>'
 
-            # Stock + price
-            row_cols[0].markdown(
-                f'<div style="padding:4px 0;">'
-                f'<div class="iw-sym">{sym}</div>'
-                f'<div class="iw-price">₹{live_price:,.2f}</div>'
-                f'<div style="font-size:9px;color:{pct_col};">{pct:+.1f}% vs 8d high</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            # Day cells — pad with empty if symbol has fewer than n_days rows
             for i in range(n_days):
                 if i < len(days):
-                    d    = days[i]
-                    cell = _iw_cell(d["status"], d["vol_signal"], d["vol_ratio"])
+                    d = days[i]
+                    bg, txt, bdr = _cell_bg_border(d["vol_signal"])
+                    st_letter = _status_letter(d["status"])
+                    ratio = f"{d['vol_ratio']:.1f}x"
+                    html += f'<td style="padding:8px 6px;text-align:center;"><div style="background:{bg};color:{txt};border:0.5px solid {bdr};border-radius:4px;padding:6px 4px;font-size:11px;font-weight:500;"><div>{st_letter}</div><div>{ratio}</div></div></td>'
                 else:
-                    cell = f'<div class="iw-cell iw-none">—</div>'
-                row_cols[i+1].markdown(
-                    f'<div style="padding:2px 0;">{cell}</div>',
-                    unsafe_allow_html=True,
-                )
+                    html += f'<td style="padding:8px 6px;"><div style="text-align:center;color:var(--color-text-secondary);">—</div></td>'
 
-            # Live signal
-            row_cols[-1].markdown(
-                f'<div style="padding:6px 0;font-size:18px;text-align:center;">'
-                f'{_live_cell(r["live_signal"])}</div>',
-                unsafe_allow_html=True,
-            )
+            live_emoji = "🔥" if "Explosive" in r["live_signal"] else ("🟢" if "Strong" in r["live_signal"] else ("🟡" if "Build" in r["live_signal"] else ("🔴" if "Weak" in r["live_signal"] else "—")))
+            html += f'<td style="padding:8px 6px;text-align:center;font-size:18px;">{live_emoji}</td></tr>'
 
-            st.markdown(
-                "<div style='border-bottom:1px solid #f0f2f5;margin:2px 0;'></div>",
-                unsafe_allow_html=True,
-            )
+        html += '</tbody></table></div>'
 
-    st.stop()  # Don't show regular results table when Intraday tab is active
+        st.markdown(html, unsafe_allow_html=True)
+
+    st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RESULTS TABLE
