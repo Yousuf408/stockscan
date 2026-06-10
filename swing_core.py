@@ -1,50 +1,34 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v3.4
-#  v3.4 FIXES (candle date bug — stale DB hist rows showing May data):
-#    - _load_all_from_db: window tightened 14→10 days + strictly take last 5
-#      rows per symbol after sort (eliminates stale May/old rows from DB)
-#    - run_swing_scan DB-hit path: guard changed >= 1 → >= 5; symbols with
-#      < 5 DB hist rows are pushed to yfinance fallback + saved to DB so
-#      next scan is instantly correct
-#    EVERYTHING ELSE UNCHANGED FROM v3.3
+#  TRADE SENTRY — swing_core.py  v4.0
+#  Complete rewrite. Clean architecture.
 #
-#  v3.3 FIXES & FEATURES:
-#    - HYBRID APPROACH: hist candles from DB, current candle always live from yfinance
-#    - Parallel execution: DB load + yfinance current fetch run together
-#    - period="3mo" instead of "1mo" — guarantees 5+ hist candles even on month boundaries
-#    - Guard logic in _build_result_from_df — ensures exactly 5 hist + 1 current
-#    - DB saves only hist rows (never saves current) — stays fresh intraday
+#  TABLES:
+#    swing_watchlist  — master symbol list (user's tracked stocks)
+#    swing_hist_data  — last 5 trading days OHLCV per symbol (no NULLs ever)
+#    swing_live_data  — today's live price per symbol, one row, overwritten
 #
-#  v3.2 FIXES:
-#    - _fetch_all_yf_bulk: chunked into 200 tickers per batch
-#    - _fetch_all_yf_bulk: period="1mo"
-#    - _load_all_from_db: Range: 0-9999 header
+#  FLOW:
+#    Page load      → load_from_db()     — reads both tables, instant, no yfinance
+#    Sync 5D button → sync_5d_history()  — fetch only MISSING days from yfinance
+#    Refresh Live   → refresh_live()     — fetch today only, update swing_live_data
 #
-#  ARCHITECTURE — Smart DB-first + live current prices:
-#
-#  ON SCAN (DB hit — data for today exists):
-#    Thread 1: Load 5 hist candles from DB (instant)
-#    Thread 2: Fetch current candle from yfinance in parallel (live price)
-#    Merge → results (5 hist from DB + 1 current from yfinance per stock)
-#
-#  ON SCAN (DB miss — first scan of day):
-#    Fetch all 6 candles from yfinance (hist+current)
-#    Save only hist 5 to DB async (current never saved — always fresh)
-#    Next scan uses DB path instantly
-#
-#  ON REFRESH (market hours):
-#    - Only fetch current price from yfinance
-#    - Hist stays unchanged from scan
-#    - Update DB with new current
+#  RULES:
+#    - No NULLs ever saved to DB
+#    - yfinance period="7d" max — never "3mo"
+#    - uid always captured in main thread before any daemon thread
+#    - swing_hist_data keeps exactly last 5 trading days per symbol
+#    - swing_live_data keeps exactly 1 row per symbol (upsert)
 # ══════════════════════════════════════════════════════════════════════════════
 
-import os, requests, yfinance as yf, statistics, time, threading
+import os, requests, yfinance as yf, statistics, threading
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 1 — SUPABASE HELPERS
+# SECTION 1 — CONFIG & SUPABASE HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
+
+HIST_DAYS = 5  # number of trading days to show in chart
 
 def _get_config():
     try:
@@ -77,16 +61,12 @@ def _headers():
         "Prefer":        "return=representation",
     }
 
-def _table_url():
+def _url(table: str) -> str:
     url, _ = _get_config()
-    return f"{url}/rest/v1/swing_watchlist"
-
-def _price_table_url():
-    url, _ = _get_config()
-    return f"{url}/rest/v1/swing_price_data"
+    return f"{url}/rest/v1/{table}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 2 — SWING STOCK CRUD
+# SECTION 2 — SWING WATCHLIST CRUD
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_swing_stocks() -> list:
@@ -95,14 +75,15 @@ def load_swing_stocks() -> list:
         if not uid:
             return []
         r = requests.get(
-            _table_url(), headers=_headers(),
+            _url("swing_watchlist"),
+            headers=_headers(),
             params={"select": "*", "user_id": f"eq.{uid}", "order": "symbol.asc"},
             timeout=10,
         )
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"[swing_core] load error: {e}")
+        print(f"[swing_core] load_swing_stocks error: {e}")
         return []
 
 def add_swing_stock(symbol: str, screener_url: str = "", breakout_date=None, notes: str = "") -> dict:
@@ -120,7 +101,7 @@ def add_swing_stock(symbol: str, screener_url: str = "", breakout_date=None, not
     }
     if breakout_date:
         row["breakout_date"] = str(breakout_date)
-    r = requests.post(_table_url(), headers=_headers(), json=row, timeout=10)
+    r = requests.post(_url("swing_watchlist"), headers=_headers(), json=row, timeout=10)
     r.raise_for_status()
     d = r.json()
     return d[0] if isinstance(d, list) else d
@@ -131,14 +112,17 @@ def update_swing_stock(db_id: int, updates: dict):
     if not clean:
         return
     r = requests.patch(
-        f"{_table_url()}?id=eq.{db_id}",
+        f"{_url('swing_watchlist')}?id=eq.{db_id}",
         headers=_headers(), json=clean, timeout=10,
     )
     r.raise_for_status()
     return r.json()
 
 def delete_swing_stock(db_id: int):
-    r = requests.delete(f"{_table_url()}?id=eq.{db_id}", headers=_headers(), timeout=10)
+    r = requests.delete(
+        f"{_url('swing_watchlist')}?id=eq.{db_id}",
+        headers=_headers(), timeout=10,
+    )
     r.raise_for_status()
 
 def bulk_add_swing_stocks(symbols: list) -> dict:
@@ -162,7 +146,7 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
         added.append(sym)
     if rows:
         try:
-            r = requests.post(_table_url(), headers=_headers(), json=rows, timeout=15)
+            r = requests.post(_url("swing_watchlist"), headers=_headers(), json=rows, timeout=15)
             r.raise_for_status()
         except Exception:
             errors = added.copy()
@@ -170,7 +154,7 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
     return {"added": added, "skipped": skipped, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3 — FORMAT HELPERS
+# SECTION 3 — HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_vol(v) -> str:
@@ -182,9 +166,36 @@ def fmt_vol(v) -> str:
     if v >= 1_000:      return f"{v/1_000:.1f}K"
     return str(v)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4 — SIGNAL LOGIC
-# ─────────────────────────────────────────────────────────────────────────────
+def is_market_open() -> bool:
+    try:
+        import pytz
+        IST  = pytz.timezone("Asia/Kolkata")
+        now  = datetime.now(pytz.utc).astimezone(IST)
+        if now.weekday() >= 5:
+            return False
+        mins = now.hour * 60 + now.minute
+        return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
+    except Exception:
+        return False
+
+def _last_n_trading_days(n: int) -> list:
+    """
+    Returns last N trading days (Mon-Fri) as date objects, most recent last.
+    Looks back up to 30 calendar days to find N trading days.
+    """
+    import pytz
+    IST  = pytz.timezone("Asia/Kolkata")
+    now  = datetime.now(pytz.utc).astimezone(IST)
+    today = now.date()
+
+    days = []
+    d    = today
+    while len(days) < n:
+        if d.weekday() < 5:  # Mon-Fri
+            days.append(d)
+        d -= timedelta(days=1)
+
+    return list(reversed(days))  # oldest first
 
 def _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio) -> str:
     max_hist_vol = max(hist_volumes) if hist_volumes else 0
@@ -202,357 +213,43 @@ def _vol_signal(ratio: float) -> str:
     if ratio > 1.0: return f"🟡 Build ({ratio})"
     return f"🔴 Weak ({ratio})"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5 — MARKET HOURS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def is_market_open() -> bool:
-    try:
-        import pytz
-        IST  = pytz.timezone("Asia/Kolkata")
-        now  = datetime.now(pytz.utc).astimezone(IST)
-        if now.weekday() >= 5:
-            return False
-        mins = now.hour * 60 + now.minute
-        return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
-    except Exception:
-        return False
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — DB: CHECK IF LAST TRADING DAY DATA EXISTS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _get_last_trading_day() -> str:
+def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict:
     """
-    Returns the last trading day (Mon-Fri) as YYYY-MM-DD string.
+    Build a single result dict from hist DB rows + live DB row + watchlist meta.
+    hist_rows : list of dicts from swing_hist_data, sorted oldest→newest, max 5
+    live_row  : dict from swing_live_data (today's price), or None
+    meta      : dict from swing_watchlist (screener_url, breakout_date, notes, id)
     """
-    import pytz
-    IST = pytz.timezone("Asia/Kolkata")
-    now = datetime.now(pytz.utc).astimezone(IST)
-
-    mins = now.hour * 60 + now.minute
-    market_open_now = (now.weekday() < 5) and ((9 * 60 + 15) <= mins <= (15 * 60 + 30))
-
-    if market_open_now:
-        return now.date().isoformat()
-
-    d = now.date()
-    d -= timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d.isoformat()
-
-
-def db_has_last_trading_day(symbols: list) -> bool:
-    """
-    Check if ANY ONE symbol has the last trading day's date in swing_price_data.
-    """
-    if not symbols:
-        return False
-    try:
-        uid          = _get_user_id()
-        last_trd_day = _get_last_trading_day()
-        first        = symbols[0]
-        print(f"[swing_core] Checking DB for last trading day: {last_trd_day}")
-        r = requests.get(
-            _price_table_url(),
-            headers=_headers(),
-            params={
-                "select":     "trade_date",
-                "user_id":    f"eq.{uid}",
-                "symbol":     f"eq.{first}",
-                "trade_date": f"eq.{last_trd_day}",
-                "limit":      "1",
-            },
-            timeout=8,
-        )
-        r.raise_for_status()
-        found = len(r.json()) > 0
-        print(f"[swing_core] DB has {last_trd_day}: {found}")
-        return found
-    except Exception as e:
-        print(f"[swing_core] db_has_last_trading_day check failed: {e}")
-        return False
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7 — DB: LOAD ALL PRICE DATA (HIST CANDLES ONLY)
-# ── v3.4 FIX: 10-day window (not 14) + strictly take last 5 rows per symbol ──
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_all_from_db(symbols: list) -> dict:
-    """
-    Load last 5 HIST candles from swing_price_data for all symbols.
-    Does NOT include current candle — that comes from live yfinance fetch.
-    Single query with Range header.
-
-    v3.4 FIX:
-      - Window tightened from 14 → 10 calendar days.
-        10 days = 7 trading days guaranteed (weekends + 1 holiday buffer).
-        14 days was pulling stale May rows when June data was sparse.
-      - After loading, rows are sorted by trade_date and sliced to the
-        last 5 per symbol. This is the strict guarantee that we never
-        show old data even if the DB has gaps between months.
-    """
-    try:
-        uid    = _get_user_id()
-        # v3.4: 10 calendar days covers exactly 7 trading days (2 weekends + buffer)
-        from_d = (date.today() - timedelta(days=10)).isoformat()
-
-        headers = {**_headers(), "Range-Unit": "items", "Range": "0-9999"}
-
-        r = requests.get(
-            _price_table_url(),
-            headers=headers,
-            params={
-                "select":     "symbol,trade_date,open,high,low,close,volume",
-                "user_id":    f"eq.{uid}",
-                "trade_date": f"gte.{from_d}",
-                "order":      "symbol.asc,trade_date.asc",
-            },
-            timeout=20,
-        )
-        r.raise_for_status()
-        rows = r.json()
-
-        result = {}
-        for row in rows:
-            sym = row["symbol"]
-            if sym not in result:
-                result[sym] = []
-            # v3.6 FIX: only require close+volume — open/high/low may be NULL in
-            # legacy rows. _build_from_db_rows handles NULL OHLC safely.
-            if row.get("close") is not None and row.get("volume") is not None:
-                result[sym].append(row)
-
-        # v3.4 FIX: sort by date and take only the 5 most recent rows per symbol.
-        # Without this, symbols that have old DB rows (e.g. from May) mixed with
-        # recent ones would pass the >= 1 guard and show stale candles.
-        for sym in result:
-            result[sym] = sorted(result[sym], key=lambda x: x["trade_date"])[-5:]
-
-        print(f"[swing_core] DB loaded {len(rows)} rows for {len(result)} symbols")
-        return result
-
-    except Exception as e:
-        print(f"[swing_core] _load_all_from_db error: {e}")
-        return {}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8 — DB: SAVE PRICE DATA (HIST ONLY, ASYNC)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _save_to_db_async(results: list):
-    """
-    Save today's OHLCV row to swing_price_data after refresh.
-    Runs in background thread.
-    v3.5 FIX: uid captured in main thread — st.session_state not accessible in daemon threads.
-    """
-    uid = _get_user_id()  # capture here, in main thread context
-    def _do_save():
-        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
-        rows = []
-
-        today_str = date.today().isoformat()
-
-        for r in results:
-            if r.get("error"):
-                continue
-            sym = r["symbol"]
-            rows.append({
-                "user_id":    uid,
-                "symbol":     sym,
-                "trade_date": today_str,
-                "open":       r.get("current_open"),
-                "high":       r.get("current_high"),
-                "low":        r.get("current_low"),
-                "close":      r.get("current_price"),
-                "volume":     r.get("current_vol"),
-            })
-
-        if not rows:
-            return
-
-        for i in range(0, len(rows), 200):
-            batch = rows[i:i+200]
-            try:
-                resp = requests.post(
-                    _price_table_url(),
-                    headers=hdrs,
-                    json=batch,
-                    timeout=20,
-                )
-                resp.raise_for_status()
-            except Exception as e:
-                print(f"[swing_core] save_to_db batch {i}: {e}")
-
-    threading.Thread(target=_do_save, daemon=True).start()
-
-
-def _save_hist_to_db_async(results: list):
-    """
-    v3.3: Save only HIST candles (5 rows per stock), not current.
-    Current candle is always live from yfinance, never persisted.
-    v3.5 FIX: uid captured in main thread — st.session_state not accessible in daemon threads.
-    """
-    uid = _get_user_id()  # capture here, in main thread context
-    def _do_save():
-        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
-        rows = []
-
-        for r in results:
-            if r.get("error"):
-                continue
-            sym = r["symbol"]
-
-            hist_iso  = r.get("hist_iso_dates", [])
-            hist_o    = r.get("hist_opens",   [])
-            hist_h    = r.get("hist_highs",   [])
-            hist_l    = r.get("hist_lows",    [])
-            hist_c    = r.get("hist_closes",  [])
-            hist_v    = r.get("hist_volumes", [])
-
-            for i, iso_date in enumerate(hist_iso):
-                if i < len(hist_c):
-                    rows.append({
-                        "user_id":    uid,
-                        "symbol":     sym,
-                        "trade_date": iso_date,
-                        "open":       hist_o[i] if i < len(hist_o) else None,
-                        "high":       hist_h[i] if i < len(hist_h) else None,
-                        "low":        hist_l[i] if i < len(hist_l) else None,
-                        "close":      hist_c[i],
-                        "volume":     hist_v[i] if i < len(hist_v) else None,
-                    })
-
-        if not rows:
-            return
-
-        for i in range(0, len(rows), 200):
-            batch = rows[i:i+200]
-            try:
-                resp = requests.post(
-                    _price_table_url(),
-                    headers=hdrs,
-                    json=batch,
-                    timeout=20,
-                )
-                resp.raise_for_status()
-            except Exception as e:
-                print(f"[swing_core] save_hist batch {i}: {e}")
-
-    threading.Thread(target=_do_save, daemon=True).start()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 9 — BUILD RESULT FROM DB ROWS + LIVE CURRENT
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _build_from_db_rows(sym: str, all_rows: list, live_current: dict, meta: dict) -> dict:
-    """
-    v3.3: Build result from DB hist rows + live current price dict.
-    all_rows: 5 hist candles from DB
-    live_current: {current_price, current_open, current_high, current_low, current_vol, current_date}
-    """
-    if not all_rows or not live_current or live_current.get("error"):
+    if not hist_rows:
         return None
 
-    # Hist candles from DB (exactly 5)
-    disp_rows = all_rows[-5:] if len(all_rows) >= 5 else all_rows
+    # Hist fields
+    hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in hist_rows]
+    hist_opens   = [round(float(r["open"]),   2) for r in hist_rows]
+    hist_highs   = [round(float(r["high"]),   2) for r in hist_rows]
+    hist_lows    = [round(float(r["low"]),    2) for r in hist_rows]
+    hist_closes  = [round(float(r["close"]),  2) for r in hist_rows]
+    hist_volumes = [int(r["volume"])              for r in hist_rows]
 
-    all_closes  = [float(r["close"])  for r in disp_rows]
-    all_volumes = [int(r["volume"])   for r in disp_rows]
-
-    hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in disp_rows]
-    # v3.6 FIX: open/high/low may be NULL in legacy rows — fallback to close so
-    # price candles still render correctly (doji shape) instead of crashing.
-    hist_opens   = [round(float(r["open"]  if r["open"]  is not None else r["close"]), 2) for r in disp_rows]
-    hist_highs   = [round(float(r["high"]  if r["high"]  is not None else r["close"]), 2) for r in disp_rows]
-    hist_lows    = [round(float(r["low"]   if r["low"]   is not None else r["close"]), 2) for r in disp_rows]
-    hist_closes  = [round(float(r["close"]),  2) for r in disp_rows]
-    hist_volumes = [int(r["volume"])              for r in disp_rows]
-
-    # Current from live yfinance
-    current_price = live_current["current_price"]
-    current_open  = live_current["current_open"]
-    current_high  = live_current["current_high"]
-    current_low   = live_current["current_low"]
-    current_vol   = live_current["current_vol"]
-    current_date  = live_current["current_date"]
-
-    max_close   = max(all_closes)  if all_closes  else current_price
-    clean_vols  = [v for v in all_volumes if v and v > 0]
-    median_vol  = statistics.median(clean_vols) if clean_vols else 1
-    vol_ratio   = round(current_vol / median_vol, 2) if median_vol > 0 else 0
-    status      = _calc_status(current_price, max_close, current_vol, all_volumes, vol_ratio)
-    vol_signal  = _vol_signal(vol_ratio)
-    pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
-
-    return {
-        "symbol":        sym,
-        "error":         None,
-        "source":        "db+live",
-        "hist_dates":    hist_dates,
-        "hist_opens":    hist_opens,
-        "hist_highs":    hist_highs,
-        "hist_lows":     hist_lows,
-        "hist_closes":   hist_closes,
-        "hist_volumes":  hist_volumes,
-        "current_date":  current_date,
-        "current_price": current_price,
-        "current_open":  current_open,
-        "current_high":  current_high,
-        "current_low":   current_low,
-        "current_vol":   current_vol,
-        "max_close":     round(max_close, 2),
-        "median_vol":    int(median_vol),
-        "vol_ratio":     vol_ratio,
-        "vol_signal":    vol_signal,
-        "pct_vs_high":   pct_vs_high,
-        "status":        status,
-        "screener_url":  meta.get("screener_url",  f"https://www.screener.in/company/{sym}/"),
-        "breakout_date": meta.get("breakout_date", ""),
-        "notes":         meta.get("notes",         ""),
-        "db_id":         meta.get("id"),
-    }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 10 — YFINANCE FETCH
-# ── v3.3: period="3mo" to guarantee 5+ hist candles, guard logic ─────────────
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _build_result_from_df(symbol: str, df) -> dict:
-    """
-    v3.3: Guard logic — ensures exactly 5 hist + 1 current.
-    If insufficient rows, pads with available data.
-    """
-    # Need at least 6 rows (5 hist + 1 current)
-    if len(df) < 2:
-        return {"symbol": symbol, "error": f"Only {len(df)} rows available"}
-
-    if len(df) < 7:
-        # Not enough for 5 hist — use what we have
-        cur  = df.iloc[-1]
-        hist = df.iloc[:-1]  # everything except current
+    # Live fields — fallback to last hist row if no live data
+    if live_row:
+        current_price = round(float(live_row["close"]), 2)
+        current_open  = round(float(live_row["open"]),  2)
+        current_high  = round(float(live_row["high"]),  2)
+        current_low   = round(float(live_row["low"]),   2)
+        current_vol   = int(live_row["volume"])
+        current_date  = datetime.strptime(live_row["trade_date"], "%Y-%m-%d").strftime("%d %b")
     else:
-        # Normal path — exactly 5 hist + 1 current
-        cur  = df.iloc[-1]
-        hist = df.iloc[-6:-1]
+        # No live data — use last hist row as current
+        last          = hist_rows[-1]
+        current_price = round(float(last["close"]), 2)
+        current_open  = round(float(last["open"]),  2)
+        current_high  = round(float(last["high"]),  2)
+        current_low   = round(float(last["low"]),   2)
+        current_vol   = int(last["volume"])
+        current_date  = datetime.strptime(last["trade_date"], "%Y-%m-%d").strftime("%d %b")
 
-    hist_closes  = hist["Close"].tolist()
-    hist_volumes = hist["Volume"].tolist()
-    hist_opens   = hist["Open"].tolist()
-    hist_highs   = hist["High"].tolist()
-    hist_lows    = hist["Low"].tolist()
-    hist_dates   = hist.index.strftime("%d %b").tolist()
-    hist_iso     = hist.index.strftime("%Y-%m-%d").tolist()
-
-    current_price = round(float(cur["Close"]), 2)
-    current_open  = round(float(cur["Open"]),  2)
-    current_high  = round(float(cur["High"]),  2)
-    current_low   = round(float(cur["Low"]),   2)
-    current_vol   = int(cur["Volume"])
-    current_date  = df.index[-1].strftime("%d %b")
-
-    max_close   = max(hist_closes)
+    max_close   = max(hist_closes) if hist_closes else current_price
     clean_vols  = [v for v in hist_volumes if v and v > 0]
     median_vol  = statistics.median(clean_vols) if clean_vols else 1
     vol_ratio   = round(current_vol / median_vol, 2) if median_vol > 0 else 0
@@ -561,355 +258,416 @@ def _build_result_from_df(symbol: str, df) -> dict:
     pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
 
     return {
-        "symbol":          symbol,
-        "error":           None,
-        "source":          "yfinance",
-        "hist_dates":      hist_dates,
-        "hist_iso_dates":  hist_iso,
-        "hist_opens":      [round(float(v), 2) for v in hist_opens],
-        "hist_highs":      [round(float(v), 2) for v in hist_highs],
-        "hist_lows":       [round(float(v), 2) for v in hist_lows],
-        "hist_closes":     [round(float(v), 2) for v in hist_closes],
-        "hist_volumes":    [int(v)             for v in hist_volumes],
-        "current_date":    current_date,
-        "current_price":   current_price,
-        "current_open":    current_open,
-        "current_high":    current_high,
-        "current_low":     current_low,
-        "current_vol":     current_vol,
-        "max_close":       round(max_close, 2),
-        "median_vol":      int(median_vol),
-        "vol_ratio":       vol_ratio,
-        "vol_signal":      vol_signal,
-        "pct_vs_high":     pct_vs_high,
-        "status":          status,
+        "symbol":        sym,
+        "error":         None,
+        # hist
+        "hist_dates":    hist_dates,
+        "hist_opens":    hist_opens,
+        "hist_highs":    hist_highs,
+        "hist_lows":     hist_lows,
+        "hist_closes":   hist_closes,
+        "hist_volumes":  hist_volumes,
+        # live
+        "current_date":  current_date,
+        "current_price": current_price,
+        "current_open":  current_open,
+        "current_high":  current_high,
+        "current_low":   current_low,
+        "current_vol":   current_vol,
+        # signals
+        "max_close":     round(max_close, 2),
+        "median_vol":    int(median_vol),
+        "vol_ratio":     vol_ratio,
+        "vol_signal":    vol_signal,
+        "pct_vs_high":   pct_vs_high,
+        "status":        status,
+        # meta
+        "screener_url":  meta.get("screener_url",  f"https://www.screener.in/company/{sym}/"),
+        "breakout_date": meta.get("breakout_date", ""),
+        "notes":         meta.get("notes",         ""),
+        "db_id":         meta.get("id"),
     }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4 — PAGE LOAD: READ FROM DB (NO YFINANCE)
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _fetch_all_yf_bulk(symbols: list) -> dict:
+def load_from_db() -> tuple:
     """
-    v3.3: Chunked yfinance bulk download for ALL hist+current candles.
-    period="3mo" guarantees 5+ hist even on month boundaries.
+    Page load function. Reads swing_hist_data + swing_live_data.
+    No yfinance. Returns (results, errors) in ~1 second.
+
+    Returns whatever is in DB — even if symbol has only 1-2 hist rows.
+    Symbols with zero hist rows are skipped silently.
+    """
+    stocks = load_swing_stocks()
+    if not stocks:
+        return [], []
+
+    uid       = _get_user_id()
+    meta_map  = {s["symbol"]: s for s in stocks}
+    symbols   = [s["symbol"] for s in stocks]
+    results, errors = [], []
+
+    # ── Query 1: swing_hist_data — last 10 calendar days covers 5+ trading days ──
+    from_d = (date.today() - timedelta(days=14)).isoformat()
+    try:
+        r = requests.get(
+            _url("swing_hist_data"),
+            headers={**_headers(), "Range-Unit": "items", "Range": "0-9999"},
+            params={
+                "select":     "symbol,trade_date,open,high,low,close,volume",
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"gte.{from_d}",
+                "order":      "symbol.asc,trade_date.asc",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        hist_rows = r.json()
+    except Exception as e:
+        print(f"[swing_core] load_from_db hist query error: {e}")
+        return [], [{"symbol": "ALL", "error": f"DB hist read failed: {e}"}]
+
+    # Group hist rows by symbol — take last HIST_DAYS rows
+    hist_map = {}
+    for row in hist_rows:
+        sym = row["symbol"]
+        if sym not in hist_map:
+            hist_map[sym] = []
+        hist_map[sym].append(row)
+    for sym in hist_map:
+        hist_map[sym] = sorted(hist_map[sym], key=lambda x: x["trade_date"])[-HIST_DAYS:]
+
+    # ── Query 2: swing_live_data — one row per symbol ──
+    live_map = {}
+    try:
+        r = requests.get(
+            _url("swing_live_data"),
+            headers={**_headers(), "Range-Unit": "items", "Range": "0-9999"},
+            params={
+                "select":  "symbol,trade_date,open,high,low,close,volume",
+                "user_id": f"eq.{uid}",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        for row in r.json():
+            live_map[row["symbol"]] = row
+    except Exception as e:
+        print(f"[swing_core] load_from_db live query error: {e}")
+        # Non-fatal — continue without live data
+
+    # ── Build results ──
+    for sym in symbols:
+        hist = hist_map.get(sym, [])
+        if not hist:
+            # No hist data yet — skip, will appear after Sync 5D
+            continue
+        live   = live_map.get(sym)
+        meta   = meta_map.get(sym, {})
+        result = _build_result(sym, hist, live, meta)
+        if result:
+            results.append(result)
+
+    # Sort by status priority
+    priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
+    results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
+
+    print(f"[swing_core] load_from_db — {len(results)} symbols loaded from DB")
+    return results, errors
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5 — SYNC 5D HISTORY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
+    """
+    Bulk yfinance download for given symbols.
+    Returns dict: {symbol: DataFrame row list} or {symbol: error}
+    Chunked at 200 tickers per batch.
     """
     import pandas as pd
 
-    sym_map     = {f"{sym}.NS": sym for sym in symbols}
-    results     = {}
+    sym_map     = {f"{s}.NS": s for s in symbols}
     all_tickers = list(sym_map.keys())
+    results     = {}
+    chunks      = [all_tickers[i:i+200] for i in range(0, len(all_tickers), 200)]
 
-    chunks = [all_tickers[i:i+200] for i in range(0, len(all_tickers), 200)]
-    print(f"[swing_core] yf.download — {len(symbols)} stocks in {len(chunks)} chunks of 200")
+    print(f"[swing_core] yf.download {len(symbols)} symbols in {len(chunks)} chunks, period={period}")
 
-    for chunk_idx, chunk in enumerate(chunks):
-        ticker_str = " ".join(chunk)
+    for idx, chunk in enumerate(chunks):
         try:
-            print(f"[swing_core] chunk {chunk_idx+1}/{len(chunks)} — {len(chunk)} tickers")
+            print(f"[swing_core] chunk {idx+1}/{len(chunks)} — {len(chunk)} tickers")
             data = yf.download(
-                tickers      = ticker_str,
-                period       = "3mo",        # guarantees 5+ hist candles
-                interval     = "1d",
-                group_by     = "ticker",
-                auto_adjust  = False,
-                progress     = False,
+                tickers     = " ".join(chunk),
+                period      = period,
+                interval    = "1d",
+                group_by    = "ticker",
+                auto_adjust = True,
+                progress    = False,
             )
 
             if data is None or data.empty:
-                print(f"[swing_core] chunk {chunk_idx+1} returned empty")
                 for ticker in chunk:
-                    sym = sym_map[ticker]
-                    results[sym] = {"symbol": sym, "error": "Chunk download empty"}
+                    results[sym_map[ticker]] = {"error": "Empty response"}
                 continue
 
             for ticker in chunk:
                 sym = sym_map[ticker]
                 try:
-                    if len(chunk) == 1:
-                        df_stock = data.copy()
-                    elif ticker in data.columns.levels[0]:
-                        df_stock = data[ticker].copy()
-                    else:
-                        results[sym] = {"symbol": sym, "error": "Ticker not in chunk data"}
+                    df = data.copy() if len(chunk) == 1 else (
+                        data[ticker].copy() if ticker in data.columns.get_level_values(0) else None
+                    )
+                    if df is None:
+                        results[sym] = {"error": "Ticker not in response"}
                         continue
 
-                    df_stock = df_stock.dropna(subset=["Close", "Volume"])
-
-                    if len(df_stock) < 2:
-                        results[sym] = {"symbol": sym, "error": f"Only {len(df_stock)} rows"}
+                    df = df.dropna(subset=["Close", "Volume"])
+                    if df.empty:
+                        results[sym] = {"error": "No valid rows after dropna"}
                         continue
 
-                    results[sym] = _build_result_from_df(sym, df_stock)
+                    results[sym] = {"df": df}
 
                 except Exception as e:
-                    results[sym] = {"symbol": sym, "error": f"Parse error: {e}"}
+                    results[sym] = {"error": f"Parse error: {e}"}
 
         except Exception as e:
-            print(f"[swing_core] chunk {chunk_idx+1} failed: {e}")
             for ticker in chunk:
-                sym = sym_map[ticker]
-                results[sym] = {"symbol": sym, "error": f"Chunk failed: {e}"}
+                results[sym_map[ticker]] = {"error": f"Chunk failed: {e}"}
 
-    success = sum(1 for v in results.values() if not v.get("error"))
-    print(f"[swing_core] bulk complete — {success}/{len(symbols)} successful")
     return results
 
 
-def _fetch_single_yf(symbol: str) -> dict:
+def sync_5d_history() -> dict:
     """
-    Fallback — fetch one stock individually.
-    v3.3: period="3mo" to guarantee 5+ hist
+    Smart sync — fetches only MISSING trading days from yfinance.
+
+    Steps:
+    1. Load existing dates from swing_hist_data per symbol
+    2. Calculate last HIST_DAYS trading days
+    3. Find which dates are missing per symbol
+    4. Fetch only missing data from yfinance (period="7d")
+    5. Save new complete OHLCV rows to swing_hist_data (no NULLs)
+    6. Delete rows older than last HIST_DAYS trading days per symbol
     """
-    symbol = symbol.lstrip("$").strip().upper()
+    uid    = _get_user_id()  # capture in main thread
+    stocks = load_swing_stocks()
+    if not stocks:
+        return {"synced": 0, "skipped": 0, "errors": []}
+
+    symbols          = [s["symbol"] for s in stocks]
+    required_days    = _last_n_trading_days(HIST_DAYS)  # last 5 trading days as date objects
+    required_iso     = {d.isoformat() for d in required_days}
+
+    # ── Step 1: Load existing dates from DB ──
+    from_d = (min(required_days) - timedelta(days=1)).isoformat()
+    existing_map = {}  # {symbol: set of existing iso date strings}
     try:
-        df = yf.Ticker(f"{symbol}.NS").history(
-            period="3mo", interval="1d", auto_adjust=True
+        r = requests.get(
+            _url("swing_hist_data"),
+            headers={**_headers(), "Range-Unit": "items", "Range": "0-9999"},
+            params={
+                "select":     "symbol,trade_date",
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"gte.{from_d}",
+            },
+            timeout=15,
         )
-        if df is None or df.empty:
-            return {"symbol": symbol, "error": "No data from yfinance"}
-
-        df = df.dropna(subset=["Close", "Volume"])
-
-        if len(df) < 2:
-            return {"symbol": symbol, "error": f"Only {len(df)} trading days available"}
-
-        return _build_result_from_df(symbol, df)
-
+        r.raise_for_status()
+        for row in r.json():
+            sym = row["symbol"]
+            if sym not in existing_map:
+                existing_map[sym] = set()
+            existing_map[sym].add(row["trade_date"])
     except Exception as e:
-        return {"symbol": symbol, "error": str(e)}
+        print(f"[swing_core] sync_5d existing dates query error: {e}")
 
-
-def _fetch_live_current(symbol: str) -> dict:
-    """
-    v3.3: Fetch ONLY current candle — for parallel execution with DB load.
-    period="2d" gives just today + yesterday, minimal data.
-    """
-    symbol = symbol.lstrip("$").strip().upper()
-    try:
-        df = yf.Ticker(f"{symbol}.NS").history(
-            period="2d", interval="1d", auto_adjust=True
-        )
-        if df is None or df.empty:
-            return {"symbol": symbol, "error": "No data"}
-        cur = df.iloc[-1]
-        return {
-            "symbol":        symbol,
-            "error":         None,
-            "current_price": round(float(cur["Close"]), 2),
-            "current_open":  round(float(cur["Open"]),  2),
-            "current_high":  round(float(cur["High"]),  2),
-            "current_low":   round(float(cur["Low"]),   2),
-            "current_vol":   int(cur["Volume"]),
-            "current_date":  df.index[-1].strftime("%d %b"),
-        }
-    except Exception as e:
-        return {"symbol": symbol, "error": str(e)}
-
-# Alias for backward compatibility with refresh code
-def _fetch_live_single(symbol: str) -> dict:
-    return _fetch_live_current(symbol)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 11 — MAIN SCAN RUNNER
-# ── v3.4 FIX: DB-hit path now requires >= 5 rows per symbol.               ──
-# ──           Symbols with < 5 rows fall back to yfinance + save to DB.    ──
-# ─────────────────────────────────────────────────────────────────────────────
-
-def run_swing_scan(stocks: list, batch_size: int = 25) -> tuple:
-    """
-    v3.4: Smart hybrid scan.
-
-    DB HIT (data exists for today):
-      Symbols with >= 5 DB hist rows:
-        Thread 1: 5 hist candles from DB (instant)
-        Thread 2: current price from yfinance (parallel, live)
-        Merge → 5 hist + 1 current
-      Symbols with < 5 DB hist rows:
-        → yfinance fallback (bulk download) + save hist to DB
-
-    DB MISS (first scan of day):
-      Fetch all 6 candles from yfinance
-      Save only hist to DB (current never saved — always fresh)
-    """
-    stock_meta = {s["symbol"]: s for s in stocks}
-    symbols    = [s["symbol"] for s in stocks]
-    results, errors = [], []
-
-    # ── STEP 1: Check DB for last trading day ────────────────────────────────
-    if db_has_last_trading_day(symbols):
-        print(f"[swing_core] DB hit — hybrid load: hist from DB + current from yfinance")
-        all_db_rows = _load_all_from_db(symbols)
-
-        # v3.4 FIX: split symbols — those with enough DB hist vs those needing yfinance
-        db_ok_syms  = [sym for sym in symbols if len(all_db_rows.get(sym, [])) >= 5]
-        yf_fallback = [sym for sym in symbols if sym not in db_ok_syms]
-
-        if yf_fallback:
-            print(f"[swing_core] {len(yf_fallback)} symbols have < 5 DB rows — yfinance fallback")
-        print(f"[swing_core] {len(db_ok_syms)} symbols using DB hist path")
-
-        # ── DB-ok path: parallel live fetch for symbols with full DB hist ────
-        if db_ok_syms:
-            with ThreadPoolExecutor(max_workers=min(50, len(db_ok_syms))) as ex:
-                fetch_futures = {
-                    ex.submit(_fetch_live_current, sym): sym
-                    for sym in db_ok_syms
-                }
-                for f in as_completed(fetch_futures):
-                    sym = fetch_futures[f]
-                    try:
-                        live = f.result()
-                    except Exception as e:
-                        errors.append({"symbol": sym, "error": f"Live fetch failed: {e}"})
-                        continue
-
-                    rows = all_db_rows.get(sym, [])
-                    meta   = stock_meta.get(sym, {})
-                    result = _build_from_db_rows(sym, rows, live, meta)
-                    if result:
-                        results.append(result)
-                    else:
-                        # build failed — push to yfinance fallback
-                        yf_fallback.append(sym)
-
-        # ── yfinance fallback for symbols missing enough DB hist ─────────────
-        if yf_fallback:
-            bulk = _fetch_all_yf_bulk(yf_fallback)
-            fallback_syms2 = []
-            for sym in yf_fallback:
-                d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
-                if not d.get("error"):
-                    m = stock_meta.get(sym, {})
-                    d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                    d["breakout_date"] = m.get("breakout_date", "")
-                    d["notes"]         = m.get("notes",         "")
-                    d["db_id"]         = m.get("id")
-                    results.append(d)
-                else:
-                    fallback_syms2.append(sym)
-
-            # per-stock fallback if bulk also failed
-            if fallback_syms2:
-                with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms2))) as ex:
-                    futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms2}
-                    for f in as_completed(futures):
-                        d   = f.result()
-                        sym = d["symbol"]
-                        if not d.get("error"):
-                            m = stock_meta.get(sym, {})
-                            d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                            d["breakout_date"] = m.get("breakout_date", "")
-                            d["notes"]         = m.get("notes",         "")
-                            d["db_id"]         = m.get("id")
-                            results.append(d)
-                        else:
-                            errors.append({"symbol": sym, "error": d["error"]})
-
-            # Save fresh hist to DB so next scan uses the fast DB path
-            yf_results = [r for r in results if r.get("symbol") in set(yf_fallback)]
-            _save_hist_to_db_async(yf_results)
-
-        priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
-        results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
-        return results, errors
-
-    # ── STEP 2: DB miss — fetch all from yfinance ────────────────────────────
-    print(f"[swing_core] DB miss — bulk yf.download for {len(symbols)} stocks")
-    bulk = _fetch_all_yf_bulk(symbols)
-
-    fallback_syms = []
+    # ── Step 2: Find symbols that need fetching ──
+    need_fetch = []  # symbols with at least one missing day
+    skip_count = 0
     for sym in symbols:
-        d = bulk.get(sym, {"symbol": sym, "error": "Not in bulk result"})
-        if not d.get("error"):
-            m = stock_meta.get(sym, {})
-            d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-            d["breakout_date"] = m.get("breakout_date", "")
-            d["notes"]         = m.get("notes",         "")
-            d["db_id"]         = m.get("id")
-            results.append(d)
+        existing = existing_map.get(sym, set())
+        missing  = required_iso - existing
+        if missing:
+            need_fetch.append(sym)
         else:
-            fallback_syms.append(sym)
+            skip_count += 1
 
-    # Per-stock fallback
-    if fallback_syms:
-        print(f"[swing_core] per-stock fallback for {len(fallback_syms)} stocks")
-        with ThreadPoolExecutor(max_workers=min(25, len(fallback_syms))) as ex:
-            futures = {ex.submit(_fetch_single_yf, sym): sym for sym in fallback_syms}
-            for f in as_completed(futures):
-                d   = f.result()
-                sym = d["symbol"]
-                if not d.get("error"):
-                    m = stock_meta.get(sym, {})
-                    d["screener_url"]  = m.get("screener_url",  f"https://www.screener.in/company/{sym}/")
-                    d["breakout_date"] = m.get("breakout_date", "")
-                    d["notes"]         = m.get("notes",         "")
-                    d["db_id"]         = m.get("id")
-                    results.append(d)
-                else:
-                    errors.append({"symbol": sym, "error": d["error"]})
+    print(f"[swing_core] sync_5d — {len(need_fetch)} need fetch, {skip_count} already complete")
 
-    # Save HIST only to DB (current never saved — always live)
-    _save_hist_to_db_async(results)
+    if not need_fetch:
+        return {"synced": 0, "skipped": skip_count, "errors": []}
 
-    priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
-    results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
-    return results, errors
+    # ── Step 3: Fetch from yfinance ──
+    bulk    = _fetch_yf_bulk(need_fetch, period="7d")
+    errors  = []
+    to_save = []  # list of complete OHLCV row dicts
+
+    for sym in need_fetch:
+        res = bulk.get(sym, {"error": "Not in bulk result"})
+        if "error" in res:
+            errors.append({"symbol": sym, "error": res["error"]})
+            continue
+
+        df = res["df"]
+
+        # Build rows for each required trading day
+        for req_date in required_days:
+            iso = req_date.isoformat()
+            # Find matching row in df
+            matching = df[df.index.date == req_date] if not df.empty else None
+            if matching is None or matching.empty:
+                continue  # that day not in yfinance data (holiday etc)
+
+            row_data = matching.iloc[0]
+
+            # Skip if any OHLCV is null/zero — enforce no NULLs rule
+            o = float(row_data["Open"])
+            h = float(row_data["High"])
+            l = float(row_data["Low"])
+            c = float(row_data["Close"])
+            v = int(row_data["Volume"])
+
+            if not all([o, h, l, c, v]):
+                continue
+
+            to_save.append({
+                "user_id":    uid,
+                "symbol":     sym,
+                "trade_date": iso,
+                "open":       round(o, 2),
+                "high":       round(h, 2),
+                "low":        round(l, 2),
+                "close":      round(c, 2),
+                "volume":     v,
+            })
+
+    # ── Step 4: Save to swing_hist_data (upsert) ──
+    synced = 0
+    if to_save:
+        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        for i in range(0, len(to_save), 200):
+            batch = to_save[i:i+200]
+            try:
+                resp = requests.post(
+                    _url("swing_hist_data"),
+                    headers=hdrs,
+                    json=batch,
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                synced += len(batch)
+                print(f"[swing_core] sync_5d saved batch {i} — {len(batch)} rows")
+            except Exception as e:
+                print(f"[swing_core] sync_5d save error batch {i}: {e}")
+                errors.append({"symbol": "batch", "error": str(e)})
+
+    # ── Step 5: Delete old rows beyond HIST_DAYS per symbol ──
+    # Delete anything older than the oldest required trading day
+    oldest_required = min(required_days).isoformat()
+
+    def _delete_old():
+        try:
+            resp = requests.delete(
+                _url("swing_hist_data"),
+                headers=_headers(),
+                params={
+                    "user_id":    f"eq.{uid}",
+                    "trade_date": f"lt.{oldest_required}",
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            print(f"[swing_core] sync_5d deleted rows older than {oldest_required}")
+        except Exception as e:
+            print(f"[swing_core] sync_5d delete old rows error: {e}")
+
+    threading.Thread(target=_delete_old, daemon=True).start()
+
+    print(f"[swing_core] sync_5d complete — {synced} rows saved, {len(errors)} errors")
+    return {"synced": synced, "skipped": skip_count, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 12 — REFRESH LIVE DATA
+# SECTION 6 — REFRESH LIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def refresh_live_data(results: list, batch_size: int = 25) -> list:
+def refresh_live() -> dict:
     """
-    Refresh only today's live price + volume from yfinance.
-    Hist data stays unchanged from scan.
+    Fetch today's live OHLCV from yfinance for all symbols.
+    Saves/overwrites one row per symbol in swing_live_data.
+    Returns (results, errors) after updating DB.
     """
-    if not results:
-        return results
+    uid    = _get_user_id()  # capture in main thread
+    stocks = load_swing_stocks()
+    if not stocks:
+        return {"updated": 0, "errors": []}
 
-    symbols    = [r["symbol"] for r in results]
-    result_map = {r["symbol"]: r for r in results}
-    batches    = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
-    updated    = {}
+    symbols = [s["symbol"] for s in stocks]
 
-    for batch in batches:
-        with ThreadPoolExecutor(max_workers=batch_size) as ex:
-            futures = {ex.submit(_fetch_live_current, sym): sym for sym in batch}
-            for f in as_completed(futures):
-                live = f.result()
-                sym  = live["symbol"]
-                if live.get("error"):
-                    continue
+    # Fetch today + yesterday (period="2d") — today's candle only
+    bulk   = _fetch_yf_bulk(symbols, period="2d")
+    errors = []
+    to_save = []
 
-                old           = result_map.get(sym, {})
-                hist_volumes  = old.get("hist_volumes", [])
-                current_price = live["current_price"]
-                current_vol   = live["current_vol"]
-                max_close     = old.get("max_close", current_price)
-                clean_vols    = [v for v in hist_volumes if v and v > 0]
-                median_vol    = statistics.median(clean_vols) if clean_vols else 1
-                vol_ratio     = round(current_vol / median_vol, 2) if median_vol > 0 else 0
-                status        = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
-                vol_signal    = _vol_signal(vol_ratio)
-                pct_vs_high   = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
+    today = date.today()
 
-                updated[sym] = {
-                    **old,
-                    "current_price": current_price,
-                    "current_open":  live["current_open"],
-                    "current_high":  live["current_high"],
-                    "current_low":   live["current_low"],
-                    "current_vol":   current_vol,
-                    "current_date":  live["current_date"],
-                    "vol_ratio":     vol_ratio,
-                    "vol_signal":    vol_signal,
-                    "pct_vs_high":   pct_vs_high,
-                    "status":        status,
-                    "median_vol":    int(median_vol),
-                }
+    for sym in symbols:
+        res = bulk.get(sym, {"error": "Not in bulk result"})
+        if "error" in res:
+            errors.append({"symbol": sym, "error": res["error"]})
+            continue
 
-    # Save updated current to DB
-    _save_to_db_async(list(updated.values()))
+        df = res["df"]
+        if df.empty:
+            errors.append({"symbol": sym, "error": "Empty df"})
+            continue
 
-    final = [updated.get(r["symbol"], r) for r in results]
-    priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
-    final.sort(key=lambda x: priority.get(x.get("status", ""), 3))
-    return final
+        # Always take the last row — most recent available candle
+        row_data   = df.iloc[-1]
+        trade_date = df.index[-1].date().isoformat()
+
+        o = float(row_data["Open"])
+        h = float(row_data["High"])
+        l = float(row_data["Low"])
+        c = float(row_data["Close"])
+        v = int(row_data["Volume"])
+
+        if not all([o, h, l, c, v]):
+            errors.append({"symbol": sym, "error": "Incomplete OHLCV from yfinance"})
+            continue
+
+        to_save.append({
+            "user_id":    uid,
+            "symbol":     sym,
+            "trade_date": trade_date,
+            "open":       round(o, 2),
+            "high":       round(h, 2),
+            "low":        round(l, 2),
+            "close":      round(c, 2),
+            "volume":     v,
+        })
+
+    # Upsert into swing_live_data — unique on (user_id, symbol)
+    updated = 0
+    if to_save:
+        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        for i in range(0, len(to_save), 200):
+            batch = to_save[i:i+200]
+            try:
+                resp = requests.post(
+                    _url("swing_live_data"),
+                    headers=hdrs,
+                    json=batch,
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                updated += len(batch)
+                print(f"[swing_core] refresh_live saved batch {i} — {len(batch)} rows")
+            except Exception as e:
+                print(f"[swing_core] refresh_live save error batch {i}: {e}")
+                errors.append({"symbol": "batch", "error": str(e)})
+
+    print(f"[swing_core] refresh_live complete — {updated} updated, {len(errors)} errors")
+    return {"updated": updated, "errors": errors}
