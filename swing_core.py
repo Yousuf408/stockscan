@@ -862,16 +862,31 @@ def get_intraday_watch() -> list:
         live_row    = live_map.get(sym)
         live_price  = float(live_row["close"])  if live_row else days[-1]["close"]
         live_vol    = int(live_row["volume"])    if live_row else 0
-        live_signal = ""
+        live_signal    = ""
+        live_vol_ratio = 0.0
+        live_status    = "WATCH"
         if live_row and live_vol:
-            # Calculate live vol_signal using median of hist volumes
-            hist_vols  = [d["volume"] for d in days if d["volume"] > 0]
-            median_vol = statistics.median(hist_vols) if hist_vols else 1
-            live_ratio = round(live_vol / median_vol, 2)
-            vs         = _vol_signal(live_ratio)
-            live_signal = vs.split("(")[0].strip()
+            hist_vols    = [d["volume"] for d in days if d["volume"] > 0]
+            median_vol   = statistics.median(hist_vols) if hist_vols else 1
+            live_ratio   = round(live_vol / median_vol, 2)
+            live_vol_ratio = live_ratio
+            vs           = _vol_signal(live_ratio)
+            live_signal  = vs.split("(")[0].strip()
+            hist_closes  = [d["close"] for d in days]
+            max_close    = max(hist_closes) if hist_closes else live_price
+            max_hist_vol = max([d["volume"] for d in days if d["volume"] > 0], default=1)
+            if live_price > max_close and live_vol > max_hist_vol and live_ratio >= 2.0:
+                live_status = "BLASTING"
+            elif live_price >= max_close * 0.995 and live_ratio >= 1.5:
+                live_status = "READY"
+            elif live_price >= max_close * 0.92:
+                live_status = "WATCH"
+            else:
+                live_status = "NONE"
         else:
-            live_signal = days[-1]["vol_signal"]
+            live_signal    = days[-1]["vol_signal"]
+            live_vol_ratio = days[-1]["vol_ratio"]
+            live_status    = days[-1]["status"]
 
         # % vs 8-day high
         pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d else 0
@@ -891,14 +906,16 @@ def get_intraday_watch() -> list:
         min_vol = min(vols) if vols else 0
 
         results.append({
-            "symbol":      sym,
-            "days":        days,
-            "live_signal": live_signal,
-            "live_price":  live_price,
-            "high_8d":     high_8d,
-            "pct_vs_high": pct_vs_high,
-            "consec_weak": consec_weak,
-            "min_vol":     min_vol,
+            "symbol":        sym,
+            "days":          days,
+            "live_signal":   live_signal,
+            "live_status":   live_status,
+            "live_vol_ratio": live_vol_ratio,
+            "live_price":    live_price,
+            "high_8d":       high_8d,
+            "pct_vs_high":   pct_vs_high,
+            "consec_weak":   consec_weak,
+            "min_vol":       min_vol,
         })
 
     # ── Sort: recent Explosive/Strong first, then consec_weak desc ──
