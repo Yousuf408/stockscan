@@ -319,7 +319,9 @@ def _load_all_from_db(symbols: list) -> dict:
             sym = row["symbol"]
             if sym not in result:
                 result[sym] = []
-            if all(row.get(k) is not None for k in ["open", "high", "low", "close", "volume"]):
+            # v3.6 FIX: only require close+volume — open/high/low may be NULL in
+            # legacy rows. _build_from_db_rows handles NULL OHLC safely.
+            if row.get("close") is not None and row.get("volume") is not None:
                 result[sym].append(row)
 
         # v3.4 FIX: sort by date and take only the 5 most recent rows per symbol.
@@ -460,9 +462,11 @@ def _build_from_db_rows(sym: str, all_rows: list, live_current: dict, meta: dict
     all_volumes = [int(r["volume"])   for r in disp_rows]
 
     hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in disp_rows]
-    hist_opens   = [round(float(r["open"]),   2) for r in disp_rows]
-    hist_highs   = [round(float(r["high"]),   2) for r in disp_rows]
-    hist_lows    = [round(float(r["low"]),    2) for r in disp_rows]
+    # v3.6 FIX: open/high/low may be NULL in legacy rows — fallback to close so
+    # price candles still render correctly (doji shape) instead of crashing.
+    hist_opens   = [round(float(r["open"]  if r["open"]  is not None else r["close"]), 2) for r in disp_rows]
+    hist_highs   = [round(float(r["high"]  if r["high"]  is not None else r["close"]), 2) for r in disp_rows]
+    hist_lows    = [round(float(r["low"]   if r["low"]   is not None else r["close"]), 2) for r in disp_rows]
     hist_closes  = [round(float(r["close"]),  2) for r in disp_rows]
     hist_volumes = [int(r["volume"])              for r in disp_rows]
 
