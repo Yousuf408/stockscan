@@ -189,7 +189,7 @@ def _last_n_trading_days(n: int) -> list:
     today = now.date()
 
     days = []
-    d    = today
+    d    = today - timedelta(days=1)  # start from yesterday — today belongs in swing_live_data, not hist
     while len(days) < n:
         if d.weekday() < 5:  # Mon-Fri
             days.append(d)
