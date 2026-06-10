@@ -767,3 +767,147 @@ def populate_status_history() -> dict:
 
     print(f"[swing_core] populate_history complete — {saved} rows saved, {len(errors)} errors")
     return {"saved": saved, "errors": errors}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 8 — INTRADAY WATCH  ← NEW in v4.2
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_intraday_watch() -> list:
+    """
+    v4.2: Fetch last 8 trading days from swing_status_history +
+          today's live signal from swing_live_data.
+
+    Returns list of dicts per symbol:
+    {
+        symbol        : str
+        days          : [ {date, date_label, status, vol_signal, vol_ratio}, ... ]  ← 8 days oldest→newest
+        live_signal   : str   ← today's vol_signal from swing_live_data
+        live_price    : float ← today's close from swing_live_data
+        high_8d       : float ← max close in last 8 days from swing_status_history
+        pct_vs_high   : float ← (live_price - high_8d) / high_8d * 100
+        consec_weak   : int   ← max consecutive WATCH+Weak days in last 8 days
+        min_vol       : int   ← min daily volume in last 8 days
+    }
+    Sorted: most recent Explosive/Strong first, then by consec_weak desc.
+    """
+    uid = _get_user_id()
+    if not uid:
+        return []
+
+    # ── Query 1: last 8 trading days from swing_status_history ──
+    required_days = _last_n_trading_days(8)
+    from_d        = min(required_days).isoformat()
+
+    try:
+        hist_rows = _fetch_all_rows("swing_status_history", uid, {
+            "select":     "symbol,trade_date,close,volume,vol_ratio,vol_signal,status",
+            "trade_date": f"gte.{from_d}",
+            "order":      "symbol.asc,trade_date.asc",
+        })
+        print(f"[swing_core] intraday_watch — fetched {len(hist_rows)} history rows")
+    except Exception as e:
+        print(f"[swing_core] intraday_watch history query error: {e}")
+        return []
+
+    # ── Query 2: today's live data from swing_live_data ──
+    live_map = {}
+    try:
+        live_rows = _fetch_all_rows("swing_live_data", uid, {
+            "select": "symbol,close,volume,trade_date",
+        })
+        for row in live_rows:
+            live_map[row["symbol"]] = row
+    except Exception as e:
+        print(f"[swing_core] intraday_watch live query error: {e}")
+
+    # ── Group history rows by symbol ──
+    sym_map = {}
+    for row in hist_rows:
+        sym = row["symbol"]
+        if sym not in sym_map:
+            sym_map[sym] = []
+        sym_map[sym].append(row)
+
+    results = []
+
+    for sym, rows in sym_map.items():
+        # Sort oldest → newest, take last 8
+        rows = sorted(rows, key=lambda x: x["trade_date"])[-8:]
+
+        # Build day entries
+        days = []
+        for r in rows:
+            # Clean vol_signal — strip emoji for logic, keep for display
+            vs_raw   = r.get("vol_signal", "")
+            vs_clean = vs_raw.split("(")[0].strip()  # "🔴 Weak" etc
+
+            days.append({
+                "date":       r["trade_date"],
+                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d%b"),
+                "status":     r.get("status", "NONE"),
+                "vol_signal": vs_clean,
+                "vol_ratio":  float(r.get("vol_ratio", 0)),
+                "close":      float(r.get("close", 0)),
+                "volume":     int(r.get("volume", 0)),
+            })
+
+        if not days:
+            continue
+
+        # ── Calculate metrics ──
+        # 8-day high close
+        high_8d = max(d["close"] for d in days)
+
+        # Live price + signal
+        live_row    = live_map.get(sym)
+        live_price  = float(live_row["close"])  if live_row else days[-1]["close"]
+        live_vol    = int(live_row["volume"])    if live_row else 0
+        live_signal = ""
+        if live_row and live_vol:
+            # Calculate live vol_signal using median of hist volumes
+            hist_vols  = [d["volume"] for d in days if d["volume"] > 0]
+            median_vol = statistics.median(hist_vols) if hist_vols else 1
+            live_ratio = round(live_vol / median_vol, 2)
+            vs         = _vol_signal(live_ratio)
+            live_signal = vs.split("(")[0].strip()
+        else:
+            live_signal = days[-1]["vol_signal"]
+
+        # % vs 8-day high
+        pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d else 0
+
+        # Max consecutive WATCH+Weak streak
+        consec_weak = 0
+        current_streak = 0
+        for d in days:
+            if d["status"] == "WATCH" and "Weak" in d["vol_signal"]:
+                current_streak += 1
+                consec_weak = max(consec_weak, current_streak)
+            else:
+                current_streak = 0
+
+        # Min volume in last 8 days
+        vols    = [d["volume"] for d in days if d["volume"] > 0]
+        min_vol = min(vols) if vols else 0
+
+        results.append({
+            "symbol":      sym,
+            "days":        days,
+            "live_signal": live_signal,
+            "live_price":  live_price,
+            "high_8d":     high_8d,
+            "pct_vs_high": pct_vs_high,
+            "consec_weak": consec_weak,
+            "min_vol":     min_vol,
+        })
+
+    # ── Sort: recent Explosive/Strong first, then consec_weak desc ──
+    def _sort_key(r):
+        last_sig   = r["days"][-1]["vol_signal"] if r["days"] else ""
+        sig_rank   = 0 if "Explosive" in last_sig else (1 if "Strong" in last_sig else 2)
+        return (sig_rank, -r["consec_weak"])
+
+    results.sort(key=_sort_key)
+
+    print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
+    return results
