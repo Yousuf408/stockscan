@@ -1,10 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.0
-#  Complete rewrite. Clean architecture.
+#  TRADE SENTRY — pages/4_Swing.py  v4.1
+#  v4.1: Added "📊 Populate History" button in the empty space of control bar.
+#        Nothing else changed from v4.0.
 #
 #  PAGE LOAD  → auto reads DB, shows results instantly, no button needed
 #  SYNC 5D    → fetches only missing trading days from yfinance, saves hist
 #  REFRESH    → fetches today's live price, updates swing_live_data
+#  POPULATE   → one-time: calculates + saves last 10 days status snapshots
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -17,6 +19,7 @@ from swing_core import (
     load_swing_stocks, add_swing_stock, update_swing_stock,
     delete_swing_stock, bulk_add_swing_stocks,
     load_from_db, sync_5d_history, refresh_live,
+    populate_status_history,                        # ← NEW v4.1
     fmt_vol, is_market_open,
 )
 
@@ -87,6 +90,7 @@ for k, v in [
     ("sw_stocks_cache",  None),
     ("sw_last_sync",     None),
     ("sw_last_refresh",  None),
+    ("sw_last_populate", None),   # ← NEW v4.1
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -189,14 +193,12 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, w=195, h=62):
     gap      = 5
     bar_area = h - pad - 14
 
-    # Scale hist bars against hist max only — cur bar scaled separately
     hist_clean = [v for v in hist_vols if v and v > 0]
     mx_hist    = max(hist_clean) if hist_clean else 1
 
     def bh_hist(v):
         return max(3, int((v / mx_hist) * bar_area))
 
-    # Cur bar: if cur > hist max, cap at bar_area (show it's higher visually)
     def bh_cur(v):
         if not v or not mx_hist:
             return 3
@@ -259,6 +261,7 @@ def border_color(status):
 stocks       = load_cached()
 total_stocks = len(stocks)
 
+# ── Row 1: Buttons + Stats ──
 c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
 
 with c1:
@@ -274,7 +277,6 @@ with c2:
         with st.spinner(f"Syncing {total_stocks} stocks..."):
             res = sync_5d_history()
             st.session_state.sw_last_sync = time.time()
-        # Reload from DB after sync
         results, errors = load_from_db()
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
@@ -287,8 +289,8 @@ with c2:
         st.rerun()
 
 with c3:
-    market_open     = is_market_open()
-    refresh_label   = "📡 Refresh Live" if market_open else "📡 Closed"
+    market_open      = is_market_open()
+    refresh_label    = "📡 Refresh Live" if market_open else "📡 Closed"
     refresh_disabled = not market_open
     if st.button(refresh_label, use_container_width=True,
                  disabled=refresh_disabled,
@@ -296,7 +298,6 @@ with c3:
         with st.spinner("Refreshing live prices..."):
             res = refresh_live()
             st.session_state.sw_last_refresh = time.time()
-        # Reload from DB after refresh
         results, errors = load_from_db()
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
@@ -311,26 +312,45 @@ with c4:
         st.rerun()
 
 with c5:
+    # ── Stats row ──
     blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
     ready    = sum(1 for r in st.session_state.sw_results if r.get("status") == "READY")
     watch    = sum(1 for r in st.session_state.sw_results if r.get("status") == "WATCH")
     sync_t   = ""
     ref_t    = ""
+    pop_t    = ""
     if st.session_state.sw_last_sync:
         sync_t = f"&nbsp;&nbsp;🔄 Sync: {datetime.fromtimestamp(st.session_state.sw_last_sync).strftime('%I:%M %p')}"
     if st.session_state.sw_last_refresh:
         ref_t  = f"&nbsp;&nbsp;📡 Live: {datetime.fromtimestamp(st.session_state.sw_last_refresh).strftime('%I:%M %p')}"
+    if st.session_state.sw_last_populate:
+        pop_t  = f"&nbsp;&nbsp;📊 History: {datetime.fromtimestamp(st.session_state.sw_last_populate).strftime('%I:%M %p')}"
     st.markdown(
-        f"<div style='display:flex;gap:16px;align-items:center;padding-top:8px;flex-wrap:wrap;'>"
+        f"<div style='display:flex;gap:16px;align-items:center;padding-top:4px;flex-wrap:wrap;'>"
         f"<span style='font-size:12px;color:#7c3aed;font-weight:700;'>🔥 {blasting}</span>"
         f"<span style='font-size:12px;color:#00a854;font-weight:700;'>✅ {ready}</span>"
         f"<span style='font-size:12px;color:#d97706;font-weight:700;'>👁 {watch}</span>"
         f"<span style='font-size:11px;color:#9ca3af;'>📋 {total_stocks} stocks"
         f"{'&nbsp;&nbsp;🟢 Live' if market_open else '&nbsp;&nbsp;🔴 Closed'}"
-        f"{sync_t}{ref_t}</span>"
+        f"{sync_t}{ref_t}{pop_t}</span>"
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── NEW v4.1: Populate History button in empty space below stats ──
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    pop_col, _ = st.columns([1.2, 2.3])
+    with pop_col:
+        if st.button("📊 Populate History", use_container_width=True,
+                     help="One-time: fetch & save last 10 days status snapshot to swing_status_history"):
+            with st.spinner(f"Populating history for {total_stocks} stocks — this may take ~2 min..."):
+                res = populate_status_history()
+                st.session_state.sw_last_populate = time.time()
+            if res["saved"] > 0:
+                st.success(f"✅ Saved {res['saved']} history rows")
+            if res["errors"]:
+                st.warning(f"⚠ {len(res['errors'])} errors")
+            st.rerun()
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
