@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.1
+#  TRADE SENTRY — pages/4_Swing.py  v4.1.
 #  v4.1: Added "📊 Populate History" button in the empty space of control bar.
 #        Nothing else changed from v4.0.
 #
