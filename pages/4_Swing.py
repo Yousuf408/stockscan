@@ -91,7 +91,7 @@ for k, v in [
     ("sw_stocks_cache",  None),
     ("sw_last_sync",     None),
     ("sw_last_refresh",  None),
-    ("sw_last_populate", None),   # ← NEW v4.1
+    ("sw_last_populate", None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -105,9 +105,7 @@ def refresh_cache():
     st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTO LOAD FROM DB ON PAGE OPEN
-# ─────────────────────────────────────────────────────────────────────────────
+# AUTO LOAD
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
         results, errors = load_from_db()
@@ -115,23 +113,17 @@ if not st.session_state.sw_loaded:
         st.session_state.sw_errors  = errors
         st.session_state.sw_loaded  = True
 
-# ─────────────────────────────────────────────────────────────────────────────
 # SVG HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
-
 def price_svg(opens, highs, lows, closes, dates,
               cur_open=None, cur_high=None, cur_low=None, cur_close=None,
               cur_date=None, w=200, h=62):
     if not closes:
         return f'<svg width="{w}" height="{h}"><text x="6" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
-
     has_cur = all(v is not None for v in [cur_open, cur_high, cur_low, cur_close])
-
     n   = len(closes)
     pad = 4
     bw  = 16
     gap = 5
-
     all_p = [v for v in highs + lows if v and v > 0]
     if has_cur:
         all_p += [cur_high, cur_low]
@@ -139,12 +131,9 @@ def price_svg(opens, highs, lows, closes, dates,
         return f'<svg width="{w}" height="{h}"></svg>'
     mn, mx = min(all_p), max(all_p)
     rng = mx - mn or 1
-
     def sy(v):
         return round(pad + (h - pad*2 - 10) * (1 - (v - mn) / rng), 1)
-
     parts = []
-
     for i in range(n):
         x  = pad + i*(bw+gap)
         cx = x + bw//2
@@ -161,7 +150,6 @@ def price_svg(opens, highs, lows, closes, dates,
         parts.append(
             f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{lbl}</text>'
         )
-
     if has_cur:
         sep_x = pad + n*(bw+gap) + 2
         parts.append(
@@ -180,7 +168,6 @@ def price_svg(opens, highs, lows, closes, dates,
             f'fill="{col}30" stroke="{col}" stroke-width="1.5" rx="2"/>'
             f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="{col}" font-weight="500">{lbl}</text>'
         )
-
     total_w = (sep_x + 5 + bw + pad) if has_cur else (pad + n*(bw+gap))
     return f'<svg width="{total_w}" height="{h}" viewBox="0 0 {total_w} {h}">{"".join(parts)}</svg>'
 
@@ -193,19 +180,15 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195,
     bw       = 18
     gap      = 5
     bar_area = h - pad - 14
-
     hist_clean = [v for v in hist_vols if v and v > 0]
     mx_hist    = max(hist_clean) if hist_clean else 1
-
     def bh_hist(v):
         return max(3, int((v / mx_hist) * bar_area))
-
     def bh_cur(v):
         if not v or not mx_hist:
             return 3
         ratio = v / mx_hist
         return min(int(ratio * bar_area), bar_area)
-
     parts = []
     for i, v in enumerate(hist_vols):
         x  = pad + i*(bw+gap)
@@ -216,13 +199,11 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195,
             f'fill="#e8eaed" stroke="#c4c9d4" stroke-width="0.5" rx="2"/>'
             f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{dates[i].split(" ")[0] if i < len(dates) else i+1}</text>'
         )
-
     sep = pad + n*(bw+gap) + 2
     parts.append(
         f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-14}" '
         f'stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>'
     )
-
     cx   = sep + 4
     ch2  = bh_cur(cur_vol) if cur_vol else 3
     cy   = h - 14 - ch2
@@ -233,7 +214,6 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195,
         f'fill="{cc}25" stroke="{cc}" stroke-width="1.5" rx="2"/>'
         f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">{cur_date.split(" ")[0] if cur_date else "cur"}</text>'
     )
-
     if median_vol and median_vol > 0:
         med_y  = round(h - 14 - bh_hist(median_vol), 1)
         med_x2 = pad + n*(bw+gap) - gap
@@ -241,7 +221,6 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195,
             f'<line x1="{pad}" x2="{med_x2}" y1="{med_y}" y2="{med_y}" '
             f'stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="3,2"/>'
         )
-
     total_w = cx + bw + pad
     return f'<svg width="{total_w}" height="{h}" viewBox="0 0 {total_w} {h}">{"".join(parts)}</svg>'
 
@@ -256,13 +235,10 @@ def status_badge(status):
 def border_color(status):
     return {"BLASTING": "#7c3aed", "READY": "#00a854", "WATCH": "#f59e0b"}.get(status, "#e0e3e8")
 
-# ─────────────────────────────────────────────────────────────────────────────
 # CONTROL BAR
-# ─────────────────────────────────────────────────────────────────────────────
 stocks       = load_cached()
 total_stocks = len(stocks)
 
-# ── Row 1: Buttons + Stats ──
 c1, c2, c3, c4, c5 = st.columns([1.1, 1.1, 0.8, 0.9, 3.5])
 
 with c1:
@@ -313,7 +289,6 @@ with c4:
         st.rerun()
 
 with c5:
-    # ── Stats row ──
     blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
     ready    = sum(1 for r in st.session_state.sw_results if r.get("status") == "READY")
     watch    = sum(1 for r in st.session_state.sw_results if r.get("status") == "WATCH")
@@ -337,8 +312,6 @@ with c5:
         f"</div>",
         unsafe_allow_html=True,
     )
-
-    # ── NEW v4.1: Populate History button in empty space below stats ──
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     pop_col, _ = st.columns([1.2, 2.3])
     with pop_col:
@@ -355,9 +328,7 @@ with c5:
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
 # MANAGE PANEL
-# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.sw_show_manage:
     st.markdown("### ⚙ Manage Swing Stocks")
     t1, t2, t3 = st.tabs(["➕ Add Single", "📋 Bulk Add", "📝 Stock List"])
@@ -433,9 +404,7 @@ if st.session_state.sw_show_manage:
 
     st.markdown("---")
 
-# ─────────────────────────────────────────────────────────────────────────────
 # FILTER PILLS
-# ─────────────────────────────────────────────────────────────────────────────
 all_results = st.session_state.sw_results
 
 if all_results:
@@ -458,10 +427,10 @@ if all_results:
                         label_visibility="collapsed")
 
     if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel_status and "READY"          in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel_status and "WATCH"          in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
-    elif sel_status and "Intraday Watch" in sel_status: view = []  # handled separately below
-    else:                                               view = all_results
+    elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH"           in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
+    elif sel_status and "Intraday Watch"  in sel_status: view = []
+    else:                                                view = all_results
 
     if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
     elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
@@ -476,9 +445,7 @@ if all_results:
 else:
     view = []
 
-# ─────────────────────────────────────────────────────────────────────────────
 # EMPTY STATE
-# ─────────────────────────────────────────────────────────────────────────────
 if not all_results:
     if total_stocks == 0:
         st.info("👆 Add stocks via Manage Stocks, then click Sync 5D.")
@@ -492,7 +459,9 @@ if not all_results:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INTRADAY WATCH SECTION  ← NEW v4.2
+# INTRADAY WATCH SECTION  ← v4.3 (column filter dropdowns)
+# Drop-in replacement for the existing INTRADAY WATCH SECTION in 4_Swing.py
+# Only this block changes — everything above and below stays identical.
 # ─────────────────────────────────────────────────────────────────────────────
 if sel_status and "Intraday Watch" in sel_status:
 
@@ -508,10 +477,10 @@ if sel_status and "Intraday Watch" in sel_status:
         st.stop()
 
     # ── Filter pills ──
-    iw_all_n    = len(iw_data)
-    iw_4w_n     = sum(1 for r in iw_data if r["consec_weak"] >= 4)
-    iw_near_n   = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
-    iw_vol50_n  = sum(1 for r in iw_data if r["min_vol"] >= 50000)
+    iw_all_n   = len(iw_data)
+    iw_4w_n    = sum(1 for r in iw_data if r["consec_weak"] >= 4)
+    iw_near_n  = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
+    iw_vol50_n = sum(1 for r in iw_data if r["min_vol"] >= 50000)
 
     iw_filter_opts = [
         f"All ({iw_all_n})",
@@ -522,7 +491,6 @@ if sel_status and "Intraday Watch" in sel_status:
     sel_iw = st.pills("Intraday Filter", iw_filter_opts,
                       default=iw_filter_opts[0], label_visibility="collapsed")
 
-    # Apply filter
     if   sel_iw and "4+ Weak"   in sel_iw: iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
     elif sel_iw and "Near High" in sel_iw: iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
     elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
@@ -530,15 +498,17 @@ if sel_status and "Intraday Watch" in sel_status:
 
     st.markdown(
         f"<div style='font-size:11px;color:var(--color-text-secondary);padding:8px 0 12px;'>"
-        f"Showing {len(iw_view)} stocks</div>",
+        f"Showing <span id='iw-count'>{len(iw_view)}</span> stocks</div>",
         unsafe_allow_html=True,
     )
 
     if iw_view:
-        sample_days = iw_view[0]["days"]
-        # Last 6 days only
-        date_labels = [d["date_label"] for d in sample_days[-6:]]
-        n_days      = len(date_labels)
+        sample_days  = iw_view[0]["days"]
+        date_labels  = [d["date_label"] for d in sample_days[-6:]]
+        n_days       = len(date_labels)
+
+        # Last 2 filterable column indices (0-based within date_labels)
+        FILTER_COL_INDICES = {n_days - 2, n_days - 1}  # e.g. index 4 and 5 for 6 cols
 
         def _vol_emoji(vol_signal):
             if "Explosive" in vol_signal: return "🔥"
@@ -549,26 +519,152 @@ if sel_status and "Intraday Watch" in sel_status:
         def _cat_label(status):
             return {"BLASTING": "BLASTING", "READY": "READY", "WATCH": "WATCH"}.get(status, "—")
 
-        # ── Build HTML table ──
-        html = (
-            '<div style="background:white;border:0.5px solid #e5e7eb;border-radius:8px;overflow:hidden;">'
-            '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
-            '<thead><tr style="background:#f0f0f0;border-bottom:1px solid #e5e7eb;">'
-            '<th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:600;color:#000;width:140px;">STOCK</th>'
-        )
-        for lbl in date_labels:
-            html += f'<th style="text-align:center;padding:12px 8px;font-size:12px;font-weight:600;color:#000;text-transform:uppercase;">{lbl}</th>'
-        html += '<th style="text-align:center;padding:12px 8px;font-size:12px;font-weight:600;color:#000;">LIVE</th></tr></thead><tbody>'
+        def _sig_key(vol_signal):
+            """Normalised signal key for data-attributes"""
+            if "Explosive" in vol_signal: return "Explosive"
+            if "Strong"    in vol_signal: return "Strong"
+            if "Build"     in vol_signal: return "Build"
+            if "Weak"      in vol_signal: return "Weak"
+            return "None"
 
+        # ── Build HTML ──
+        # Unique IDs so multiple tables on page don't clash (future-proof)
+        TID = "iwtbl"
+
+        # Header
+        html = f'''
+<div style="position:relative;">
+<div id="{TID}-count-bar" style="font-size:11px;color:#6b7280;padding:0 0 8px;"></div>
+<div style="background:white;border:0.5px solid #e5e7eb;border-radius:8px;overflow:visible;">
+<table id="{TID}" style="width:100%;border-collapse:collapse;table-layout:fixed;">
+<thead>
+<tr style="background:#f0f0f0;border-bottom:1px solid #e5e7eb;">
+  <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:600;color:#000;width:140px;">STOCK</th>
+'''
+        for i, lbl in enumerate(date_labels):
+            is_filterable = i in FILTER_COL_INDICES
+            col_id = f"{TID}-col-{i}"
+            if is_filterable:
+                html += f'''
+  <th style="text-align:center;padding:8px 8px;font-size:12px;font-weight:600;color:#000;position:relative;">
+    <div style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="iwToggleDropdown('{col_id}')">
+      <span style="text-transform:uppercase;">{lbl}</span>
+      <span style="font-size:10px;color:#6b7280;" id="{col_id}-arrow">▼</span>
+    </div>
+    <div id="{col_id}-dot" style="display:none;width:6px;height:6px;background:#7c3aed;border-radius:50%;position:absolute;top:6px;right:6px;"></div>
+    <!-- Dropdown -->
+    <div id="{col_id}-dd" style="display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);
+         background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);
+         z-index:9999;min-width:160px;padding:8px 0;text-align:left;">
+      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Vol Signal</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Explosive" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔥 Explosive
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Strong" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🟢 Strong
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Build" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🟡 Build
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Weak" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔴 Weak
+      </label>
+      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
+      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Status</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="BLASTING" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔥 BLASTING
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="READY" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> ✅ READY
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="WATCH" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 👁 WATCH
+      </label>
+      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
+      <div style="display:flex;justify-content:center;padding:4px 12px;">
+        <button onclick="iwClearCol('{col_id}')" style="font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;">Clear</button>
+      </div>
+    </div>
+  </th>
+'''
+            else:
+                html += f'  <th style="text-align:center;padding:12px 8px;font-size:12px;font-weight:600;color:#000;text-transform:uppercase;">{lbl}</th>\n'
+
+        # LIVE column header — also filterable
+        live_col_id = f"{TID}-col-live"
+        html += f'''
+  <th style="text-align:center;padding:8px 8px;font-size:12px;font-weight:600;color:#000;position:relative;">
+    <div style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="iwToggleDropdown('{live_col_id}')">
+      <span>LIVE</span>
+      <span style="font-size:10px;color:#6b7280;" id="{live_col_id}-arrow">▼</span>
+    </div>
+    <div id="{live_col_id}-dot" style="display:none;width:6px;height:6px;background:#7c3aed;border-radius:50%;position:absolute;top:6px;right:6px;"></div>
+    <div id="{live_col_id}-dd" style="display:none;position:absolute;top:100%;right:0;
+         background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);
+         z-index:9999;min-width:160px;padding:8px 0;text-align:left;">
+      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Vol Signal</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Explosive" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔥 Explosive
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Strong" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🟢 Strong
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Build" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🟡 Build
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="Weak" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔴 Weak
+      </label>
+      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
+      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Status</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="BLASTING" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔥 BLASTING
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="READY" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> ✅ READY
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
+        <input type="checkbox" value="WATCH" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 👁 WATCH
+      </label>
+      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
+      <div style="display:flex;justify-content:center;padding:4px 12px;">
+        <button onclick="iwClearCol('{live_col_id}')" style="font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;">Clear</button>
+      </div>
+    </div>
+  </th>
+</tr>
+</thead>
+<tbody id="{TID}-body">
+'''
+
+        # ── Data rows ──
         for r in iw_view:
-            sym  = r["symbol"]
-            prc  = r["live_price"]
-            pct  = r["pct_vs_high"]
+            sym     = r["symbol"]
+            prc     = r["live_price"]
+            pct     = r["pct_vs_high"]
             pct_col = "#16a34a" if pct >= 0 else "#dc2626"
-            days = r["days"][-6:]  # last 6 days
+            days    = r["days"][-6:]
+
+            # Build data attributes for last 2 hist cols + live
+            last2_indices = [max(0, len(days)-2), len(days)-1]
+            d_attrs = ""
+            for attr_i, day_i in enumerate(last2_indices):
+                col_id_attr = f"{TID}-col-{n_days - 2 + attr_i}"
+                if day_i < len(days):
+                    sig = _sig_key(days[day_i]["vol_signal"])
+                    sta = days[day_i]["status"]
+                else:
+                    sig = "None"
+                    sta = "NONE"
+                d_attrs += f' data-{col_id_attr}-sig="{sig}" data-{col_id_attr}-sta="{sta}"'
+
+            # Live data attributes
+            live_sig = _sig_key(r.get("live_signal", ""))
+            live_sta = r.get("live_status", "WATCH")
+            d_attrs += f' data-{live_col_id}-sig="{live_sig}" data-{live_col_id}-sta="{live_sta}"'
 
             html += (
-                f'<tr style="background:white;border-bottom:0.5px solid #e5e7eb;">'
+                f'<tr class="iw-row"{d_attrs} style="background:white;border-bottom:0.5px solid #e5e7eb;">'
                 f'<td style="padding:14px 16px;">'
                 f'<div style="font-size:14px;font-weight:700;color:#000;">{sym}</div>'
                 f'<div style="font-size:13px;color:#000;margin-top:3px;">₹{prc:,.0f}</div>'
@@ -593,12 +689,11 @@ if sel_status and "Intraday Watch" in sel_status:
                 else:
                     html += '<td style="padding:10px 4px;text-align:center;color:#9ca3af;">—</td>'
 
-            # LIVE cell — same format as day cells
+            # LIVE cell
             live_emoji = _vol_emoji(r["live_signal"])
             live_cat   = _cat_label(r.get("live_status", "WATCH"))
             live_ratio = f"{r.get('live_vol_ratio', 0):.1f}x"
             live_date  = r.get("live_date", "")
-            # Format date: "2026-06-11" → "11Jun"
             try:
                 from datetime import datetime as _dt
                 live_date_lbl = _dt.strptime(live_date, "%Y-%m-%d").strftime("%-d%b").upper()
@@ -615,18 +710,93 @@ if sel_status and "Intraday Watch" in sel_status:
                 f'</tr>'
             )
 
-        html += '</tbody></table></div>'
+        html += '</tbody></table></div></div>'
+
+        # ── JS for filter logic ──
+        html += f'''
+<script>
+(function() {{
+  // Close all dropdowns when clicking outside
+  document.addEventListener('click', function(e) {{
+    if (!e.target.closest('[id$="-dd"]') && !e.target.closest('[onclick*="iwToggleDropdown"]')) {{
+      document.querySelectorAll('[id$="-dd"]').forEach(function(dd) {{
+        dd.style.display = 'none';
+      }});
+    }}
+  }});
+}})();
+
+function iwToggleDropdown(colId) {{
+  var dd = document.getElementById(colId + '-dd');
+  var allDDs = document.querySelectorAll('[id$="-dd"]');
+  allDDs.forEach(function(el) {{
+    if (el.id !== colId + '-dd') el.style.display = 'none';
+  }});
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}}
+
+function iwApplyFilter() {{
+  // Collect active filters per column
+  var colFilters = {{}};
+  document.querySelectorAll('input[data-col]:checked').forEach(function(cb) {{
+    var col = cb.getAttribute('data-col');
+    if (!colFilters[col]) colFilters[col] = {{ sigs: [], stas: [] }};
+    // Vol signals are Explosive/Strong/Build/Weak; statuses are BLASTING/READY/WATCH
+    var val = cb.value;
+    if (['Explosive','Strong','Build','Weak'].indexOf(val) >= 0) {{
+      colFilters[col].sigs.push(val);
+    }} else {{
+      colFilters[col].stas.push(val);
+    }}
+  }});
+
+  // Update dot indicators
+  document.querySelectorAll('[id$="-dot"]').forEach(function(dot) {{
+    var colId = dot.id.replace('-dot','');
+    dot.style.display = colFilters[colId] ? 'block' : 'none';
+  }});
+
+  var rows = document.querySelectorAll('#{TID}-body .iw-row');
+  var visible = 0;
+  rows.forEach(function(row) {{
+    var show = true;
+    Object.keys(colFilters).forEach(function(col) {{
+      var f = colFilters[col];
+      var rowSig = row.getAttribute('data-' + col + '-sig') || '';
+      var rowSta = row.getAttribute('data-' + col + '-sta') || '';
+      // If sigs selected: row sig must match one
+      if (f.sigs.length > 0 && f.sigs.indexOf(rowSig) < 0) show = false;
+      // If stas selected: row status must match one
+      if (f.stas.length > 0 && f.stas.indexOf(rowSta) < 0) show = false;
+    }});
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+
+  // Update count
+  var countEl = document.getElementById('{TID}-count-bar');
+  var totalActive = Object.keys(colFilters).length > 0;
+  if (countEl) {{
+    countEl.textContent = totalActive ? ('Showing ' + visible + ' of {len(iw_view)} stocks') : '';
+  }}
+}}
+
+function iwClearCol(colId) {{
+  document.querySelectorAll('input[data-col="' + colId + '"]').forEach(function(cb) {{
+    cb.checked = false;
+  }});
+  document.getElementById(colId + '-dd').style.display = 'none';
+  iwApplyFilter();
+}}
+</script>
+'''
         st.markdown(html, unsafe_allow_html=True)
 
     st.stop()
 
-# ─────────────────────────────────────────────────────────────────────────────
 # RESULTS TABLE
-# ─────────────────────────────────────────────────────────────────────────────
-
 COL = [1.4, 2.0, 2.1, 1.2, 1.3, 1.8, 1.0, 0.9]
 
-# ── Header ──
 header = st.columns(COL)
 labels = ["Stock", "Price Candles — 5D | Today", "Volume — 5D Hist | Current",
           "LTP", "Today H / L", "Vol Signal", "Status", "Screener"]
@@ -638,7 +808,6 @@ for col, lbl in zip(header, labels):
         unsafe_allow_html=True,
     )
 
-# ── Data rows ──
 for r in view:
     sym    = r["symbol"]
     status = r.get("status", "")
@@ -687,10 +856,7 @@ for r in view:
         f"<div class='sw-bd'>{bd}</div></div>",
         unsafe_allow_html=True,
     )
-    row[1].markdown(
-        f"<div style='padding:4px 0;'>{p_svg}</div>",
-        unsafe_allow_html=True,
-    )
+    row[1].markdown(f"<div style='padding:4px 0;'>{p_svg}</div>", unsafe_allow_html=True)
     row[2].markdown(
         f"<div style='padding:4px 0;'>{v_svg}"
         f"<div class='sw-med'>— median {med_v}</div></div>",
@@ -724,7 +890,7 @@ for r in view:
         unsafe_allow_html=True,
     )
 
-# ── Push to watchlist ──
+# Push to watchlist
 ready_blast = [r for r in view if r.get("status") in ("BLASTING", "READY")]
 if ready_blast and WATCHLIST_PUSH:
     try:
@@ -738,11 +904,9 @@ if ready_blast and WATCHLIST_PUSH:
         sym = r["symbol"]
         p1, p2, p3 = st.columns([2, 2, 1])
         with p1:
-            st.markdown(f"`{sym}` {status_badge(r.get('status', ''))}",
-                        unsafe_allow_html=True)
+            st.markdown(f"`{sym}` {status_badge(r.get('status', ''))}", unsafe_allow_html=True)
         with p2:
-            chosen = st.selectbox("WL", wl_names, key=f"wl_{sym}",
-                                  label_visibility="collapsed")
+            chosen = st.selectbox("WL", wl_names, key=f"wl_{sym}", label_visibility="collapsed")
         with p3:
             if st.button("➕", key=f"wladd_{sym}", use_container_width=True):
                 try:
@@ -760,7 +924,6 @@ if ready_blast and WATCHLIST_PUSH:
                 except Exception as e:
                     st.error(str(e))
 
-# ── Errors ──
 if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
