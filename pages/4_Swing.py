@@ -909,9 +909,44 @@ function iwApplyFilter() {{
   }}
 }}
 
+// Persist filters to localStorage
+function iwSaveFilters() {{
+  var state = {{}};
+  document.querySelectorAll('input[data-col]:checked').forEach(function(cb) {{
+    var col = cb.getAttribute('data-col');
+    if (!state[col]) state[col] = [];
+    state[col].push(cb.value);
+  }});
+  try {{
+    localStorage.setItem('iw_filters', JSON.stringify(state));
+  }} catch(e) {{
+    console.warn('localStorage save failed:', e);
+  }}
+}}
+
+// Restore filters from localStorage on load
+function iwRestoreFilters() {{
+  try {{
+    var saved = localStorage.getItem('iw_filters');
+    if (!saved) return;
+    var state = JSON.parse(saved);
+    Object.keys(state).forEach(function(col) {{
+      state[col].forEach(function(val) {{
+        var cb = document.querySelector('input[data-col="' + col + '"][value="' + val + '"]');
+        if (cb) cb.checked = true;
+      }});
+    }});
+  }} catch(e) {{
+    console.warn('localStorage restore failed:', e);
+  }}
+}}
+
 // Attach change handlers
 document.querySelectorAll('input[data-col]').forEach(function(cb) {{
-  cb.addEventListener('change', iwApplyFilter);
+  cb.addEventListener('change', function() {{
+    iwApplyFilter();
+    iwSaveFilters();
+  }});
 }});
 
 // Close dropdown on outside click
@@ -921,6 +956,12 @@ document.addEventListener('click', function(e) {{
       el.classList.remove('open');
     }});
   }}
+}});
+
+// Restore on load
+window.addEventListener('load', function() {{
+  iwRestoreFilters();
+  iwApplyFilter();
 }});
 </script>
 </body>
