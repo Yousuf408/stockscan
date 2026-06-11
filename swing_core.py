@@ -752,13 +752,15 @@ def populate_status_history() -> dict:
     # Upsert to swing_status_history
     saved = 0
     if to_save:
-        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"}
+        upsert_params = {"on_conflict": "user_id,symbol,trade_date"}
         for i in range(0, len(to_save), 200):
             batch = to_save[i:i+200]
             try:
                 resp = requests.post(
                     _url("swing_status_history"),
                     headers=hdrs,
+                    params=upsert_params,
                     json=batch,
                     timeout=20,
                 )
@@ -885,8 +887,9 @@ def get_intraday_watch() -> list:
 
         # Live price + signal
         live_row    = live_map.get(sym)
-        live_price  = float(live_row["close"])  if live_row else days[-1]["close"]
-        live_vol    = int(live_row["volume"])    if live_row else 0
+        live_price  = float(live_row["close"])      if live_row else days[-1]["close"]
+        live_vol    = int(live_row["volume"])        if live_row else 0
+        live_date   = live_row["trade_date"]         if live_row else days[-1]["date"]
         live_signal    = ""
         live_vol_ratio = 0.0
         live_status    = "WATCH"
@@ -931,16 +934,17 @@ def get_intraday_watch() -> list:
         min_vol = min(vols) if vols else 0
 
         results.append({
-            "symbol":        sym,
-            "days":          days,
-            "live_signal":   live_signal,
-            "live_status":   live_status,
+            "symbol":         sym,
+            "days":           days,
+            "live_signal":    live_signal,
+            "live_status":    live_status,
             "live_vol_ratio": live_vol_ratio,
-            "live_price":    live_price,
-            "high_8d":       high_8d,
-            "pct_vs_high":   pct_vs_high,
-            "consec_weak":   consec_weak,
-            "min_vol":       min_vol,
+            "live_price":     live_price,
+            "live_date":      live_date,
+            "high_8d":        high_8d,
+            "pct_vs_high":    pct_vs_high,
+            "consec_weak":    consec_weak,
+            "min_vol":        min_vol,
         })
 
     # ── Sort: recent Explosive/Strong first, then consec_weak desc ──

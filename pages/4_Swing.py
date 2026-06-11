@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.1.
+#  TRADE SENTRY — pages/4_Swing.py  v4.1
 #  v4.1: Added "📊 Populate History" button in the empty space of control bar.
 #        Nothing else changed from v4.0.
 #
@@ -597,9 +597,17 @@ if sel_status and "Intraday Watch" in sel_status:
             live_emoji = _vol_emoji(r["live_signal"])
             live_cat   = _cat_label(r.get("live_status", "WATCH"))
             live_ratio = f"{r.get('live_vol_ratio', 0):.1f}x"
+            live_date  = r.get("live_date", "")
+            # Format date: "2026-06-11" → "11Jun"
+            try:
+                from datetime import datetime as _dt
+                live_date_lbl = _dt.strptime(live_date, "%Y-%m-%d").strftime("%-d%b").upper()
+            except Exception:
+                live_date_lbl = "LIVE"
             html += (
                 f'<td style="padding:10px 4px;text-align:center;vertical-align:middle;">'
                 f'<div style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;">'
+                f'<span style="font-size:10px;font-weight:600;color:#9ca3af;">{live_date_lbl}</span>'
                 f'<span style="font-size:22px;line-height:1;">{live_emoji}</span>'
                 f'<span style="font-size:11px;font-weight:600;color:#000;">{live_cat}</span>'
                 f'<span style="font-size:11px;color:#000;">{live_ratio}</span>'
