@@ -185,7 +185,7 @@ def price_svg(opens, highs, lows, closes, dates,
     return f'<svg width="{total_w}" height="{h}" viewBox="0 0 {total_w} {h}">{"".join(parts)}</svg>'
 
 
-def volume_svg(hist_vols, cur_vol, median_vol, dates=None, w=195, h=62):
+def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195, h=62):
     if dates is None:
         dates = []
     n        = len(hist_vols)
@@ -231,7 +231,7 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, w=195, h=62):
     parts.append(
         f'<rect x="{cx}" y="{cy}" width="{bw}" height="{ch2}" '
         f'fill="{cc}25" stroke="{cc}" stroke-width="1.5" rx="2"/>'
-        f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">cur</text>'
+        f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">{cur_date.split(" ")[0] if cur_date else "cur"}</text>'
     )
 
     if median_vol and median_vol > 0:
@@ -651,6 +651,7 @@ for r in view:
         r.get("current_vol", 0),
         r.get("median_vol", 1),
         dates=r.get("hist_dates", []),
+        cur_date=r.get("current_date"),
     )
 
     ltp     = r.get("current_price", 0)
