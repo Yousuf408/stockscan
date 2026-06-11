@@ -531,13 +531,15 @@ def sync_5d_history() -> dict:
 
     synced = 0
     if to_save:
-        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"}
+        upsert_params = {"on_conflict": "user_id,symbol,trade_date"}
         for i in range(0, len(to_save), 200):
             batch = to_save[i:i+200]
             try:
                 resp = requests.post(
                     _url("swing_hist_data"),
                     headers=hdrs,
+                    params=upsert_params,
                     json=batch,
                     timeout=20,
                 )
