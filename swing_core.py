@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.1
+#  TRADE SENTRY — swing_core.py  v4.1.
 #  v4.1: Added populate_status_history() — saves last 10 days status snapshot
 #        to swing_status_history table. Called by "Populate History" button.
 #        Nothing else changed from v4.0.
