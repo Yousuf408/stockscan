@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.1.
+#  TRADE SENTRY — swing_core.py  v4.1
 #  v4.1: Added populate_status_history() — saves last 10 days status snapshot
 #        to swing_status_history table. Called by "Populate History" button.
 #        Nothing else changed from v4.0.
@@ -220,10 +220,8 @@ def _last_n_trading_days(n: int) -> list:
     today = now.date()
 
     # Include today in hist only if: weekday + after 3:30 PM IST
-    market_closed_today = (
-        today.weekday() < 5 and
-        now.hour > 15 or (now.hour == 15 and now.minute >= 30)
-    )
+    after_close = (now.hour > 15) or (now.hour == 15 and now.minute >= 30)
+    market_closed_today = (today.weekday() < 5) and after_close
 
     days = []
     # Start from today if market closed, else from yesterday
@@ -612,9 +610,12 @@ def refresh_live() -> dict:
         c = float(row_data["Close"])
         v = int(row_data["Volume"])
 
-        if not all([o, h, l, c, v]):
+        if not all([o, h, l, c]):
             errors.append({"symbol": sym, "error": "Incomplete OHLCV from yfinance"})
             continue
+
+        if v == 0:
+            v = 1  # placeholder — live intraday volume may be 0 mid-day
 
         to_save.append({
             "user_id":    uid,
