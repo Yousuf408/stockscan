@@ -1,7 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.1
-#  v4.1: Added "📊 Populate History" button in the empty space of control bar.
-#        Nothing else changed from v4.0.
+#  TRADE SENTRY — pages/4_Swing.py  v4.4
+#  v4.4: Intraday Watch column filters via components.html (proper iframe).
+#        Last 2 history cols + LIVE col have ▼ dropdown with checkbox filters.
+#        Multi-column AND filtering. Live header shows date inline (e.g. 11JUN · LIVE).
 #
 #  PAGE LOAD  → auto reads DB, shows results instantly, no button needed
 #  SYNC 5D    → fetches only missing trading days from yfinance, saves hist
@@ -459,11 +460,14 @@ if not all_results:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INTRADAY WATCH SECTION  ← v4.3 (column filter dropdowns)
-# Drop-in replacement for the existing INTRADAY WATCH SECTION in 4_Swing.py
-# Only this block changes — everything above and below stays identical.
+# INTRADAY WATCH SECTION  ← v4.4 (column filter dropdowns via components.html)
+# - Uses streamlit.components.v1.html for proper JS execution in iframe
+# - Multi-column AND filtering (Vol Signal + Status checkboxes)
+# - Last 2 history columns + LIVE column are filterable
+# - Bigger ▼ arrows + spacing; LIVE header shows date inline
 # ─────────────────────────────────────────────────────────────────────────────
 if sel_status and "Intraday Watch" in sel_status:
+    import streamlit.components.v1 as components
 
     # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
@@ -496,19 +500,13 @@ if sel_status and "Intraday Watch" in sel_status:
     elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
     else:                                   iw_view = iw_data
 
-    st.markdown(
-        f"<div style='font-size:11px;color:var(--color-text-secondary);padding:8px 0 12px;'>"
-        f"Showing <span id='iw-count'>{len(iw_view)}</span> stocks</div>",
-        unsafe_allow_html=True,
-    )
-
     if iw_view:
         sample_days  = iw_view[0]["days"]
         date_labels  = [d["date_label"] for d in sample_days[-6:]]
         n_days       = len(date_labels)
 
         # Last 2 filterable column indices (0-based within date_labels)
-        FILTER_COL_INDICES = {n_days - 2, n_days - 1}  # e.g. index 4 and 5 for 6 cols
+        FILTER_COL_INDICES = {n_days - 2, n_days - 1}
 
         def _vol_emoji(vol_signal):
             if "Explosive" in vol_signal: return "🔥"
@@ -520,124 +518,76 @@ if sel_status and "Intraday Watch" in sel_status:
             return {"BLASTING": "BLASTING", "READY": "READY", "WATCH": "WATCH"}.get(status, "—")
 
         def _sig_key(vol_signal):
-            """Normalised signal key for data-attributes"""
             if "Explosive" in vol_signal: return "Explosive"
             if "Strong"    in vol_signal: return "Strong"
             if "Build"     in vol_signal: return "Build"
             if "Weak"      in vol_signal: return "Weak"
             return "None"
 
-        # ── Build HTML ──
-        # Unique IDs so multiple tables on page don't clash (future-proof)
-        TID = "iwtbl"
+        # Build LIVE header date inline (e.g. "11JUN · LIVE")
+        live_date_for_header = "LIVE"
+        if iw_view:
+            ld = iw_view[0].get("live_date", "")
+            try:
+                from datetime import datetime as _dt
+                live_date_for_header = _dt.strptime(ld, "%Y-%m-%d").strftime("%-d%b").upper() + " · LIVE"
+            except Exception:
+                live_date_for_header = "LIVE"
 
-        # Header
-        html = f'''
-<div style="position:relative;">
-<div id="{TID}-count-bar" style="font-size:11px;color:#6b7280;padding:0 0 8px;"></div>
-<div style="background:white;border:0.5px solid #e5e7eb;border-radius:8px;overflow:visible;">
-<table id="{TID}" style="width:100%;border-collapse:collapse;table-layout:fixed;">
-<thead>
-<tr style="background:#f0f0f0;border-bottom:1px solid #e5e7eb;">
-  <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:600;color:#000;width:140px;">STOCK</th>
+        live_col_id = "col-live"
+
+        # ── Build dropdown menu HTML (reusable) ──
+        def _dropdown_html(col_id):
+            return f'''
+    <div id="{col_id}-dd" class="dd-menu">
+      <div class="dd-section">Vol Signal</div>
+      <label class="dd-opt"><input type="checkbox" value="Explosive" data-col="{col_id}"> 🔥 Explosive</label>
+      <label class="dd-opt"><input type="checkbox" value="Strong"    data-col="{col_id}"> 🟢 Strong</label>
+      <label class="dd-opt"><input type="checkbox" value="Build"     data-col="{col_id}"> 🟡 Build</label>
+      <label class="dd-opt"><input type="checkbox" value="Weak"      data-col="{col_id}"> 🔴 Weak</label>
+      <div class="dd-divider"></div>
+      <div class="dd-section">Status</div>
+      <label class="dd-opt"><input type="checkbox" value="BLASTING" data-col="{col_id}"> 🔥 BLASTING</label>
+      <label class="dd-opt"><input type="checkbox" value="READY"    data-col="{col_id}"> ✅ READY</label>
+      <label class="dd-opt"><input type="checkbox" value="WATCH"    data-col="{col_id}"> 👁 WATCH</label>
+      <div class="dd-divider"></div>
+      <div class="dd-clear"><button type="button" onclick="iwClearCol('{col_id}')">Clear</button></div>
+    </div>
 '''
+
+        # ── Header HTML ──
+        header_html = '<th class="stock-col">STOCK</th>'
         for i, lbl in enumerate(date_labels):
             is_filterable = i in FILTER_COL_INDICES
-            col_id = f"{TID}-col-{i}"
+            col_id = f"col-{i}"
             if is_filterable:
-                html += f'''
-  <th style="text-align:center;padding:8px 8px;font-size:12px;font-weight:600;color:#000;position:relative;">
-    <div style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="iwToggleDropdown('{col_id}')">
-      <span style="text-transform:uppercase;">{lbl}</span>
-      <span style="font-size:10px;color:#6b7280;" id="{col_id}-arrow">▼</span>
+                header_html += f'''
+  <th class="date-col filterable" data-colid="{col_id}">
+    <div class="date-trigger" onclick="iwToggleDropdown('{col_id}')">
+      <span class="date-text">{lbl}</span>
+      <span class="dd-arrow">▼</span>
     </div>
-    <div id="{col_id}-dot" style="display:none;width:6px;height:6px;background:#7c3aed;border-radius:50%;position:absolute;top:6px;right:6px;"></div>
-    <!-- Dropdown -->
-    <div id="{col_id}-dd" style="display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);
-         background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);
-         z-index:9999;min-width:160px;padding:8px 0;text-align:left;">
-      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Vol Signal</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Explosive" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔥 Explosive
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Strong" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🟢 Strong
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Build" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🟡 Build
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Weak" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔴 Weak
-      </label>
-      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
-      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Status</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="BLASTING" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 🔥 BLASTING
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="READY" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> ✅ READY
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="WATCH" onchange="iwApplyFilter()" data-col="{col_id}" style="accent-color:#7c3aed;"> 👁 WATCH
-      </label>
-      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
-      <div style="display:flex;justify-content:center;padding:4px 12px;">
-        <button onclick="iwClearCol('{col_id}')" style="font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;">Clear</button>
-      </div>
-    </div>
+    <div class="dd-dot" id="{col_id}-dot"></div>
+    {_dropdown_html(col_id)}
   </th>
 '''
             else:
-                html += f'  <th style="text-align:center;padding:12px 8px;font-size:12px;font-weight:600;color:#000;text-transform:uppercase;">{lbl}</th>\n'
+                header_html += f'<th class="date-col">{lbl}</th>'
 
-        # LIVE column header — also filterable
-        live_col_id = f"{TID}-col-live"
-        html += f'''
-  <th style="text-align:center;padding:8px 8px;font-size:12px;font-weight:600;color:#000;position:relative;">
-    <div style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" onclick="iwToggleDropdown('{live_col_id}')">
-      <span>LIVE</span>
-      <span style="font-size:10px;color:#6b7280;" id="{live_col_id}-arrow">▼</span>
+        # LIVE header — filterable
+        header_html += f'''
+  <th class="date-col filterable" data-colid="{live_col_id}">
+    <div class="date-trigger" onclick="iwToggleDropdown('{live_col_id}')">
+      <span class="date-text">{live_date_for_header}</span>
+      <span class="dd-arrow">▼</span>
     </div>
-    <div id="{live_col_id}-dot" style="display:none;width:6px;height:6px;background:#7c3aed;border-radius:50%;position:absolute;top:6px;right:6px;"></div>
-    <div id="{live_col_id}-dd" style="display:none;position:absolute;top:100%;right:0;
-         background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);
-         z-index:9999;min-width:160px;padding:8px 0;text-align:left;">
-      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Vol Signal</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Explosive" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔥 Explosive
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Strong" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🟢 Strong
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Build" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🟡 Build
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="Weak" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔴 Weak
-      </label>
-      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
-      <div style="padding:6px 12px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Status</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="BLASTING" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 🔥 BLASTING
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="READY" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> ✅ READY
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:13px;color:#111;">
-        <input type="checkbox" value="WATCH" onchange="iwApplyFilter()" data-col="{live_col_id}" style="accent-color:#7c3aed;"> 👁 WATCH
-      </label>
-      <div style="height:1px;background:#f3f4f6;margin:6px 0;"></div>
-      <div style="display:flex;justify-content:center;padding:4px 12px;">
-        <button onclick="iwClearCol('{live_col_id}')" style="font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;">Clear</button>
-      </div>
-    </div>
+    <div class="dd-dot" id="{live_col_id}-dot"></div>
+    {_dropdown_html(live_col_id)}
   </th>
-</tr>
-</thead>
-<tbody id="{TID}-body">
 '''
 
         # ── Data rows ──
+        rows_html = ""
         for r in iw_view:
             sym     = r["symbol"]
             prc     = r["live_price"]
@@ -645,30 +595,33 @@ if sel_status and "Intraday Watch" in sel_status:
             pct_col = "#16a34a" if pct >= 0 else "#dc2626"
             days    = r["days"][-6:]
 
-            # Build data attributes for last 2 hist cols + live
-            last2_indices = [max(0, len(days)-2), len(days)-1]
+            # Data attributes for filterable columns
+            last2_positions = [len(days) - 2, len(days) - 1] if len(days) >= 2 else [0, len(days) - 1]
             d_attrs = ""
-            for attr_i, day_i in enumerate(last2_indices):
-                col_id_attr = f"{TID}-col-{n_days - 2 + attr_i}"
-                if day_i < len(days):
-                    sig = _sig_key(days[day_i]["vol_signal"])
-                    sta = days[day_i]["status"]
+            # Map: header col index (n_days-2, n_days-1) → days index (last2_positions)
+            for offset in range(2):
+                header_col_idx = n_days - 2 + offset
+                day_idx        = last2_positions[offset] if offset < len(last2_positions) else -1
+                col_id_attr    = f"col-{header_col_idx}"
+                if 0 <= day_idx < len(days):
+                    sig = _sig_key(days[day_idx]["vol_signal"])
+                    sta = days[day_idx]["status"]
                 else:
                     sig = "None"
                     sta = "NONE"
                 d_attrs += f' data-{col_id_attr}-sig="{sig}" data-{col_id_attr}-sta="{sta}"'
 
-            # Live data attributes
+            # Live attrs
             live_sig = _sig_key(r.get("live_signal", ""))
             live_sta = r.get("live_status", "WATCH")
             d_attrs += f' data-{live_col_id}-sig="{live_sig}" data-{live_col_id}-sta="{live_sta}"'
 
-            html += (
-                f'<tr class="iw-row"{d_attrs} style="background:white;border-bottom:0.5px solid #e5e7eb;">'
-                f'<td style="padding:14px 16px;">'
-                f'<div style="font-size:14px;font-weight:700;color:#000;">{sym}</div>'
-                f'<div style="font-size:13px;color:#000;margin-top:3px;">₹{prc:,.0f}</div>'
-                f'<div style="font-size:12px;color:{pct_col};margin-top:2px;">{pct:+.1f}%</div>'
+            rows_html += (
+                f'<tr class="iw-row"{d_attrs}>'
+                f'<td class="stock-cell">'
+                f'<div class="sym">{sym}</div>'
+                f'<div class="prc">₹{prc:,.0f}</div>'
+                f'<div class="pct" style="color:{pct_col};">{pct:+.1f}%</div>'
                 f'</td>'
             )
 
@@ -678,70 +631,245 @@ if sel_status and "Intraday Watch" in sel_status:
                     emoji = _vol_emoji(d["vol_signal"])
                     cat   = _cat_label(d["status"])
                     ratio = f"{d['vol_ratio']:.1f}x"
-                    html += (
-                        f'<td style="padding:10px 4px;text-align:center;vertical-align:middle;">'
-                        f'<div style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;">'
-                        f'<span style="font-size:22px;line-height:1;">{emoji}</span>'
-                        f'<span style="font-size:11px;font-weight:600;color:#000;">{cat}</span>'
-                        f'<span style="font-size:11px;color:#000;">{ratio}</span>'
+                    rows_html += (
+                        f'<td class="data-cell">'
+                        f'<div class="cell-stack">'
+                        f'<span class="cell-emoji">{emoji}</span>'
+                        f'<span class="cell-cat">{cat}</span>'
+                        f'<span class="cell-ratio">{ratio}</span>'
                         f'</div></td>'
                     )
                 else:
-                    html += '<td style="padding:10px 4px;text-align:center;color:#9ca3af;">—</td>'
+                    rows_html += '<td class="data-cell empty">—</td>'
 
             # LIVE cell
             live_emoji = _vol_emoji(r["live_signal"])
             live_cat   = _cat_label(r.get("live_status", "WATCH"))
             live_ratio = f"{r.get('live_vol_ratio', 0):.1f}x"
-            live_date  = r.get("live_date", "")
-            try:
-                from datetime import datetime as _dt
-                live_date_lbl = _dt.strptime(live_date, "%Y-%m-%d").strftime("%-d%b").upper()
-            except Exception:
-                live_date_lbl = "LIVE"
-            html += (
-                f'<td style="padding:10px 4px;text-align:center;vertical-align:middle;">'
-                f'<div style="display:inline-flex;flex-direction:column;align-items:center;gap:3px;">'
-                f'<span style="font-size:10px;font-weight:600;color:#9ca3af;">{live_date_lbl}</span>'
-                f'<span style="font-size:22px;line-height:1;">{live_emoji}</span>'
-                f'<span style="font-size:11px;font-weight:600;color:#000;">{live_cat}</span>'
-                f'<span style="font-size:11px;color:#000;">{live_ratio}</span>'
+            rows_html += (
+                f'<td class="data-cell live-cell">'
+                f'<div class="cell-stack">'
+                f'<span class="cell-emoji">{live_emoji}</span>'
+                f'<span class="cell-cat">{live_cat}</span>'
+                f'<span class="cell-ratio">{live_ratio}</span>'
                 f'</div></td>'
                 f'</tr>'
             )
 
-        html += '</tbody></table></div></div>'
+        # ── Build full HTML document for iframe ──
+        total_count = len(iw_view)
+        full_html = f'''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: transparent;
+  color: #111;
+}}
+.count-bar {{
+  font-size: 11px;
+  color: #6b7280;
+  padding: 4px 0 8px;
+}}
+.table-wrap {{
+  background: white;
+  border: 0.5px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: visible;
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}}
+thead tr {{
+  background: #f0f0f0;
+  border-bottom: 1px solid #e5e7eb;
+}}
+th {{
+  font-size: 12px;
+  font-weight: 600;
+  color: #000;
+  padding: 12px 8px;
+  text-align: center;
+  position: relative;
+}}
+th.stock-col {{
+  text-align: left;
+  padding: 12px 16px;
+  width: 140px;
+}}
+th.date-col {{
+  text-transform: uppercase;
+}}
+.date-trigger {{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}}
+.date-trigger:hover {{
+  background: #e5e7eb;
+}}
+th.filterable .date-text {{
+  font-weight: 600;
+}}
+.dd-arrow {{
+  font-size: 13px;
+  color: #6b7280;
+  margin-left: 2px;
+}}
+.dd-dot {{
+  display: none;
+  width: 8px;
+  height: 8px;
+  background: #7c3aed;
+  border-radius: 50%;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}}
+.dd-dot.active {{ display: block; }}
+.dd-menu {{
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 9999;
+  min-width: 180px;
+  padding: 8px 0;
+  text-align: left;
+  margin-top: 4px;
+}}
+.dd-menu.open {{ display: block; }}
+.dd-section {{
+  padding: 6px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}}
+.dd-opt {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #111;
+  font-weight: 400;
+}}
+.dd-opt:hover {{ background: #f9fafb; }}
+.dd-opt input[type="checkbox"] {{
+  accent-color: #7c3aed;
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}}
+.dd-divider {{
+  height: 1px;
+  background: #f3f4f6;
+  margin: 6px 0;
+}}
+.dd-clear {{
+  display: flex;
+  justify-content: center;
+  padding: 4px 14px;
+}}
+.dd-clear button {{
+  font-size: 11px;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px 8px;
+}}
+.dd-clear button:hover {{ color: #111; }}
 
-        # ── JS for filter logic ──
-        html += f'''
+tbody tr {{
+  background: white;
+  border-bottom: 0.5px solid #e5e7eb;
+}}
+td.stock-cell {{
+  padding: 14px 16px;
+  text-align: left;
+}}
+.sym {{ font-size: 14px; font-weight: 700; color: #000; }}
+.prc {{ font-size: 13px; color: #000; margin-top: 3px; }}
+.pct {{ font-size: 12px; margin-top: 2px; }}
+td.data-cell {{
+  padding: 10px 4px;
+  text-align: center;
+  vertical-align: middle;
+}}
+td.data-cell.empty {{ color: #9ca3af; }}
+.cell-stack {{
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}}
+.cell-emoji {{ font-size: 22px; line-height: 1; }}
+.cell-cat   {{ font-size: 11px; font-weight: 600; color: #000; }}
+.cell-ratio {{ font-size: 11px; color: #000; }}
+</style>
+</head>
+<body>
+<div class="count-bar" id="count-bar">Showing {total_count} stocks</div>
+<div class="table-wrap">
+<table id="iw-table">
+<thead>
+<tr>{header_html}</tr>
+</thead>
+<tbody id="iw-body">
+{rows_html}
+</tbody>
+</table>
+</div>
+
 <script>
-(function() {{
-  // Close all dropdowns when clicking outside
-  document.addEventListener('click', function(e) {{
-    if (!e.target.closest('[id$="-dd"]') && !e.target.closest('[onclick*="iwToggleDropdown"]')) {{
-      document.querySelectorAll('[id$="-dd"]').forEach(function(dd) {{
-        dd.style.display = 'none';
-      }});
-    }}
-  }});
-}})();
+var TOTAL = {total_count};
 
 function iwToggleDropdown(colId) {{
   var dd = document.getElementById(colId + '-dd');
-  var allDDs = document.querySelectorAll('[id$="-dd"]');
-  allDDs.forEach(function(el) {{
-    if (el.id !== colId + '-dd') el.style.display = 'none';
+  if (!dd) return;
+  // close others
+  document.querySelectorAll('.dd-menu').forEach(function(el) {{
+    if (el.id !== colId + '-dd') el.classList.remove('open');
   }});
-  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+  dd.classList.toggle('open');
+}}
+
+function iwClearCol(colId) {{
+  document.querySelectorAll('input[data-col="' + colId + '"]').forEach(function(cb) {{
+    cb.checked = false;
+  }});
+  var dd = document.getElementById(colId + '-dd');
+  if (dd) dd.classList.remove('open');
+  iwApplyFilter();
 }}
 
 function iwApplyFilter() {{
-  // Collect active filters per column
   var colFilters = {{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb) {{
     var col = cb.getAttribute('data-col');
     if (!colFilters[col]) colFilters[col] = {{ sigs: [], stas: [] }};
-    // Vol signals are Explosive/Strong/Build/Weak; statuses are BLASTING/READY/WATCH
     var val = cb.value;
     if (['Explosive','Strong','Build','Weak'].indexOf(val) >= 0) {{
       colFilters[col].sigs.push(val);
@@ -750,13 +878,14 @@ function iwApplyFilter() {{
     }}
   }});
 
-  // Update dot indicators
-  document.querySelectorAll('[id$="-dot"]').forEach(function(dot) {{
+  // dot indicators
+  document.querySelectorAll('.dd-dot').forEach(function(dot) {{
     var colId = dot.id.replace('-dot','');
-    dot.style.display = colFilters[colId] ? 'block' : 'none';
+    if (colFilters[colId]) dot.classList.add('active');
+    else                   dot.classList.remove('active');
   }});
 
-  var rows = document.querySelectorAll('#{TID}-body .iw-row');
+  var rows = document.querySelectorAll('#iw-body .iw-row');
   var visible = 0;
   rows.forEach(function(row) {{
     var show = true;
@@ -764,33 +893,45 @@ function iwApplyFilter() {{
       var f = colFilters[col];
       var rowSig = row.getAttribute('data-' + col + '-sig') || '';
       var rowSta = row.getAttribute('data-' + col + '-sta') || '';
-      // If sigs selected: row sig must match one
       if (f.sigs.length > 0 && f.sigs.indexOf(rowSig) < 0) show = false;
-      // If stas selected: row status must match one
       if (f.stas.length > 0 && f.stas.indexOf(rowSta) < 0) show = false;
     }});
     row.style.display = show ? '' : 'none';
     if (show) visible++;
   }});
 
-  // Update count
-  var countEl = document.getElementById('{TID}-count-bar');
-  var totalActive = Object.keys(colFilters).length > 0;
+  var countEl = document.getElementById('count-bar');
+  var anyActive = Object.keys(colFilters).length > 0;
   if (countEl) {{
-    countEl.textContent = totalActive ? ('Showing ' + visible + ' of {len(iw_view)} stocks') : '';
+    countEl.textContent = anyActive
+      ? ('Showing ' + visible + ' of ' + TOTAL + ' stocks')
+      : ('Showing ' + TOTAL + ' stocks');
   }}
 }}
 
-function iwClearCol(colId) {{
-  document.querySelectorAll('input[data-col="' + colId + '"]').forEach(function(cb) {{
-    cb.checked = false;
-  }});
-  document.getElementById(colId + '-dd').style.display = 'none';
-  iwApplyFilter();
-}}
+// Attach change handlers
+document.querySelectorAll('input[data-col]').forEach(function(cb) {{
+  cb.addEventListener('change', iwApplyFilter);
+}});
+
+// Close dropdown on outside click
+document.addEventListener('click', function(e) {{
+  if (!e.target.closest('.dd-menu') && !e.target.closest('.date-trigger')) {{
+    document.querySelectorAll('.dd-menu').forEach(function(el) {{
+      el.classList.remove('open');
+    }});
+  }}
+}});
 </script>
+</body>
+</html>
 '''
-        st.markdown(html, unsafe_allow_html=True)
+
+        # ── Render via components.html (proper iframe) ──
+        # Height: header (~50) + rows (~85 each) + padding
+        est_height = 80 + len(iw_view) * 85
+        est_height = min(max(est_height, 300), 5000)
+        components.html(full_html, height=est_height, scrolling=True)
 
     st.stop()
 
