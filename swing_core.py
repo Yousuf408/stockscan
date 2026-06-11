@@ -630,13 +630,26 @@ def refresh_live() -> dict:
 
     updated = 0
     if to_save:
-        hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates"}
+        # Step 1: Delete all existing live rows for this user
+        try:
+            resp = requests.delete(
+                _url("swing_live_data"),
+                headers=_headers(),
+                params={"user_id": f"eq.{uid}"},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            print(f"[swing_core] refresh_live — deleted old live rows")
+        except Exception as e:
+            print(f"[swing_core] refresh_live — delete error: {e}")
+
+        # Step 2: Insert fresh data
         for i in range(0, len(to_save), 200):
             batch = to_save[i:i+200]
             try:
                 resp = requests.post(
                     _url("swing_live_data"),
-                    headers=hdrs,
+                    headers={**_headers(), "Prefer": "return=minimal"},
                     json=batch,
                     timeout=20,
                 )
