@@ -210,15 +210,24 @@ def is_market_open() -> bool:
 def _last_n_trading_days(n: int) -> list:
     """
     Returns last N trading days (Mon-Fri) as date objects, most recent last.
-    Starts from yesterday — today belongs in swing_live_data, not hist.
+    Normally starts from yesterday — today belongs in swing_live_data, not hist.
+    EXCEPTION: if today is a weekday AND market has closed (after 3:30 PM IST),
+    include today so same-day Sync 5D captures the completed day's data.
     """
     import pytz
     IST   = pytz.timezone("Asia/Kolkata")
     now   = datetime.now(pytz.utc).astimezone(IST)
     today = now.date()
 
+    # Include today in hist only if: weekday + after 3:30 PM IST
+    market_closed_today = (
+        today.weekday() < 5 and
+        now.hour > 15 or (now.hour == 15 and now.minute >= 30)
+    )
+
     days = []
-    d    = today - timedelta(days=1)
+    # Start from today if market closed, else from yesterday
+    d = today if market_closed_today else today - timedelta(days=1)
     while len(days) < n:
         if d.weekday() < 5:
             days.append(d)
