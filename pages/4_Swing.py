@@ -325,7 +325,8 @@ with c5:
                 st.success(f"✅ Saved {res['saved']} history rows")
             if res["errors"]:
                 st.warning(f"⚠ {len(res['errors'])} errors")
-            st.rerun()
+           st.session_state.sw_intraday = None
+st.success(f"✅ Saved {res['saved']} history rows — refreshing...")
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
