@@ -796,7 +796,7 @@ def populate_status_history() -> dict:
     return {"saved": saved, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8 — INTRADAY WATCH  ← UPDATED with Dry Streak & Price %
+# SECTION 8 — INTRADAY WATCH  ← NEW in v4.2
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_intraday_watch() -> list:
@@ -807,15 +807,13 @@ def get_intraday_watch() -> list:
     Returns list of dicts per symbol:
     {
         symbol        : str
-        days          : [ {date, date_label, status, vol_signal, vol_ratio}, ... ]
+        days          : [ {date, date_label, status, vol_signal, vol_ratio}, ... ]  ← 8 days oldest→newest
         live_signal   : str   ← today's vol_signal from swing_live_data
         live_price    : float ← today's close from swing_live_data
         high_8d       : float ← max close in last 8 days from swing_status_history
         pct_vs_high   : float ← (live_price - high_8d) / high_8d * 100
         consec_weak   : int   ← max consecutive WATCH+Weak days in last 8 days
         min_vol       : int   ← min daily volume in last 8 days
-        dry_streak    : int   ← consecutive Weak/Build days up to today (Added)
-        price_pct_5d  : float ← percentage return over last 5 days (Added)
     }
     Sorted: most recent Explosive/Strong first, then by consec_weak desc.
     """
@@ -829,7 +827,7 @@ def get_intraday_watch() -> list:
 
     try:
         hist_rows = _fetch_all_rows("swing_status_history", uid, {
-            "select":      "symbol,trade_date,close,volume,vol_ratio,vol_signal,status",
+            "select":     "symbol,trade_date,close,volume,vol_ratio,vol_signal,status",
             "trade_date": f"gte.{from_d}",
             "order":      "symbol.asc,trade_date.asc",
         })
@@ -857,99 +855,105 @@ def get_intraday_watch() -> list:
             sym_map[sym] = []
         sym_map[sym].append(row)
 
-    watch_list = []
+    results = []
 
-    # ── Process each symbol ──
     for sym, rows in sym_map.items():
-        if not rows:
-            continue
-
-        # Keep exactly the last 8 trading days, oldest to newest
+        # Sort oldest → newest, take last 8
         rows = sorted(rows, key=lambda x: x["trade_date"])[-8:]
 
-        # ── CLAUDE AI ADDITION COMPATIBILITY PATCH (Using 'rows' instead of 'days') ──
-        # Calculate DRY STREAK (consecutive Weak/Build days)
-        dry_streak = 0
-        for d in reversed(rows):
-            # Clean string symbols like "🟢 Build (1.2)" to look for baseline tokens
-            signal_clean = d["vol_signal"].strip()
-            if any(token in signal_clean for token in ("Weak", "Build")):
-                dry_streak += 1
-            else:
-                break
-
-        # Calculate PRICE % (last 5 days)
-        price_pct_5d = 0.0
-        if len(rows) >= 5:
-            close_today = float(rows[-1]["close"])
-            close_5d_ago = float(rows[-5]["close"])
-            if close_5d_ago > 0:
-                price_pct_5d = round(((close_today - close_5d_ago) / close_5d_ago) * 100, 1)
-        # ─────────────────────────────────────────────────────────────────────────────
-
-        # Additional analytical definitions from your schema
-        closes = [float(r["close"]) for r in rows]
-        volumes = [int(r["volume"]) for r in rows]
-
-        high_8d = max(closes) if closes else 0.0
-        min_vol = min(volumes) if volumes else 0
-
-        # Construct individual day historical payloads
-        days_payload = []
+        # Build day entries
+        days = []
         for r in rows:
-            dt_obj = datetime.strptime(r["trade_date"], "%Y-%m-%d")
-            days_payload.append({
-                "date": r["trade_date"],
-                "date_label": dt_obj.strftime("%d %b"),
-                "status": r["status"],
-                "vol_signal": r["vol_signal"],
-                "vol_ratio": float(r["vol_ratio"]),
+            # Clean vol_signal — strip emoji for logic, keep for display
+            vs_raw   = r.get("vol_signal", "")
+            vs_clean = vs_raw.split("(")[0].strip()  # "🔴 Weak" etc
+
+            days.append({
+                "date":       r["trade_date"],
+                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d%b"),
+                "status":     r.get("status", "NONE"),
+                "vol_signal": vs_clean,
+                "vol_ratio":  float(r.get("vol_ratio", 0)),
+                "close":      float(r.get("close", 0)),
+                "volume":     int(r.get("volume", 0)),
             })
 
-        # Process Live Stream fallback metrics
-        live_row = live_map.get(sym)
-        if live_row:
-            live_price = round(float(live_row["close"]), 2)
-            # Calculate rolling relative indicators
-            clean_vols = [v for v in volumes[-5:] if v > 0]
-            median_hist_vol = statistics.median(clean_vols) if clean_vols else 1
-            live_vol = int(live_row["volume"])
-            live_ratio = round(live_vol / median_hist_vol, 2) if median_hist_vol > 0 else 0.0
-            live_signal = _vol_signal(live_ratio).split("(")[0].strip()
+        if not days:
+            continue
+
+        # ── Calculate metrics ──
+        # 8-day high close
+        high_8d = max(d["close"] for d in days)
+
+        # Live price + signal
+        live_row    = live_map.get(sym)
+        live_price  = float(live_row["close"])      if live_row else days[-1]["close"]
+        live_vol    = int(live_row["volume"])        if live_row else 0
+        live_date   = live_row["trade_date"]         if live_row else days[-1]["date"]
+        live_signal    = ""
+        live_vol_ratio = 0.0
+        live_status    = "WATCH"
+        if live_row and live_vol:
+            hist_vols    = [d["volume"] for d in days if d["volume"] > 0]
+            median_vol   = statistics.median(hist_vols) if hist_vols else 1
+            live_ratio   = round(live_vol / median_vol, 2)
+            live_vol_ratio = live_ratio
+            vs           = _vol_signal(live_ratio)
+            live_signal  = vs.split("(")[0].strip()
+            hist_closes  = [d["close"] for d in days]
+            max_close    = max(hist_closes) if hist_closes else live_price
+            max_hist_vol = max([d["volume"] for d in days if d["volume"] > 0], default=1)
+            if live_price > max_close and live_vol > max_hist_vol and live_ratio >= 2.0:
+                live_status = "BLASTING"
+            elif live_price >= max_close * 0.995 and live_ratio >= 1.5:
+                live_status = "READY"
+            elif live_price >= max_close * 0.92:
+                live_status = "WATCH"
+            else:
+                live_status = "NONE"
         else:
-            live_price = float(rows[-1]["close"])
-            live_signal = rows[-1]["vol_signal"].split("(")[0].strip()
+            live_signal    = days[-1]["vol_signal"]
+            live_vol_ratio = days[-1]["vol_ratio"]
+            live_status    = days[-1]["status"]
 
-        pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d > 0 else 0.0
+        # % vs 8-day high
+        pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d else 0
 
-        # Building the full list item matching your watch_list payload structure
-        watch_list.append({
-            "symbol": sym,
-            "days": days_payload,
-            "live_signal": live_signal,
-            "live_price": live_price,
-            "high_8d": round(high_8d, 2),
-            "pct_vs_high": pct_vs_high,
-            "consec_weak": dry_streak, # Maps logic straight into sorting engine
-            "min_vol": min_vol,
-            "dry_streak": dry_streak,       # ← Added exactly per instructions
-            "price_pct_5d": price_pct_5d,   # ← Added exactly per instructions
+        # Max consecutive WATCH+Weak streak
+        consec_weak = 0
+        current_streak = 0
+        for d in days:
+            if d["status"] == "WATCH" and "Weak" in d["vol_signal"]:
+                current_streak += 1
+                consec_weak = max(consec_weak, current_streak)
+            else:
+                current_streak = 0
+
+        # Min volume in last 8 days
+        vols    = [d["volume"] for d in days if d["volume"] > 0]
+        min_vol = min(vols) if vols else 0
+
+        results.append({
+            "symbol":         sym,
+            "days":           days,
+            "live_signal":    live_signal,
+            "live_status":    live_status,
+            "live_vol_ratio": live_vol_ratio,
+            "live_price":     live_price,
+            "live_date":      live_date,
+            "high_8d":        high_8d,
+            "pct_vs_high":    pct_vs_high,
+            "consec_weak":    consec_weak,
+            "min_vol":        min_vol,
         })
 
-    # Sort system setup (Prioritize volume spikes, then long structural compressions)
-    def sorting_key(item):
-        sig = item["live_signal"]
-        if "Explosive" in sig:
-            sig_priority = 0
-        elif "Strong" in sig:
-            sig_priority = 1
-        elif "Build" in sig:
-            sig_priority = 2
-        else:
-            sig_priority = 3
-        return (sig_priority, -item["dry_streak"])
+    # ── Sort: recent Explosive/Strong first, then consec_weak desc ──
+    def _sort_key(r):
+        last_sig   = r["days"][-1]["vol_signal"] if r["days"] else ""
+        sig_rank   = 0 if "Explosive" in last_sig else (1 if "Strong" in last_sig else 2)
+        return (sig_rank, -r["consec_weak"])
 
-    watch_list.sort(key=sorting_key)
+    results.sort(key=_sort_key)
 
-    print(f"[swing_core] get_intraday_watch complete — processed {len(watch_list)} symbols")
-    return watch_list
+    print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
+    return results
