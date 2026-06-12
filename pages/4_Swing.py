@@ -308,7 +308,7 @@ with c5:
         f"<span style='font-size:12px;color:#00a854;font-weight:700;'>✅ {ready}</span>"
         f"<span style='font-size:12px;color:#d97706;font-weight:700;'>👁 {watch}</span>"
         f"<span style='font-size:11px;color:#9ca3af;'>📋 {total_stocks} stocks"
-        f"{'&nbsp;&nbsp;🟢 Live' if market_open else '&nbsp;&nbsp;🔴 Closed'}"
+        f"{'&nbsp;&nbsp;🟢 Live' if is_market_open() else '&nbsp;&nbsp;🔴 Closed'}"
         f"{sync_t}{ref_t}{pop_t}</span>"
         f"</div>",
         unsafe_allow_html=True,
