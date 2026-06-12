@@ -24,6 +24,7 @@ from swing_core import (
     get_intraday_watch,
     fmt_vol, is_market_open,  # ← Keep this!
 )
+market_open = is_market_open()
 
 try:
     from core import add_to_watchlist, get_user_watchlist_names
