@@ -1,8 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.1
+#  TRADE SENTRY — swing_core.py  v4.2
+#  v4.2: Day-based refresh gate — allows refresh any day, stores last trading day
 #  v4.1: Added populate_status_history() — saves last 10 days status snapshot
 #        to swing_status_history table. Called by "Populate History" button.
-#        Nothing else changed from v4.0.
 #
 #  TABLES:
 #    swing_watchlist      — master symbol list (user's tracked stocks)
@@ -15,6 +15,7 @@
 #    Sync 5D button        → sync_5d_history()         — fetch only MISSING days from yfinance
 #    Refresh Live          → refresh_live()            — fetch today only, update swing_live_data
 #    Populate History btn  → populate_status_history() — calc + save last 10 days snapshots
+#    Intraday Watch        → get_intraday_watch()      — 8-day history + live signal analysis
 #
 #  RULES:
 #    - No NULLs ever saved to DB
@@ -23,6 +24,7 @@
 #    - swing_hist_data keeps exactly last 5 trading days per symbol
 #    - swing_live_data keeps exactly 1 row per symbol (upsert)
 #    - swing_status_history keeps last 10 trading days per symbol
+#    - Refresh gate is day-based: allowed anytime, stores last trading day (Fri on weekends)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import os, requests, yfinance as yf, statistics, threading
@@ -95,7 +97,52 @@ def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
     return all_rows
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 2 — SWING WATCHLIST CRUD
+# SECTION 2 — REFRESH GATE (DAY-BASED)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def can_refresh() -> bool:
+    """
+    v4.2: Day-based refresh gate — allows refresh anytime (no market-hour check).
+    Weekday   → stores today's live price
+    Weekend   → yfinance returns last Friday's data (trading day) automatically
+    Returns True unless pytz error (fail open).
+    """
+    try:
+        import pytz
+        return True  # Always allow — yfinance iloc[-1] returns last trading day
+    except Exception:
+        return True  # fail open
+
+def refresh_label() -> str:
+    """Button label for Refresh Live button — contextual for weekday/weekend."""
+    try:
+        import pytz
+        IST = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(pytz.utc).astimezone(IST)
+        if now.weekday() >= 5:  # Saturday=5, Sunday=6
+            return "📅 Refresh (Weekend — Last Trading Day)"
+        return "🔄 Refresh Live"
+    except Exception:
+        return "🔄 Refresh Live"
+
+def is_market_open() -> bool:
+    """
+    Time-based check — still used elsewhere (e.g., UI state display).
+    NOT used for Refresh button gate (use can_refresh() instead).
+    """
+    try:
+        import pytz
+        IST  = pytz.timezone("Asia/Kolkata")
+        now  = datetime.now(pytz.utc).astimezone(IST)
+        if now.weekday() >= 5:
+            return False
+        mins = now.hour * 60 + now.minute
+        return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
+    except Exception:
+        return False
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3 — SWING WATCHLIST CRUD
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_swing_stocks() -> list:
@@ -183,7 +230,7 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
     return {"added": added, "skipped": skipped, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 3 — HELPERS
+# SECTION 4 — HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_vol(v) -> str:
@@ -194,18 +241,6 @@ def fmt_vol(v) -> str:
     if v >= 100_000:    return f"{v/100_000:.2f}L"
     if v >= 1_000:      return f"{v/1_000:.1f}K"
     return str(v)
-
-def is_market_open() -> bool:
-    try:
-        import pytz
-        IST  = pytz.timezone("Asia/Kolkata")
-        now  = datetime.now(pytz.utc).astimezone(IST)
-        if now.weekday() >= 5:
-            return False
-        mins = now.hour * 60 + now.minute
-        return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
-    except Exception:
-        return False
 
 def _last_n_trading_days(n: int) -> list:
     """
@@ -318,7 +353,7 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4 — PAGE LOAD: READ FROM DB (NO YFINANCE)
+# SECTION 5 — PAGE LOAD: READ FROM DB (NO YFINANCE)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_from_db() -> tuple:
@@ -384,7 +419,7 @@ def load_from_db() -> tuple:
     return results, errors
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5 — SYNC 5D HISTORY
+# SECTION 6 — SYNC 5D HISTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
@@ -574,13 +609,15 @@ def sync_5d_history() -> dict:
     return {"synced": synced, "skipped": skip_count, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — REFRESH LIVE
+# SECTION 7 — REFRESH LIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def refresh_live() -> dict:
     """
-    Fetch today's live OHLCV from yfinance for all symbols.
+    v4.2: Fetch last trading day from yfinance for all symbols.
     Saves/overwrites one row per symbol in swing_live_data.
+    Weekday   → stores today's live price
+    Weekend   → stores last Friday's data (yfinance iloc[-1] handles automatically)
     """
     uid    = _get_user_id()
     stocks = load_swing_stocks()
@@ -666,12 +703,12 @@ def refresh_live() -> dict:
     return {"updated": updated, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7 — POPULATE STATUS HISTORY  ← NEW in v4.1
+# SECTION 8 — POPULATE STATUS HISTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
 def populate_status_history() -> dict:
     """
-    v4.1: Populate swing_status_history with last HISTORY_DAYS (10) trading days.
+    Populate swing_status_history with last HISTORY_DAYS (10) trading days.
 
     For each symbol × each day:
       - Use 5-row context window ending on that day to calculate median_vol
@@ -796,13 +833,13 @@ def populate_status_history() -> dict:
     return {"saved": saved, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 8 — INTRADAY WATCH  ← NEW in v4.2
+# SECTION 9 — INTRADAY WATCH
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_intraday_watch() -> list:
     """
-    v4.2: Fetch last 8 trading days from swing_status_history +
-          today's live signal from swing_live_data.
+    Fetch last 8 trading days from swing_status_history +
+    today's live signal from swing_live_data.
 
     Returns list of dicts per symbol:
     {
