@@ -20,9 +20,9 @@ from swing_core import (
     load_swing_stocks, add_swing_stock, update_swing_stock,
     delete_swing_stock, bulk_add_swing_stocks,
     load_from_db, sync_5d_history, refresh_live,
-    populate_status_history,                        # ← NEW v4.1
-    get_intraday_watch,                             # ← NEW v4.2
-    fmt_vol, is_market_open,
+    populate_status_history,
+    get_intraday_watch,
+    fmt_vol, is_market_open,  # ← Keep this!
 )
 
 try:
