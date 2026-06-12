@@ -267,12 +267,11 @@ with c2:
         st.rerun()
 
 with c3:
-    market_open      = is_market_open()
-    refresh_label    = "📡 Refresh Live" if market_open else "📡 Closed"
-    refresh_disabled = not market_open
-    if st.button(refresh_label, use_container_width=True,
-                 disabled=refresh_disabled,
-                 help="Fetch today's live price — market hours only"):
+    from swing_core import can_refresh, refresh_label
+    
+    if st.button(refresh_label(), use_container_width=True,
+                 disabled=False,
+                 help="Weekday: fetch today's price. Weekend: fetch last trading day"):
         with st.spinner("Refreshing live prices..."):
             res = refresh_live()
             st.session_state.sw_last_refresh = time.time()
