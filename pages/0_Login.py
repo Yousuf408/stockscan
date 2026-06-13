@@ -20,6 +20,7 @@ def _get_config():
     except Exception:
         url = os.environ.get("SUPABASE_URL", "").rstrip("/")
         key = os.environ.get("SUPABASE_KEY", "")
+        service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     return url, key
 
 
