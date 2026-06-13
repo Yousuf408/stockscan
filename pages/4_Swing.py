@@ -500,9 +500,10 @@ if sel_status and "Intraday Watch" in sel_status:
     elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
     else:                                   iw_view = iw_data
 
-    if iw_view:
-        sample_days  = iw_view[0]["days"]date_labels  = [d["date_label"] for d in sample_days[-6:]]
-        n_days       = len(date_labels)
+  if iw_view:
+    sample_days = iw_view[0]["days"]
+    date_labels = [d["date_label"] for d in sample_days[-6:]]
+    n_days = len(date_labels)
 
         # All columns are filterable (0-based within date_labels)
         FILTER_COL_INDICES = set(range(n_days))
