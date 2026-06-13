@@ -599,14 +599,12 @@ if sel_status and "Intraday Watch" in sel_status:
             pct_col = "#16a34a" if pct >= 0 else "#dc2626"
             days    = r["days"][-6:]
 
-            # Data attributes for filterable columns
-            last2_positions = [len(days) - 2, len(days) - 1] if len(days) >= 2 else [0, len(days) - 1]
+          # Data attributes for filterable columns
             d_attrs = ""
-            # Map: header col index (n_days-2, n_days-1) → days index (last2_positions)
-            for offset in range(2):
-                header_col_idx = n_days - 2 + offset
-                day_idx        = last2_positions[offset] if offset < len(last2_positions) else -1
-                col_id_attr    = f"col-{header_col_idx}"
+            # Map all columns (0 to n_days-1) to their corresponding days
+            for col_idx in range(n_days):
+                day_idx = col_idx if col_idx < len(days) else -1
+                col_id_attr = f"col-{col_idx}"
                 if 0 <= day_idx < len(days):
                     sig = _sig_key(days[day_idx]["vol_signal"])
                     sta = days[day_idx]["status"]
@@ -614,12 +612,13 @@ if sel_status and "Intraday Watch" in sel_status:
                     sig = "None"
                     sta = "NONE"
                 d_attrs += f' data-{col_id_attr}-sig="{sig}" data-{col_id_attr}-sta="{sta}"'
-
+            
             # Live attrs
             live_sig = _sig_key(r.get("live_signal", ""))
             live_sta = r.get("live_status", "WATCH")
             d_attrs += f' data-{live_col_id}-sig="{live_sig}" data-{live_col_id}-sta="{live_sta}"'
 
+            
             rows_html += (
                 f'<tr class="iw-row"{d_attrs}>'
                 f'<td class="stock-cell">'
