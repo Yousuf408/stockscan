@@ -614,10 +614,8 @@ def sync_5d_history() -> dict:
 
 def refresh_live() -> dict:
     """
-    v4.2: Fetch last trading day from yfinance for all symbols.
-    Saves/overwrites one row per symbol in swing_live_data.
-    Weekday   → stores today's live price
-    Weekend   → stores last Friday's data (yfinance iloc[-1] handles automatically)
+    v4.3: Fetch last trading day + calculate and save vol_ratio, vol_signal, status
+    to swing_live_data table.
     """
     uid    = _get_user_id()
     stocks = load_swing_stocks()
@@ -654,7 +652,18 @@ def refresh_live() -> dict:
             continue
 
         if v == 0:
-            v = 1  # placeholder — live intraday volume may be 0 mid-day
+            v = 1
+
+        context = df.tail(5)
+        context_closes = [float(x) for x in context["Close"].tolist()]
+        context_vols = [int(x) for x in context["Volume"].tolist()]
+        max_close = max(context_closes) if context_closes else c
+        clean_vols = [x for x in context_vols if x > 0]
+        median_vol = statistics.median(clean_vols) if clean_vols else 1
+        vol_ratio = round(v / median_vol, 2) if median_vol > 0 else 0
+        vol_signal = _vol_signal(vol_ratio)
+        status = _calc_status(c, max_close, v, context_vols, vol_ratio)
+        vol_signal_clean = vol_signal.split("(")[0].strip()
 
         to_save.append({
             "user_id":    uid,
@@ -665,11 +674,13 @@ def refresh_live() -> dict:
             "low":        round(l, 2),
             "close":      round(c, 2),
             "volume":     v,
+            "vol_ratio":  vol_ratio,
+            "vol_signal": vol_signal_clean,
+            "status":     status,
         })
 
     updated = 0
     if to_save:
-        # Step 1: Delete all existing live rows for this user
         try:
             resp = requests.delete(
                 _url("swing_live_data"),
@@ -682,7 +693,6 @@ def refresh_live() -> dict:
         except Exception as e:
             print(f"[swing_core] refresh_live — delete error: {e}")
 
-        # Step 2: Insert fresh data
         for i in range(0, len(to_save), 200):
             batch = to_save[i:i+200]
             try:
