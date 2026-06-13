@@ -649,11 +649,11 @@ def refresh_live() -> dict:
         c = float(row_data["Close"])
         v = int(row_data["Volume"])
 
-        if not all([o, h, l, c]):
+      if not all([o, h, l, c]):
             errors.append({"symbol": sym, "error": "Incomplete OHLCV from yfinance"})
             continue
 
-       if v == 0:
+        if v == 0:
             v = 1  # placeholder — live intraday volume may be 0 mid-day
 
         context = df.tail(5)
