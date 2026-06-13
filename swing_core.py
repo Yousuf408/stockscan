@@ -649,23 +649,12 @@ def refresh_live() -> dict:
         c = float(row_data["Close"])
         v = int(row_data["Volume"])
 
-      if not all([o, h, l, c]):
+        if not all([o, h, l, c]):
             errors.append({"symbol": sym, "error": "Incomplete OHLCV from yfinance"})
             continue
 
         if v == 0:
             v = 1  # placeholder — live intraday volume may be 0 mid-day
-
-        context = df.tail(5)
-        context_closes = [float(x) for x in context["Close"].tolist()]
-        context_vols = [int(x) for x in context["Volume"].tolist()]
-        max_close = max(context_closes) if context_closes else c
-        clean_vols = [x for x in context_vols if x > 0]
-        median_vol = statistics.median(clean_vols) if clean_vols else 1
-        vol_ratio = round(v / median_vol, 2) if median_vol > 0 else 0
-        vol_signal = _vol_signal(vol_ratio)
-        status = _calc_status(c, max_close, v, context_vols, vol_ratio)
-        vol_signal_clean = vol_signal.split("(")[0].strip()
 
         to_save.append({
             "user_id":    uid,
@@ -676,9 +665,6 @@ def refresh_live() -> dict:
             "low":        round(l, 2),
             "close":      round(c, 2),
             "volume":     v,
-            "vol_ratio":  vol_ratio,
-            "vol_signal": vol_signal_clean,
-            "status":     status,
         })
 
     updated = 0
@@ -1008,3 +994,4 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
+    
