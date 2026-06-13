@@ -597,6 +597,9 @@ if sel_status and "Intraday Watch" in sel_status:
             prc     = r["live_price"]
             pct     = r["pct_vs_high"]
             pct_col = "#16a34a" if pct >= 0 else "#dc2626"
+            pct_avg_iw = r.get("pct_vs_avg_iw", 0)
+            dir_arrow_iw = r.get("direction_arrow_iw", "→")
+            dir_color_iw = r.get("direction_color_iw", "#6b7280")
             days    = r["days"][-6:]
 
           # Data attributes for filterable columns
@@ -623,8 +626,7 @@ if sel_status and "Intraday Watch" in sel_status:
                 f'<tr class="iw-row"{d_attrs}>'
                 f'<td class="stock-cell">'
                 f'<div class="sym">{sym}</div>'
-                f'<div class="prc">₹{prc:,.0f}</div>'
-                f'<div class="pct" style="color:{pct_col};">{pct:+.1f}%</div>'
+                f'<div class="prc">₹{prc:,.0f} <span style="color:{dir_color_iw}; font-size:14px;">{dir_arrow_iw}</span> <span style="color:{dir_color_iw};">{pct_avg_iw:+.1f}%</span></div>'
                 f'</td>'
             )
 
