@@ -1019,6 +1019,9 @@ for r in view:
     ltp     = r.get("current_price", 0)
     pct     = r.get("pct_vs_high", 0)
     pct_col = "#00a854" if pct >= 0 else "#e53935"
+    pct_avg = r.get("pct_vs_avg", 0)
+    dir_arrow = r.get("direction_arrow", "→")
+    dir_color = r.get("direction_color", "#7a8394")
     h_val   = r.get("current_high", 0)
     l_val   = r.get("current_low", 0)
     vsig    = r.get("vol_signal", "—")
@@ -1049,8 +1052,7 @@ for r in view:
     )
     row[3].markdown(
         f"<div style='padding:8px 4px;'>"
-        f"<div class='sw-ltp'>₹{ltp:,.2f}</div>"
-        f"<div class='sw-pct' style='color:{pct_col};'>{pct:+.1f}% vs 5d high</div></div>",
+        f"<div class='sw-ltp'>₹{ltp:,.2f} <span style='color:{dir_color}; font-size:16px;'>{dir_arrow}</span> <span style='color:{dir_color};'>{pct_avg:+.1f}%</span></div></div>",
         unsafe_allow_html=True,
     )
     row[4].markdown(
