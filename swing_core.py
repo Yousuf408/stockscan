@@ -27,39 +27,38 @@
 #    - Refresh gate is day-based: allowed anytime, stores last trading day (Fri on weekends)
 # ══════════════════════════════════════════════════════════════════════════════
 
-
 import os, requests, yfinance as yf, statistics, threading
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1 — CONFIG & SUPABASE HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 HIST_DAYS    = 5   # number of trading days to show in chart
 HISTORY_DAYS = 10  # number of days to keep in swing_status_history
- 
+
 def _get_config():
     try:
         import streamlit as st
         return st.secrets["SUPABASE_URL"].rstrip("/"), st.secrets["SUPABASE_KEY"]
     except Exception:
         return os.environ.get("SUPABASE_URL", "").rstrip("/"), os.environ.get("SUPABASE_KEY", "")
- 
+
 def _get_user_id():
     try:
         import streamlit as st
         return st.session_state.get("user_id", "")
     except Exception:
         return ""
- 
+
 def _get_access_token():
     try:
         import streamlit as st
         return st.session_state.get("access_token", "")
     except Exception:
         return ""
- 
+
 def _headers():
     _, key = _get_config()
     token  = _get_access_token()
@@ -69,11 +68,11 @@ def _headers():
         "Content-Type":  "application/json",
         "Prefer":        "return=representation",
     }
- 
+
 def _url(table: str) -> str:
     url, _ = _get_config()
     return f"{url}/rest/v1/{table}"
- 
+
 def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
     """
     Paginate through Supabase 1000-row hard limit.
@@ -96,11 +95,11 @@ def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
             break
         offset += limit
     return all_rows
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 2 — REFRESH GATE (DAY-BASED)
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def can_refresh() -> bool:
     """
     v4.2: Day-based refresh gate — allows refresh anytime (no market-hour check).
@@ -113,7 +112,7 @@ def can_refresh() -> bool:
         return True  # Always allow — yfinance iloc[-1] returns last trading day
     except Exception:
         return True  # fail open
- 
+
 def refresh_label() -> str:
     """Button label for Refresh Live button — contextual for weekday/weekend."""
     try:
@@ -125,7 +124,7 @@ def refresh_label() -> str:
         return "🔄 Refresh Live"
     except Exception:
         return "🔄 Refresh Live"
- 
+
 def is_market_open() -> bool:
     """
     Time-based check — still used elsewhere (e.g., UI state display).
@@ -141,11 +140,11 @@ def is_market_open() -> bool:
         return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
     except Exception:
         return False
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3 — SWING WATCHLIST CRUD
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def load_swing_stocks() -> list:
     try:
         uid = _get_user_id()
@@ -162,7 +161,7 @@ def load_swing_stocks() -> list:
     except Exception as e:
         print(f"[swing_core] load_swing_stocks error: {e}")
         return []
- 
+
 def add_swing_stock(symbol: str, screener_url: str = "", breakout_date=None, notes: str = "") -> dict:
     uid    = _get_user_id()
     if not uid:
@@ -182,7 +181,7 @@ def add_swing_stock(symbol: str, screener_url: str = "", breakout_date=None, not
     r.raise_for_status()
     d = r.json()
     return d[0] if isinstance(d, list) else d
- 
+
 def update_swing_stock(db_id: int, updates: dict):
     allowed = {"screener_url", "breakout_date", "notes", "symbol"}
     clean   = {k: v for k, v in updates.items() if k in allowed}
@@ -194,14 +193,14 @@ def update_swing_stock(db_id: int, updates: dict):
     )
     r.raise_for_status()
     return r.json()
- 
+
 def delete_swing_stock(db_id: int):
     r = requests.delete(
         f"{_url('swing_watchlist')}?id=eq.{db_id}",
         headers=_headers(), timeout=10,
     )
     r.raise_for_status()
- 
+
 def bulk_add_swing_stocks(symbols: list) -> dict:
     uid      = _get_user_id()
     existing = {s["symbol"] for s in load_swing_stocks()}
@@ -209,50 +208,56 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
     rows = []
     for sym in symbols:
         sym = sym.upper().strip()
+        if not sym:
+            continue
         if sym in existing:
             skipped.append(sym)
             continue
-        rows.append({"user_id": uid, "symbol": sym, "screener_url": f"https://www.screener.in/company/{sym}/"})
+        rows.append({
+            "user_id":      uid,
+            "symbol":       sym,
+            "screener_url": f"https://www.screener.in/company/{sym}/",
+            "notes":        "",
+        })
         added.append(sym)
-    if not rows:
-        return {"added": added, "skipped": skipped, "errors": errors}
-    try:
-        r = requests.post(
-            _url("swing_watchlist"),
-            headers={**_headers(), "Prefer": "resolution=ignore-duplicates,return=minimal"},
-            json=rows, timeout=20,
-        )
-        r.raise_for_status()
-    except Exception as e:
-        errors.append({"batch": "bulk_add", "error": str(e)})
-    print(f"[swing_core] bulk_add — +{len(added)} -{len(skipped)} ✗{len(errors)}")
+    if rows:
+        try:
+            r = requests.post(_url("swing_watchlist"), headers=_headers(), json=rows, timeout=15)
+            r.raise_for_status()
+        except Exception:
+            errors = added.copy()
+            added  = []
     return {"added": added, "skipped": skipped, "errors": errors}
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4 — HELPER FUNCTIONS
+# SECTION 4 — HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
- 
-def fmt_vol(v: int) -> str:
-    if v >= 10000000:
-        return f"{v/1000000:.1f}M"
-    if v >= 100000:
-        return f"{v/100000:.1f}L"
+
+def fmt_vol(v) -> str:
+    if v is None:
+        return "—"
+    v = int(v)
+    if v >= 10_000_000: return f"{v/10_000_000:.2f}Cr"
+    if v >= 100_000:    return f"{v/100_000:.2f}L"
+    if v >= 1_000:      return f"{v/1_000:.1f}K"
     return str(v)
- 
+
 def _last_n_trading_days(n: int) -> list:
     """
-    Return list of last n trading days (Mon-Fri), oldest first.
-    Logic: we want to include today so same-day Sync 5D captures the completed day's data.
+    Returns last N trading days (Mon-Fri) as date objects, most recent last.
+    Normally starts from yesterday — today belongs in swing_live_data, not hist.
+    EXCEPTION: if today is a weekday AND market has closed (after 3:30 PM IST),
+    include today so same-day Sync 5D captures the completed day's data.
     """
     import pytz
     IST   = pytz.timezone("Asia/Kolkata")
     now   = datetime.now(pytz.utc).astimezone(IST)
     today = now.date()
- 
+
     # Include today in hist only if: weekday + after 3:30 PM IST
     after_close = (now.hour > 15) or (now.hour == 15 and now.minute >= 30)
     market_closed_today = (today.weekday() < 5) and after_close
- 
+
     days = []
     # Start from today if market closed, else from yesterday
     d = today if market_closed_today else today - timedelta(days=1)
@@ -260,9 +265,9 @@ def _last_n_trading_days(n: int) -> list:
         if d.weekday() < 5:
             days.append(d)
         d -= timedelta(days=1)
- 
+
     return list(reversed(days))  # oldest first
- 
+
 def _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio) -> str:
     max_hist_vol = max(hist_volumes) if hist_volumes else 0
     if current_price > max_close and current_vol > max_hist_vol and vol_ratio >= 2.0:
@@ -272,13 +277,13 @@ def _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
     if current_price >= max_close * 0.92:
         return "WATCH"
     return ""
- 
+
 def _vol_signal(ratio: float) -> str:
     if ratio > 2.0: return f"🔥 Explosive ({ratio})"
     if ratio > 1.5: return f"🟢 Strong ({ratio})"
     if ratio > 1.0: return f"🟡 Build ({ratio})"
     return f"🔴 Weak ({ratio})"
- 
+
 def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict:
     """
     Build a single result dict from hist DB rows + live DB row + watchlist meta.
@@ -288,14 +293,14 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     """
     if not hist_rows:
         return None
- 
+
     hist_dates   = [datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d %b") for r in hist_rows]
     hist_opens   = [round(float(r["open"]),   2) for r in hist_rows]
     hist_highs   = [round(float(r["high"]),   2) for r in hist_rows]
     hist_lows    = [round(float(r["low"]),    2) for r in hist_rows]
     hist_closes  = [round(float(r["close"]),  2) for r in hist_rows]
     hist_volumes = [int(r["volume"])              for r in hist_rows]
- 
+
     if live_row:
         current_price = round(float(live_row["close"]), 2)
         current_open  = round(float(live_row["open"]),  2)
@@ -311,7 +316,7 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
         current_low   = round(float(last["low"]),   2)
         current_vol   = int(last["volume"])
         current_date  = datetime.strptime(last["trade_date"], "%Y-%m-%d").strftime("%d %b")
- 
+
     max_close   = max(hist_closes) if hist_closes else current_price
     clean_vols  = [v for v in hist_volumes if v and v > 0]
     median_vol  = statistics.median(clean_vols) if clean_vols else 1
@@ -320,22 +325,19 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     vol_signal  = _vol_signal(vol_ratio)
     pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
     
-    # ═══ NEW: Calculate 5D average price and direction ═══
+    # Calculate 5D average price and direction
     avg_5d_price = round(sum(hist_closes) / len(hist_closes), 2) if hist_closes else current_price
     pct_vs_avg = round(((current_price - avg_5d_price) / avg_5d_price) * 100, 1) if avg_5d_price else 0
-    
-    # Determine direction with ±1% threshold
     if pct_vs_avg > 1:
         direction_arrow = "↑"
-        direction_color = "#00a854"  # Green
+        direction_color = "#00a854"
     elif pct_vs_avg < -1:
         direction_arrow = "↓"
-        direction_color = "#e53935"  # Red
+        direction_color = "#e53935"
     else:
         direction_arrow = "→"
-        direction_color = "#7a8394"  # Gray
-    # ═════════════════════════════════════════════════════
- 
+        direction_color = "#7a8394"
+
     return {
         "symbol":        sym,
         "error":         None,
@@ -356,64 +358,67 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
         "vol_ratio":     vol_ratio,
         "vol_signal":    vol_signal,
         "pct_vs_high":   pct_vs_high,
-        "pct_vs_avg":    pct_vs_avg,          # NEW: % change vs 5D average
-        "avg_5d_price":  avg_5d_price,        # NEW: 5-day average price
-        "direction_arrow": direction_arrow,   # NEW: Direction indicator (↑↓→)
-        "direction_color": direction_color,   # NEW: Color for direction
+        "pct_vs_avg":    pct_vs_avg,
+        "avg_5d_price":  avg_5d_price,
+        "direction_arrow": direction_arrow,
+        "direction_color": direction_color,
         "status":        status,
         "screener_url":  meta.get("screener_url",  f"https://www.screener.in/company/{sym}/"),
         "breakout_date": meta.get("breakout_date", ""),
+        "notes":         meta.get("notes",         ""),
+        "db_id":         meta.get("id"),
     }
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 5 — LOAD FROM DB
+# SECTION 5 — PAGE LOAD: READ FROM DB (NO YFINANCE)
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def load_from_db() -> tuple:
     """
-    Load all swing results from DB: hist data + live data + watchlist metadata.
-    Instant load (no yfinance).
+    Page load function. Reads swing_hist_data + swing_live_data.
+    No yfinance. Returns (results, errors) in ~1 second.
     """
-    uid = _get_user_id()
-    if not uid:
-        return [], []
- 
-    results = []
-    errors  = []
- 
     stocks = load_swing_stocks()
     if not stocks:
-        return results, errors
- 
-    symbols = [s["symbol"] for s in stocks]
-    meta_map = {s["symbol"]: s for s in stocks}
- 
-    # Fetch hist data — all rows, grouped by symbol
-    hist_map = {}
+        return [], []
+
+    uid       = _get_user_id()
+    meta_map  = {s["symbol"]: s for s in stocks}
+    symbols   = [s["symbol"] for s in stocks]
+    results, errors = [], []
+
+    from_d = (date.today() - timedelta(days=14)).isoformat()
     try:
-        hist_rows = _fetch_all_rows("swing_hist_data", uid, {"select": "symbol,trade_date,open,high,low,close,volume"})
-        for row in hist_rows:
-            sym = row["symbol"]
-            if sym not in hist_map:
-                hist_map[sym] = []
-            hist_map[sym].append(row)
-        # Sort by trade_date (oldest first) and keep last 5
-        for sym in hist_map:
-            hist_map[sym] = sorted(hist_map[sym], key=lambda x: x["trade_date"])[-HIST_DAYS:]
-        print(f"[swing_core] load_from_db — fetched {len(hist_rows)} hist rows for {len(hist_map)} symbols")
+        hist_rows = _fetch_all_rows("swing_hist_data", uid, {
+            "select":     "symbol,trade_date,open,high,low,close,volume",
+            "trade_date": f"gte.{from_d}",
+            "order":      "symbol.asc,trade_date.asc",
+        })
+        print(f"[swing_core] load_from_db — fetched {len(hist_rows)} hist rows")
     except Exception as e:
         print(f"[swing_core] load_from_db hist query error: {e}")
- 
-    # Fetch live data
+        return [], [{"symbol": "ALL", "error": f"DB hist read failed: {e}"}]
+
+    hist_map = {}
+    for row in hist_rows:
+        sym = row["symbol"]
+        if sym not in hist_map:
+            hist_map[sym] = []
+        hist_map[sym].append(row)
+    for sym in hist_map:
+        hist_map[sym] = sorted(hist_map[sym], key=lambda x: x["trade_date"])[-HIST_DAYS:]
+
     live_map = {}
     try:
-        live_rows = _fetch_all_rows("swing_live_data", uid, {"select": "symbol,trade_date,open,high,low,close,volume"})
+        live_rows = _fetch_all_rows("swing_live_data", uid, {
+            "select": "symbol,trade_date,open,high,low,close,volume",
+        })
         for row in live_rows:
             live_map[row["symbol"]] = row
         print(f"[swing_core] load_from_db — fetched {len(live_rows)} live rows")
     except Exception as e:
         print(f"[swing_core] load_from_db live query error: {e}")
- 
+
     for sym in symbols:
         hist = hist_map.get(sym, [])
         if not hist:
@@ -423,10 +428,10 @@ def load_from_db() -> tuple:
         result = _build_result(sym, hist, live, meta)
         if result:
             results.append(result)
- 
+
     priority = {"BLASTING": 0, "READY": 1, "WATCH": 2, "": 3}
     results.sort(key=lambda x: priority.get(x.get("status", ""), 3))
- 
+
     print(f"[swing_core] load_from_db — {len(results)} symbols loaded from DB")
     return results, errors
 
@@ -991,6 +996,21 @@ def get_intraday_watch() -> list:
         # Min volume in last 8 days
         vols    = [d["volume"] for d in days if d["volume"] > 0]
         min_vol = min(vols) if vols else 0
+        
+        # Calculate 5D average price and direction for Intraday Watch
+        closes_5d = [d["close"] for d in days[-5:]] if len(days) >= 5 else [d["close"] for d in days]
+        avg_5d_price_iw = sum(closes_5d) / len(closes_5d) if closes_5d else live_price
+        pct_vs_avg_iw = round(((live_price - avg_5d_price_iw) / avg_5d_price_iw) * 100, 1) if avg_5d_price_iw else 0
+        
+        if pct_vs_avg_iw > 1:
+            direction_arrow_iw = "↑"
+            direction_color_iw = "#16a34a"
+        elif pct_vs_avg_iw < -1:
+            direction_arrow_iw = "↓"
+            direction_color_iw = "#dc2626"
+        else:
+            direction_arrow_iw = "→"
+            direction_color_iw = "#6b7280"
 
         results.append({
             "symbol":         sym,
@@ -1002,6 +1022,10 @@ def get_intraday_watch() -> list:
             "live_date":      live_date,
             "high_8d":        high_8d,
             "pct_vs_high":    pct_vs_high,
+            "pct_vs_avg_iw":  pct_vs_avg_iw,
+            "avg_5d_price_iw": avg_5d_price_iw,
+            "direction_arrow_iw": direction_arrow_iw,
+            "direction_color_iw": direction_color_iw,
             "consec_weak":    consec_weak,
             "min_vol":        min_vol,
         })
@@ -1016,4 +1040,3 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
-    
