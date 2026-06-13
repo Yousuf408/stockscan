@@ -40,6 +40,16 @@ st.set_page_config(
     page_icon="⚡",
     initial_sidebar_state="expanded"
 )
+# Yahan se code paste karein
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+# Yahan tak
 
 # ── Auth guard ──
 if not st.session_state.get("user_id"):
