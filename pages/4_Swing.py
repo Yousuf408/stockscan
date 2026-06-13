@@ -505,8 +505,8 @@ if sel_status and "Intraday Watch" in sel_status:
         date_labels  = [d["date_label"] for d in sample_days[-6:]]
         n_days       = len(date_labels)
 
-        # Last 2 filterable column indices (0-based within date_labels)
-        FILTER_COL_INDICES = {n_days - 2, n_days - 1}
+       # ALL columns are filterable
+      FILTER_COL_INDICES = set(range(n_days)) 
 
         def _vol_emoji(vol_signal):
             if "Explosive" in vol_signal: return "🔥"
