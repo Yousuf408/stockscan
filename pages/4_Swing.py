@@ -463,7 +463,7 @@ if not all_results:
 # INTRADAY WATCH SECTION  ← v4.4 (column filter dropdowns via components.html)
 # - Uses streamlit.components.v1.html for proper JS execution in iframe
 # - Multi-column AND filtering (Vol Signal + Status checkboxes)
-# - Last 2 history columns + LIVE column are filterable
+# - All columns are now filterable
 # - Bigger ▼ arrows + spacing; LIVE header shows date inline
 # ─────────────────────────────────────────────────────────────────────────────
 if sel_status and "Intraday Watch" in sel_status:
@@ -495,7 +495,7 @@ if sel_status and "Intraday Watch" in sel_status:
     sel_iw = st.pills("Intraday Filter", iw_filter_opts,
                       default=iw_filter_opts[0], label_visibility="collapsed")
 
-      if   sel_iw and "4+ Weak"   in sel_iw:
+    if   sel_iw and "4+ Weak"   in sel_iw:
         iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
     elif sel_iw and "Near High" in sel_iw:
         iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
@@ -505,13 +505,12 @@ if sel_status and "Intraday Watch" in sel_status:
         iw_view = iw_data
 
     if iw_view:
-        sample_days = iw_view[0]["days"]
-        date_labels = [d["date_label"] for d in sample_days[-6:]]
-        n_days = len(date_labels)
+        sample_days  = iw_view[0]["days"]
+        date_labels  = [d["date_label"] for d in sample_days[-6:]]
+        n_days       = len(date_labels)
 
         # All columns are filterable (0-based within date_labels)
         FILTER_COL_INDICES = set(range(n_days))
-        
 
         def _vol_emoji(vol_signal):
             if "Explosive" in vol_signal: return "🔥"
