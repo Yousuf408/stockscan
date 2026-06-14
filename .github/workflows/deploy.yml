@@ -15,4 +15,4 @@ jobs:
         run: |
           curl -X POST \
             https://huggingface.co/api/spaces/Md1360408/smartswing/restart \
-            -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}"
+           -H "Authorization: Bearer ${{ secrets.HF_KEY }}"
