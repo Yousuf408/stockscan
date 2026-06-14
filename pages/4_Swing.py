@@ -418,14 +418,14 @@ if all_results:
     bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal", ""))
     wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal", ""))
 
-    status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
-    sel_status  = st.pills("Status", status_opts, default=status_opts[0],
-                           label_visibility="collapsed")
+  status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
+    sel_status  = st.selectbox("Status", status_opts, index=0,
+                               label_visibility="collapsed", key="status_filter")
 
-    vol_opts = ["All signals", f"🔥 Explosive ({ex_n})", f"🟢 Strong ({st_n})",
+  vol_opts = ["All signals", f"🔥 Explosive ({ex_n})", f"🟢 Strong ({st_n})",
                 f"🟡 Build ({bu_n})", f"🔴 Weak ({wk_n})"]
-    sel_vol  = st.pills("Vol signal", vol_opts, default=vol_opts[0],
-                        label_visibility="collapsed")
+    sel_vol  = st.selectbox("Vol signal", vol_opts, index=0,
+                            label_visibility="collapsed", key="vol_filter")
 
     if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
     elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
@@ -466,8 +466,8 @@ if not all_results:
 # - All columns are now filterable
 # - Bigger ▼ arrows + spacing; LIVE header shows date inline
 # ─────────────────────────────────────────────────────────────────────────────
-if sel_status and "Intraday Watch" in sel_status:
-    import streamlit.components.v1 as components
+   if sel_status and "Intraday Watch" in sel_status:
+            import streamlit as components  # Alias for compatibility
 
     # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
@@ -974,11 +974,11 @@ window.addEventListener('load', function() {{
 </html>
 '''
 
-        # ── Render via components.html (proper iframe) ──
+        # ── Render via st.html (proper iframe) ──
         # Height: header (~50) + rows (~85 each) + padding
         est_height = 80 + len(iw_view) * 85
         est_height = min(max(est_height, 300), 5000)
-        components.html(full_html, height=est_height, scrolling=True)
+        st.html(full_html)  # Note: st.html doesn't support height param
 
     st.stop()
 
