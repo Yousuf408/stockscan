@@ -1,4 +1,4 @@
-name: Deploy to HF Spaces
+name: Sync to HF Spaces
 
 on:
   push:
@@ -10,9 +10,16 @@ jobs:
     
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       
-      - name: Trigger HF Rebuild
+      - name: Push to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_KEY }}
         run: |
-          curl -X POST \
-            https://huggingface.co/api/spaces/Md1360408/smartswing/restart \
-           -H "Authorization: Bearer ${{ secrets.HF_KEY }}"
+          git config --global user.email "github@example.com"
+          git config --global user.name "GitHub Actions"
+          
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/Md1360408/smartswing
+          
+          git push -f hf main
