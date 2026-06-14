@@ -5,10 +5,10 @@ from SmartApi.smartConnect import SmartConnect
 # =====================================================================
 # 1. ENTER YOUR ANGEL ONE CREDENTIALS HERE
 # =====================================================================
-API_KEY = "YOUR_API_KEY"
-CLIENT_CODE = "YOUR_CLIENT_CODE"
-PASSWORD = "YOUR_PIN"
-TOTP_SECRET = "YOUR_TOTP_QR_SECRET_KEY"  # Alphanumeric secret key string
+API_KEY = "QFectj5C"
+CLIENT_CODE = "IIRA29771"
+PASSWORD = "1993"
+TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
 
 # =====================================================================
 # 2. HARDCODED TOP 10 NSE STOCKS (NO JSON PARSING REQUIRED)
