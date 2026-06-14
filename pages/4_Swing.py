@@ -413,6 +413,15 @@ if all_results:
     r_n  = sum(1 for r in all_results if r.get("status") == "READY")
     w_n  = sum(1 for r in all_results if r.get("status") == "WATCH")
     a_n  = len(all_results)
+
+    status_opts = [
+        f"ALL ({a_n})",
+        f"🔥 BLASTING ({b_n})",
+        f"✅ READY ({r_n})",
+        f"👁 WATCH ({w_n})",
+        "📊 Intraday Watch"
+    ]
+    
     ex_n = sum(1 for r in all_results if "Explosive" in r.get("vol_signal", ""))
     st_n = sum(1 for r in all_results if "Strong"    in r.get("vol_signal", ""))
     bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal", ""))
