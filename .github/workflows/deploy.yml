@@ -13,5 +13,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git remote add space https://md1360408:$HF_TOKEN@huggingface.co/spaces/md1360408/smartswing
+          git config --global credential.helper store
+          echo "https://md1360408:${HF_TOKEN}@huggingface.co" > ~/.git-credentials
+          git remote add space https://huggingface.co/spaces/md1360408/smartswing
           git push --force space main
