@@ -421,14 +421,13 @@ if all_results:
         f"👁 WATCH ({w_n})",
         "📊 Intraday Watch"
     ]
-    
-    ex_n = sum(1 for r in all_results if "Explosive" in r.get("vol_signal", ""))
-    st_n = sum(1 for r in all_results if "Strong"    in r.get("vol_signal", ""))
-    bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal", ""))
-    wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal", ""))
 
-   
-       sel_status = st.selectbox(
+    ex_n = sum(1 for r in all_results if "Explosive" in r.get("vol_signal", ""))
+    st_n = sum(1 for r in all_results if "Strong" in r.get("vol_signal", ""))
+    bu_n = sum(1 for r in all_results if "Build" in r.get("vol_signal", ""))
+    wk_n = sum(1 for r in all_results if "Weak" in r.get("vol_signal", ""))
+
+    sel_status = st.selectbox(
         "Status",
         status_opts,
         index=0,
@@ -452,22 +451,6 @@ if all_results:
         key="vol_filter"
     )
 
-    if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel_status and "WATCH"           in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
-    elif sel_status and "Intraday Watch"  in sel_status: view = []
-    else:                                                view = all_results
-
-    if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
-    elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
-    elif sel_vol and "Build"     in sel_vol: view = [r for r in view if "Build"     in r.get("vol_signal", "")]
-    elif sel_vol and "Weak"      in sel_vol: view = [r for r in view if "Weak"      in r.get("vol_signal", "")]
-
-    st.markdown(
-        f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 8px;'>"
-        f"Showing {len(view)} stocks</div>",
-        unsafe_allow_html=True,
-    )
 else:
     view = []
 
