@@ -1,0 +1,14 @@
+name: Sync to Hugging Face
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git push https://md1360408:$HF_TOKEN@huggingface.co/spaces/md1360408/smartswing main
