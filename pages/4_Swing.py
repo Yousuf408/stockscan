@@ -474,9 +474,9 @@ if not all_results:
 # - All columns are now filterable
 # - Bigger ▼ arrows + spacing; LIVE header shows date inline
 # ─────────────────────────────────────────────────────────────────────────────
-   if sel_status and "Intraday Watch" in sel_status:
-            import streamlit as components  # Alias for compatibility
-
+  if sel_status and "Intraday Watch" in sel_status:
+    import streamlit.components.v1 as components
+      
     # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
         with st.spinner("Loading intraday watch data..."):
