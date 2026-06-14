@@ -1,0 +1,18 @@
+name: Deploy to HF Spaces
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Trigger HF Rebuild
+        run: |
+          curl -X POST \
+            https://huggingface.co/api/spaces/Md1360408/smartswing/restart \
+            -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}"
