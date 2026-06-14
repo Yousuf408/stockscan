@@ -627,6 +627,7 @@ if sel_status and "Intraday Watch" in sel_status:
                 f'<td class="stock-cell">'
                 f'<div class="sym">{sym}</div>'
                 f'<div class="prc">₹{prc:,.0f} <span style="color:{dir_color_iw}; font-size:14px;">{dir_arrow_iw}</span> <span style="color:{dir_color_iw};">{pct_avg_iw:+.1f}%</span></div>'
+                f'<div style="font-size:10px; color:#6b7280; margin-top:2px;">5D Avg: ₹{r.get("avg_5d_price_iw", 0):,.0f}</div>'
                 f'</td>'
             )
 
@@ -1117,3 +1118,4 @@ if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
             st.markdown(f"`{e['symbol']}` — {e['error']}")
+            
