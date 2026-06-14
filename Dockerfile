@@ -8,7 +8,7 @@ USER user
 
 ENV HOME=/home/user PATH=/home/user/.local/bin:$PATH
 
-RUN pip install --no-cache-dir --upgrade -r requirements.txt streamlit==1.28.0
+RUN pip install --no-cache-dir --upgrade -r requirements.txt streamlit==1.35.0
 
 EXPOSE 7860
 ENV STREAMLIT_SERVER_PORT=7860 STREAMLIT_SERVER_ADDRESS=0.0.0.0
