@@ -427,14 +427,30 @@ if all_results:
     bu_n = sum(1 for r in all_results if "Build"     in r.get("vol_signal", ""))
     wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal", ""))
 
-  status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
-    sel_status  = st.selectbox("Status", status_opts, index=0,
-                               label_visibility="collapsed", key="status_filter")
+   status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
+       sel_status = st.selectbox(
+        "Status",
+        status_opts,
+        index=0,
+        label_visibility="collapsed",
+        key="status_filter"
+    )
 
-  vol_opts = ["All signals", f"🔥 Explosive ({ex_n})", f"🟢 Strong ({st_n})",
-                f"🟡 Build ({bu_n})", f"🔴 Weak ({wk_n})"]
-    sel_vol  = st.selectbox("Vol signal", vol_opts, index=0,
-                            label_visibility="collapsed", key="vol_filter")
+    vol_opts = [
+        "All signals",
+        f"🔥 Explosive ({ex_n})",
+        f"🟢 Strong ({st_n})",
+        f"🟡 Build ({bu_n})",
+        f"🔴 Weak ({wk_n})"
+    ]
+
+    sel_vol = st.selectbox(
+        "Vol signal",
+        vol_opts,
+        index=0,
+        label_visibility="collapsed",
+        key="vol_filter"
+    )
 
     if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
     elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
