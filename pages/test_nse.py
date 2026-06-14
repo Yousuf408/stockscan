@@ -1,6 +1,14 @@
+import streamlit as pd_st
+import streamlit as st
 import pyotp
 import pandas as pd
 from SmartApi.smartConnect import SmartConnect
+
+# Page configuration
+st.set_page_config(page_title="Angel One API Test", page_icon="🟢", layout="wide")
+
+st.title("📊 Angel One API Connection Test")
+st.markdown("This page verifies if your credentials and live token handshakes are operating properly.")
 
 # =====================================================================
 # 1. ENTER YOUR ANGEL ONE CREDENTIALS HERE
@@ -10,10 +18,8 @@ CLIENT_CODE = "IIRA29771"
 PASSWORD = "1993"
 TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
 
-# =====================================================================
-# 2. HARDCODED TOP 10 NSE STOCKS (NO JSON PARSING REQUIRED)
-# =====================================================================
-# These specific numerical mapping IDs do not change arbitrarily.
+
+# Hardcoded tokens for instant validation
 HARDCODED_STOCKS = {
     "1398": "RELIANCE-EQ",
     "1333": "HDFCBANK-EQ",
@@ -24,60 +30,52 @@ HARDCODED_STOCKS = {
     "10604": "BHARTIARTL-EQ",
     "1660": "ITC-EQ",
     "3456": "TATAMOTORS-EQ",
-    "11630": "NIFTY-BEES" # High volume ETF for tracking benchmark
+    "11630": "NIFTY-BEES"
 }
 
-def verify_direct_connection():
-    # Convert keys to a clean string list for the API payload
+# Add a manual trigger button on the dashboard
+if st.button("🚀 Run Live Connection Test"):
     tokens = list(HARDCODED_STOCKS.keys())
-    
-    # Initialize SDK Connection
     obj = SmartConnect(api_key=API_KEY)
     
-    try:
-        # Generate current 2FA code dynamically
-        totp_auth = pyotp.TOTP(TOTP_SECRET).now()
-        
-        print("🔐 Sending authentication packet directly to Angel One servers...")
-        session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
-        
-        if session_data.get('status') is False:
-            print(f"❌ Connection Handshake Denied: {session_data.get('message')}")
-            return
+    with st.spinner("🔐 Authenticating and connecting to Angel One Servers..."):
+        try:
+            # Generate TOTP 2FA
+            totp_auth = pyotp.TOTP(TOTP_SECRET).now()
+            session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
             
-        print("✅ Session active! Fetching live price & volume matrix...")
-        
-        # Requesting FULL snapshot (Provides Price + Accumulated Day Volume)
-        market_data = obj.getMarketData("FULL", {"NSE": tokens})
-        
-        if market_data.get('status') and 'data' in market_data:
-            fetched_list = market_data['data'].get('fetched', [])
-            
-            dashboard_rows = []
-            for item in fetched_list:
-                token_id = item.get('symbolToken')
-                dashboard_rows.append({
-                    "Stock Ticker": HARDCODED_STOCKS.get(token_id, item.get('tradingSymbol')),
-                    "Token": token_id,
-                    "Live LTP (₹)": item.get('ltp'),
-                    "Volume Traded": item.get('volume'),
-                    "Day High (₹)": item.get('high'),
-                    "Day Low (₹)": item.get('low')
-                })
-            
-            # Print layout output
-            df_dashboard = pd.DataFrame(dashboard_rows)
-            print("\n" + "="*72)
-            print("         🟢 TEST PASSED: ANGEL ONE API COMMUNICATING FLAWLESSLY")
-            print("="*72)
-            print(df_dashboard.to_string(index=False))
-            print("="*72)
-            
-        else:
-            print(f"⚠️ Authenticated, but could not extract instrument data: {market_data.get('message')}")
-            
-    except Exception as e:
-        print(f"💥 Runtime Exception: {str(e)}")
-
-if __name__ == "__main__":
-    verify_direct_connection()
+            if session_data.get('status') is False:
+                st.error(f"❌ Connection Handshake Denied: {session_data.get('message')}")
+            else:
+                st.success("✅ Session Authenticated Successfully! Fetching live rates...")
+                
+                # Request Data
+                market_data = obj.getMarketData("FULL", {"NSE": tokens})
+                
+                if market_data.get('status') and 'data' in market_data:
+                    fetched_list = market_data['data'].get('fetched', [])
+                    
+                    dashboard_rows = []
+                    for item in fetched_list:
+                        token_id = item.get('symbolToken')
+                        dashboard_rows.append({
+                            "Stock Ticker": HARDCODED_STOCKS.get(token_id, item.get('tradingSymbol')),
+                            "Token ID": token_id,
+                            "Live LTP (₹)": item.get('ltp'),
+                            "Volume Traded": item.get('volume'),
+                            "Day High (₹)": item.get('high'),
+                            "Day Low (₹)": item.get('low')
+                        })
+                    
+                    # Create Dataframe and render it visually on screen
+                    df = pd.DataFrame(dashboard_rows)
+                    
+                    st.subheader("🟢 Live Market Feed Matrix")
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    st.warning(f"⚠️ Authenticated, but data fetch empty: {market_data.get('message')}")
+                    
+        except Exception as e:
+            st.error(f"💥 Runtime Error: {str(e)}")
+else:
+    st.info("Click the 'Run Live Connection Test' button above to initialize the API handshake.")
