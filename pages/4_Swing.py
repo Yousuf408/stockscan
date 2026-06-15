@@ -551,7 +551,7 @@ if sel_status and "Intraday Watch" in sel_status:
         cur_high  = live_high  if live_high  and live_high  > 0 else live_close
         cur_low   = live_low   if live_low   and live_low   > 0 else live_close
         cur_close = live_close
-        cur_date  = str(live_date)[-2:] if live_date else "today",
+        cur_date  = datetime.strptime(str(live_date), "%Y-%m-%d").strftime("%d") if live_date else "today",
 
         return price_svg(
             opens   = hist_opens,
