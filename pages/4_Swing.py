@@ -613,6 +613,20 @@ if sel_status and "Intraday Watch" in sel_status:
   </div>
   <div class="dd-dot" id="col-live-dot"></div>
   {_iw_dropdown("col-live")}
+</th>
+<th class="date-col ab-break-col">
+  <div class="date-trigger" onclick="toggleDD('iw-break-dd')">
+    <span class="date-text">BREAKOUT TYPE</span><span class="dd-arrow">▼</span>
+  </div>
+  <div class="dd-dot" id="iw-break-dot"></div>
+  <div id="iw-break-dd" class="dd-menu">
+    <div class="dd-section">Breakout Type</div>
+    <label class="dd-opt"><input type="checkbox" data-iwf="break" value="accumulation"> Accumulation</label>
+    <label class="dd-opt"><input type="checkbox" data-iwf="break" value="washout"> Washout</label>
+    <label class="dd-opt"><input type="checkbox" data-iwf="break" value="shakeout"> Shakeout</label>
+    <div class="dd-divider"></div>
+    <div class="dd-clear"><button type="button" onclick="iwClearBreak()">Clear</button></div>
+  </div>
 </th>'''
 
         rows = ""
@@ -628,8 +642,29 @@ if sel_status and "Intraday Watch" in sel_status:
             if pct_avg_iw > 1: iw_dir = "up"
             elif pct_avg_iw < -1: iw_dir = "down"
             else: iw_dir = "side"
+            
+            # Calculate breakout type using SQL logic
+            # Baseline: oldest day, Selection: 5th day (if exists)
+            if len(days) >= 5:
+                vol_base = days[0]["vol_ratio"]
+                vol_sel = days[4]["vol_ratio"]
+            else:
+                vol_base = days[0]["vol_ratio"] if days else 0
+                vol_sel = days[-1]["vol_ratio"] if days else 0
+            
+            vol_improve = vol_sel - vol_base
+            
+            if vol_improve >= 2.5:
+                breakout_type = "Accumulation"
+                btype_lower = "accumulation"
+            elif vol_base > 0.8:
+                breakout_type = "Washout"
+                btype_lower = "washout"
+            else:
+                breakout_type = "Shakeout"
+                btype_lower = "shakeout"
 
-            d_attrs = f' data-iw-dir="{iw_dir}"'
+            d_attrs = f' data-iw-dir="{iw_dir}" data-iw-break="{btype_lower}"'
             for col_idx in range(n_days):
                 day_idx = col_idx if col_idx < len(days) else -1
                 col_id_attr = f"col-{col_idx}"
@@ -668,7 +703,18 @@ if sel_status and "Intraday Watch" in sel_status:
                      f'<span class="cell-emoji">{live_emoji}</span>'
                      f'<span class="cell-cat">{live_cat}</span>'
                      f'<span class="cell-ratio">{live_ratio}</span>'
-                     f'</div></td></tr>')
+                     f'</div></td>')
+            
+            # Breakout type badge
+            btype_style = {
+                "Accumulation": "background:#f3f0ff;color:#5b21b6;border:0.5px solid #c4b5fd",
+                "Washout":      "background:#fff7ed;color:#9a3412;border:0.5px solid #fed7aa",
+                "Shakeout":     "background:#f0fdf4;color:#166534;border:0.5px solid #86efac"
+            }.get(breakout_type, "background:#f3f4f6;color:#374151")
+            
+            rows += (f'<td class="data-cell break-cell">'
+                     f'<span style="display:inline-block;font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;{btype_style};">'
+                     f'{breakout_type}</span></td></tr>')
         return header, rows
 
     def _iw_dropdown(col_id):
@@ -1036,6 +1082,12 @@ function iwClearDir() {{
   iwApplyFilter();
 }}
 
+function iwClearBreak() {{
+  document.querySelectorAll('input[data-iwf="break"]').forEach(function(cb){{cb.checked=false;}});
+  document.getElementById('iw-break-dd').classList.remove('open');
+  iwApplyFilter();
+}}
+
 function iwClearCol(colId) {{
   document.querySelectorAll('input[data-col="'+colId+'"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById(colId+'-dd').classList.remove('open');
@@ -1044,7 +1096,9 @@ function iwClearCol(colId) {{
 
 function iwApplyFilter() {{
   var dirVals=Array.from(document.querySelectorAll('input[data-iwf="dir"]:checked')).map(function(c){{return c.value;}});
+  var breakVals=Array.from(document.querySelectorAll('input[data-iwf="break"]:checked')).map(function(c){{return c.value;}});
   document.getElementById('iw-dir-dot').className='dd-dot'+(dirVals.length?' active':'');
+  document.getElementById('iw-break-dot').className='dd-dot'+(breakVals.length?' active':'');
   
   var colFilters={{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb){{
@@ -1063,7 +1117,8 @@ function iwApplyFilter() {{
   var visible=0;
   rows.forEach(function(row){{
     var showDir=!dirVals.length||dirVals.indexOf(row.getAttribute('data-iw-dir'))>=0;
-    var show=showDir;
+    var showBreak=!breakVals.length||breakVals.indexOf(row.getAttribute('data-iw-break'))>=0;
+    var show=showDir&&showBreak;
     Object.keys(colFilters).forEach(function(col){{
       var f=colFilters[col];
       var rs=row.getAttribute('data-'+col+'-sig')||'';
@@ -1074,7 +1129,7 @@ function iwApplyFilter() {{
     row.style.display=show?'':'none';
     if(show) visible++;
   }});
-  var anyActive=dirVals.length>0||Object.keys(colFilters).length>0;
+  var anyActive=dirVals.length>0||breakVals.length>0||Object.keys(colFilters).length>0;
   document.getElementById('iw-count').textContent=anyActive?('Showing '+visible+' of '+IW_TOTAL+' stocks'):('Showing '+IW_TOTAL+' stocks');
 }}
 
