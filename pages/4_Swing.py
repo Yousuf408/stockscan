@@ -247,7 +247,7 @@ with c1:
     lbl = "✕ Manage" if st.session_state.sw_show_manage else "⚙ Manage Stocks"
     if st.button(lbl, use_container_width=True):
         st.session_state.sw_show_manage = not st.session_state.sw_show_manage
-        st.rerun()
+        # st.rerun()  # DISABLED - causing infinite loop
 
 with c2:
     if st.button("🔄 Sync 5D", use_container_width=True,
@@ -265,7 +265,7 @@ with c2:
             st.info(f"✅ All {res['skipped']} symbols already up to date")
         if res["errors"]:
             st.warning(f"⚠ {len(res['errors'])} errors")
-        st.rerun()
+        # st.rerun()  # DISABLED - causing infinite loop
 
 with c3:
     from swing_core import can_refresh, refresh_label
@@ -279,7 +279,7 @@ with c3:
         results, errors = load_from_db()
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
-        st.rerun()
+        # st.rerun()  # DISABLED - causing infinite loop
 
 with c4:
     if st.button("🗑 Clear", use_container_width=True,
@@ -287,7 +287,7 @@ with c4:
         st.session_state.sw_results = []
         st.session_state.sw_errors  = []
         st.session_state.sw_loaded  = False
-        st.rerun()
+        # st.rerun()  # DISABLED - causing infinite loop
 
 with c5:
     blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
@@ -325,7 +325,7 @@ with c5:
                 st.success(f"✅ Saved {res['saved']} history rows")
             if res["errors"]:
                 st.warning(f"⚠ {len(res['errors'])} errors")
-            st.rerun()
+            # st.rerun()  # DISABLED - causing infinite loop
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
@@ -350,7 +350,7 @@ if st.session_state.sw_show_manage:
                         add_swing_stock(sym.strip(), url.strip(), bd, note.strip())
                         refresh_cache()
                         st.success(f"✅ {sym.upper()} added.")
-                        st.rerun()
+                        # st.rerun()  # DISABLED - causing infinite loop
                     except ValueError as e: st.warning(str(e))
                     except Exception as e:  st.error(str(e))
 
@@ -367,7 +367,7 @@ if st.session_state.sw_show_manage:
                 if res["added"]:   st.success(f"✅ Added: {', '.join(res['added'])}")
                 if res["skipped"]: st.info(f"⏭ Already exists: {', '.join(res['skipped'])}")
                 if res["errors"]:  st.error(f"❌ Failed: {', '.join(res['errors'])}")
-                st.rerun()
+                # st.rerun()  # DISABLED - causing infinite loop
 
     with t3:
         curr = refresh_cache()
@@ -393,14 +393,14 @@ if st.session_state.sw_show_manage:
                         try:
                             update_swing_stock(s["id"], {"breakout_date": str(new_bd)})
                             refresh_cache()
-                            st.rerun()
+                            # st.rerun()  # DISABLED - causing infinite loop
                         except Exception as e: st.error(str(e))
                 with r5:
                     if st.button("✕", key=f"del_{s['id']}"):
                         try:
                             delete_swing_stock(s["id"])
                             refresh_cache()
-                            st.rerun()
+                            # st.rerun()  # DISABLED - causing infinite loop
                         except Exception as e: st.error(str(e))
 
     st.markdown("---")
