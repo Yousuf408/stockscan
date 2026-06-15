@@ -435,26 +435,25 @@ if all_results:
         f"🔴 Weak ({wk_n})"
     ]
 
-    # Side-by-side filters
-    col_status, col_vol = st.columns(2)
+    # Status pills (horizontal buttons)
+    sel_status = st.radio(
+        "Status",
+        status_opts,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="status_filter"
+    )
 
-    with col_status:
-        sel_status = st.selectbox(
-            "Status",
-            status_opts,
-            index=0,
-            label_visibility="collapsed",
-            key="status_filter"
-        )
-
-    with col_vol:
-        sel_vol = st.selectbox(
-            "Vol signal",
-            vol_opts,
-            index=0,
-            label_visibility="collapsed",
-            key="vol_filter"
-        )
+    # Vol signal pills (horizontal buttons)
+    sel_vol = st.radio(
+        "Vol signal",
+        vol_opts,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="vol_filter"
+    )
 
     if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
     elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
