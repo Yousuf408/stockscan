@@ -581,7 +581,22 @@ if sel_status and "Intraday Watch" in sel_status:
 
     # ── Build Intraday Watch rows ──
     def build_iw_rows(iw_view, date_labels, n_days, live_date_hdr):
-        header = '<th class="stock-col">STOCK</th><th class="chart-col">PRICE CANDLES</th><th class="chart-col">VOLUME RATIO</th>'
+        header = '''<th class="stock-col">
+  <div class="date-trigger" onclick="toggleDD('iw-dir-dd')">
+    <span class="date-text">STOCK</span><span class="dd-arrow">▼</span>
+  </div>
+  <div class="dd-dot" id="iw-dir-dot"></div>
+  <div id="iw-dir-dd" class="dd-menu">
+    <div class="dd-section">Price Direction</div>
+    <label class="dd-opt"><input type="checkbox" data-iwf="dir" value="up"> ↑ Upside</label>
+    <label class="dd-opt"><input type="checkbox" data-iwf="dir" value="down"> ↓ Downside</label>
+    <label class="dd-opt"><input type="checkbox" data-iwf="dir" value="side"> → Sideways</label>
+    <div class="dd-divider"></div>
+    <div class="dd-clear"><button type="button" onclick="iwClearDir()">Clear</button></div>
+  </div>
+</th>
+<th class="chart-col">PRICE CANDLES</th>
+<th class="chart-col">VOLUME RATIO</th>'''
         for i, lbl in enumerate(date_labels):
             header += f'''
 <th class="date-col filterable" data-colid="col-{i}">
@@ -608,8 +623,13 @@ if sel_status and "Intraday Watch" in sel_status:
             dir_arrow_iw = r.get("direction_arrow_iw", "→")
             dir_color_iw = r.get("direction_color_iw", "#6b7280")
             days = r["days"][-6:]
+            
+            # Determine direction for filtering
+            if pct_avg_iw > 1: iw_dir = "up"
+            elif pct_avg_iw < -1: iw_dir = "down"
+            else: iw_dir = "side"
 
-            d_attrs = ""
+            d_attrs = f' data-iw-dir="{iw_dir}"'
             for col_idx in range(n_days):
                 day_idx = col_idx if col_idx < len(days) else -1
                 col_id_attr = f"col-{col_idx}"
@@ -1010,6 +1030,12 @@ document.addEventListener('click', function(e) {{
 }});
 
 /* ── Intraday Watch filter ── */
+function iwClearDir() {{
+  document.querySelectorAll('input[data-iwf="dir"]').forEach(function(cb){{cb.checked=false;}});
+  document.getElementById('iw-dir-dd').classList.remove('open');
+  iwApplyFilter();
+}}
+
 function iwClearCol(colId) {{
   document.querySelectorAll('input[data-col="'+colId+'"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById(colId+'-dd').classList.remove('open');
@@ -1017,6 +1043,9 @@ function iwClearCol(colId) {{
 }}
 
 function iwApplyFilter() {{
+  var dirVals=Array.from(document.querySelectorAll('input[data-iwf="dir"]:checked')).map(function(c){{return c.value;}});
+  document.getElementById('iw-dir-dot').className='dd-dot'+(dirVals.length?' active':'');
+  
   var colFilters={{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb){{
     var col=cb.getAttribute('data-col');
@@ -1033,7 +1062,8 @@ function iwApplyFilter() {{
   var rows=document.querySelectorAll('#iw-body .iw-row');
   var visible=0;
   rows.forEach(function(row){{
-    var show=true;
+    var showDir=!dirVals.length||dirVals.indexOf(row.getAttribute('data-iw-dir'))>=0;
+    var show=showDir;
     Object.keys(colFilters).forEach(function(col){{
       var f=colFilters[col];
       var rs=row.getAttribute('data-'+col+'-sig')||'';
@@ -1044,7 +1074,7 @@ function iwApplyFilter() {{
     row.style.display=show?'':'none';
     if(show) visible++;
   }});
-  var anyActive=Object.keys(colFilters).length>0;
+  var anyActive=dirVals.length>0||Object.keys(colFilters).length>0;
   document.getElementById('iw-count').textContent=anyActive?('Showing '+visible+' of '+IW_TOTAL+' stocks'):('Showing '+IW_TOTAL+' stocks');
 }}
 
@@ -1075,6 +1105,9 @@ function abApplyFilter() {{
 }}
 
 document.querySelectorAll('input[data-col]').forEach(function(cb){{
+  cb.addEventListener('change',function(){{iwApplyFilter();}});
+}});
+document.querySelectorAll('input[data-iwf]').forEach(function(cb){{
   cb.addEventListener('change',function(){{iwApplyFilter();}});
 }});
 document.querySelectorAll('input[data-abf]').forEach(function(cb){{
