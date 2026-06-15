@@ -468,15 +468,11 @@ if not all_results:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INTRADAY WATCH SECTION  ← v4.4 (column filter dropdowns via components.html)
-# - Uses streamlit.components.v1.html for proper JS execution in iframe
-# - Multi-column AND filtering (Vol Signal + Status checkboxes)
-# - All columns are now filterable
-# - Bigger ▼ arrows + spacing; LIVE header shows date inline
+# INTRADAY WATCH SECTION
 # ─────────────────────────────────────────────────────────────────────────────
-  if sel_status and "intraday watch" in sel_status:
+if sel_status and "Intraday Watch" in sel_status:
     import streamlit.components.v1 as components
-      
+
     # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
         with st.spinner("Loading intraday watch data..."):
@@ -500,8 +496,8 @@ if not all_results:
         f"Near High <3% ({iw_near_n})",
         f"Vol > 50K ({iw_vol50_n})",
     ]
-    sel_iw = st.pills("Intraday Filter", iw_filter_opts,
-                      default=iw_filter_opts[0], label_visibility="collapsed")
+    sel_iw = st.selectbox("Intraday Filter", iw_filter_opts,
+                          index=0, label_visibility="collapsed", key="iw_filter")
 
     if   sel_iw and "4+ Weak"   in sel_iw:
         iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
