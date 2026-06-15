@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — login.py  v1.0
+#  TRADE SENTRY — login.py  v1.1
 #  Email login / signup using Supabase Auth (plain requests — no supabase client)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -97,7 +97,8 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = user.get("id", "")
     st.session_state["user_email"]   = user.get("email", "")
     st.session_state["access_token"] = data.get("access_token", "")
- save_refresh_token(data.get("refresh_token", ""))
+    save_refresh_token(data.get("refresh_token", ""))
+
 
 def logout():
     token = get_access_token()
@@ -105,7 +106,7 @@ def logout():
         auth_sign_out(token)
     for k in ["user_id", "user_email", "access_token", "results", "scan_log"]:
         st.session_state.pop(k, None)
-        delete_refresh_token()
+    delete_refresh_token()
     st.rerun()
 
 
@@ -130,6 +131,8 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ── Auto-redirect if already logged in via cookie ──
 restore_session()
 if st.session_state.get("user_id"):
     st.switch_page("pages/scanner.py")
