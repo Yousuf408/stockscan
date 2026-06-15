@@ -1,5 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.2
+#  TRADE SENTRY — swing_core.py  v4.3
+#  v4.3: populate_status_history() now saves open,high,low to swing_status_history
+#        get_intraday_watch() now fetches open,high,low from swing_status_history
+#        days[] array now includes open,high,low for real OHLC candles
 #  v4.2: Day-based refresh gate — allows refresh any day, stores last trading day
 #  v4.1: Added populate_status_history() — saves last 10 days status snapshot
 #        to swing_status_history table. Called by "Populate History" button.
@@ -324,7 +327,7 @@ def _build_result(sym: str, hist_rows: list, live_row: dict, meta: dict) -> dict
     status      = _calc_status(current_price, max_close, current_vol, hist_volumes, vol_ratio)
     vol_signal  = _vol_signal(vol_ratio)
     pct_vs_high = round(((current_price - max_close) / max_close) * 100, 1) if max_close else 0
-    
+
     # Calculate 5D average price and direction
     avg_5d_price = round(sum(hist_closes) / len(hist_closes), 2) if hist_closes else current_price
     pct_vs_avg = round(((current_price - avg_5d_price) / avg_5d_price) * 100, 1) if avg_5d_price else 0
@@ -671,15 +674,15 @@ def refresh_live() -> dict:
         if v == 0:
             v = 1
 
-        context = df.tail(5)
+        context        = df.tail(5)
         context_closes = [float(x) for x in context["Close"].tolist()]
-        context_vols = [int(x) for x in context["Volume"].tolist()]
-        max_close = max(context_closes) if context_closes else c
-        clean_vols = [x for x in context_vols if x > 0]
-        median_vol = statistics.median(clean_vols) if clean_vols else 1
-        vol_ratio = round(v / median_vol, 2) if median_vol > 0 else 0
-        vol_signal = _vol_signal(vol_ratio)
-        status = _calc_status(c, max_close, v, context_vols, vol_ratio)
+        context_vols   = [int(x)   for x in context["Volume"].tolist()]
+        max_close      = max(context_closes) if context_closes else c
+        clean_vols     = [x for x in context_vols if x > 0]
+        median_vol     = statistics.median(clean_vols) if clean_vols else 1
+        vol_ratio      = round(v / median_vol, 2) if median_vol > 0 else 0
+        vol_signal     = _vol_signal(vol_ratio)
+        status         = _calc_status(c, max_close, v, context_vols, vol_ratio)
         vol_signal_clean = vol_signal.split("(")[0].strip()
 
         to_save.append({
@@ -735,7 +738,8 @@ def refresh_live() -> dict:
 
 def populate_status_history() -> dict:
     """
-    Populate swing_status_history with last HISTORY_DAYS (10) trading days.
+    v4.3: Populate swing_status_history with last HISTORY_DAYS (10) trading days.
+    Now saves open, high, low in addition to close, volume, vol_ratio, vol_signal, status.
 
     For each symbol × each day:
       - Use 5-row context window ending on that day to calculate median_vol
@@ -777,10 +781,15 @@ def populate_status_history() -> dict:
                 continue  # holiday or no data for this day
 
             row_data = matching.iloc[0]
+
+            # v4.3: read full OHLCV
+            o = float(row_data["Open"])
+            h = float(row_data["High"])
+            l = float(row_data["Low"])
             c = float(row_data["Close"])
             v = int(row_data["Volume"])
 
-            if not c or not v:
+            if not all([o, h, l, c, v]):
                 continue
 
             # Context: up to 5 rows ending on req_date for median/status calc
@@ -802,10 +811,14 @@ def populate_status_history() -> dict:
             # Strip ratio from vol_signal for clean DB storage e.g. "🔥 Explosive"
             vs_clean = vs.split("(")[0].strip()
 
+            # v4.3: save open, high, low alongside existing fields
             to_save.append({
                 "user_id":    uid,
                 "symbol":     sym,
                 "trade_date": req_date.isoformat(),
+                "open":       round(o, 2),
+                "high":       round(h, 2),
+                "low":        round(l, 2),
                 "close":      round(c, 2),
                 "volume":     v,
                 "vol_ratio":  vol_ratio,
@@ -865,19 +878,23 @@ def populate_status_history() -> dict:
 
 def get_intraday_watch() -> list:
     """
-    Fetch last 8 trading days from swing_status_history +
+    v4.3: Fetch last 8 trading days from swing_status_history (now includes open,high,low) +
     today's live signal from swing_live_data.
 
     Returns list of dicts per symbol:
     {
-        symbol        : str
-        days          : [ {date, date_label, status, vol_signal, vol_ratio}, ... ]  ← 8 days oldest→newest
-        live_signal   : str   ← today's vol_signal from swing_live_data
-        live_price    : float ← today's close from swing_live_data
-        high_8d       : float ← max close in last 8 days from swing_status_history
-        pct_vs_high   : float ← (live_price - high_8d) / high_8d * 100
-        consec_weak   : int   ← max consecutive WATCH+Weak days in last 8 days
-        min_vol       : int   ← min daily volume in last 8 days
+        symbol          : str
+        days            : [ {date, date_label, status, vol_signal, vol_ratio,
+                              open, high, low, close, volume}, ... ]  ← 8 days oldest→newest
+        live_signal     : str   ← today's vol_signal from swing_live_data
+        live_price      : float ← today's close from swing_live_data
+        live_open       : float ← today's open from swing_live_data
+        live_high       : float ← today's high from swing_live_data
+        live_low        : float ← today's low from swing_live_data
+        high_8d         : float ← max close in last 8 days from swing_status_history
+        pct_vs_high     : float ← (live_price - high_8d) / high_8d * 100
+        consec_weak     : int   ← max consecutive WATCH+Weak days in last 8 days
+        min_vol         : int   ← min daily volume in last 8 days
     }
     Sorted: most recent Explosive/Strong first, then by consec_weak desc.
     """
@@ -886,12 +903,13 @@ def get_intraday_watch() -> list:
         return []
 
     # ── Query 1: last 8 trading days from swing_status_history ──
+    # v4.3: now fetches open, high, low too
     required_days = _last_n_trading_days(8)
     from_d        = min(required_days).isoformat()
 
     try:
         hist_rows = _fetch_all_rows("swing_status_history", uid, {
-            "select":     "symbol,trade_date,close,volume,vol_ratio,vol_signal,status",
+            "select":     "symbol,trade_date,open,high,low,close,volume,vol_ratio,vol_signal,status",
             "trade_date": f"gte.{from_d}",
             "order":      "symbol.asc,trade_date.asc",
         })
@@ -901,10 +919,11 @@ def get_intraday_watch() -> list:
         return []
 
     # ── Query 2: today's live data from swing_live_data ──
+    # v4.3: now fetches open, high, low too
     live_map = {}
     try:
         live_rows = _fetch_all_rows("swing_live_data", uid, {
-            "select": "symbol,close,volume,trade_date",
+            "select": "symbol,trade_date,open,high,low,close,volume,vol_ratio,vol_signal,status",
         })
         for row in live_rows:
             live_map[row["symbol"]] = row
@@ -925,12 +944,11 @@ def get_intraday_watch() -> list:
         # Sort oldest → newest, take last 8
         rows = sorted(rows, key=lambda x: x["trade_date"])[-8:]
 
-        # Build day entries
+        # Build day entries — v4.3: now includes open, high, low
         days = []
         for r in rows:
-            # Clean vol_signal — strip emoji for logic, keep for display
             vs_raw   = r.get("vol_signal", "")
-            vs_clean = vs_raw.split("(")[0].strip()  # "🔴 Weak" etc
+            vs_clean = vs_raw.split("(")[0].strip()
 
             days.append({
                 "date":       r["trade_date"],
@@ -938,6 +956,9 @@ def get_intraday_watch() -> list:
                 "status":     r.get("status", "NONE"),
                 "vol_signal": vs_clean,
                 "vol_ratio":  float(r.get("vol_ratio", 0)),
+                "open":       float(r.get("open")  or 0),   # v4.3: added
+                "high":       float(r.get("high")  or 0),   # v4.3: added
+                "low":        float(r.get("low")   or 0),   # v4.3: added
                 "close":      float(r.get("close", 0)),
                 "volume":     int(r.get("volume", 0)),
             })
@@ -946,17 +967,20 @@ def get_intraday_watch() -> list:
             continue
 
         # ── Calculate metrics ──
-        # 8-day high close
         high_8d = max(d["close"] for d in days)
 
-        # Live price + signal
-        live_row    = live_map.get(sym)
-        live_price  = float(live_row["close"])      if live_row else days[-1]["close"]
-        live_vol    = int(live_row["volume"])        if live_row else 0
-        live_date   = live_row["trade_date"]         if live_row else days[-1]["date"]
+        # Live price + signal — v4.3: now pulls open, high, low from live_row
+        live_row       = live_map.get(sym)
+        live_price     = float(live_row["close"]) if live_row else days[-1]["close"]
+        live_open      = float(live_row["open"])  if live_row else days[-1]["open"]
+        live_high      = float(live_row["high"])  if live_row else days[-1]["high"]
+        live_low       = float(live_row["low"])   if live_row else days[-1]["low"]
+        live_vol       = int(live_row["volume"])  if live_row else 0
+        live_date      = live_row["trade_date"]   if live_row else days[-1]["date"]
         live_signal    = ""
         live_vol_ratio = 0.0
         live_status    = "WATCH"
+
         if live_row and live_vol:
             hist_vols    = [d["volume"] for d in days if d["volume"] > 0]
             median_vol   = statistics.median(hist_vols) if hist_vols else 1
@@ -984,7 +1008,7 @@ def get_intraday_watch() -> list:
         pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d else 0
 
         # Max consecutive WATCH+Weak streak
-        consec_weak = 0
+        consec_weak    = 0
         current_streak = 0
         for d in days:
             if d["status"] == "WATCH" and "Weak" in d["vol_signal"]:
@@ -996,12 +1020,12 @@ def get_intraday_watch() -> list:
         # Min volume in last 8 days
         vols    = [d["volume"] for d in days if d["volume"] > 0]
         min_vol = min(vols) if vols else 0
-        
+
         # Calculate 5D average price and direction for Intraday Watch
-        closes_5d = [d["close"] for d in days[-5:]] if len(days) >= 5 else [d["close"] for d in days]
+        closes_5d       = [d["close"] for d in days[-5:]] if len(days) >= 5 else [d["close"] for d in days]
         avg_5d_price_iw = sum(closes_5d) / len(closes_5d) if closes_5d else live_price
-        pct_vs_avg_iw = round(((live_price - avg_5d_price_iw) / avg_5d_price_iw) * 100, 1) if avg_5d_price_iw else 0
-        
+        pct_vs_avg_iw   = round(((live_price - avg_5d_price_iw) / avg_5d_price_iw) * 100, 1) if avg_5d_price_iw else 0
+
         if pct_vs_avg_iw > 1:
             direction_arrow_iw = "↑"
             direction_color_iw = "#16a34a"
@@ -1013,27 +1037,30 @@ def get_intraday_watch() -> list:
             direction_color_iw = "#6b7280"
 
         results.append({
-            "symbol":         sym,
-            "days":           days,
-            "live_signal":    live_signal,
-            "live_status":    live_status,
-            "live_vol_ratio": live_vol_ratio,
-            "live_price":     live_price,
-            "live_date":      live_date,
-            "high_8d":        high_8d,
-            "pct_vs_high":    pct_vs_high,
-            "pct_vs_avg_iw":  pct_vs_avg_iw,
-            "avg_5d_price_iw": avg_5d_price_iw,
-            "direction_arrow_iw": direction_arrow_iw,
-            "direction_color_iw": direction_color_iw,
-            "consec_weak":    consec_weak,
-            "min_vol":        min_vol,
+            "symbol":              sym,
+            "days":                days,
+            "live_signal":         live_signal,
+            "live_status":         live_status,
+            "live_vol_ratio":      live_vol_ratio,
+            "live_price":          live_price,
+            "live_open":           live_open,       # v4.3: added
+            "live_high":           live_high,       # v4.3: added
+            "live_low":            live_low,        # v4.3: added
+            "live_date":           live_date,
+            "high_8d":             high_8d,
+            "pct_vs_high":         pct_vs_high,
+            "pct_vs_avg_iw":       pct_vs_avg_iw,
+            "avg_5d_price_iw":     avg_5d_price_iw,
+            "direction_arrow_iw":  direction_arrow_iw,
+            "direction_color_iw":  direction_color_iw,
+            "consec_weak":         consec_weak,
+            "min_vol":             min_vol,
         })
 
     # ── Sort: recent Explosive/Strong first, then consec_weak desc ──
     def _sort_key(r):
-        last_sig   = r["days"][-1]["vol_signal"] if r["days"] else ""
-        sig_rank   = 0 if "Explosive" in last_sig else (1 if "Strong" in last_sig else 2)
+        last_sig = r["days"][-1]["vol_signal"] if r["days"] else ""
+        sig_rank = 0 if "Explosive" in last_sig else (1 if "Strong" in last_sig else 2)
         return (sig_rank, -r["consec_weak"])
 
     results.sort(key=_sort_key)
