@@ -2,7 +2,7 @@
 #  TRADE SENTRY — pages/4_Swing.py  v4.5
 #  v4.5: Fixed session state initialization + radio buttons (1.35.0 compatible)
 #        Removed st.pills → using st.radio with horizontal=True
-#        Added session state safety checks + infinite rerun prevention
+#        Added session state safety checks + infinite rerun prevention.
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
