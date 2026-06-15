@@ -436,23 +436,21 @@ if all_results:
     ]
 
     # Status pills (horizontal radio buttons)
-    sel_status = st.radio(
+   sel_status = st.radio(
         "Status",
         status_opts,
         index=0,
         horizontal=True,
-        label_visibility="collapsed",
-        key="status_filter"
+        label_visibility="collapsed"
     )
 
     # Vol signal pills (horizontal radio buttons)
-    sel_vol = st.radio(
+   sel_vol = st.radio(
         "Vol signal",
         vol_opts,
         index=0,
         horizontal=True,
-        label_visibility="collapsed",
-        key="vol_filter"
+        label_visibility="collapsed"
     )
 
     if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
@@ -517,13 +515,12 @@ if sel_status and "Intraday Watch" in sel_status:
         f"Vol > 50K ({iw_vol50_n})",
     ]
     
-    sel_iw = st.radio(
+   sel_iw = st.radio(
         "Intraday Filter",
         iw_filter_opts,
         index=0,
         horizontal=True,
-        label_visibility="collapsed",
-        key="iw_filter"
+        label_visibility="collapsed"
     )
 
     if   sel_iw and "4+ Weak"   in sel_iw:
