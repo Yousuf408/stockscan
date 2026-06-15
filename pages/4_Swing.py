@@ -1,13 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.4
-#  v4.4: Intraday Watch column filters via components.html (proper iframe).
-#        Last 2 history cols + LIVE col have ▼ dropdown with checkbox filters.
-#        Multi-column AND filtering. Live header shows date inline (e.g. 11JUN · LIVE).
-#
-#  PAGE LOAD  → auto reads DB, shows results instantly, no button needed
-#  SYNC 5D    → fetches only missing trading days from yfinance, saves hist
-#  REFRESH    → fetches today's live price, updates swing_live_data
-#  POPULATE   → one-time: calculates + saves last 10 days status snapshots
+#  TRADE SENTRY — pages/4_Swing.py  v4.5
+#  v4.5: Replaced st.pills() with button-based tabs (Streamlit Cloud compatible)
+#        No infinite loops, works on all Streamlit versions
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -22,7 +16,7 @@ from swing_core import (
     load_from_db, sync_5d_history, refresh_live,
     populate_status_history,
     get_intraday_watch,
-    fmt_vol, is_market_open,  # ← Keep this!
+    fmt_vol, is_market_open,
 )
 market_open = is_market_open()
 
@@ -94,6 +88,9 @@ for k, v in [
     ("sw_last_sync",     None),
     ("sw_last_refresh",  None),
     ("sw_last_populate", None),
+    ("sw_sel_status",    None),
+    ("sw_sel_vol",       None),
+    ("sw_sel_iw",        None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -405,7 +402,10 @@ if st.session_state.sw_show_manage:
 
     st.markdown("---")
 
-# FILTER PILLS
+# ══════════════════════════════════════════════════════════════════════════════
+# FILTER BUTTONS (Replaced st.pills with button-based tabs)
+# ══════════════════════════════════════════════════════════════════════════════
+
 all_results = st.session_state.sw_results
 
 if all_results:
@@ -419,24 +419,63 @@ if all_results:
     wk_n = sum(1 for r in all_results if "Weak"      in r.get("vol_signal", ""))
 
     status_opts = [f"ALL ({a_n})", f"🔥 BLASTING ({b_n})", f"✅ READY ({r_n})", f"👁 WATCH ({w_n})", "📊 Intraday Watch"]
-    sel_status  = st.pills("Status", status_opts, default=status_opts[0],
-                           label_visibility="collapsed")
+    
+    # Initialize status selection
+    if st.session_state.sw_sel_status is None:
+        st.session_state.sw_sel_status = status_opts[0]
+    
+    # Status buttons
+    st.markdown("**Status**")
+    status_cols = st.columns(len(status_opts))
+    for i, opt in enumerate(status_opts):
+        with status_cols[i]:
+            is_active = st.session_state.sw_sel_status == opt
+            if st.button(opt, key=f"status_{i}", 
+                        type="primary" if is_active else "secondary",
+                        use_container_width=True):
+                st.session_state.sw_sel_status = opt
 
     vol_opts = ["All signals", f"🔥 Explosive ({ex_n})", f"🟢 Strong ({st_n})",
                 f"🟡 Build ({bu_n})", f"🔴 Weak ({wk_n})"]
-    sel_vol  = st.pills("Vol signal", vol_opts, default=vol_opts[0],
-                        label_visibility="collapsed")
+    
+    # Initialize vol selection
+    if st.session_state.sw_sel_vol is None:
+        st.session_state.sw_sel_vol = vol_opts[0]
+    
+    # Vol signal buttons
+    st.markdown("**Vol Signal**")
+    vol_cols = st.columns(len(vol_opts))
+    for i, opt in enumerate(vol_opts):
+        with vol_cols[i]:
+            is_active = st.session_state.sw_sel_vol == opt
+            if st.button(opt, key=f"vol_{i}",
+                        type="primary" if is_active else "secondary",
+                        use_container_width=True):
+                st.session_state.sw_sel_vol = opt
 
-    if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel_status and "WATCH"           in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
-    elif sel_status and "Intraday Watch"  in sel_status: view = []
-    else:                                                view = all_results
+    # Filter logic
+    sel_status = st.session_state.sw_sel_status
+    sel_vol = st.session_state.sw_sel_vol
 
-    if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
-    elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
-    elif sel_vol and "Build"     in sel_vol: view = [r for r in view if "Build"     in r.get("vol_signal", "")]
-    elif sel_vol and "Weak"      in sel_vol: view = [r for r in view if "Weak"      in r.get("vol_signal", "")]
+    if sel_status and "BLASTING" in sel_status:
+        view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel_status and "READY" in sel_status:
+        view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH" in sel_status:
+        view = [r for r in all_results if r.get("status") == "WATCH"]
+    elif sel_status and "Intraday Watch" in sel_status:
+        view = []
+    else:
+        view = all_results
+
+    if sel_vol and "Explosive" in sel_vol:
+        view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
+    elif sel_vol and "Strong" in sel_vol:
+        view = [r for r in view if "Strong" in r.get("vol_signal", "")]
+    elif sel_vol and "Build" in sel_vol:
+        view = [r for r in view if "Build" in r.get("vol_signal", "")]
+    elif sel_vol and "Weak" in sel_vol:
+        view = [r for r in view if "Weak" in r.get("vol_signal", "")]
 
     st.markdown(
         f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 8px;'>"
@@ -459,17 +498,10 @@ if not all_results:
         </div>""", unsafe_allow_html=True)
     st.stop()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# INTRADAY WATCH SECTION  ← v4.4 (column filter dropdowns via components.html)
-# - Uses streamlit.components.v1.html for proper JS execution in iframe
-# - Multi-column AND filtering (Vol Signal + Status checkboxes)
-# - All columns are now filterable
-# - Bigger ▼ arrows + spacing; LIVE header shows date inline
-# ─────────────────────────────────────────────────────────────────────────────
+# INTRADAY WATCH SECTION
 if sel_status and "Intraday Watch" in sel_status:
     import streamlit.components.v1 as components
 
-    # ── Load intraday data ──
     if "sw_intraday" not in st.session_state:
         with st.spinner("Loading intraday watch data..."):
             st.session_state.sw_intraday = get_intraday_watch()
@@ -480,7 +512,6 @@ if sel_status and "Intraday Watch" in sel_status:
         st.info("No data in swing_status_history. Click 📊 Populate History first.")
         st.stop()
 
-    # ── Filter pills ──
     iw_all_n   = len(iw_data)
     iw_4w_n    = sum(1 for r in iw_data if r["consec_weak"] >= 4)
     iw_near_n  = sum(1 for r in iw_data if r["pct_vs_high"] >= -3.0)
@@ -492,10 +523,25 @@ if sel_status and "Intraday Watch" in sel_status:
         f"Near High <3% ({iw_near_n})",
         f"Vol > 50K ({iw_vol50_n})",
     ]
-    sel_iw = st.pills("Intraday Filter", iw_filter_opts,
-                      default=iw_filter_opts[0], label_visibility="collapsed")
+    
+    # Initialize intraday filter
+    if st.session_state.sw_sel_iw is None:
+        st.session_state.sw_sel_iw = iw_filter_opts[0]
+    
+    # Intraday filter buttons
+    st.markdown("**Intraday Filter**")
+    iw_cols = st.columns(len(iw_filter_opts))
+    for i, opt in enumerate(iw_filter_opts):
+        with iw_cols[i]:
+            is_active = st.session_state.sw_sel_iw == opt
+            if st.button(opt, key=f"iw_{i}",
+                        type="primary" if is_active else "secondary",
+                        use_container_width=True):
+                st.session_state.sw_sel_iw = opt
 
-    if   sel_iw and "4+ Weak"   in sel_iw:
+    sel_iw = st.session_state.sw_sel_iw
+
+    if sel_iw and "4+ Weak" in sel_iw:
         iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
     elif sel_iw and "Near High" in sel_iw:
         iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
@@ -508,8 +554,6 @@ if sel_status and "Intraday Watch" in sel_status:
         sample_days  = iw_view[0]["days"]
         date_labels  = [d["date_label"] for d in sample_days[-6:]]
         n_days       = len(date_labels)
-
-        # All columns are filterable (0-based within date_labels)
         FILTER_COL_INDICES = set(range(n_days))
 
         def _vol_emoji(vol_signal):
@@ -528,7 +572,6 @@ if sel_status and "Intraday Watch" in sel_status:
             if "Weak"      in vol_signal: return "Weak"
             return "None"
 
-        # Build LIVE header date inline (e.g. "11JUN · LIVE")
         live_date_for_header = "LIVE"
         if iw_view:
             ld = iw_view[0].get("live_date", "")
@@ -540,7 +583,6 @@ if sel_status and "Intraday Watch" in sel_status:
 
         live_col_id = "col-live"
 
-        # ── Build dropdown menu HTML (reusable) ──
         def _dropdown_html(col_id):
             return f'''
     <div id="{col_id}-dd" class="dd-menu">
@@ -559,7 +601,6 @@ if sel_status and "Intraday Watch" in sel_status:
     </div>
 '''
 
-        # ── Header HTML ──
         header_html = '<th class="stock-col">STOCK</th>'
         for i, lbl in enumerate(date_labels):
             is_filterable = i in FILTER_COL_INDICES
@@ -578,7 +619,6 @@ if sel_status and "Intraday Watch" in sel_status:
             else:
                 header_html += f'<th class="date-col">{lbl}</th>'
 
-        # LIVE header — filterable
         header_html += f'''
   <th class="date-col filterable" data-colid="{live_col_id}">
     <div class="date-trigger" onclick="iwToggleDropdown('{live_col_id}')">
@@ -590,7 +630,6 @@ if sel_status and "Intraday Watch" in sel_status:
   </th>
 '''
 
-        # ── Data rows ──
         rows_html = ""
         for r in iw_view:
             sym     = r["symbol"]
@@ -602,9 +641,7 @@ if sel_status and "Intraday Watch" in sel_status:
             dir_color_iw = r.get("direction_color_iw", "#6b7280")
             days    = r["days"][-6:]
 
-          # Data attributes for filterable columns
             d_attrs = ""
-            # Map all columns (0 to n_days-1) to their corresponding days
             for col_idx in range(n_days):
                 day_idx = col_idx if col_idx < len(days) else -1
                 col_id_attr = f"col-{col_idx}"
@@ -616,12 +653,10 @@ if sel_status and "Intraday Watch" in sel_status:
                     sta = "NONE"
                 d_attrs += f' data-{col_id_attr}-sig="{sig}" data-{col_id_attr}-sta="{sta}"'
             
-            # Live attrs
             live_sig = _sig_key(r.get("live_signal", ""))
             live_sta = r.get("live_status", "WATCH")
             d_attrs += f' data-{live_col_id}-sig="{live_sig}" data-{live_col_id}-sta="{live_sta}"'
 
-            
             rows_html += (
                 f'<tr class="iw-row"{d_attrs}>'
                 f'<td class="stock-cell">'
@@ -648,7 +683,6 @@ if sel_status and "Intraday Watch" in sel_status:
                 else:
                     rows_html += '<td class="data-cell empty">—</td>'
 
-            # LIVE cell
             live_emoji = _vol_emoji(r["live_signal"])
             live_cat   = _cat_label(r.get("live_status", "WATCH"))
             live_ratio = f"{r.get('live_vol_ratio', 0):.1f}x"
@@ -662,7 +696,6 @@ if sel_status and "Intraday Watch" in sel_status:
                 f'</tr>'
             )
 
-        # ── Build full HTML document for iframe ──
         total_count = len(iw_view)
         full_html = f'''<!DOCTYPE html>
 <html>
@@ -855,7 +888,6 @@ var TOTAL = {total_count};
 function iwToggleDropdown(colId) {{
   var dd = document.getElementById(colId + '-dd');
   if (!dd) return;
-  // close others
   document.querySelectorAll('.dd-menu').forEach(function(el) {{
     if (el.id !== colId + '-dd') el.classList.remove('open');
   }});
@@ -884,7 +916,6 @@ function iwApplyFilter() {{
     }}
   }});
 
-  // dot indicators
   document.querySelectorAll('.dd-dot').forEach(function(dot) {{
     var colId = dot.id.replace('-dot','');
     if (colFilters[colId]) dot.classList.add('active');
@@ -915,7 +946,6 @@ function iwApplyFilter() {{
   }}
 }}
 
-// Persist filters to localStorage
 function iwSaveFilters() {{
   var state = {{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb) {{
@@ -930,7 +960,6 @@ function iwSaveFilters() {{
   }}
 }}
 
-// Restore filters from localStorage on load
 function iwRestoreFilters() {{
   try {{
     var saved = localStorage.getItem('iw_filters');
@@ -947,7 +976,6 @@ function iwRestoreFilters() {{
   }}
 }}
 
-// Attach change handlers
 document.querySelectorAll('input[data-col]').forEach(function(cb) {{
   cb.addEventListener('change', function() {{
     iwApplyFilter();
@@ -955,7 +983,6 @@ document.querySelectorAll('input[data-col]').forEach(function(cb) {{
   }});
 }});
 
-// Close dropdown on outside click
 document.addEventListener('click', function(e) {{
   if (!e.target.closest('.dd-menu') && !e.target.closest('.date-trigger')) {{
     document.querySelectorAll('.dd-menu').forEach(function(el) {{
@@ -964,7 +991,6 @@ document.addEventListener('click', function(e) {{
   }}
 }});
 
-// Restore on load
 window.addEventListener('load', function() {{
   iwRestoreFilters();
   iwApplyFilter();
@@ -974,8 +1000,6 @@ window.addEventListener('load', function() {{
 </html>
 '''
 
-        # ── Render via components.html (proper iframe) ──
-        # Height: header (~50) + rows (~85 each) + padding
         est_height = 80 + len(iw_view) * 85
         est_height = min(max(est_height, 300), 5000)
         components.html(full_html, height=est_height, scrolling=True)
