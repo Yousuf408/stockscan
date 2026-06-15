@@ -414,7 +414,7 @@ if all_results:
     w_n  = sum(1 for r in all_results if r.get("status") == "WATCH")
     a_n  = len(all_results)
 
-    status_opts = [
+  status_opts = [
         f"ALL ({a_n})",
         f"🔥 BLASTING ({b_n})",
         f"✅ READY ({r_n})",
@@ -427,14 +427,6 @@ if all_results:
     bu_n = sum(1 for r in all_results if "Build" in r.get("vol_signal", ""))
     wk_n = sum(1 for r in all_results if "Weak" in r.get("vol_signal", ""))
 
-    sel_status = st.selectbox(
-        "Status",
-        status_opts,
-        index=0,
-        label_visibility="collapsed",
-        key="status_filter"
-    )
-
     vol_opts = [
         "All signals",
         f"🔥 Explosive ({ex_n})",
@@ -443,13 +435,26 @@ if all_results:
         f"🔴 Weak ({wk_n})"
     ]
 
-    sel_vol = st.selectbox(
-        "Vol signal",
-        vol_opts,
-        index=0,
-        label_visibility="collapsed",
-        key="vol_filter"
-    )
+    # Side-by-side filters
+    col_status, col_vol = st.columns(2)
+
+    with col_status:
+        sel_status = st.selectbox(
+            "Status",
+            status_opts,
+            index=0,
+            label_visibility="collapsed",
+            key="status_filter"
+        )
+
+    with col_vol:
+        sel_vol = st.selectbox(
+            "Vol signal",
+            vol_opts,
+            index=0,
+            label_visibility="collapsed",
+            key="vol_filter"
+        )
 
 else:
     view = []
