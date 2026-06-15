@@ -418,102 +418,91 @@ if sel_status and "Intraday Watch" in sel_status:
     def load_ab_data(user_id: str):
         try:
             from supabase import create_client
+            from datetime import datetime as _dt
+            
             sb = create_client(
                 os.environ.get("SUPABASE_URL",""),
                 os.environ.get("SUPABASE_KEY","")
             )
-            # Last 5 trading days
+            
             today = date.today()
-            trading_days = []
-            d = today - timedelta(days=1)
-            while len(trading_days) < 7:
-                if d.weekday() < 5: trading_days.append(d)
-                d -= timedelta(days=1)
-            trading_days = sorted(trading_days)
-            date_from = str(trading_days[0])
-            date_to   = str(trading_days[-1])
-            baseline_date  = str(trading_days[0])
-            selection_date = str(trading_days[-1])
+            # Get 4 days ago
+            target_date = today - timedelta(days=4)
+            # Handle weekends - if target is weekend, go back to Friday
+            while target_date.weekday() >= 5:
+                target_date -= timedelta(days=1)
+            
+            baseline_date = str(target_date)
 
+            # Fetch history data for 4 days ago
             hist = sb.table("swing_status_history")\
-                     .select("symbol,trade_date,open,high,low,close,vol_ratio,vol_signal,status")\
+                     .select("symbol,trade_date,close,vol_ratio,vol_signal,status")\
                      .eq("user_id", user_id)\
-                     .gte("trade_date", date_from)\
-                     .lte("trade_date", date_to)\
-                     .order("symbol").order("trade_date")\
+                     .eq("trade_date", baseline_date)\
                      .execute()
 
+            # Fetch live data (today)
             live = sb.table("swing_live_data")\
                      .select("symbol,close,open,high,low,vol_ratio,vol_signal,status,trade_date")\
                      .eq("user_id", user_id)\
                      .execute()
 
+            hist_map = {r["symbol"]: r for r in (hist.data or [])}
             live_map = {r["symbol"]: r for r in (live.data or [])}
 
-            from collections import defaultdict
-            sym_hist = defaultdict(list)
-            for r in (hist.data or []):
-                sym_hist[r["symbol"]].append(r)
-
             results = []
-            for sym, rows in sym_hist.items():
-                rows_sorted = sorted(rows, key=lambda x: x["trade_date"])
-                baseline  = next((r for r in rows_sorted if r["trade_date"] == baseline_date), None)
-                selection = next((r for r in rows_sorted if r["trade_date"] == selection_date), None)
-                if not baseline or not selection: continue
+            for sym in hist_map.keys():
+                if sym not in live_map:
+                    continue
+                
+                hist_row = hist_map[sym]
+                live_row = live_map[sym]
 
-                c8  = float(baseline.get("close") or 0)
-                c_s = float(selection.get("close") or 0)
-                v8  = float(baseline.get("vol_ratio") or 0)
-                v_s = float(selection.get("vol_ratio") or 0)
-                if c8 <= 0 or c_s <= 0: continue
+                c_base = float(hist_row.get("close") or 0)
+                v_base = float(hist_row.get("vol_ratio") or 0)
+                c_live = float(live_row.get("close") or 0)
+                v_live = float(live_row.get("vol_ratio") or 0)
 
-                price_gain  = (c_s - c8) / c8 * 100
-                vol_improve = v_s - v8
-                avg_5d      = sum(float(r.get("close") or 0) for r in rows_sorted) / len(rows_sorted)
+                if c_base <= 0 or c_live <= 0:
+                    continue
 
-                if not (4.0 <= price_gain <= 10.0): continue
-                if vol_improve < 1.5: continue
-                if not (2.0 <= v_s <= 4.5): continue
+                price_gain = (c_live - c_base) / c_base * 100
+                vol_improve = v_live - v_base
 
-                live_r      = live_map.get(sym, {})
-                live_close  = float(live_r.get("close") or c_s)
-                live_vr     = float(live_r.get("vol_ratio") or 0)
-                live_date   = str(live_r.get("trade_date") or today)
-                live_status = live_r.get("status", "WATCH")
-                live_vsig   = live_r.get("vol_signal", "")
+                # Accumulation Breakout pattern: price +4-10%, vol_ratio 2.0-4.5x, vol_improve >= 1.5x
+                if not (4.0 <= price_gain <= 10.0):
+                    continue
+                if vol_improve < 1.5:
+                    continue
+                if not (2.0 <= v_live <= 4.5):
+                    continue
 
-                pct_today = (live_close - c_s) / c_s * 100 if c_s > 0 else 0
-                if pct_today > 1.5:   direction="up";   dir_arrow="↑"; dir_color="#16a34a"
-                elif pct_today < -1.5: direction="down"; dir_arrow="↓"; dir_color="#dc2626"
-                else:                  direction="side"; dir_arrow="→"; dir_color="#6b7280"
-
-                if vol_improve >= 2.5:  btype = "Accumulation"
-                elif v8 > 0.8:          btype = "Washout"
-                else:                   btype = "Shakeout"
+                # Direction
+                if price_gain > 1.5:
+                    direction = "up"; dir_arrow = "↑"; dir_color = "#16a34a"
+                elif price_gain < -1.5:
+                    direction = "down"; dir_arrow = "↓"; dir_color = "#dc2626"
+                else:
+                    direction = "side"; dir_arrow = "→"; dir_color = "#6b7280"
 
                 results.append({
                     "symbol":        sym,
-                    "hist_rows":     rows_sorted,
-                    "trading_days":  trading_days,
                     "price_gain":    round(price_gain, 2),
                     "vol_improve":   round(vol_improve, 2),
-                    "vol_ratio_base": round(v8, 2),
-                    "vol_ratio_sel":  round(v_s, 2),
-                    "avg_5d":        round(avg_5d, 2),
-                    "close_base":    round(c8, 2),
-                    "close_sel":     round(c_s, 2),
-                    "live_close":    round(live_close, 2),
-                    "live_vr":       round(live_vr, 2),
-                    "live_date":     live_date,
-                    "live_status":   live_status,
-                    "live_vsig":     live_vsig,
+                    "vol_ratio_base": round(v_base, 2),
+                    "vol_ratio_live": round(v_live, 2),
+                    "close_base":    round(c_base, 2),
+                    "close_live":    round(c_live, 2),
+                    "live_status":   live_row.get("status", "WATCH"),
+                    "live_vsig":     live_row.get("vol_signal", ""),
                     "direction":     direction,
                     "dir_arrow":     dir_arrow,
                     "dir_color":     dir_color,
-                    "breakout_type": btype,
+                    "baseline_date": baseline_date,
+                    "live_date":     str(live_row.get("trade_date", today)),
                     "screener_url":  f"https://www.screener.in/company/{sym}/",
                 })
+
             results.sort(key=lambda x: x["price_gain"], reverse=True)
             return results
         except Exception as e:
@@ -622,8 +611,6 @@ if sel_status and "Intraday Watch" in sel_status:
   <div id="iw-break-dd" class="dd-menu">
     <div class="dd-section">Breakout Type</div>
     <label class="dd-opt"><input type="checkbox" data-iwf="break" value="accumulation"> Accumulation</label>
-    <label class="dd-opt"><input type="checkbox" data-iwf="break" value="washout"> Washout</label>
-    <label class="dd-opt"><input type="checkbox" data-iwf="break" value="shakeout"> Shakeout</label>
     <div class="dd-divider"></div>
     <div class="dd-clear"><button type="button" onclick="iwClearBreak()">Clear</button></div>
   </div>
@@ -643,27 +630,35 @@ if sel_status and "Intraday Watch" in sel_status:
             elif pct_avg_iw < -1: iw_dir = "down"
             else: iw_dir = "side"
             
-            # Calculate breakout type using SQL logic
-            # Baseline: oldest day, Selection: 5th day (if exists)
+            # Calculate Accumulation Breakout: TODAY (live) vs 4-DAYS-OLD (history)
+            breakout_type = "—"
+            has_breakout = False
+            
             if len(days) >= 5:
-                vol_base = days[0]["vol_ratio"]
-                vol_sel = days[4]["vol_ratio"]
-            else:
-                vol_base = days[0]["vol_ratio"] if days else 0
-                vol_sel = days[-1]["vol_ratio"] if days else 0
+                # days[0] = 6 days ago, days[4] = 2 days ago
+                # We need 4 days ago from today, so use days[1] (yesterday is days[-1])
+                # Actually if we have 6 days: days[0]=6d ago, days[1]=5d ago, days[2]=4d ago, days[3]=3d ago, days[4]=2d ago, days[5]=yesterday
+                # Wait, let me reconsider. If days[-1] is most recent before today, then:
+                # days[-5] would be 5 days ago, days[-4] would be 4 days ago
+                hist_4d_ago = days[-4] if len(days) >= 4 else days[0]
+                
+                price_base = hist_4d_ago["close"]
+                vol_base = hist_4d_ago["vol_ratio"]
+                price_today = prc
+                vol_today = r.get("live_vol_ratio", 0)
+                
+                if price_base > 0:
+                    price_gain = (price_today - price_base) / price_base * 100
+                    vol_improve = vol_today - vol_base
+                    
+                    # Accumulation pattern: price +4-10%, vol_ratio 2.0-4.5x, vol_improve >= 1.5x
+                    if (4.0 <= price_gain <= 10.0 and 
+                        2.0 <= vol_today <= 4.5 and 
+                        vol_improve >= 1.5):
+                        breakout_type = "Accumulation"
+                        has_breakout = True
             
-            vol_improve = vol_sel - vol_base
-            
-            if vol_improve >= 2.5:
-                breakout_type = "Accumulation"
-                btype_lower = "accumulation"
-            elif vol_base > 0.8:
-                breakout_type = "Washout"
-                btype_lower = "washout"
-            else:
-                breakout_type = "Shakeout"
-                btype_lower = "shakeout"
-
+            btype_lower = "accumulation" if has_breakout else "none"
             d_attrs = f' data-iw-dir="{iw_dir}" data-iw-break="{btype_lower}"'
             for col_idx in range(n_days):
                 day_idx = col_idx if col_idx < len(days) else -1
@@ -705,16 +700,13 @@ if sel_status and "Intraday Watch" in sel_status:
                      f'<span class="cell-ratio">{live_ratio}</span>'
                      f'</div></td>')
             
-            # Breakout type badge
-            btype_style = {
-                "Accumulation": "background:#f3f0ff;color:#5b21b6;border:0.5px solid #c4b5fd",
-                "Washout":      "background:#fff7ed;color:#9a3412;border:0.5px solid #fed7aa",
-                "Shakeout":     "background:#f0fdf4;color:#166534;border:0.5px solid #86efac"
-            }.get(breakout_type, "background:#f3f4f6;color:#374151")
-            
-            rows += (f'<td class="data-cell break-cell">'
-                     f'<span style="display:inline-block;font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;{btype_style};">'
-                     f'{breakout_type}</span></td></tr>')
+            # Breakout type badge - only Accumulation
+            if has_breakout:
+                rows += (f'<td class="data-cell break-cell">'
+                         f'<span style="display:inline-block;font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;background:#f3f0ff;color:#5b21b6;border:0.5px solid #c4b5fd;">'
+                         f'Accumulation</span></td></tr>')
+            else:
+                rows += f'<td class="data-cell break-cell">—</td></tr>'
         return header, rows
 
     def _iw_dropdown(col_id):
@@ -954,7 +946,47 @@ if sel_status and "Intraday Watch" in sel_status:
     ab_header_html = ""
     ab_rows_html   = ""
     if ab_data:
-        ab_header_html, ab_rows_html = build_ab_rows(ab_data)
+        ab_header_html = '''<th class="stock-col ab-stock-col">
+  <div class="date-trigger" onclick="toggleDD('ab-dir-dd')">
+    <span class="date-text">STOCK</span><span class="dd-arrow">▼</span>
+  </div>
+  <div class="dd-dot" id="ab-dir-dot"></div>
+  <div id="ab-dir-dd" class="dd-menu">
+    <div class="dd-section">Price Direction</div>
+    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="up"> ↑ Upside</label>
+    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="down"> ↓ Downside</label>
+    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="side"> → Sideways</label>
+    <div class="dd-divider"></div>
+    <div class="dd-clear"><button type="button" onclick="abClearDD('ab-dir-dd','dir')">Clear</button></div>
+  </div>
+</th>
+<th class="chart-col">4-DAY AGO</th>
+<th class="chart-col">TODAY</th>
+<th class="date-col">GAIN %</th>
+<th class="date-col">VOL CHG</th>'''
+
+        ab_rows_html = ""
+        for r in ab_data:
+            sym = r["symbol"]
+            lc = r["close_live"]
+            gain = r["price_gain"]
+            arrow = r["dir_arrow"]
+            acol = r["dir_color"]
+            dir_val = r["direction"]
+            vol_improve = r["vol_improve"]
+            vol_base = r["vol_ratio_base"]
+            vol_live = r["vol_ratio_live"]
+            
+            ab_rows_html += (f'<tr class="ab-row" data-dir="{dir_val}">'
+                             f'<td class="stock-cell">'
+                             f'<div class="sym">{sym}</div>'
+                             f'<div class="prc">₹{lc:,.2f} <span style="color:{acol};font-size:13px;">{arrow} <span style="font-size:11px;">{gain:+.1f}%</span></span></div>'
+                             f'</td>'
+                             f'<td class="chart-col">₹{r["close_base"]:,.2f}<br/><span style="font-size:10px;color:#6b7280;">{vol_base:.2f}x</span></td>'
+                             f'<td class="chart-col">₹{lc:,.2f}<br/><span style="font-size:10px;color:#6b7280;">{vol_live:.2f}x</span></td>'
+                             f'<td class="date-col" style="color:{acol};font-weight:500;">{gain:+.1f}%</td>'
+                             f'<td class="date-col">{vol_improve:+.2f}x</td>'
+                             f'</tr>')
 
     total_iw = len(iw_view)
     total_ab = len(ab_data)
