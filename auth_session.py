@@ -143,7 +143,7 @@ def restore_session() -> bool:
         delete_refresh_token()
         return False
 
-    # Repopulate session state
+  # Repopulate session state
     user = data.get("user") or {}
     st.session_state["user_id"]      = user.get("id", "")
     st.session_state["user_email"]   = user.get("email", "")
@@ -155,4 +155,5 @@ def restore_session() -> bool:
         save_refresh_token(new_refresh_token)
 
     print(f"[auth_session] Session restored for {user.get('email', '?')}")
+    st.rerun()   # ← ADD THIS LINE
     return True
