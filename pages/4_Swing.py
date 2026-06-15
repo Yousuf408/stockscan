@@ -123,7 +123,7 @@ def price_svg(opens, highs, lows, closes, dates,
         parts.append(f'<line x1="{sep_x}" x2="{sep_x}" y1="{pad}" y2="{h-12}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
         cx = sep_x + 5 + bw//2; tx = sep_x + 5; col = "#7c3aed"
         body_y = sy(max(cur_open, cur_close)); body_h = max(2, abs(sy(cur_open) - sy(cur_close)))
-        lbl = cur_date.split(" ")[0] if cur_date else "today"
+        lbl = str(cur_date).split(" ")[0] if cur_date else "today"
         parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(cur_high)}" y2="{sy(cur_low)}" stroke="{col}" stroke-width="1.2"/>'
                      f'<rect x="{tx}" y="{body_y}" width="{bw}" height="{body_h}" fill="{col}30" stroke="{col}" stroke-width="1.5" rx="2"/>'
                      f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="{col}" font-weight="500">{lbl}</text>')
@@ -551,7 +551,11 @@ if sel_status and "Intraday Watch" in sel_status:
         cur_high  = live_high  if live_high  and live_high  > 0 else live_close
         cur_low   = live_low   if live_low   and live_low   > 0 else live_close
         cur_close = live_close
-        cur_date  = datetime.strptime(str(live_date), "%Y-%m-%d").strftime("%d") if live_date else "today",
+        # Convert live_date to DD string — handles both date objects and YYYY-MM-DD strings
+        try:
+            cur_date = str(live_date)[8:10] if live_date else "—"
+        except Exception:
+            cur_date = "—"
 
         return price_svg(
             opens   = hist_opens,
@@ -1311,3 +1315,4 @@ if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
             st.markdown(f"`{e['symbol']}` — {e['error']}")
+            
