@@ -414,7 +414,7 @@ if all_results:
     w_n  = sum(1 for r in all_results if r.get("status") == "WATCH")
     a_n  = len(all_results)
 
-  status_opts = [
+    status_opts = [
         f"ALL ({a_n})",
         f"🔥 BLASTING ({b_n})",
         f"✅ READY ({r_n})",
@@ -455,6 +455,23 @@ if all_results:
             label_visibility="collapsed",
             key="vol_filter"
         )
+
+    if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH"           in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
+    elif sel_status and "Intraday Watch"  in sel_status: view = []
+    else:                                                view = all_results
+
+    if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
+    elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
+    elif sel_vol and "Build"     in sel_vol: view = [r for r in view if "Build"     in r.get("vol_signal", "")]
+    elif sel_vol and "Weak"      in sel_vol: view = [r for r in view if "Weak"      in r.get("vol_signal", "")]
+
+    st.markdown(
+        f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 8px;'>"
+        f"Showing {len(view)} stocks</div>",
+        unsafe_allow_html=True,
+    )
 
 else:
     view = []
