@@ -1,11 +1,38 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v4.5
-#  v4.5: Fixed session state initialization + radio buttons (1.35.0 compatible)
-#        Removed st.pills → using st.radio with horizontal=True
-#        Added session state safety checks + infinite rerun prevention.
+#  TRADE SENTRY — pages/4_Swing.py  v4.6
+#  CRITICAL: Session state initialized FIRST (before all other code)
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ⚠️ INITIALIZE SESSION STATE FIRST - BEFORE ANYTHING ELSE
+# ══════════════════════════════════════════════════════════════════════════════
+
+_required_keys = {
+    "sw_results": [],
+    "sw_errors": [],
+    "sw_loaded": False,
+    "sw_show_manage": False,
+    "sw_stocks_cache": None,
+    "sw_last_sync": None,
+    "sw_last_refresh": None,
+    "sw_last_populate": None,
+    "status_filter": "ALL",
+    "vol_filter": "All signals",
+    "sw_intraday": None,
+    "iw_filter": "All",
+    "user_id": None,
+}
+
+for key, default_val in _required_keys.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOW IMPORT OTHER MODULES
+# ══════════════════════════════════════════════════════════════════════════════
+
 import os, sys, time
 from datetime import datetime
 
@@ -26,33 +53,20 @@ try:
 except Exception:
     WATCHLIST_PUSH = False
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
+
 st.set_page_config(page_title="Swing · TradeSentry", layout="wide",
                    page_icon="📈", initial_sidebar_state="collapsed")
 
 apply_styles()
 sidebar_brand()
 
-# ── CRITICAL: Initialize ALL session state keys FIRST ──
-_required_keys = {
-    "sw_results": [],
-    "sw_errors": [],
-    "sw_loaded": False,
-    "sw_show_manage": False,
-    "sw_stocks_cache": None,
-    "sw_last_sync": None,
-    "sw_last_refresh": None,
-    "sw_last_populate": None,
-    "status_filter": "ALL",
-    "vol_filter": "All signals",
-    "sw_intraday": None,
-    "iw_filter": "All",
-}
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH GUARD
+# ══════════════════════════════════════════════════════════════════════════════
 
-for key, default_val in _required_keys.items():
-    if key not in st.session_state:
-        st.session_state[key] = default_val
-
-# ── Auth guard ──
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
@@ -397,7 +411,7 @@ if st.session_state.sw_show_manage:
     st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FILTER PILLS - FIXED INDENTATION FOR PYTHON 3.12
+# FILTER PILLS
 # ══════════════════════════════════════════════════════════════════════════════
 
 all_results = st.session_state.get("sw_results", [])
@@ -490,14 +504,11 @@ if not all_results:
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# INTRADAY WATCH SECTION - FIXED INDENTATION FOR PYTHON 3.12
+# INTRADAY WATCH SECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
 if sel_status and "Intraday Watch" in sel_status:
     import streamlit.components.v1 as components
-
-    if "sw_intraday" not in st.session_state:
-        st.session_state.sw_intraday = None
 
     if st.session_state.sw_intraday is None:
         with st.spinner("Loading intraday watch data..."):
@@ -1132,4 +1143,3 @@ if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
             st.markdown(f"`{e['symbol']}` — {e['error']}")
-            
