@@ -7,6 +7,8 @@ import streamlit as st
 import requests
 import os
 
+from auth_session import save_refresh_token, delete_refresh_token, restore_session
+
 st.set_page_config(page_title="Trade Sentry — Login", layout="centered")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ def _set_session(data: dict):
     st.session_state["user_id"]      = user.get("id", "")
     st.session_state["user_email"]   = user.get("email", "")
     st.session_state["access_token"] = data.get("access_token", "")
-
+ save_refresh_token(data.get("refresh_token", ""))
 
 def logout():
     token = get_access_token()
@@ -103,6 +105,7 @@ def logout():
         auth_sign_out(token)
     for k in ["user_id", "user_email", "access_token", "results", "scan_log"]:
         st.session_state.pop(k, None)
+        delete_refresh_token()
     st.rerun()
 
 
@@ -127,6 +130,9 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+restore_session()
+if st.session_state.get("user_id"):
+    st.switch_page("pages/scanner.py")
 
 st.markdown('<div class="login-box">', unsafe_allow_html=True)
 st.markdown('<p class="login-title">TRADE SENTRY</p>', unsafe_allow_html=True)
