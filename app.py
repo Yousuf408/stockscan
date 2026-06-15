@@ -14,6 +14,7 @@ import time
 import struct
 import pytz
 from datetime import datetime
+from auth_session import restore_session
 
 print(f"[BOOT] Python {sys.version}")
 print("[BOOT] app.py loading...")
@@ -52,6 +53,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 # Yahan tak
 
 # ── Auth guard ──
+restore_session()
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
