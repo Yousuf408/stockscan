@@ -247,7 +247,6 @@ with c1:
     lbl = "✕ Manage" if st.session_state.sw_show_manage else "⚙ Manage Stocks"
     if st.button(lbl, use_container_width=True):
         st.session_state.sw_show_manage = not st.session_state.sw_show_manage
-        # st.rerun()  # DISABLED - causing infinite loop
 
 with c2:
     if st.button("🔄 Sync 5D", use_container_width=True,
@@ -265,7 +264,6 @@ with c2:
             st.info(f"✅ All {res['skipped']} symbols already up to date")
         if res["errors"]:
             st.warning(f"⚠ {len(res['errors'])} errors")
-        # st.rerun()  # DISABLED - causing infinite loop
 
 with c3:
     from swing_core import can_refresh, refresh_label
@@ -279,7 +277,6 @@ with c3:
         results, errors = load_from_db()
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
-        # st.rerun()  # DISABLED - causing infinite loop
 
 with c4:
     if st.button("🗑 Clear", use_container_width=True,
@@ -287,7 +284,6 @@ with c4:
         st.session_state.sw_results = []
         st.session_state.sw_errors  = []
         st.session_state.sw_loaded  = False
-        # st.rerun()  # DISABLED - causing infinite loop
 
 with c5:
     blasting = sum(1 for r in st.session_state.sw_results if r.get("status") == "BLASTING")
@@ -325,7 +321,6 @@ with c5:
                 st.success(f"✅ Saved {res['saved']} history rows")
             if res["errors"]:
                 st.warning(f"⚠ {len(res['errors'])} errors")
-            # st.rerun()  # DISABLED - causing infinite loop
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
@@ -350,7 +345,6 @@ if st.session_state.sw_show_manage:
                         add_swing_stock(sym.strip(), url.strip(), bd, note.strip())
                         refresh_cache()
                         st.success(f"✅ {sym.upper()} added.")
-                        # st.rerun()  # DISABLED - causing infinite loop
                     except ValueError as e: st.warning(str(e))
                     except Exception as e:  st.error(str(e))
 
@@ -367,7 +361,6 @@ if st.session_state.sw_show_manage:
                 if res["added"]:   st.success(f"✅ Added: {', '.join(res['added'])}")
                 if res["skipped"]: st.info(f"⏭ Already exists: {', '.join(res['skipped'])}")
                 if res["errors"]:  st.error(f"❌ Failed: {', '.join(res['errors'])}")
-                # st.rerun()  # DISABLED - causing infinite loop
 
     with t3:
         curr = refresh_cache()
@@ -393,19 +386,20 @@ if st.session_state.sw_show_manage:
                         try:
                             update_swing_stock(s["id"], {"breakout_date": str(new_bd)})
                             refresh_cache()
-                            # st.rerun()  # DISABLED - causing infinite loop
                         except Exception as e: st.error(str(e))
                 with r5:
                     if st.button("✕", key=f"del_{s['id']}"):
                         try:
                             delete_swing_stock(s["id"])
                             refresh_cache()
-                            # st.rerun()  # DISABLED - causing infinite loop
                         except Exception as e: st.error(str(e))
 
     st.markdown("---")
 
-# FILTER PILLS
+# ══════════════════════════════════════════════════════════════════════════════
+# FILTER PILLS - FIXED INDENTATION FOR PYTHON 3.12
+# ══════════════════════════════════════════════════════════════════════════════
+
 all_results = st.session_state.get("sw_results", [])
 
 if all_results:
@@ -435,7 +429,7 @@ if all_results:
         f"🔴 Weak ({wk_n})"
     ]
 
-   col_st, col_vol = st.columns(2)
+    col_st, col_vol = st.columns(2)
     
     with col_st:
         sel_status = st.selectbox(
@@ -453,16 +447,25 @@ if all_results:
             label_visibility="collapsed"
         )
 
-    if   sel_status and "BLASTING"        in sel_status: view = [r for r in all_results if r.get("status") == "BLASTING"]
-    elif sel_status and "READY"           in sel_status: view = [r for r in all_results if r.get("status") == "READY"]
-    elif sel_status and "WATCH"           in sel_status: view = [r for r in all_results if r.get("status") == "WATCH"]
-    elif sel_status and "Intraday Watch"  in sel_status: view = []
-    else:                                                view = all_results
+    if sel_status and "BLASTING" in sel_status:
+        view = [r for r in all_results if r.get("status") == "BLASTING"]
+    elif sel_status and "READY" in sel_status:
+        view = [r for r in all_results if r.get("status") == "READY"]
+    elif sel_status and "WATCH" in sel_status:
+        view = [r for r in all_results if r.get("status") == "WATCH"]
+    elif sel_status and "Intraday Watch" in sel_status:
+        view = []
+    else:
+        view = all_results
 
-    if   sel_vol and "Explosive" in sel_vol: view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
-    elif sel_vol and "Strong"    in sel_vol: view = [r for r in view if "Strong"    in r.get("vol_signal", "")]
-    elif sel_vol and "Build"     in sel_vol: view = [r for r in view if "Build"     in r.get("vol_signal", "")]
-    elif sel_vol and "Weak"      in sel_vol: view = [r for r in view if "Weak"      in r.get("vol_signal", "")]
+    if sel_vol and "Explosive" in sel_vol:
+        view = [r for r in view if "Explosive" in r.get("vol_signal", "")]
+    elif sel_vol and "Strong" in sel_vol:
+        view = [r for r in view if "Strong" in r.get("vol_signal", "")]
+    elif sel_vol and "Build" in sel_vol:
+        view = [r for r in view if "Build" in r.get("vol_signal", "")]
+    elif sel_vol and "Weak" in sel_vol:
+        view = [r for r in view if "Weak" in r.get("vol_signal", "")]
 
     st.markdown(
         f"<div style='font-size:11px;color:#9ca3af;padding:4px 0 8px;'>"
@@ -486,7 +489,10 @@ if not all_results:
         </div>""", unsafe_allow_html=True)
     st.stop()
 
-# INTRADAY WATCH SECTION
+# ══════════════════════════════════════════════════════════════════════════════
+# INTRADAY WATCH SECTION - FIXED INDENTATION FOR PYTHON 3.12
+# ══════════════════════════════════════════════════════════════════════════════
+
 if sel_status and "Intraday Watch" in sel_status:
     import streamlit.components.v1 as components
 
@@ -515,14 +521,14 @@ if sel_status and "Intraday Watch" in sel_status:
         f"Vol > 50K ({iw_vol50_n})",
     ]
     
-  sel_iw = st.selectbox(
+    sel_iw = st.selectbox(
         "Intraday Filter",
         iw_filter_opts,
         index=0,
         label_visibility="collapsed"
     )
 
-    if   sel_iw and "4+ Weak"   in sel_iw:
+    if sel_iw and "4+ Weak" in sel_iw:
         iw_view = [r for r in iw_data if r["consec_weak"] >= 4]
     elif sel_iw and "Near High" in sel_iw:
         iw_view = [r for r in iw_data if r["pct_vs_high"] >= -3.0]
@@ -987,7 +993,10 @@ window.addEventListener('load', function() {{
 
     st.stop()
 
+# ══════════════════════════════════════════════════════════════════════════════
 # RESULTS TABLE
+# ══════════════════════════════════════════════════════════════════════════════
+
 COL = [1.4, 2.0, 2.1, 1.2, 1.3, 1.8, 1.0, 0.9]
 
 header = st.columns(COL)
@@ -1123,3 +1132,4 @@ if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
             st.markdown(f"`{e['symbol']}` — {e['error']}")
+            
