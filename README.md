@@ -1,8 +1,8 @@
 ---
 title: TradeSentry
 emoji: ⚡
-colorFrom: blue
-colorTo: green
+colorFrom: white
+colorTo: white
 sdk: streamlit
 sdk_version: "1.35.0"
 app_file: app.py
