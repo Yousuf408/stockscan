@@ -538,9 +538,50 @@ if sel_status and "Intraday Watch" in sel_status:
     def _cat_label(s):
         return {"BLASTING":"BLASTING","READY":"READY","WATCH":"WATCH"}.get(s,"—")
 
+    # ── SVG helpers for Intraday Watch ──
+    def _price_svg_iw(days_data):
+        """6-day candlestick from days array"""
+        closes = [d["close"] for d in days_data]
+        dates_lbl = [d["date_label"][-2:] for d in days_data]
+        if not closes: return '<svg width="140" height="70"></svg>'
+        n, pad, bw, gap, h = len(closes), 4, 14, 5, 70
+        mn, mx = min(closes), max(closes)
+        rng = mx - mn or 1
+        def sy(v): return round(pad + (h-pad*2-12)*(1-(v-mn)/rng), 1)
+        parts = []
+        for i, c in enumerate(closes):
+            x, cx = pad+i*(bw+gap), pad+i*(bw+gap)+bw//2
+            prev = closes[i-1] if i > 0 else c
+            col = "#00a854" if c >= prev else "#e53935"
+            by, bh2 = sy(max(c,prev)), max(3, abs(sy(c)-sy(prev)))
+            parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(c)-2}" y2="{by+bh2+2}" stroke="{col}" stroke-width="1"/>'
+                        f'<rect x="{x}" y="{by}" width="{bw}" height="{bh2}" fill="{col}" rx="1"/>'
+                        f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{dates_lbl[i]}</text>')
+        tw = pad + n*(bw+gap)
+        return f'<svg width="{tw}" height="{h}" viewBox="0 0 {tw} {h}">{"".join(parts)}</svg>'
+
+    def _volume_svg_iw(days_data):
+        """6-day volume bars from days array"""
+        ratios = [d["vol_ratio"] for d in days_data]
+        dates_lbl = [d["date_label"][-2:] for d in days_data]
+        if not ratios: return '<svg width="140" height="70"></svg>'
+        n, pad, bw, gap, h = len(ratios), 4, 14, 5, 70
+        bar_area, mx = h-pad-14, max(ratios) if ratios else 1
+        def bh(v): return max(3, int((v/mx)*bar_area)) if mx > 0 else 3
+        parts = []
+        for i, rv in enumerate(ratios):
+            x, h2, y = pad+i*(bw+gap), bh(rv), h-14-bh(rv)
+            parts.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{h2}" fill="#f59e0b" rx="1"/>'
+                        f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="7" fill="#9ca3af">{dates_lbl[i]}</text>'
+                        f'<text x="{x+bw//2}" y="{max(y-2,8)}" text-anchor="middle" font-size="7" fill="#b45309">{rv:.1f}x</text>')
+        med_y = round(h-14-bh(1.0), 1)
+        parts.append(f'<line x1="{pad}" x2="{pad+n*(bw+gap)-gap}" y1="{med_y}" y2="{med_y}" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>')
+        tw = pad+n*(bw+gap)
+        return f'<svg width="{tw}" height="{h}" viewBox="0 0 {tw} {h}">{"".join(parts)}</svg>'
+
     # ── Build Intraday Watch rows ──
     def build_iw_rows(iw_view, date_labels, n_days, live_date_hdr):
-        header = '<th class="stock-col">STOCK</th>'
+        header = '<th class="stock-col">STOCK</th><th class="chart-col">PRICE CANDLES</th><th class="chart-col">VOLUME RATIO</th>'
         for i, lbl in enumerate(date_labels):
             header += f'''
 <th class="date-col filterable" data-colid="col-{i}">
@@ -587,7 +628,9 @@ if sel_status and "Intraday Watch" in sel_status:
                      f'<div class="sym">{sym}</div>'
                      f'<div class="prc">₹{prc:,.0f} <span style="color:{dir_color_iw};font-size:14px;">{dir_arrow_iw}</span> <span style="color:{dir_color_iw};">{pct_avg_iw:+.1f}%</span></div>'
                      f'<div style="font-size:10px;color:#6b7280;margin-top:2px;">5D Avg: ₹{r.get("avg_5d_price_iw",0):,.0f}</div>'
-                     f'</td>')
+                     f'</td>'
+                     f'<td class="chart-cell">{_price_svg_iw(days)}</td>'
+                     f'<td class="chart-cell">{_volume_svg_iw(days)}</td>')
             for i in range(n_days):
                 if i < len(days):
                     d = days[i]
