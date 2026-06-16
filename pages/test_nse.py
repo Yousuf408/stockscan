@@ -1,23 +1,19 @@
 import streamlit as st
-import pyotp
 import pandas as pd
 import threading
 import time
-import base64
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-st.set_page_config(page_title="Nifty 50 Real-Time Feed", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Nifty 50 WebSocket", page_icon="⚡", layout="wide")
 st.title("⚡ Nifty 50 High-Speed WebSocket Stream")
 
 # =====================================================================
-# 1. API CREDENTIALS
+# 1. FIXED API CREDENTIALS
 # =====================================================================
 API_KEY = "QFectj5C"
 CLIENT_CODE = "IIRA29771"
 PASSWORD = "1993"
-TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
-
 
 TRACKED_STOCKS = {
     "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
@@ -25,7 +21,7 @@ TRACKED_STOCKS = {
     "3456": "TATAMOTORS-EQ", "11630": "NIFTY-BEES"
 }
 
-# Session State Initializations
+# State Variables
 if "live_market_data" not in st.session_state:
     st.session_state.live_market_data = {t: {"Symbol": s, "Price": 0.0, "Volume": 0} for t, s in TRACKED_STOCKS.items()}
 if "ws_connected" not in st.session_state:
@@ -36,17 +32,8 @@ if "ws_logs" not in st.session_state:
 def log_message(msg):
     st.session_state.ws_logs.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
 
-def fix_secret_string(raw_secret):
-    clean = raw_secret.replace(" ", "").strip()
-    try:
-        base64.b32decode(clean, casefold=True)
-        return clean
-    except Exception:
-        padded = clean + '=' * ((4 - len(clean) % 4) % 4)
-        return base64.b64encode(base64.b64decode(padded)).decode('utf-8')
-
 # =====================================================================
-# 2. WEBSOCKET LOOP PIPELINE
+# 2. PURE WEBSOCKET PIPELINE
 # =====================================================================
 def start_websocket_stream(auth_token, feed_token):
     try:
@@ -57,7 +44,7 @@ def start_websocket_stream(auth_token, feed_token):
             st.session_state.ws_connected = True
             log_message("✅ Pure WebSocket Active! Subscribing to script streams...")
             token_list = [{"exchangeType": 1, "tokens": list(TRACKED_STOCKS.keys())}]
-            sws.subscribe("stream_nifty_50", 2, token_list)
+            sws.subscribe("manual_otp_stream", 2, token_list)
             log_message("📡 Subscription payload successfully processed.")
 
         def on_data(wsapp, message):
@@ -86,68 +73,64 @@ def start_websocket_stream(auth_token, feed_token):
         log_message(f"💥 Fatal exception in WebSocket Thread Engine: {str(thread_err)}")
 
 # =====================================================================
-# 3. INTERACTIVE ENGINE WITH SPACED APIS TO PREVENT RATE BLOCKS
+# 3. MANUAL OTP UI INPUT PANEL
 # =====================================================================
 if not st.session_state.ws_connected:
-    if st.button("🔌 Boot Nifty 50 Live Stream"):
-        st.session_state.ws_logs = []
-        log_message("🔑 Normalizing TOTP Secret Key structure...")
-        
-        try:
-            safe_secret = fix_secret_string(TOTP_SECRET)
-            obj = SmartConnect(api_key=API_KEY)
+    st.subheader("🔑 Secure Gateway Login")
+    
+    # Text input field on the UI for your 6-digit dynamic OTP
+    user_otp = st.text_input(
+        label="Enter the 6-Digit TOTP from your Authenticator App:", 
+        max_chars=6, 
+        placeholder="e.g. 123456",
+        type="password"  # Hides the numbers as you type for security
+    )
+    
+    if st.button("🔌 Connect to Live WebSocket Stream"):
+        if len(user_otp) != 6 or not user_otp.isdigit():
+            st.warning("Please enter a valid 6-digit numeric OTP.")
+        else:
+            st.session_state.ws_logs = []
+            log_message("📡 Initiating handshake with manual security verification...")
             
-            session_data = None
-            time_offsets = [0, -30, 30] # Reduced window checks to prevent spam blocks
-            log_message(f"📡 Requesting handshake across {len(time_offsets)} windows with cooldown spacing...")
-            
-            for index, offset in enumerate(time_offsets):
-                if index > 0:
-                    time.sleep(1.5)  # Rest step prevents "exceeding access rate" block
-                
-                current_time_slot = int(time.time()) + offset
-                totp_auth = pyotp.TOTP(safe_secret).at(current_time_slot)
-                
-                log_message(f"🔄 Attempting handshake window {index + 1} (Offset: {offset}s)...")
-                session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
+            try:
+                obj = SmartConnect(api_key=API_KEY)
+                session_data = obj.generateSession(CLIENT_CODE, PASSWORD, user_otp)
                 
                 if session_data.get('status'):
-                    log_message(f"✅ REST Authentication verified successfully!")
-                    break
-            
-            if session_data and session_data.get('status'):
-                auth_token = session_data['data']['jwtToken']
-                feed_token = obj.getfeedToken()
-                
-                log_message("⏳ Spawning standalone background thread for WebSocket listener...")
-                ws_thread = threading.Thread(
-                    target=start_websocket_stream, 
-                    args=(auth_token, feed_token), 
-                    daemon=True
+                    log_message("✅ Dynamic Handshake Passed! Fetching pipeline authentication tickets...")
+                    auth_token = session_data['data']['jwtToken']
+                    feed_token = obj.getfeedToken()
+                    
+                    log_message("⏳ Spawning standalone background thread for WebSocket listener...")
+                    ws_thread = threading.Thread(
+                        target=start_websocket_stream, 
+                        args=(auth_token, feed_token), 
+                        daemon=True
                 )
-                ws_thread.start()
-                
-                time.sleep(2.5)
-                st.rerun()
-            else:
-                msg = session_data.get('message') if session_data else "Rate limit cooldown active. Wait 1 minute."
-                log_message(f"❌ Session Rejected by Angel One: {msg}")
-                st.error(f"Authentication Failed: {msg}")
-        except Exception as e:
-            log_message(f"💥 Session Generation Crash: {str(e)}")
+                    ws_thread.start()
+                    
+                    time.sleep(2.5)
+                    st.rerun()
+                else:
+                    msg = session_data.get('message')
+                    log_message(f"❌ Session Rejected: {msg}")
+                    st.error(f"Authentication Failed: {msg}. Ensure your phone app clock is synced.")
+            except Exception as e:
+                log_message(f"💥 Integration Crash: {str(e)}")
 
 # =====================================================================
 # 4. MONITOR RENDERING ZONE
 # =====================================================================
 @st.fragment(run_every=1)
 def monitoring_ui_dashboard():
-    st.subheader("📋 Pipeline Infrastructure Log Stream")
     if st.session_state.ws_logs:
+        st.subheader("📋 Pipeline Infrastructure Log Stream")
         for log in st.session_state.ws_logs[::-1]:
             st.code(log)
             
     if st.session_state.ws_connected:
-        st.subheader("🟢 Live Data Matrix")
+        st.subheader("🟢 Live Data Matrix (Pure WebSocket Active)")
         ui_df = pd.DataFrame.from_dict(st.session_state.live_market_data, orient='index')
         ui_df.index.name = "Token"
         ui_df.reset_index(inplace=True)
