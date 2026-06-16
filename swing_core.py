@@ -702,12 +702,12 @@ def refresh_live() -> dict:
     updated = 0
     if to_save:
         try:
-           resp = requests.post(
-    _url("swing_live_data"),
-    headers={**_headers(), "Prefer": "return=minimal"},
-    json=batch,
-    timeout=20,
-)
+            resp = requests.delete(
+                _url("swing_live_data"),
+                headers=_headers(),
+                params={"user_id": f"eq.{uid}"},
+                timeout=20,
+            )
             resp.raise_for_status()
             print(f"[swing_core] refresh_live — deleted old live rows")
         except Exception as e:
@@ -717,6 +717,7 @@ def refresh_live() -> dict:
             batch = to_save[i:i+200]
             try:
                 resp = requests.post(
+                    
                     _url("swing_live_data"),
                     headers={**_headers(), "Prefer": "return=minimal"},
                     json=batch,
@@ -1088,15 +1089,17 @@ def start_background_refresh(interval_secs: int = 180):
             global _db_updated_at
             while True:
                 _time.sleep(interval_secs)
-                try:
+               try:
                     if is_market_open():
-                     print("[bg_refresh] fetching yfinance...")
-                res = refresh_live()
-                if res.get("updated", 0) > 0:
-                    _db_updated_at = _time.time()
-                    print(f"[bg_refresh] DB updated at {_db_updated_at} — {res['updated']} rows")
-                else:
-                    print(f"[bg_refresh] No updates — {len(res.get('errors',[]))} errors")
+                        print("[bg_refresh] fetching yfinance...")
+                        res = refresh_live()
+                        if res.get("updated", 0) > 0:
+                            _db_updated_at = _time.time()
+                            print(f"[bg_refresh] DB updated at {_db_updated_at} — {res['updated']} rows")
+                        else:
+                            print(f"[bg_refresh] No updates — {len(res.get('errors',[]))} errors")
+                    else:
+                        print("[bg_refresh] market closed — skipping")
                     
                 except Exception as e:
                     print(f"[bg_refresh] error: {e}")
