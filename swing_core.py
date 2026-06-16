@@ -1068,39 +1068,4 @@ def get_intraday_watch() -> list:
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
 
-# ─── SECTION 10 — BACKGROUND REFRESH ────────────────────────────────────────
-import threading as _threading, time as _time
 
-_bg_thread     = None
-_bg_lock       = _threading.Lock()
-_db_updated_at = None   # ← shared variable, readable by fragment
-
-def get_db_updated_at():
-    """Fragment calls this to check if new data is available."""
-    return _db_updated_at
-
-def start_background_refresh(interval_secs: int = 180):
-    global _bg_thread, _db_updated_at
-    with _bg_lock:
-        if _bg_thread and _bg_thread.is_alive():
-            return
-        def _loop():
-            global _db_updated_at
-            while True:
-                _time.sleep(interval_secs)
-                try:
-                    if is_market_open():
-                        print("[bg_refresh] fetching yfinance...")
-                        res = refresh_live()
-                        if res.get("updated", 0) > 0:
-                            _db_updated_at = _time.time()
-                            print(f"[bg_refresh] DB updated at {_db_updated_at} — {res['updated']} rows")
-                        else:
-                            print(f"[bg_refresh] No updates — {len(res.get('errors',[]))} errors")
-                    else:
-                        print("[bg_refresh] market closed — skipping")
-                except Exception as e:
-                    print(f"[bg_refresh] error: {e}")
-        _bg_thread = _threading.Thread(target=_loop, daemon=True, name="sw_bg_refresh")
-        _bg_thread.start()
-        print("[bg_refresh] started — fetch every 3 min")
