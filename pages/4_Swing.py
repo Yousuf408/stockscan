@@ -264,20 +264,19 @@ with c5:
 def _refresh_status_bar():
     _now     = time.time()
     _mlabel  = "🟢 Live fetch active" if market_open else "🟠 Market closed"
-    db_ts = get_db_updated_at()
-    last  = st.session_state.get("sw_auto_refresh_time") or 0
-    if db_ts and db_ts > last:
-        _status = "⚡ New data ready — updating..."
-        _color  = "#7c3aed"
-    elif st.session_state.get("sw_auto_refresh_time"):
-        _elapsed = int(_now - st.session_state.sw_auto_refresh_time)
-        _next_in = max(0, 180 - _elapsed)
+    
+    # Check if last auto-refresh happened
+    last_refresh = st.session_state.get("sw_auto_refresh_time") or 0
+    if last_refresh:
+        _elapsed = int(_now - last_refresh)
+        _next_in = max(0, 300 - _elapsed)  # 300 sec = 5 min
         _status  = (f"🔁 Last updated {_elapsed//60}m {_elapsed%60}s ago · "
                     f"Next fetch in {_next_in//60}m {_next_in%60}s · {_mlabel}")
         _color   = "#6b7280"
     else:
-        _status = f"🔁 Waiting for first fetch (3 min) · {_mlabel}"
+        _status = f"🔁 Waiting for auto-refresh (5 min) · {_mlabel}"
         _color  = "#9ca3af"
+    
     st.markdown(
         f"<div style='font-size:10px;padding:4px 10px;background:#f9fafb;"
         f"border-radius:6px;border:1px solid #e5e7eb;color:{_color};"
