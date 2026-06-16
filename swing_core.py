@@ -1070,29 +1070,30 @@ def get_intraday_watch() -> list:
 
 # ─── SECTION 10 — BACKGROUND REFRESH ────────────────────────────────────────
 import threading as _threading, time as _time
-_bg_thread = None
-_bg_lock   = _threading.Lock()
+
+_bg_thread     = None
+_bg_lock       = _threading.Lock()
+_db_updated_at = None   # ← shared variable, readable by fragment
+
+def get_db_updated_at():
+    """Fragment calls this to check if new data is available."""
+    return _db_updated_at
 
 def start_background_refresh(interval_secs: int = 180):
-    global _bg_thread
+    global _bg_thread, _db_updated_at
     with _bg_lock:
         if _bg_thread and _bg_thread.is_alive():
             return
         def _loop():
+            global _db_updated_at
             while True:
                 _time.sleep(interval_secs)
                 try:
                     if is_market_open():
                         print("[bg_refresh] fetching yfinance...")
                         refresh_live()
-                        print("[bg_refresh] saved to DB — signalling UI")
-                        # ── Signal fragment: DB is fresh, update UI now ──
-                        try:
-                            import streamlit as st
-                            st.session_state["sw_db_updated"]      = True
-                            st.session_state["sw_auto_refresh_time"] = _time.time()
-                        except Exception:
-                            pass
+                        _db_updated_at = _time.time()   # ← set timestamp after save
+                        print(f"[bg_refresh] DB updated at {_db_updated_at}")
                     else:
                         print("[bg_refresh] market closed — skipping")
                 except Exception as e:
