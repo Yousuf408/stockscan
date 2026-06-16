@@ -717,7 +717,6 @@ def refresh_live() -> dict:
             batch = to_save[i:i+200]
             try:
                 resp = requests.post(
-                    
                     _url("swing_live_data"),
                     headers={**_headers(), "Prefer": "return=minimal"},
                     json=batch,
@@ -1089,7 +1088,7 @@ def start_background_refresh(interval_secs: int = 180):
             global _db_updated_at
             while True:
                 _time.sleep(interval_secs)
-               try:
+                try:
                     if is_market_open():
                         print("[bg_refresh] fetching yfinance...")
                         res = refresh_live()
@@ -1100,7 +1099,6 @@ def start_background_refresh(interval_secs: int = 180):
                             print(f"[bg_refresh] No updates — {len(res.get('errors',[]))} errors")
                     else:
                         print("[bg_refresh] market closed — skipping")
-                    
                 except Exception as e:
                     print(f"[bg_refresh] error: {e}")
         _bg_thread = _threading.Thread(target=_loop, daemon=True, name="sw_bg_refresh")
