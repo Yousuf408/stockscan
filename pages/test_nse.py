@@ -9,11 +9,11 @@ st.set_page_config(page_title="Nifty 50 WebSocket", page_icon="⚡", layout="wid
 st.title("⚡ Nifty 50 High-Speed WebSocket Stream")
 
 # =====================================================================
-# 1. FIXED API CREDENTIALS
+# 1. PERMANENT HARDCODED API CREDENTIALS
 # =====================================================================
-API_KEY = "QFectj5C"
-CLIENT_CODE = "IIRA29771"
-PASSWORD = "1993"
+API_KEY = "QFectj5C"       # Permanently locked in as requested
+CLIENT_CODE = "IIRA29771"   # Hardcoded Client ID
+PASSWORD = "1993"          # Hardcoded Pin/Password
 
 TRACKED_STOCKS = {
     "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
@@ -21,7 +21,7 @@ TRACKED_STOCKS = {
     "3456": "TATAMOTORS-EQ", "11630": "NIFTY-BEES"
 }
 
-# State Variables
+# Session State Initializations
 if "live_market_data" not in st.session_state:
     st.session_state.live_market_data = {t: {"Symbol": s, "Price": 0.0, "Volume": 0} for t, s in TRACKED_STOCKS.items()}
 if "ws_connected" not in st.session_state:
@@ -38,14 +38,19 @@ def log_message(msg):
 def start_websocket_stream(auth_token, feed_token):
     try:
         clean_auth_token = auth_token.replace("Bearer ", "").strip()
-        sws = SmartWebSocketV2(clean_auth_token, API_KEY, CLIENT_CODE, feed_token)
+        clean_client_code = str(CLIENT_CODE).upper().strip()
+        
+        log_message(f"🔌 Dialing wss://smartapisocket.angelone.in for Client: {clean_client_code}...")
+        
+        # Initializing WebSocket connection using the locked-in Key
+        sws = SmartWebSocketV2(clean_auth_token, API_KEY, clean_client_code, feed_token)
 
         def on_open(wsapp):
             st.session_state.ws_connected = True
-            log_message("✅ Pure WebSocket Active! Subscribing to script streams...")
+            log_message("✅ Pure WebSocket Pipeline Active! Injecting subscription mapping payload...")
             token_list = [{"exchangeType": 1, "tokens": list(TRACKED_STOCKS.keys())}]
             sws.subscribe("manual_otp_stream", 2, token_list)
-            log_message("📡 Subscription payload successfully processed.")
+            log_message("📡 Subscription tracks accepted by remote host server.")
 
         def on_data(wsapp, message):
             if isinstance(message, dict):
@@ -57,33 +62,33 @@ def start_websocket_stream(auth_token, feed_token):
                     })
 
         def on_error(wsapp, error):
-            log_message(f"❌ Socket Pipeline Error: {str(error)}")
+            log_message(f"❌ Socket Callback Exception: {str(error)}")
 
         def on_close(wsapp, *args, **kwargs):
             st.session_state.ws_connected = False
-            log_message("🔌 Connection closed down by remote server.")
+            log_message(f"🔌 Connection closed down by remote server. Info: {args} {kwargs}")
 
         sws.on_open = on_open
         sws.on_data = on_data
         sws.on_error = on_error
         sws.on_close = on_close
+        
         sws.connect()
         
     except Exception as thread_err:
-        log_message(f"💥 Fatal exception in WebSocket Thread Engine: {str(thread_err)}")
+        log_message(f"💥 Thread Runtime Exception: {str(thread_err)}")
 
 # =====================================================================
-# 3. MANUAL OTP UI INPUT PANEL
+# 3. MANUAL OTP UI INPUT PANEL (NO PRIVATE KEY PASTE NEEDED)
 # =====================================================================
 if not st.session_state.ws_connected:
     st.subheader("🔑 Secure Gateway Login")
     
-    # Text input field on the UI for your 6-digit dynamic OTP
     user_otp = st.text_input(
         label="Enter the 6-Digit TOTP from your Authenticator App:", 
         max_chars=6, 
         placeholder="e.g. 123456",
-        type="password"  # Hides the numbers as you type for security
+        type="password"
     )
     
     if st.button("🔌 Connect to Live WebSocket Stream"):
@@ -94,6 +99,7 @@ if not st.session_state.ws_connected:
             log_message("📡 Initiating handshake with manual security verification...")
             
             try:
+                # Direct assignment of your API Key
                 obj = SmartConnect(api_key=API_KEY)
                 session_data = obj.generateSession(CLIENT_CODE, PASSWORD, user_otp)
                 
@@ -107,15 +113,15 @@ if not st.session_state.ws_connected:
                         target=start_websocket_stream, 
                         args=(auth_token, feed_token), 
                         daemon=True
-                )
+                    )
                     ws_thread.start()
                     
-                    time.sleep(2.5)
+                    time.sleep(3.0)  # Standard window for background task spin-up
                     st.rerun()
                 else:
                     msg = session_data.get('message')
                     log_message(f"❌ Session Rejected: {msg}")
-                    st.error(f"Authentication Failed: {msg}. Ensure your phone app clock is synced.")
+                    st.error(f"Authentication Failed: {msg}")
             except Exception as e:
                 log_message(f"💥 Integration Crash: {str(e)}")
 
