@@ -18,6 +18,7 @@ CLIENT_CODE = "IIRA29771"
 PASSWORD = "1993"
 TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
 
+
 TRACKED_STOCKS = {
     "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
     "4124": "ICICIBANK-EQ", "3045": "SBIN-EQ", "10604": "BHARTIARTL-EQ", "1660": "ITC-EQ",
@@ -79,15 +80,13 @@ def start_websocket_stream(auth_token, feed_token):
         sws.on_data = on_data
         sws.on_error = on_error
         sws.on_close = on_close
-        
-        log_message("🔌 Connecting network to wss://smartapisocket.angelone.in...")
         sws.connect()
         
     except Exception as thread_err:
         log_message(f"💥 Fatal exception in WebSocket Thread Engine: {str(thread_err)}")
 
 # =====================================================================
-# 3. INTERACTIVE ENGINE WITH ANTI-TIME DRIFT RETRY
+# 3. INTERACTIVE ENGINE WITH SPACED APIS TO PREVENT RATE BLOCKS
 # =====================================================================
 if not st.session_state.ws_connected:
     if st.button("🔌 Boot Nifty 50 Live Stream"):
@@ -99,17 +98,21 @@ if not st.session_state.ws_connected:
             obj = SmartConnect(api_key=API_KEY)
             
             session_data = None
-            # Scan multiple time offsets to account for cloud server time sync errors
-            time_offsets = [0, -30, 30, -60, 60]
-            log_message(f"📡 Testing credentials against Angel One REST endpoints (Scanning {len(time_offsets)} time windows)...")
+            time_offsets = [0, -30, 30] # Reduced window checks to prevent spam blocks
+            log_message(f"📡 Requesting handshake across {len(time_offsets)} windows with cooldown spacing...")
             
-            for offset in time_offsets:
+            for index, offset in enumerate(time_offsets):
+                if index > 0:
+                    time.sleep(1.5)  # Rest step prevents "exceeding access rate" block
+                
                 current_time_slot = int(time.time()) + offset
                 totp_auth = pyotp.TOTP(safe_secret).at(current_time_slot)
                 
+                log_message(f"🔄 Attempting handshake window {index + 1} (Offset: {offset}s)...")
                 session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
+                
                 if session_data.get('status'):
-                    log_message(f"✅ REST Authentication verified! (Time offset match: {offset}s)")
+                    log_message(f"✅ REST Authentication verified successfully!")
                     break
             
             if session_data and session_data.get('status'):
@@ -127,9 +130,9 @@ if not st.session_state.ws_connected:
                 time.sleep(2.5)
                 st.rerun()
             else:
-                msg = session_data.get('message') if session_data else "No response from server"
+                msg = session_data.get('message') if session_data else "Rate limit cooldown active. Wait 1 minute."
                 log_message(f"❌ Session Rejected by Angel One: {msg}")
-                st.error(f"Authentication Failed: {msg}. Check your credentials or reset your 2FA token seed.")
+                st.error(f"Authentication Failed: {msg}")
         except Exception as e:
             log_message(f"💥 Session Generation Crash: {str(e)}")
 
