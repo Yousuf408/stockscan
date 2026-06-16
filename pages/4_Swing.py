@@ -75,6 +75,8 @@ for k, v in [
     ("sw_sel_vol",            None),
     ("sw_sel_iw",             None),
     ("sw_auto_refresh_time",  None),
+    ("sw_db_updated",         False),
+    ("sw_fetch_start_time",   None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -88,21 +90,21 @@ def refresh_cache():
     st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
 
-# ── Background thread: calls refresh_live() every 5 min during market hours ──
+# ── Background thread: fetches yfinance every 3 min, signals UI when DB is updated ──
 if st.session_state.get("user_id"):
-    start_background_refresh(interval_secs=300)
+    start_background_refresh(interval_secs=180)
 
-# ── Silent fragment: reads DB every 5 min, updates results without page reload ──
-@st.fragment(run_every=300)
+# ── Fragment: polls every 10s, acts ONLY when thread signals DB is ready ──
+@st.fragment(run_every=10)
 def _silent_auto_refresh():
-    if not st.session_state.get("user_id"):
-        return
-    if not st.session_state.get("sw_loaded", False):
-        return
+    if not st.session_state.get("user_id"):       return
+    if not st.session_state.get("sw_loaded"):     return
+    if not st.session_state.get("sw_db_updated"): return
+    st.session_state.sw_db_updated        = False
     results, errors = load_from_db()
     if results:
-        st.session_state.sw_results          = results
-        st.session_state.sw_errors           = errors
+        st.session_state.sw_results           = results
+        st.session_state.sw_errors            = errors
         st.session_state.sw_auto_refresh_time = time.time()
 
 _silent_auto_refresh()
@@ -255,17 +257,29 @@ with c5:
         st.rerun()
 
 # ── Auto-refresh status indicator ──
-if st.session_state.get("sw_auto_refresh_time"):
-    _elapsed = int(time.time() - st.session_state.sw_auto_refresh_time)
-    _next_in = max(0, 300 - _elapsed)
-    _mlabel  = "🟢 Live fetch active" if market_open else "🟠 DB refresh only"
+@st.fragment(run_every=1)
+def _refresh_status_bar():
+    _now     = time.time()
+    _mlabel  = "🟢 Live fetch active" if market_open else "🟠 Market closed"
+    if st.session_state.get("sw_db_updated"):
+        _status = "⚡ New data ready — updating..."
+        _color  = "#7c3aed"
+    elif st.session_state.get("sw_auto_refresh_time"):
+        _elapsed = int(_now - st.session_state.sw_auto_refresh_time)
+        _next_in = max(0, 180 - _elapsed)
+        _status  = (f"🔁 Last updated {_elapsed//60}m {_elapsed%60}s ago · "
+                    f"Next fetch in {_next_in//60}m {_next_in%60}s · {_mlabel}")
+        _color   = "#6b7280"
+    else:
+        _status = f"🔁 Waiting for first fetch (3 min) · {_mlabel}"
+        _color  = "#9ca3af"
     st.markdown(
         f"<div style='font-size:10px;padding:4px 10px;background:#f9fafb;"
-        f"border-radius:6px;border:1px solid #e5e7eb;color:#6b7280;"
-        f"display:inline-block;margin-bottom:4px;'>"
-        f"🔁 Refreshed {_elapsed//60}m {_elapsed%60}s ago · "
-        f"Next in {_next_in//60}m {_next_in%60}s · {_mlabel}</div>",
+        f"border-radius:6px;border:1px solid #e5e7eb;color:{_color};"
+        f"display:inline-block;margin-bottom:4px;'>{_status}</div>",
         unsafe_allow_html=True)
+
+_refresh_status_bar()
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
