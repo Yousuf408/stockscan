@@ -3,6 +3,14 @@ import websocket
 import json
 import threading
 import time
+import requests
+import pyotp
+
+# ========== CREDENTIALS (HARDCODED) ==========
+API_KEY = "QFectj5C"
+CLIENT_CODE = "IIRA29771"
+PASSWORD = "1993"
+TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"
 
 # ========== 50 NSE STOCKS ==========
 STOCKS = {
@@ -23,32 +31,21 @@ STOCKS = {
 
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="NSE Live Test", layout="wide")
-st.title("📡 NSE Live Data Test")
-
-# ========== SIDEBAR - CREDENTIALS ==========
-with st.sidebar:
-    st.header("🔐 Angel One Login")
-    api_key = st.text_input("API Key", type="password")
-    client_code = st.text_input("Client Code")
-    password = st.text_input("Password", type="password")
-    totp = st.text_input("TOTP")
-    connect_btn = st.button("Connect", type="primary")
+st.title("📡 NSE Live Data")
 
 # ========== SESSION STATE ==========
 if "live_data" not in st.session_state:
     st.session_state.live_data = {}
-if "connected" not in st.session_state:
-    st.session_state.connected = False
+if "ws_connected" not in st.session_state:
+    st.session_state.ws_connected = False
 
-# ========== PLACEHOLDER FOR DATA ==========
 placeholder = st.empty()
+status = st.empty()
 
-# ========== WEBSOCKET THREAD ==========
+# ========== WEBSOCKET ==========
 def run_websocket(feed_token, jwt_token):
     symbol_map = {v: k for k, v in STOCKS.items()}
     tokens = list(STOCKS.values())
-    
-    ws_url = f"wss://ws.angelbroking.com/NestHtml5Mobile/smart/websocket?feed_token={feed_token}&client_code={client_code}&jwttoken={jwt_token}"
     
     def on_message(ws, message):
         try:
@@ -65,6 +62,7 @@ def run_websocket(feed_token, jwt_token):
             pass
     
     def on_open(ws):
+        st.session_state.ws_connected = True
         sub_msg = json.dumps({
             "action": "subscribe",
             "params": {
@@ -74,62 +72,60 @@ def run_websocket(feed_token, jwt_token):
         })
         ws.send(sub_msg)
     
+    def on_error(ws, error):
+        st.session_state.ws_connected = False
+    
     ws = websocket.WebSocketApp(
-        ws_url,
+        f"wss://ws.angelbroking.com/NestHtml5Mobile/smart/websocket?feed_token={feed_token}&client_code={CLIENT_CODE}&jwttoken={jwt_token}",
         on_message=on_message,
-        on_open=on_open
+        on_open=on_open,
+        on_error=on_error
     )
     ws.run_forever()
 
-# ========== LOGIN & CONNECT ==========
-if connect_btn and api_key and client_code and password and totp:
-    try:
-        import requests
-        
-        # Login via REST API
-        login_url = "https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword"
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-UserType": "USER",
-            "X-SourceID": "WEB",
-            "X-ClientLocalIP": "127.0.0.1",
-            "X-ClientPublicIP": "127.0.0.1",
-            "X-MACAddress": "00:00:00:00:00:00",
-            "X-PrivateKey": api_key
-        }
-        payload = {
-            "clientcode": client_code,
-            "password": password,
-            "totp": totp
-        }
-        
-        response = requests.post(login_url, json=payload, headers=headers)
-        data = response.json()
-        
-        if data.get("status"):
-            feed_token = data["data"]["feedToken"]
-            jwt_token = data["data"]["jwtToken"]
-            
-            st.session_state.connected = True
-            st.success("✅ Connected! Starting live feed...")
-            
-            # Start WebSocket in background thread
-            thread = threading.Thread(target=run_websocket, args=(feed_token, jwt_token), daemon=True)
-            thread.start()
-        else:
-            st.error(f"❌ Login failed: {data.get('message', 'Unknown error')}")
+# ========== AUTO LOGIN & CONNECT ==========
+@st.cache_resource
+def connect_angel():
+    totp = pyotp.TOTP(TOTP_SECRET).now()
     
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
+    login_url = "https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-UserType": "USER",
+        "X-SourceID": "WEB",
+        "X-ClientLocalIP": "127.0.0.1",
+        "X-ClientPublicIP": "127.0.0.1",
+        "X-MACAddress": "00:00:00:00:00:00",
+        "X-PrivateKey": API_KEY
+    }
+    payload = {"clientcode": CLIENT_CODE, "password": PASSWORD, "totp": totp}
+    
+    response = requests.post(login_url, json=payload, headers=headers)
+    data = response.json()
+    
+    if data.get("status"):
+        return data["data"]["feedToken"], data["data"]["jwtToken"]
+    else:
+        return None, data.get("message", "Unknown error")
+
+feed_token, jwt_token = connect_angel()
+
+if feed_token:
+    status.success("✅ Connected! Streaming 50 stocks...")
+    thread = threading.Thread(target=run_websocket, args=(feed_token, jwt_token), daemon=True)
+    thread.start()
+else:
+    status.error(f"❌ Login failed: {jwt_token}")
+    st.stop()
 
 # ========== DISPLAY LIVE DATA ==========
-if st.session_state.connected:
+if st.session_state.ws_connected:
     while True:
         if st.session_state.live_data:
             import pandas as pd
             rows = []
-            for sym, vals in st.session_state.live_data.items():
+            for sym, vals in sorted(st.session_state.live_data.items()):
                 rows.append({
                     "Symbol": sym,
                     "LTP": f"₹{vals['ltp']:.2f}",
@@ -137,6 +133,6 @@ if st.session_state.connected:
                     "Change %": f"{vals['change']:.2f}%"
                 })
             df = pd.DataFrame(rows)
-            placeholder.dataframe(df, use_container_width=True)
+            placeholder.dataframe(df, use_container_width=True, hide_index=True)
         time.sleep(1)
         st.rerun()
