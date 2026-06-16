@@ -1,145 +1,123 @@
-import streamlit as st
-import pandas as pd
-import threading
+from smartapi import SmartConnect, SmartWebSocket
+import json
 import time
-from SmartApi import SmartConnect
-from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-st.set_page_config(page_title="Nifty 50 WebSocket", page_icon="⚡", layout="wide")
-st.title("⚡ Nifty 50 High-Speed WebSocket Stream")
-
-# =====================================================================
-# 1. PERMANENT HARDCODED API CREDENTIALS
-# =====================================================================
-API_KEY = "QFectj5C"       # Permanently locked in as requested
-CLIENT_CODE = "IIRA29771"   # Hardcoded Client ID
-PASSWORD = "1993"          # Hardcoded Pin/Password
-
-TRACKED_STOCKS = {
-    "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
-    "4124": "ICICIBANK-EQ", "3045": "SBIN-EQ", "10604": "BHARTIARTL-EQ", "1660": "ITC-EQ",
-    "3456": "TATAMOTORS-EQ", "11630": "NIFTY-BEES"
+# ========== 50 NSE STOCKS WITH TOKENS ==========
+STOCKS = {
+    "RELIANCE": "2885",
+    "TCS": "11536",
+    "HDFCBANK": "1333",
+    "INFY": "1594",
+    "ICICIBANK": "4963",
+    "BHARTIARTL": "10604",
+    "SBIN": "3045",
+    "ITC": "1660",
+    "KOTAKBANK": "492",
+    "LT": "1788",
+    "AXISBANK": "590",
+    "HINDUNILVR": "356",
+    "BAJFINANCE": "317",
+    "WIPRO": "3787",
+    "ASIANPAINT": "236",
+    "MARUTI": "2489",
+    "SUNPHARMA": "335",
+    "TITAN": "3506",
+    "ULTRACEMCO": "11543",
+    "NESTLEIND": "1749",
+    "HCLTECH": "722",
+    "TECHM": "3466",
+    "POWERGRID": "14977",
+    "NTPC": "11630",
+    "ONGC": "2475",
+    "COALINDIA": "4834",
+    "ADANIPORTS": "9697",
+    "ADANIENT": "13488",
+    "JSWSTEEL": "11723",
+    "TATASTEEL": "3499",
+    "HINDALCO": "1344",
+    "TATAMOTORS": "3456",
+    "M&M": "2031",
+    "BAJAJFINSV": "318",
+    "BAJAJ-AUTO": "319",
+    "EICHERMOT": "910",
+    "HEROMOTOCO": "1348",
+    "DRREDDY": "881",
+    "CIPLA": "694",
+    "DIVISLAB": "10940",
+    "APOLLOHOSP": "157",
+    "GRASIM": "1232",
+    "BRITANNIA": "547",
+    "INDUSINDBK": "525",
+    "SBILIFE": "13174",
+    "HDFCLIFE": "467",
+    "BPCL": "526",
+    "UPL": "11287",
+    "SHREECEM": "3103",
+    "DABUR": "772",
 }
 
-# Session State Initializations
-if "live_market_data" not in st.session_state:
-    st.session_state.live_market_data = {t: {"Symbol": s, "Price": 0.0, "Volume": 0} for t, s in TRACKED_STOCKS.items()}
-if "ws_connected" not in st.session_state:
-    st.session_state.ws_connected = False
-if "ws_logs" not in st.session_state:
-    st.session_state.ws_logs = []
+# ========== LOGIN ==========
+print("\n===== ANGEL ONE LOGIN =====")
+API_KEY = input("API Key: ").strip()
+CLIENT_CODE = input("Client Code: ").strip()
+PASSWORD = input("Password: ").strip()
+TOTP = input("TOTP: ").strip()
 
-def log_message(msg):
-    st.session_state.ws_logs.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+print("\n⏳ Logging in...")
+obj = SmartConnect(api_key=API_KEY)
+data = obj.generateSession(CLIENT_CODE, PASSWORD, TOTP)
 
-# =====================================================================
-# 2. PURE WEBSOCKET PIPELINE
-# =====================================================================
-def start_websocket_stream(auth_token, feed_token):
+feed_token = obj.getfeedToken()
+jwt_token = data['data']['jwtToken']
+print("✅ Login successful!\n")
+
+# ========== BUILD SUBSCRIPTION ==========
+tokens = list(STOCKS.values())
+symbol_names = {v: k for k, v in STOCKS.items()}  # token → symbol mapping
+
+print(f"📊 Loaded {len(STOCKS)} stocks\n")
+
+# ========== WEBSOCKET ==========
+sws = SmartWebSocket(feed_token, CLIENT_CODE, jwt_token)
+
+def on_data(wsapp, message):
     try:
-        clean_auth_token = auth_token.replace("Bearer ", "").strip()
-        clean_client_code = str(CLIENT_CODE).upper().strip()
+        data = json.loads(message)
         
-        log_message(f"🔌 Dialing wss://smartapisocket.angelone.in for Client: {clean_client_code}...")
+        # Skip non-tick messages
+        if 'subscription_mode' in data or 'request_id' in data:
+            return
         
-        # Initializing WebSocket connection using the locked-in Key
-        sws = SmartWebSocketV2(clean_auth_token, API_KEY, clean_client_code, feed_token)
-
-        def on_open(wsapp):
-            st.session_state.ws_connected = True
-            log_message("✅ Pure WebSocket Pipeline Active! Injecting subscription mapping payload...")
-            token_list = [{"exchangeType": 1, "tokens": list(TRACKED_STOCKS.keys())}]
-            sws.subscribe("manual_otp_stream", 2, token_list)
-            log_message("📡 Subscription tracks accepted by remote host server.")
-
-        def on_data(wsapp, message):
-            if isinstance(message, dict):
-                token = message.get("token")
-                if token in st.session_state.live_market_data:
-                    st.session_state.live_market_data[token].update({
-                        "Price": message.get("last_traded_price", 0.0) / 100.0 if "last_traded_price" in message else st.session_state.live_market_data[token]["Price"],
-                        "Volume": message.get("volume_trade_for_the_day", 0) if "volume_trade_for_the_day" in message else st.session_state.live_market_data[token]["Volume"]
-                    })
-
-        def on_error(wsapp, error):
-            log_message(f"❌ Socket Callback Exception: {str(error)}")
-
-        def on_close(wsapp, *args, **kwargs):
-            st.session_state.ws_connected = False
-            log_message(f"🔌 Connection closed down by remote server. Info: {args} {kwargs}")
-
-        sws.on_open = on_open
-        sws.on_data = on_data
-        sws.on_error = on_error
-        sws.on_close = on_close
+        token = str(data.get('token', ''))
+        symbol = symbol_names.get(token, token)
+        ltp = data.get('last_traded_price', 0)
+        volume = data.get('volume_trade_for_the_day', 0)
+        change = data.get('change_percentage', 0)
         
-        sws.connect()
+        timestamp = time.strftime('%H:%M:%S')
+        print(f"[{timestamp}] {symbol:15} │ LTP: ₹{ltp:>8.2f} │ Vol: {volume:>12,} │ Chg: {change:>+6.2f}%")
         
-    except Exception as thread_err:
-        log_message(f"💥 Thread Runtime Exception: {str(thread_err)}")
+    except Exception as e:
+        pass  # Ignore parse errors
 
-# =====================================================================
-# 3. MANUAL OTP UI INPUT PANEL (NO PRIVATE KEY PASTE NEEDED)
-# =====================================================================
-if not st.session_state.ws_connected:
-    st.subheader("🔑 Secure Gateway Login")
-    
-    user_otp = st.text_input(
-        label="Enter the 6-Digit TOTP from your Authenticator App:", 
-        max_chars=6, 
-        placeholder="e.g. 123456",
-        type="password"
-    )
-    
-    if st.button("🔌 Connect to Live WebSocket Stream"):
-        if len(user_otp) != 6 or not user_otp.isdigit():
-            st.warning("Please enter a valid 6-digit numeric OTP.")
-        else:
-            st.session_state.ws_logs = []
-            log_message("📡 Initiating handshake with manual security verification...")
-            
-            try:
-                # Direct assignment of your API Key
-                obj = SmartConnect(api_key=API_KEY)
-                session_data = obj.generateSession(CLIENT_CODE, PASSWORD, user_otp)
-                
-                if session_data.get('status'):
-                    log_message("✅ Dynamic Handshake Passed! Fetching pipeline authentication tickets...")
-                    auth_token = session_data['data']['jwtToken']
-                    feed_token = obj.getfeedToken()
-                    
-                    log_message("⏳ Spawning standalone background thread for WebSocket listener...")
-                    ws_thread = threading.Thread(
-                        target=start_websocket_stream, 
-                        args=(auth_token, feed_token), 
-                        daemon=True
-                    )
-                    ws_thread.start()
-                    
-                    time.sleep(3.0)  # Standard window for background task spin-up
-                    st.rerun()
-                else:
-                    msg = session_data.get('message')
-                    log_message(f"❌ Session Rejected: {msg}")
-                    st.error(f"Authentication Failed: {msg}")
-            except Exception as e:
-                log_message(f"💥 Integration Crash: {str(e)}")
+def on_open(wsapp):
+    print(f"🔗 Connected! Streaming {len(tokens)} stocks...\n")
+    print(f"{'Time':<10} {'Symbol':15} │ {'LTP':>10} │ {'Volume':>12} │ {'Change':>8}")
+    print("-" * 70)
+    sws.subscribe("mw", [{"exchangeType": 1, "tokens": tokens}], 2)  # Mode 2 = Quote
 
-# =====================================================================
-# 4. MONITOR RENDERING ZONE
-# =====================================================================
-@st.fragment(run_every=1)
-def monitoring_ui_dashboard():
-    if st.session_state.ws_logs:
-        st.subheader("📋 Pipeline Infrastructure Log Stream")
-        for log in st.session_state.ws_logs[::-1]:
-            st.code(log)
-            
-    if st.session_state.ws_connected:
-        st.subheader("🟢 Live Data Matrix (Pure WebSocket Active)")
-        ui_df = pd.DataFrame.from_dict(st.session_state.live_market_data, orient='index')
-        ui_df.index.name = "Token"
-        ui_df.reset_index(inplace=True)
-        st.dataframe(ui_df, use_container_width=True, hide_index=True)
+def on_error(wsapp, error):
+    print(f"❌ Error: {error}")
 
-monitoring_ui_dashboard()
+def on_close(wsapp, code, msg):
+    print(f"\n🔒 Connection closed. Reconnecting in 3s...")
+    time.sleep(3)
+    sws.connect()
+
+sws.on_open = on_open
+sws.on_data = on_data
+sws.on_error = on_error
+sws.on_close = on_close
+
+print("🚀 Starting live feed... Press Ctrl+C to stop.\n")
+sws.connect()
