@@ -138,14 +138,16 @@ def price_svg(opens, highs, lows, closes, dates,
         body_y = sy(max(o, c)); body_h = max(2, abs(sy(o) - sy(c)))
         parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(h2)}" y2="{sy(l2)}" stroke="{col}" stroke-width="1.2"/>'
                      f'<rect x="{x}" y="{body_y}" width="{bw}" height="{body_h}" fill="{col}" rx="2"/>')
-        lbl = dates[i].split(" ")[0] if i < len(dates) else str(i+1)
+        lbl = dates[i] if i < len(dates) else str(i+1)
+        if len(lbl) > 5: lbl = lbl[-2:]  # ISO date "2026-06-14" → "14"
         parts.append(f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{lbl}</text>')
     if has_cur:
         sep_x = pad + n*(bw+gap) + 2
         parts.append(f'<line x1="{sep_x}" x2="{sep_x}" y1="{pad}" y2="{h-12}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
         cx = sep_x + 5 + bw//2; tx = sep_x + 5; col = "#7c3aed"
         body_y = sy(max(cur_open, cur_close)); body_h = max(2, abs(sy(cur_open) - sy(cur_close)))
-        lbl = str(cur_date).split(" ")[0] if cur_date else "today"
+        lbl = str(cur_date) if cur_date else "today"
+        if len(lbl) > 5: lbl = lbl[-2:]  # ISO date → just day
         parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(cur_high)}" y2="{sy(cur_low)}" stroke="{col}" stroke-width="1.2"/>'
                      f'<rect x="{tx}" y="{body_y}" width="{bw}" height="{body_h}" fill="{col}30" stroke="{col}" stroke-width="1.5" rx="2"/>'
                      f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="{col}" font-weight="500">{lbl}</text>')
@@ -166,14 +168,15 @@ def volume_svg(hist_vols, cur_vol, median_vol, dates=None, cur_date=None, w=195,
     for i, v in enumerate(hist_vols):
         x = pad + i*(bw+gap); h2 = bh_hist(v); y = h - 14 - h2
         parts.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{h2}" fill="#e8eaed" stroke="#c4c9d4" stroke-width="0.5" rx="2"/>'
-                     f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{dates[i].split(" ")[0] if i < len(dates) else i+1}</text>')
+                     f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="#9ca3af">{(dates[i][-2:] if len(dates[i]) > 5 else dates[i]) if i < len(dates) else i+1}</text>')
     sep = pad + n*(bw+gap) + 2
     parts.append(f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-14}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
     cx = sep + 4; ch2 = bh_cur(cur_vol) if cur_vol else 3; cy = h - 14 - ch2
     ratio = round(cur_vol / median_vol, 2) if median_vol and median_vol > 0 else 0
     cc = "#7c3aed" if ratio > 2.0 else "#2563eb"
+    _cur_lbl = (cur_date[-2:] if cur_date and len(cur_date) > 5 else cur_date) if cur_date else "cur"
     parts.append(f'<rect x="{cx}" y="{cy}" width="{bw}" height="{ch2}" fill="{cc}25" stroke="{cc}" stroke-width="1.5" rx="2"/>'
-                 f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">{cur_date.split(" ")[0] if cur_date else "cur"}</text>')
+                 f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="8" fill="{cc}">{_cur_lbl}</text>')
     if median_vol and median_vol > 0:
         med_y = round(h - 14 - bh_hist(median_vol), 1)
         med_x2 = pad + n*(bw+gap) - gap
@@ -251,6 +254,18 @@ with c5:
         if res["errors"]:    st.warning(f"⚠ {len(res['errors'])} errors")
         st.rerun()
 
+# ── Auto-refresh status indicator ──
+if st.session_state.get("sw_auto_refresh_time"):
+    _elapsed = int(time.time() - st.session_state.sw_auto_refresh_time)
+    _next_in = max(0, 300 - _elapsed)
+    _mlabel  = "🟢 Live fetch active" if market_open else "🟠 DB refresh only"
+    st.markdown(
+        f"<div style='font-size:10px;padding:4px 10px;background:#f9fafb;"
+        f"border-radius:6px;border:1px solid #e5e7eb;color:#6b7280;"
+        f"display:inline-block;margin-bottom:4px;'>"
+        f"🔁 Refreshed {_elapsed//60}m {_elapsed%60}s ago · "
+        f"Next in {_next_in//60}m {_next_in%60}s · {_mlabel}</div>",
+        unsafe_allow_html=True)
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1074,4 +1089,3 @@ if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
         for e in st.session_state.sw_errors:
             st.markdown(f"`{e['symbol']}` — {e['error']}")
-            
