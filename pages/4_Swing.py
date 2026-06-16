@@ -20,9 +20,7 @@ from swing_core import (
     populate_status_history,
     get_intraday_watch,
     fmt_vol, is_market_open,
-    start_background_refresh,
-    get_db_updated_at,
-)
+  )
 market_open = is_market_open()
 
 try:
@@ -91,26 +89,29 @@ def refresh_cache():
     st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
 
-# ── Background thread: fetches yfinance every 3 min, signals UI when DB is updated ──
-if st.session_state.get("user_id"):
-    start_background_refresh(interval_secs=180)
 
 # ── Fragment: polls every 10s, acts ONLY when thread signals DB is ready ──
-@st.fragment(run_every=10)
-def _silent_auto_refresh():
+@st.fragment(run_every=300)  # 300 sec = 5 min
+def _auto_refresh_every_5min():
     if not st.session_state.get("user_id"):   return
     if not st.session_state.get("sw_loaded"): return
-    db_ts = get_db_updated_at()
-    if db_ts is None:                         return
-    last  = st.session_state.get("sw_auto_refresh_time") or 0
-    if db_ts <= last:                         return
-    results, errors = load_from_db()
-    if results:
-        st.session_state.sw_results           = results
-        st.session_state.sw_errors            = errors
-        st.session_state.sw_auto_refresh_time = db_ts
+    if not is_market_open():                  return
+    
+    # Fetch latest from yfinance
+    res = refresh_live()
+    
+    # Reload from DB if anything updated
+    if res.get("updated", 0) > 0:
+        results, errors = load_from_db()
+        st.session_state.sw_results = results
+        st.session_state.sw_errors  = errors
+        print(f"[fragment_refresh] Updated {res['updated']} rows")
+    else:
+        if res.get("errors"):
+            print(f"[fragment_refresh] No updates — errors: {res['errors'][:1]}")
 
-_silent_auto_refresh()
+_auto_refresh_every_5min()
+
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
         results, errors = load_from_db()
