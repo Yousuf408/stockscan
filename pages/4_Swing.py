@@ -81,9 +81,30 @@ def load_cached():
         st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
 
-def refresh_cache():
-    st.session_state.sw_stocks_cache = load_swing_stocks()
-    return st.session_state.sw_stocks_cache
+def refresh_cache():                                       # ← EXISTING
+    st.session_state.sw_stocks_cache = load_swing_stocks()# ← EXISTING
+    return st.session_state.sw_stocks_cache               # ← EXISTING
+                                                          # ← PASTE FROM HERE
+from swing_core import start_background_refresh
+if st.session_state.get("user_id"):
+    start_background_refresh(interval_secs=300)
+
+@st.fragment(run_every=300)
+def _silent_auto_refresh():
+    if not st.session_state.get("user_id"):
+        return
+    if not st.session_state.get("sw_loaded", False):
+        return
+    results, errors = load_from_db()
+    if results:
+        st.session_state.sw_results          = results
+        st.session_state.sw_errors           = errors
+        st.session_state.sw_auto_refresh_time = time.time()
+
+_silent_auto_refresh()
+                                                          # ← PASTE UNTIL HERE
+if not st.session_state.sw_loaded:                        # ← EXISTING
+    with st.spinner("Loading..."):                        # ← EXISTING
 
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
