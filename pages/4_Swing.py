@@ -21,6 +21,7 @@ from swing_core import (
     get_intraday_watch,
     fmt_vol, is_market_open,
     start_background_refresh,
+    get_db_updated_at,
 )
 market_open = is_market_open()
 
