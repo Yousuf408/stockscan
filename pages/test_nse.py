@@ -4,7 +4,6 @@ import pandas as pd
 import threading
 import time
 import base64
-import sys
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
@@ -19,14 +18,13 @@ CLIENT_CODE = "IIRA29771"
 PASSWORD = "1993"
 TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
 
-
 TRACKED_STOCKS = {
     "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
     "4124": "ICICIBANK-EQ", "3045": "SBIN-EQ", "10604": "BHARTIARTL-EQ", "1660": "ITC-EQ",
     "3456": "TATAMOTORS-EQ", "11630": "NIFTY-BEES"
 }
 
-# State Variables
+# Session State Initializations
 if "live_market_data" not in st.session_state:
     st.session_state.live_market_data = {t: {"Symbol": s, "Price": 0.0, "Volume": 0} for t, s in TRACKED_STOCKS.items()}
 if "ws_connected" not in st.session_state:
@@ -47,7 +45,7 @@ def fix_secret_string(raw_secret):
         return base64.b64encode(base64.b64decode(padded)).decode('utf-8')
 
 # =====================================================================
-# 2. FIXED WEBSOCKET PIPELINE WITH MULTI-ARGUMENT CALLBACK SUPPORT
+# 2. WEBSOCKET LOOP PIPELINE
 # =====================================================================
 def start_websocket_stream(auth_token, feed_token):
     try:
@@ -58,7 +56,7 @@ def start_websocket_stream(auth_token, feed_token):
             st.session_state.ws_connected = True
             log_message("✅ Pure WebSocket Active! Subscribing to script streams...")
             token_list = [{"exchangeType": 1, "tokens": list(TRACKED_STOCKS.keys())}]
-            sws.subscribe("load_test_800", 2, token_list)
+            sws.subscribe("stream_nifty_50", 2, token_list)
             log_message("📡 Subscription payload successfully processed.")
 
         def on_data(wsapp, message):
@@ -73,12 +71,9 @@ def start_websocket_stream(auth_token, feed_token):
         def on_error(wsapp, error):
             log_message(f"❌ Socket Pipeline Error: {str(error)}")
 
-        # Catching both old and new SDK call variants to prevent silent core drops
         def on_close(wsapp, *args, **kwargs):
             st.session_state.ws_connected = False
-            # Safely parse exit parameters based on argument distribution lengths
-            msg = f"Args: {args} {kwargs}" if args else "Normal Closure"
-            log_message(f"🔌 Connection closed down by remote server. Details: {msg}")
+            log_message("🔌 Connection closed down by remote server.")
 
         sws.on_open = on_open
         sws.on_data = on_data
@@ -92,7 +87,7 @@ def start_websocket_stream(auth_token, feed_token):
         log_message(f"💥 Fatal exception in WebSocket Thread Engine: {str(thread_err)}")
 
 # =====================================================================
-# 3. VERIFICATION RUNNER
+# 3. INTERACTIVE ENGINE WITH ANTI-TIME DRIFT RETRY
 # =====================================================================
 if not st.session_state.ws_connected:
     if st.button("🔌 Boot Nifty 50 Live Stream"):
@@ -101,14 +96,23 @@ if not st.session_state.ws_connected:
         
         try:
             safe_secret = fix_secret_string(TOTP_SECRET)
-            totp_auth = pyotp.TOTP(safe_secret).now()
-            
-            log_message("📡 Connecting to Angel One REST Validation Endpoint...")
             obj = SmartConnect(api_key=API_KEY)
-            session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
             
-            if session_data.get('status'):
-                log_message("✅ REST Authentication verified! Fetching tokens...")
+            session_data = None
+            # Scan multiple time offsets to account for cloud server time sync errors
+            time_offsets = [0, -30, 30, -60, 60]
+            log_message(f"📡 Testing credentials against Angel One REST endpoints (Scanning {len(time_offsets)} time windows)...")
+            
+            for offset in time_offsets:
+                current_time_slot = int(time.time()) + offset
+                totp_auth = pyotp.TOTP(safe_secret).at(current_time_slot)
+                
+                session_data = obj.generateSession(CLIENT_CODE, PASSWORD, totp_auth)
+                if session_data.get('status'):
+                    log_message(f"✅ REST Authentication verified! (Time offset match: {offset}s)")
+                    break
+            
+            if session_data and session_data.get('status'):
                 auth_token = session_data['data']['jwtToken']
                 feed_token = obj.getfeedToken()
                 
@@ -120,11 +124,12 @@ if not st.session_state.ws_connected:
                 )
                 ws_thread.start()
                 
-                # Monitor initialization progress across threads
                 time.sleep(2.5)
                 st.rerun()
             else:
-                log_message(f"❌ Session Rejected by Angel One: {session_data.get('message')}")
+                msg = session_data.get('message') if session_data else "No response from server"
+                log_message(f"❌ Session Rejected by Angel One: {msg}")
+                st.error(f"Authentication Failed: {msg}. Check your credentials or reset your 2FA token seed.")
         except Exception as e:
             log_message(f"💥 Session Generation Crash: {str(e)}")
 
