@@ -97,6 +97,8 @@ def _auto_refresh_every_5min():
     if not st.session_state.get("sw_loaded"): return
     if not is_market_open():                  return
     
+    print("[fragment_refresh] ⏰ Starting 5-min refresh...")
+    
     # Fetch latest from yfinance
     res = refresh_live()
     
@@ -105,10 +107,12 @@ def _auto_refresh_every_5min():
         results, errors = load_from_db()
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
-        print(f"[fragment_refresh] Updated {res['updated']} rows")
+        st.session_state.sw_auto_refresh_time = time.time()  # ← UPDATE TIMESTAMP
+        print(f"✅ [fragment_refresh] Updated {res['updated']} rows")
     else:
+        print(f"⚠️ [fragment_refresh] No updates — {len(res.get('errors',[]))} errors")
         if res.get("errors"):
-            print(f"[fragment_refresh] No updates — errors: {res['errors'][:1]}")
+            print(f"   First error: {res['errors'][0]}")
 
 _auto_refresh_every_5min()
 
