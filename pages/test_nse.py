@@ -1,11 +1,8 @@
 import streamlit as st
-import websocket
-import json
-import threading
-import time
 import requests
 import pyotp
 import pandas as pd
+import time
 
 # ========== CREDENTIALS ==========
 API_KEY = "QFectj5C"
@@ -13,7 +10,7 @@ CLIENT_CODE = "IIRA29771"
 PASSWORD = "1993"
 TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"
 
-# ========== 50 NSE STOCKS ==========
+# ========== 50 NSE STOCKS (symbol: token) ==========
 STOCKS = {
     "RELIANCE": "2885", "TCS": "11536", "HDFCBANK": "1333", "INFY": "1594",
     "ICICIBANK": "4963", "BHARTIARTL": "10604", "SBIN": "3045", "ITC": "1660",
@@ -30,11 +27,11 @@ STOCKS = {
     "SHREECEM": "3103", "DABUR": "772"
 }
 
-# ========== PAGE CONFIG ==========
+# ========== PAGE SETUP ==========
 st.set_page_config(page_title="NSE Live", layout="wide")
-st.title("📡 NSE Live Data (Angel One)")
+st.title("📡 NSE Live Data (Angel One Polling)")
 
-# ========== LOGIN (cached once per session) ==========
+# ========== LOGIN ==========
 @st.cache_resource
 def angel_login():
     totp = pyotp.TOTP(TOTP_SECRET).now()
@@ -48,75 +45,68 @@ def angel_login():
     payload = {"clientcode": CLIENT_CODE, "password": PASSWORD, "totp": totp}
     resp = requests.post(url, json=payload, headers=headers).json()
     if resp.get("status"):
-        return resp["data"]["feedToken"], resp["data"]["jwtToken"]
+        return resp["data"]["jwtToken"], resp["data"]["feedToken"]
     return None, None
 
-feed_token, jwt_token = angel_login()
+jwt_token, feed_token = angel_login()
 
-if not feed_token:
+if not jwt_token:
     st.error("❌ Login failed")
     st.stop()
 
-# ========== INITIALIZE SESSION STATE ==========
-if "live_data" not in st.session_state:
-    st.session_state.live_data = {}
-if "ws_started" not in st.session_state:
-    st.session_state.ws_started = False
+# ========== FETCH QUOTES (REST API) ==========
+def fetch_quotes(tokens):
+    url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/market/v1/quote/"
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-UserType": "USER",
+        "X-SourceID": "WEB",
+        "X-ClientLocalIP": "127.0.0.1",
+        "X-ClientPublicIP": "127.0.0.1",
+        "X-MACAddress": "00:00:00:00:00:00",
+        "X-PrivateKey": API_KEY
+    }
+    payload = {
+        "mode": "FULL",
+        "exchangeTokens": {
+            "NSE": tokens
+        }
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        return resp.json()
+    except:
+        return None
 
-# ========== WEBSOCKET THREAD (runs only once) ==========
-def start_ws():
-    symbol_map = {v: k for k, v in STOCKS.items()}
-    tokens = list(STOCKS.values())
+# ========== MAIN LOOP ==========
+tokens = list(STOCKS.values())
+symbol_map = {v: k for k, v in STOCKS.items()}
 
-    def on_message(ws, message):
-        try:
-            data = json.loads(message)
-            if 'last_traded_price' in data:
-                token = str(data.get('token', ''))
-                sym = symbol_map.get(token, '?')
-                st.session_state.live_data[sym] = {
-                    "ltp": data.get('last_traded_price', 0),
-                    "volume": data.get('volume_trade_for_the_day', 0),
-                    "change": data.get('change_percentage', 0)
-                }
-        except:
-            pass
-
-    def on_open(ws):
-        sub = json.dumps({
-            "action": "subscribe",
-            "params": {"mode": 2, "tokenList": [{"exchangeType": 1, "tokens": tokens}]}
-        })
-        ws.send(sub)
-
-    def on_error(ws, error):
-        pass  # silently ignore
-
-    ws_url = f"wss://ws.angelbroking.com/NestHtml5Mobile/smart/websocket?feed_token={feed_token}&client_code={CLIENT_CODE}&jwttoken={jwt_token}"
-    ws = websocket.WebSocketApp(ws_url, on_message=on_message, on_open=on_open, on_error=on_error)
-    ws.run_forever()
-
-if not st.session_state.ws_started:
-    threading.Thread(target=start_ws, daemon=True).start()
-    st.session_state.ws_started = True
-
-# ========== DISPLAY TABLE (auto-refresh) ==========
 placeholder = st.empty()
 
-if st.session_state.live_data:
-    rows = []
-    for sym, vals in sorted(st.session_state.live_data.items()):
-        rows.append({
-            "Symbol": sym,
-            "LTP": f"₹{vals['ltp']:.2f}",
-            "Volume": vals['volume'],
-            "Change %": f"{vals['change']:.2f}%"
-        })
-    df = pd.DataFrame(rows)
-    placeholder.dataframe(df, use_container_width=True, hide_index=True)
-else:
-    placeholder.info("⏳ Waiting for live ticks... (usually 3-5 seconds)")
+while True:
+    data = fetch_quotes(tokens)
+    if data and data.get("status"):
+        rows = []
+        for item in data.get("data", {}).get("fetched", []):
+            token = str(item.get("symbolToken", ""))
+            sym = symbol_map.get(token, "?")
+            ltp = item.get("ltp", 0)
+            vol = item.get("volume", 0)
+            change = item.get("change", 0)
+            rows.append({
+                "Symbol": sym,
+                "LTP": f"₹{ltp:.2f}",
+                "Volume": vol,
+                "Change %": f"{change:.2f}%"
+            })
+        if rows:
+            df = pd.DataFrame(rows)
+            placeholder.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        placeholder.warning("⏳ Fetching data... (will update in 3s)")
 
-# Auto-refresh every 2 seconds
-time.sleep(2)
-st.rerun()
+    time.sleep(3)  # Poll every 3 seconds
+    st.rerun()
