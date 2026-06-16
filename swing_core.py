@@ -1068,39 +1068,35 @@ def get_intraday_watch() -> list:
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 10 — BACKGROUND REFRESH
-# ─────────────────────────────────────────────────────────────────────────────
-
-import threading as _threading
-import time as _time
-
+# ─── SECTION 10 — BACKGROUND REFRESH ────────────────────────────────────────
+import threading as _threading, time as _time
 _bg_thread = None
 _bg_lock   = _threading.Lock()
 
-def start_background_refresh(interval_secs: int = 300):
-    """
-    Single daemon thread — calls refresh_live() every 5 min during market hours.
-    Safe to call multiple times — only one thread ever runs.
-    """
+def start_background_refresh(interval_secs: int = 180):
     global _bg_thread
     with _bg_lock:
         if _bg_thread and _bg_thread.is_alive():
-            return  # already running
-
+            return
         def _loop():
             while True:
                 _time.sleep(interval_secs)
                 try:
                     if is_market_open():
-                        print("[bg_refresh] market open — calling refresh_live()")
+                        print("[bg_refresh] fetching yfinance...")
                         refresh_live()
-                        print("[bg_refresh] done")
+                        print("[bg_refresh] saved to DB — signalling UI")
+                        # ── Signal fragment: DB is fresh, update UI now ──
+                        try:
+                            import streamlit as st
+                            st.session_state["sw_db_updated"]      = True
+                            st.session_state["sw_auto_refresh_time"] = _time.time()
+                        except Exception:
+                            pass
                     else:
-                        print("[bg_refresh] market closed — skipping yfinance")
+                        print("[bg_refresh] market closed — skipping")
                 except Exception as e:
                     print(f"[bg_refresh] error: {e}")
-
         _bg_thread = _threading.Thread(target=_loop, daemon=True, name="sw_bg_refresh")
         _bg_thread.start()
-        print("[bg_refresh] background thread started")
+        print("[bg_refresh] started — fetch every 3 min")
