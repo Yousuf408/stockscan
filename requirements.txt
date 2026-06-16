@@ -1,5 +1,4 @@
 streamlit
-smartapi-python
 pyotp
 pandas
 yfinance
@@ -11,5 +10,4 @@ plotly>=5.0.0
 numpy>=1.23.0  
 streamlit>=1.35.0
 pandas>=2.0.0
-dhanhq
 extra-streamlit-components
