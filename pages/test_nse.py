@@ -27,19 +27,8 @@ STOCKS = {
     "SHREECEM": "3103", "DABUR": "772"
 }
 
-# ========== PAGE SETUP ==========
 st.set_page_config(page_title="NSE Live", layout="wide")
-
-# Auto-refresh every 5 seconds (clean, no loop)
-st.markdown(
-    """
-    <meta http-equiv="refresh" content="5">
-    """,
-    unsafe_allow_html=True
-)
-
 st.title("📡 NSE Live Data (Angel One)")
-st.caption(f"Last updated: {time.strftime('%H:%M:%S')}")
 
 # ========== LOGIN ==========
 @st.cache_resource
@@ -64,8 +53,10 @@ if not jwt_token:
     st.error("❌ Login failed")
     st.stop()
 
-# ========== FETCH DATA ==========
-def fetch_quotes(tokens):
+# ========== FETCH FUNCTION ==========
+@st.cache_data(ttl=3)  # Cache for 3 seconds, then refresh
+def fetch_quotes(jwt):
+    tokens = list(STOCKS.values())
     url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/market/v1/quote/"
     headers = {
         "Authorization": f"Bearer {jwt_token}",
@@ -86,24 +77,30 @@ def fetch_quotes(tokens):
         return None
 
 # ========== DISPLAY ==========
-tokens = list(STOCKS.values())
 symbol_map = {v: k for k, v in STOCKS.items()}
+placeholder = st.empty()
+status_text = st.empty()
 
-data = fetch_quotes(tokens)
+# Auto-refresh button (triggers only data refresh, not full page)
+if st.button("🔄 Refresh Data") or True:
+    data = fetch_quotes(jwt_token)
+    
+    if data and data.get("status"):
+        rows = []
+        for item in data.get("data", {}).get("fetched", []):
+            token = str(item.get("symbolToken", ""))
+            sym = symbol_map.get(token, "?")
+            rows.append({
+                "Symbol": sym,
+                "LTP": f"₹{item.get('ltp', 0):.2f}",
+                "Volume": item.get("volume", 0),
+                "Change %": f"{item.get('change', 0):.2f}%"
+            })
+        df = pd.DataFrame(rows)
+        placeholder.dataframe(df, use_container_width=True, hide_index=True)
+        status_text.success(f"✅ {len(rows)} stocks | {time.strftime('%H:%M:%S')}")
+    else:
+        status_text.warning("⏳ Loading...")
 
-if data and data.get("status"):
-    rows = []
-    for item in data.get("data", {}).get("fetched", []):
-        token = str(item.get("symbolToken", ""))
-        sym = symbol_map.get(token, "?")
-        rows.append({
-            "Symbol": sym,
-            "LTP": f"₹{item.get('ltp', 0):.2f}",
-            "Volume": item.get("volume", 0),
-            "Change %": f"{item.get('change', 0):.2f}%"
-        })
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    st.success(f"✅ Showing {len(rows)} stocks")
-else:
-    st.warning("⏳ Loading data... Page auto-refreshes every 5 seconds.")
+    time.sleep(3)
+    st.rerun()  # Only reruns the script, doesn't reload browser page
