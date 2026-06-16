@@ -28,10 +28,10 @@ st.title("📡 NSE Live Data Test")
 # ========== SIDEBAR - CREDENTIALS ==========
 with st.sidebar:
     st.header("🔐 Angel One Login")
-    api_key = st.text_input("QFectj5C", type="password")
-    client_code = st.text_input("IIRA29771")
-    password = st.text_input("1993", type="password")
-    totp = st.text_input("JFTG3DYADWLYSW6FC6RVV4THWM")
+    api_key = st.text_input("API Key", type="password")
+    client_code = st.text_input("Client Code")
+    password = st.text_input("Password", type="password")
+    totp = st.text_input("TOTP")
     connect_btn = st.button("Connect", type="primary")
 
 # ========== SESSION STATE ==========
