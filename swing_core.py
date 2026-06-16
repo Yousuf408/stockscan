@@ -643,7 +643,7 @@ def refresh_live() -> dict:
         return {"updated": 0, "errors": []}
 
     symbols = [s["symbol"] for s in stocks]
-    bulk    = _fetch_yf_bulk(symbols, period="2d")
+    bulk    = _fetch_yf_bulk(symbols, period="15d")  # v4.3.1: changed from "2d" to "15d" for accurate 5-day median
     errors  = []
     to_save = []
 
@@ -952,7 +952,7 @@ def get_intraday_watch() -> list:
 
             days.append({
                 "date":       r["trade_date"],
-                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d"),
+                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d%b"),
                 "status":     r.get("status", "NONE"),
                 "vol_signal": vs_clean,
                 "vol_ratio":  float(r.get("vol_ratio", 0)),
@@ -1067,5 +1067,3 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
-
-
