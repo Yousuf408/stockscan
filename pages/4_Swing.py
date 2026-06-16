@@ -1,5 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v5.1
+#  TRADE SENTRY — pages/4_Swing.py  v5.2
+#  v5.2: Silent auto-refresh every 5 min via @st.fragment + background thread
 #  v5.1: Intraday Watch now uses price_svg() with real OHLC (open,high,low,close)
 #        instead of _price_svg_iw() which only used close — fixes wrong candle colors
 #  v5.0: Accumulation Breakout added as sub-tab inside Intraday Watch HTML
@@ -19,6 +20,7 @@ from swing_core import (
     populate_status_history,
     get_intraday_watch,
     fmt_vol, is_market_open,
+    start_background_refresh,
 )
 market_open = is_market_open()
 
@@ -61,17 +63,18 @@ st.markdown("""
 
 # ── Session state ──
 for k, v in [
-    ("sw_results",       []),
-    ("sw_errors",        []),
-    ("sw_loaded",        False),
-    ("sw_show_manage",   False),
-    ("sw_stocks_cache",  None),
-    ("sw_last_sync",     None),
-    ("sw_last_refresh",  None),
-    ("sw_last_populate", None),
-    ("sw_sel_status",    None),
-    ("sw_sel_vol",       None),
-    ("sw_sel_iw",        None),
+    ("sw_results",            []),
+    ("sw_errors",             []),
+    ("sw_loaded",             False),
+    ("sw_show_manage",        False),
+    ("sw_stocks_cache",       None),
+    ("sw_last_sync",          None),
+    ("sw_last_refresh",       None),
+    ("sw_last_populate",      None),
+    ("sw_sel_status",         None),
+    ("sw_sel_vol",            None),
+    ("sw_sel_iw",             None),
+    ("sw_auto_refresh_time",  None),
 ]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -81,14 +84,15 @@ def load_cached():
         st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
 
-def refresh_cache():                                       # ← EXISTING
-    st.session_state.sw_stocks_cache = load_swing_stocks()# ← EXISTING
-    return st.session_state.sw_stocks_cache               # ← EXISTING
-                                                          # ← PASTE FROM HERE
-from swing_core import start_background_refresh
+def refresh_cache():
+    st.session_state.sw_stocks_cache = load_swing_stocks()
+    return st.session_state.sw_stocks_cache
+
+# ── Background thread: calls refresh_live() every 5 min during market hours ──
 if st.session_state.get("user_id"):
     start_background_refresh(interval_secs=300)
 
+# ── Silent fragment: reads DB every 5 min, updates results without page reload ──
 @st.fragment(run_every=300)
 def _silent_auto_refresh():
     if not st.session_state.get("user_id"):
@@ -102,9 +106,6 @@ def _silent_auto_refresh():
         st.session_state.sw_auto_refresh_time = time.time()
 
 _silent_auto_refresh()
-                                                          # ← PASTE UNTIL HERE
-if not st.session_state.sw_loaded:                        # ← EXISTING
-    with st.spinner("Loading..."):                        # ← EXISTING
 
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
@@ -424,7 +425,8 @@ if sel_status and "Intraday Watch" in sel_status:
     for i, opt in enumerate(iw_filter_opts):
         with iw_cols[i]:
             is_active = st.session_state.sw_sel_iw == opt
-            if st.button(opt, key=f"iw_{i}", type="primary" if is_active else "secondary",
+            if st.button(opt, key=f"iw_{i}",
+                         type="primary" if is_active else "secondary",
                          use_container_width=True):
                 st.session_state.sw_sel_iw = opt
 
@@ -468,54 +470,49 @@ if sel_status and "Intraday Watch" in sel_status:
             live_map = {r["symbol"]: r for r in (live.data or [])}
 
             results = []
-            for sym in hist_map.keys():
-                if sym not in live_map:
+            for sym, live_row in live_map.items():
+                hist_row = hist_map.get(sym)
+                if not hist_row:
                     continue
 
-                hist_row = hist_map[sym]
-                live_row = live_map[sym]
-
-                c_base = float(hist_row.get("close") or 0)
-                v_base = float(hist_row.get("vol_ratio") or 0)
-                c_live = float(live_row.get("close") or 0)
-                v_live = float(live_row.get("vol_ratio") or 0)
-
-                if c_base <= 0 or c_live <= 0:
+                close_base = float(hist_row.get("close") or 0)
+                close_live = float(live_row.get("close") or 0)
+                if not close_base or not close_live:
                     continue
 
-                price_gain  = (c_live - c_base) / c_base * 100
-                vol_improve = v_live - v_base
+                price_gain   = round(((close_live - close_base) / close_base) * 100, 2)
+                vol_improve  = round(float(live_row.get("vol_ratio") or 0) - float(hist_row.get("vol_ratio") or 0), 2)
+                vol_ratio_base = float(hist_row.get("vol_ratio") or 0)
+                vol_ratio_live = float(live_row.get("vol_ratio") or 0)
 
-                if not (4.0 <= price_gain <= 10.0):
-                    continue
-                if vol_improve < 1.5:
-                    continue
-                if not (2.0 <= v_live <= 4.5):
-                    continue
-
-                if price_gain > 1.5:
-                    direction = "up"; dir_arrow = "↑"; dir_color = "#16a34a"
-                elif price_gain < -1.5:
-                    direction = "down"; dir_arrow = "↓"; dir_color = "#dc2626"
+                if price_gain > 0:
+                    direction    = "up"
+                    dir_arrow    = "↑"
+                    dir_color    = "#16a34a"
+                elif price_gain < 0:
+                    direction    = "down"
+                    dir_arrow    = "↓"
+                    dir_color    = "#dc2626"
                 else:
-                    direction = "side"; dir_arrow = "→"; dir_color = "#6b7280"
+                    direction    = "side"
+                    dir_arrow    = "→"
+                    dir_color    = "#6b7280"
 
                 results.append({
-                    "symbol":          sym,
-                    "price_gain":      round(price_gain, 2),
-                    "vol_improve":     round(vol_improve, 2),
-                    "vol_ratio_base":  round(v_base, 2),
-                    "vol_ratio_live":  round(v_live, 2),
-                    "close_base":      round(c_base, 2),
-                    "close_live":      round(c_live, 2),
-                    "live_status":     live_row.get("status", "WATCH"),
-                    "live_vsig":       live_row.get("vol_signal", ""),
-                    "direction":       direction,
-                    "dir_arrow":       dir_arrow,
-                    "dir_color":       dir_color,
-                    "baseline_date":   baseline_date,
-                    "live_date":       str(live_row.get("trade_date", today)),
-                    "screener_url":    f"https://www.screener.in/company/{sym}/",
+                    "symbol":         sym,
+                    "close_base":     close_base,
+                    "close_live":     close_live,
+                    "price_gain":     price_gain,
+                    "vol_improve":    vol_improve,
+                    "vol_ratio_base": vol_ratio_base,
+                    "vol_ratio_live": vol_ratio_live,
+                    "live_vsig":      live_row.get("vol_signal", ""),
+                    "direction":      direction,
+                    "dir_arrow":      dir_arrow,
+                    "dir_color":      dir_color,
+                    "baseline_date":  baseline_date,
+                    "live_date":      str(live_row.get("trade_date", today)),
+                    "screener_url":   f"https://www.screener.in/company/{sym}/",
                 })
 
             results.sort(key=lambda x: x["price_gain"], reverse=True)
@@ -544,73 +541,54 @@ if sel_status and "Intraday Watch" in sel_status:
 
     # ══════════════════════════════════════════════════════════════════════════
     # v5.1: price_svg_for_iw — converts days[] OHLC into price_svg() format
-    # Uses real open, high, low, close from swing_status_history (now available)
-    # Produces accurate candle colors based on open vs close (same as main table)
     # ══════════════════════════════════════════════════════════════════════════
     def price_svg_for_iw(days, live_open, live_high, live_low, live_close, live_date, h=70):
-        """
-        Wrapper around price_svg() for Intraday Watch.
-        Extracts OHLC arrays from days[] and passes live OHLC as current candle.
-        Falls back gracefully if open/high/low are 0 (old rows before v4.3).
-        """
-        if not days:
-            return f'<svg width="160" height="{h}"><text x="6" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
-
-        hist_opens  = [d["open"]       for d in days]
-        hist_highs  = [d["high"]       for d in days]
-        hist_lows   = [d["low"]        for d in days]
-        hist_closes = [d["close"]      for d in days]
-        hist_dates  = [d["date_label"] for d in days]
-
-        # Fallback: if old rows have 0 for open/high/low, approximate from close
-        hist_opens  = [o if o > 0 else c for o, c in zip(hist_opens,  hist_closes)]
-        hist_highs  = [hh if hh > 0 else c for hh, c in zip(hist_highs, hist_closes)]
-        hist_lows   = [l if l > 0 else c for l, c in zip(hist_lows,  hist_closes)]
-
-        # Fallback for live candle
-        cur_open  = live_open  if live_open  and live_open  > 0 else live_close
-        cur_high  = live_high  if live_high  and live_high  > 0 else live_close
-        cur_low   = live_low   if live_low   and live_low   > 0 else live_close
-        cur_close = live_close
-        # Convert live_date to DD string — handles both date objects and YYYY-MM-DD strings
-        try:
-            cur_date = str(live_date)[8:10] if live_date else "—"
-        except Exception:
-            cur_date = "—"
-
+        opens  = [d.get("open",  d["close"]) for d in days]
+        highs  = [d.get("high",  d["close"]) for d in days]
+        lows   = [d.get("low",   d["close"]) for d in days]
+        closes = [d["close"] for d in days]
+        dates  = [d["date"]  for d in days]
         return price_svg(
-            opens   = hist_opens,
-            highs   = hist_highs,
-            lows    = hist_lows,
-            closes  = hist_closes,
-            dates   = hist_dates,
-            cur_open  = cur_open,
-            cur_high  = cur_high,
-            cur_low   = cur_low,
-            cur_close = cur_close,
-            cur_date  = cur_date,
-            h         = h,
+            opens, highs, lows, closes, dates,
+            cur_open=live_open, cur_high=live_high,
+            cur_low=live_low,   cur_close=live_close,
+            cur_date=live_date, h=h,
         )
 
-    def _volume_svg_iw(days_data, h=70):
-        """Volume bars from days array — unchanged from v5.0"""
-        ratios    = [d["vol_ratio"]   for d in days_data]
-        dates_lbl = [d["date_label"][-2:] for d in days_data]
-        if not ratios: return f'<svg width="140" height="{h}"></svg>'
-        n, pad, bw, gap = len(ratios), 4, 14, 5
-        bar_area = h - pad - 14
-        mx = max(ratios) if ratios else 1
-        def bh(v): return max(3, int((v/mx)*bar_area)) if mx > 0 else 3
+    def _volume_svg_iw(days, h=70):
+        n   = len(days); pad = 4; bw = 14; gap = 4; bar_area = h - pad - 14
+        vols = [d["volume"] for d in days if d.get("volume",0) > 0]
+        mx   = max(vols) if vols else 1
+        def bh(v): return max(3, int((v / mx) * bar_area))
         parts = []
-        for i, rv in enumerate(ratios):
-            x = pad+i*(bw+gap); h2 = bh(rv); y = h-14-h2
-            parts.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{h2}" fill="#f59e0b" rx="1"/>'
-                        f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="7" fill="#9ca3af">{dates_lbl[i]}</text>'
-                        f'<text x="{x+bw//2}" y="{max(y-2,8)}" text-anchor="middle" font-size="7" fill="#b45309">{rv:.1f}x</text>')
+        for i, d in enumerate(days):
+            v  = d.get("volume", 0)
+            rv = d.get("vol_ratio", 0)
+            x  = pad + i*(bw+gap); hh = bh(v); y = h-14-hh
+            col = "#7c3aed" if rv > 2.0 else ("#2563eb" if rv > 1.5 else ("#6b7280" if rv > 1.0 else "#e5e7eb"))
+            parts.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{hh}" fill="{col}40" stroke="{col}" stroke-width="0.8" rx="2"/>')
+            if rv >= 1.5:
+                parts.append(f'<text x="{x+bw//2}" y="{y-2}" text-anchor="middle" font-size="7" fill="#b45309">{rv:.1f}x</text>')
         med_y = round(h-14-bh(1.0), 1)
         parts.append(f'<line x1="{pad}" x2="{pad+n*(bw+gap)-gap}" y1="{med_y}" y2="{med_y}" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>')
         tw = pad+n*(bw+gap)
         return f'<svg width="{tw}" height="{h}" viewBox="0 0 {tw} {h}">{"".join(parts)}</svg>'
+
+    def _iw_dropdown(col_id):
+        return f'''<div id="{col_id}-dd" class="dd-menu">
+  <div class="dd-section">Vol Signal</div>
+  <label class="dd-opt"><input type="checkbox" value="Explosive" data-col="{col_id}"> 🔥 Explosive</label>
+  <label class="dd-opt"><input type="checkbox" value="Strong"    data-col="{col_id}"> 🟢 Strong</label>
+  <label class="dd-opt"><input type="checkbox" value="Build"     data-col="{col_id}"> 🟡 Build</label>
+  <label class="dd-opt"><input type="checkbox" value="Weak"      data-col="{col_id}"> 🔴 Weak</label>
+  <div class="dd-divider"></div>
+  <div class="dd-section">Status</div>
+  <label class="dd-opt"><input type="checkbox" value="BLASTING" data-col="{col_id}"> 🔥 BLASTING</label>
+  <label class="dd-opt"><input type="checkbox" value="READY"    data-col="{col_id}"> ✅ READY</label>
+  <label class="dd-opt"><input type="checkbox" value="WATCH"    data-col="{col_id}"> 👁 WATCH</label>
+  <div class="dd-divider"></div>
+  <div class="dd-clear"><button type="button" onclick="iwClearCol('{col_id}')">Clear</button></div>
+</div>'''
 
     # ── Build Intraday Watch rows ──
     def build_iw_rows(iw_view, date_labels, n_days, live_date_hdr):
@@ -662,69 +640,23 @@ if sel_status and "Intraday Watch" in sel_status:
 
         rows = ""
         for r in iw_view:
-            sym          = r["symbol"]
-            prc          = r["live_price"]
-            pct_avg_iw   = r.get("pct_vs_avg_iw", 0)
-            dir_arrow_iw = r.get("direction_arrow_iw", "→")
-            dir_color_iw = r.get("direction_color_iw", "#6b7280")
-            days         = r["days"][-6:]
+            sym           = r["symbol"]
+            prc           = r.get("live_price", 0)
+            pct_avg_iw    = r.get("pct_vs_avg_iw", 0)
+            dir_arrow_iw  = r.get("direction_arrow_iw", "→")
+            dir_color_iw  = r.get("direction_color_iw", "#6b7280")
+            days          = r.get("days", [])
+            live_open     = r.get("live_open",  prc)
+            live_high     = r.get("live_high",  prc)
+            live_low      = r.get("live_low",   prc)
+            live_date     = r.get("live_date",  "")
+            has_breakout  = r.get("consec_weak", 0) >= 4
 
-            # v5.1: use real OHLC from live row for current candle
-            live_open  = r.get("live_open",  0)
-            live_high  = r.get("live_high",  0)
-            live_low   = r.get("live_low",   0)
-            live_date  = r.get("live_date",  "")
+            dir_val = ("up" if pct_avg_iw > 1 else ("down" if pct_avg_iw < -1 else "side"))
+            d_attrs = f' data-dir="{dir_val}"'
+            if has_breakout: d_attrs += ' data-break="accumulation"'
 
-            # Direction for filtering
-            if pct_avg_iw > 1: iw_dir = "up"
-            elif pct_avg_iw < -1: iw_dir = "down"
-            else: iw_dir = "side"
-
-            # Accumulation Breakout detection
-            breakout_type = "—"
-            has_breakout  = False
-
-            if len(days) >= 5:
-                hist_4d_ago = days[-4] if len(days) >= 4 else days[0]
-                price_base  = hist_4d_ago["close"]
-                vol_base    = hist_4d_ago["vol_ratio"]
-                price_today = prc
-                vol_today   = r.get("live_vol_ratio", 0)
-
-                if price_base > 0:
-                    price_gain  = (price_today - price_base) / price_base * 100
-                    vol_improve = vol_today - vol_base
-
-                    if (4.0 <= price_gain <= 10.0 and
-                        2.0 <= vol_today <= 4.5 and
-                        vol_improve >= 1.5):
-                        breakout_type = "Accumulation"
-                        has_breakout  = True
-
-            btype_lower = "accumulation" if has_breakout else "none"
-            d_attrs = f' data-iw-dir="{iw_dir}" data-iw-break="{btype_lower}"'
-            for col_idx in range(n_days):
-                day_idx    = col_idx if col_idx < len(days) else -1
-                col_id_attr = f"col-{col_idx}"
-                if 0 <= day_idx < len(days):
-                    sig = _sig_key(days[day_idx]["vol_signal"])
-                    sta = days[day_idx]["status"]
-                else:
-                    sig = "None"; sta = "NONE"
-                d_attrs += f' data-{col_id_attr}-sig="{sig}" data-{col_id_attr}-sta="{sta}"'
-            live_sig = _sig_key(r.get("live_signal",""))
-            live_sta = r.get("live_status","WATCH")
-            d_attrs += f' data-col-live-sig="{live_sig}" data-col-live-sta="{live_sta}"'
-
-            # v5.1: use price_svg_for_iw() instead of _price_svg_iw()
-            p_svg = price_svg_for_iw(
-                days      = days,
-                live_open = live_open,
-                live_high = live_high,
-                live_low  = live_low,
-                live_close= prc,
-                live_date = live_date,
-            )
+            p_svg = price_svg_for_iw(days, live_open, live_high, live_low, prc, live_date)
 
             rows += (f'<tr class="iw-row"{d_attrs}>'
                      f'<td class="stock-cell">'
@@ -761,43 +693,10 @@ if sel_status and "Intraday Watch" in sel_status:
                 rows += f'<td class="data-cell break-cell">—</td></tr>'
         return header, rows
 
-    def _iw_dropdown(col_id):
-        return f'''<div id="{col_id}-dd" class="dd-menu">
-  <div class="dd-section">Vol Signal</div>
-  <label class="dd-opt"><input type="checkbox" value="Explosive" data-col="{col_id}"> 🔥 Explosive</label>
-  <label class="dd-opt"><input type="checkbox" value="Strong"    data-col="{col_id}"> 🟢 Strong</label>
-  <label class="dd-opt"><input type="checkbox" value="Build"     data-col="{col_id}"> 🟡 Build</label>
-  <label class="dd-opt"><input type="checkbox" value="Weak"      data-col="{col_id}"> 🔴 Weak</label>
-  <div class="dd-divider"></div>
-  <div class="dd-section">Status</div>
-  <label class="dd-opt"><input type="checkbox" value="BLASTING" data-col="{col_id}"> 🔥 BLASTING</label>
-  <label class="dd-opt"><input type="checkbox" value="READY"    data-col="{col_id}"> ✅ READY</label>
-  <label class="dd-opt"><input type="checkbox" value="WATCH"    data-col="{col_id}"> 👁 WATCH</label>
-  <div class="dd-divider"></div>
-  <div class="dd-clear"><button type="button" onclick="iwClearCol('{col_id}')">Clear</button></div>
-</div>'''
-
     # ── Build Accumulation Breakout rows ──
     def build_ab_rows(ab_data):
         if not ab_data:
             return "", ""
-        sample = ab_data[0]["hist_rows"]
-        date_labels = []
-        for r in sample:
-            d = str(r["trade_date"])
-            try:
-                from datetime import datetime as _dt
-                lbl = _dt.strptime(d, "%Y-%m-%d").strftime("%-d%b").upper()
-            except:
-                lbl = d[-5:]
-            date_labels.append(lbl)
-        n_days = len(date_labels)
-
-        try:
-            from datetime import datetime as _dt
-            live_lbl = _dt.strptime(ab_data[0]["live_date"], "%Y-%m-%d").strftime("%-d%b").upper() + " · LIVE"
-        except:
-            live_lbl = "LIVE"
 
         def breakout_dd():
             return '''<div id="ab-break-dd" class="dd-menu">
@@ -821,189 +720,6 @@ if sel_status and "Intraday Watch" in sel_status:
     <label class="dd-opt"><input type="checkbox" data-abf="dir" value="side"> → Sideways</label>
     <div class="dd-divider"></div>
     <div class="dd-clear"><button type="button" onclick="abClearDD(\'ab-dir-dd\',\'dir\')">Clear</button></div>
-  </div>
-</th>
-<th class="chart-col">PRICE CANDLES</th>
-<th class="chart-col">VOLUME RATIO</th>'''
-
-        for lbl in date_labels:
-            header += f'<th class="date-col">{lbl}</th>'
-
-        header += f'<th class="date-col">{live_lbl}</th>'
-        header += '''<th class="date-col ab-break-col">
-  <div class="date-trigger" onclick="toggleDD(\'ab-break-dd\')">
-    <span class="date-text">BREAKOUT TYPE</span><span class="dd-arrow">▼</span>
-  </div>
-  <div class="dd-dot" id="ab-break-dot"></div>''' + breakout_dd() + '</th>'
-
-        def price_candle_svg(hist_rows, live_close, live_date):
-            closes = [float(r.get("close") or 0) for r in hist_rows]
-            dates2 = []
-            for r in hist_rows:
-                try:
-                    from datetime import datetime as _dt
-                    dates2.append(_dt.strptime(str(r["trade_date"]), "%Y-%m-%d").strftime("%-d"))
-                except:
-                    dates2.append(str(r["trade_date"])[-2:])
-            all_p = closes + [live_close]
-            mn = min(p for p in all_p if p > 0); mx = max(all_p)
-            rng = mx - mn or 1
-            h, pad, bw, gap = 70, 4, 12, 5
-            def sy(v): return round(pad + (h-pad*2-12)*(1-(v-mn)/rng), 1)
-            parts = []
-            for i, c in enumerate(closes):
-                x = pad + i*(bw+gap); cx = x + bw//2
-                prev = closes[i-1] if i > 0 else c
-                col = "#00a854" if c >= prev else "#e53935"
-                by = sy(max(c,prev)); bh2 = max(3, abs(sy(c)-sy(prev)))
-                parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(c)-2}" y2="{by+bh2+2}" stroke="{col}" stroke-width="1"/>'
-                             f'<rect x="{x}" y="{by}" width="{bw}" height="{bh2}" fill="{col}" rx="1"/>'
-                             f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="#9ca3af">{dates2[i]}</text>')
-            n2 = len(closes)
-            sep = pad + n2*(bw+gap)+2
-            parts.append(f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-12}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
-            cx = sep+4+bw//2; tx = sep+4; col="#7c3aed"
-            last = closes[-1] if closes else live_close
-            by = sy(max(live_close,last)); bh2 = max(3, abs(sy(live_close)-sy(last)))
-            try:
-                from datetime import datetime as _dt
-                llbl = _dt.strptime(live_date,"%Y-%m-%d").strftime("%-d")
-            except: llbl = "T"
-            parts.append(f'<line x1="{cx}" x2="{cx}" y1="{sy(live_close)-2}" y2="{by+bh2+2}" stroke="{col}" stroke-width="1"/>'
-                        f'<rect x="{tx}" y="{by}" width="{bw}" height="{bh2}" fill="{col}30" stroke="{col}" stroke-width="1.5" rx="1"/>'
-                        f'<text x="{cx}" y="{h-1}" text-anchor="middle" font-size="8" fill="{col}">{llbl}</text>')
-            tw = sep+4+bw+pad
-            gain_pct = (live_close-closes[0])/closes[0]*100 if closes and closes[0]>0 else 0
-            gcol = "#16a34a" if gain_pct >= 0 else "#dc2626"
-            arrow = "↑" if gain_pct >= 0 else "↓"
-            lbl2 = f'<text x="{tw//2}" y="{h+10}" text-anchor="middle" font-size="9" fill="{gcol}">{arrow} {gain_pct:+.1f}%</text>'
-            return f'<svg width="{tw}" height="{h+14}" viewBox="0 0 {tw} {h+14}">{"".join(parts)}{lbl2}</svg>'
-
-        def vol_ratio_svg(hist_rows, live_vr, live_date):
-            ratios = [float(r.get("vol_ratio") or 0) for r in hist_rows]
-            dates2 = []
-            for r in hist_rows:
-                try:
-                    from datetime import datetime as _dt
-                    dates2.append(_dt.strptime(str(r["trade_date"]),"%Y-%m-%d").strftime("%-d"))
-                except: dates2.append(str(r["trade_date"])[-2:])
-            all_r = ratios + [live_vr]
-            mx = max(all_r) if all_r else 1
-            h, pad, bw, gap = 70, 4, 12, 5
-            bar_area = h - pad - 14
-            def bh(v): return max(3, int((v/mx)*bar_area)) if mx > 0 else 3
-            parts = []
-            for i, rv in enumerate(ratios):
-                x = pad+i*(bw+gap); h2 = bh(rv); y = h-14-h2
-                parts.append(f'<rect x="{x}" y="{y}" width="{bw}" height="{h2}" fill="#f59e0b" rx="1"/>'
-                            f'<text x="{x+bw//2}" y="{h-3}" text-anchor="middle" font-size="7" fill="#9ca3af">{dates2[i]}</text>'
-                            f'<text x="{x+bw//2}" y="{max(y-2,8)}" text-anchor="middle" font-size="7" fill="#b45309">{rv:.1f}x</text>')
-            n2 = len(ratios)
-            med_y = round(h-14-bh(1.0),1)
-            parts.append(f'<line x1="{pad}" x2="{pad+n2*(bw+gap)-gap}" y1="{med_y}" y2="{med_y}" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>')
-            sep = pad+n2*(bw+gap)+2
-            parts.append(f'<line x1="{sep}" x2="{sep}" y1="{pad}" y2="{h-14}" stroke="#e0e3e8" stroke-width="1" stroke-dasharray="2,2"/>')
-            cx = sep+4; h2 = bh(live_vr); y = h-14-h2
-            cc = "#7c3aed" if live_vr > 2.0 else "#378add"
-            try:
-                from datetime import datetime as _dt
-                llbl = _dt.strptime(live_date,"%Y-%m-%d").strftime("%-d")
-            except: llbl="T"
-            parts.append(f'<rect x="{cx}" y="{y}" width="{bw}" height="{h2}" fill="{cc}30" stroke="{cc}" stroke-width="1.5" rx="1"/>'
-                        f'<text x="{cx+bw//2}" y="{h-3}" text-anchor="middle" font-size="7" fill="{cc}">{llbl}</text>'
-                        f'<text x="{cx+bw//2}" y="{max(y-2,8)}" text-anchor="middle" font-size="7" fill="{cc}">{live_vr:.1f}x</text>')
-            tw = cx+bw+pad
-            vb = ratios[0] if ratios else 0
-            sub = f'<text x="{tw//2}" y="{h+10}" text-anchor="middle" font-size="9" fill="#6b7280">{vb:.1f}x→{live_vr:.1f}x</text>'
-            return f'<svg width="{tw}" height="{h+14}" viewBox="0 0 {tw} {h+14}">{"".join(parts)}{sub}</svg>'
-
-        def badge(btype):
-            s = {"Accumulation":"background:#f3f0ff;color:#5b21b6;border:0.5px solid #c4b5fd",
-                 "Washout":     "background:#fff7ed;color:#9a3412;border:0.5px solid #fed7aa",
-                 "Shakeout":    "background:#f0fdf4;color:#166534;border:0.5px solid #86efac"}.get(btype,"background:#f3f4f6;color:#374151")
-            return f'<span style="display:inline-block;font-size:11px;font-weight:500;padding:4px 10px;border-radius:20px;{s};">{btype}</span>'
-
-        rows = ""
-        for r in ab_data:
-            sym   = r["symbol"]
-            lc    = r["live_close"]
-            arrow = r["dir_arrow"]
-            acol  = r["dir_color"]
-            gain  = r["price_gain"]
-            btype = r["breakout_type"]
-            hist  = r["hist_rows"]
-            lvr   = r["live_vr"]
-            ld    = r["live_date"]
-            ls    = r["live_status"]
-            lsig  = r["live_vsig"]
-
-            p_svg = price_candle_svg(hist, lc, ld)
-            v_svg = vol_ratio_svg(hist, lvr, ld)
-
-            date_cells = ""
-            for hr in hist:
-                sig   = _sig_key(hr.get("vol_signal",""))
-                sta   = hr.get("status","WATCH")
-                emoji = _vol_emoji(hr.get("vol_signal",""))
-                cat   = _cat_label(sta)
-                rv    = float(hr.get("vol_ratio") or 0)
-                date_cells += (f'<td class="data-cell"><div class="cell-stack">'
-                               f'<span class="cell-emoji">{emoji}</span>'
-                               f'<span class="cell-cat">{cat}</span>'
-                               f'<span class="cell-ratio">{rv:.1f}x</span>'
-                               f'</div></td>')
-
-            live_emoji = _vol_emoji(lsig)
-            live_cat   = _cat_label(ls)
-            date_cells += (f'<td class="data-cell live-cell"><div class="cell-stack">'
-                          f'<span class="cell-emoji">{live_emoji}</span>'
-                          f'<span class="cell-cat">{live_cat}</span>'
-                          f'<span class="cell-ratio">{lvr:.1f}x</span>'
-                          f'</div></td>')
-
-            rows += (f'<tr class="ab-row" data-dir="{r["direction"]}" data-break="{btype.lower()}">'
-                     f'<td class="stock-cell">'
-                     f'<div class="sym">{sym}</div>'
-                     f'<div class="prc">₹{lc:,.2f} <span style="color:{acol};font-size:13px;">{arrow} <span style="font-size:11px;">{gain:+.1f}%</span></span></div>'
-                     f'<div style="font-size:10px;color:#6b7280;margin-top:2px;">5D Avg: ₹{r["avg_5d"]:,.2f}</div>'
-                     f'</td>'
-                     f'<td class="chart-cell">{p_svg}</td>'
-                     f'<td class="chart-cell">{v_svg}</td>'
-                     f'{date_cells}'
-                     f'<td class="data-cell break-cell">{badge(btype)}</td>'
-                     f'</tr>')
-        return header, rows
-
-    # ── Build both tables ──
-    iw_header_html     = ""
-    iw_rows_html       = ""
-    live_date_for_header = "LIVE"
-    n_days = 0
-    if iw_view:
-        sample_days = iw_view[0]["days"]
-        date_labels = [d["date_label"] for d in sample_days[-6:]]
-        n_days = len(date_labels)
-        try:
-            from datetime import datetime as _dt
-            live_date_for_header = _dt.strptime(iw_view[0].get("live_date",""), "%Y-%m-%d").strftime("%-d%b").upper() + " · LIVE"
-        except: pass
-        iw_header_html, iw_rows_html = build_iw_rows(iw_view, date_labels, n_days, live_date_for_header)
-
-    ab_header_html = ""
-    ab_rows_html   = ""
-    if ab_data:
-        ab_header_html = '''<th class="stock-col ab-stock-col">
-  <div class="date-trigger" onclick="toggleDD('ab-dir-dd')">
-    <span class="date-text">STOCK</span><span class="dd-arrow">▼</span>
-  </div>
-  <div class="dd-dot" id="ab-dir-dot"></div>
-  <div id="ab-dir-dd" class="dd-menu">
-    <div class="dd-section">Price Direction</div>
-    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="up"> ↑ Upside</label>
-    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="down"> ↓ Downside</label>
-    <label class="dd-opt"><input type="checkbox" data-abf="dir" value="side"> → Sideways</label>
-    <div class="dd-divider"></div>
-    <div class="dd-clear"><button type="button" onclick="abClearDD('ab-dir-dd','dir')">Clear</button></div>
   </div>
 </th>
 <th class="chart-col">4-DAY AGO</th>
@@ -1034,6 +750,30 @@ if sel_status and "Intraday Watch" in sel_status:
                              f'<td class="date-col">{vol_improve:+.2f}x</td>'
                              f'</tr>')
 
+        return header, ab_rows_html
+
+    # ── Prepare date labels for IW header ──
+    n_days = 0
+    date_labels = []
+    live_date_hdr = "LIVE"
+    if iw_view:
+        sample_days = iw_view[0].get("days", [])
+        n_days = len(sample_days)
+        for d in sample_days:
+            try:
+                lbl = datetime.strptime(d["date"], "%Y-%m-%d").strftime("%-d%b").upper()
+            except:
+                lbl = d["date"][-5:]
+            date_labels.append(lbl)
+        live_d = iw_view[0].get("live_date","")
+        try:
+            live_date_hdr = datetime.strptime(live_d, "%Y-%m-%d").strftime("%-d%b").upper() + " · LIVE"
+        except:
+            live_date_hdr = "LIVE"
+
+    iw_header_html, iw_rows_html = build_iw_rows(iw_view, date_labels, n_days, live_date_hdr)
+    ab_header_html, ab_rows_html = build_ab_rows(ab_data)
+
     total_iw = len(iw_view)
     total_ab = len(ab_data)
 
@@ -1056,44 +796,50 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 .table-wrap{{background:white;border:0.5px solid #e5e7eb;border-radius:8px;overflow-x:auto;}}
 table{{width:100%;border-collapse:collapse;}}
 thead tr{{background:#f9fafb;border-bottom:1px solid #e5e7eb;}}
-th{{font-size:11px;font-weight:600;color:#6b7280;padding:10px 8px;text-align:center;text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;position:relative;}}
-th.stock-col{{text-align:left;padding:10px 16px;min-width:150px;}}
-th.ab-stock-col{{text-align:left;padding:10px 16px;min-width:160px;}}
-th.chart-col{{min-width:160px;}}
-th.date-col{{min-width:90px;}}
-th.ab-break-col{{color:#7c3aed;border-left:2px solid #e9d5ff;min-width:150px;}}
+th{{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;padding:10px 8px;white-space:nowrap;position:relative;}}
+td{{padding:10px 8px;border-bottom:0.5px solid #f3f4f6;vertical-align:middle;}}
+tr:last-child td{{border-bottom:none;}}
+tr:hover td{{background:#fafafa;}}
 
-.date-trigger{{display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:2px 5px;border-radius:4px;user-select:none;}}
-.date-trigger:hover{{background:#f3f4f6;}}
-.date-text{{font-weight:600;}}
-.dd-arrow{{font-size:10px;color:#9ca3af;}}
-.dd-dot{{display:none;width:7px;height:7px;background:#7c3aed;border-radius:50%;position:absolute;top:5px;right:5px;}}
+.stock-col{{width:160px;min-width:140px;}}
+.chart-col{{width:220px;min-width:180px;}}
+.date-col{{width:90px;min-width:80px;text-align:center;}}
+.ab-stock-col{{width:200px;}}
+.ab-break-col{{width:140px;}}
+
+.stock-cell .sym{{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:#0f1117;}}
+.stock-cell .prc{{font-size:12px;margin-top:3px;color:#374151;}}
+.chart-cell{{padding:6px 8px;}}
+
+.data-cell{{text-align:center;}}
+.cell-stack{{display:flex;flex-direction:column;align-items:center;gap:2px;}}
+.cell-emoji{{font-size:14px;}}
+.cell-cat{{font-size:9px;font-weight:600;color:#6b7280;letter-spacing:0.05em;}}
+.cell-ratio{{font-size:10px;font-family:monospace;color:#374151;}}
+.live-cell{{background:#faf5ff;}}
+.data-cell.empty{{color:#d1d5db;}}
+.break-cell{{text-align:center;}}
+
+.filterable{{cursor:pointer;}}
+.date-trigger{{display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;}}
+.date-text{{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;}}
+.dd-arrow{{font-size:8px;color:#9ca3af;}}
+.dd-dot{{width:6px;height:6px;border-radius:50%;background:#7c3aed;display:none;margin-top:2px;}}
 .dd-dot.active{{display:block;}}
 
-.dd-menu{{display:none;position:absolute;top:105%;left:50%;transform:translateX(-50%);background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:9999;min-width:185px;padding:8px 0;text-align:left;margin-top:4px;}}
+.dd-menu{{display:none;position:absolute;top:100%;left:0;z-index:999;background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.12);min-width:180px;padding:8px 0;}}
 .dd-menu.open{{display:block;}}
-.dd-section{{padding:5px 14px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;}}
-.dd-opt{{display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;font-size:13px;color:#111;}}
+.dd-section{{font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.08em;padding:6px 12px 3px;}}
+.dd-opt{{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:12px;color:#374151;cursor:pointer;}}
 .dd-opt:hover{{background:#f9fafb;}}
-.dd-opt input{{accent-color:#7c3aed;width:14px;height:14px;cursor:pointer;margin:0;}}
-.dd-divider{{height:1px;background:#f3f4f6;margin:5px 0;}}
-.dd-clear{{display:flex;justify-content:center;padding:4px 0;}}
-.dd-clear button{{font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;}}
+.dd-opt input{{cursor:pointer;}}
+.dd-divider{{border-top:1px solid #f3f4f6;margin:4px 0;}}
+.dd-clear{{padding:4px 12px;}}
+.dd-clear button{{font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;}}
+.dd-clear button:hover{{color:#111;}}
 
-tbody tr{{border-bottom:0.5px solid #f3f4f6;background:white;}}
-tbody tr:last-child{{border-bottom:none;}}
-td.stock-cell{{padding:12px 16px;text-align:left;vertical-align:middle;}}
-td.chart-cell{{padding:8px 6px;text-align:center;vertical-align:middle;}}
-td.data-cell{{padding:10px 4px;text-align:center;vertical-align:middle;}}
-td.break-cell{{border-left:2px solid #e9d5ff;}}
-td.data-cell.empty{{color:#9ca3af;}}
-td.live-cell{{background:#fafaf8;}}
-.sym{{font-size:14px;font-weight:600;color:#0f1117;}}
-.prc{{font-size:12px;color:#374151;margin-top:3px;}}
-.cell-stack{{display:inline-flex;flex-direction:column;align-items:center;gap:3px;}}
-.cell-emoji{{font-size:20px;line-height:1;}}
-.cell-cat{{font-size:11px;font-weight:600;color:#000;}}
-.cell-ratio{{font-size:11px;color:#374151;}}
+.iw-row{{cursor:default;}}
+.ab-row{{cursor:default;}}
 </style>
 </head>
 <body>
@@ -1175,34 +921,27 @@ function iwApplyFilter() {{
   var colFilters={{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb){{
     var col=cb.getAttribute('data-col');
-    if(!colFilters[col]) colFilters[col]={{sigs:[],stas:[]}};
-    var val=cb.value;
-    if(['Explosive','Strong','Build','Weak'].indexOf(val)>=0) colFilters[col].sigs.push(val);
-    else colFilters[col].stas.push(val);
+    if(!colFilters[col]) colFilters[col]=[];
+    colFilters[col].push(cb.value);
   }});
-  document.querySelectorAll('.dd-dot').forEach(function(dot){{
+  document.querySelectorAll('[id$="-dot"]:not(#iw-dir-dot):not(#iw-break-dot)').forEach(function(dot){{
     var colId=dot.id.replace('-dot','');
-    if(colFilters[colId]) dot.classList.add('active');
-    else dot.classList.remove('active');
+    dot.className='dd-dot'+(colFilters[colId]&&colFilters[colId].length?' active':'');
   }});
+
   var rows=document.querySelectorAll('#iw-body .iw-row');
   var visible=0;
   rows.forEach(function(row){{
-    var showDir=!dirVals.length||dirVals.indexOf(row.getAttribute('data-iw-dir'))>=0;
-    var showBreak=!breakVals.length||breakVals.indexOf(row.getAttribute('data-iw-break'))>=0;
-    var show=showDir&&showBreak;
-    Object.keys(colFilters).forEach(function(col){{
-      var f=colFilters[col];
-      var rs=row.getAttribute('data-'+col+'-sig')||'';
-      var rst=row.getAttribute('data-'+col+'-sta')||'';
-      if(f.sigs.length>0 && f.sigs.indexOf(rs)<0) show=false;
-      if(f.stas.length>0 && f.stas.indexOf(rst)<0) show=false;
-    }});
-    row.style.display=show?'':'none';
-    if(show) visible++;
+    var dir=row.getAttribute('data-dir');
+    var brk=row.getAttribute('data-break')||'';
+    var showDir=!dirVals.length||dirVals.indexOf(dir)>=0;
+    var showBreak=!breakVals.length||breakVals.indexOf(brk)>=0;
+    var showCol=true;
+    row.style.display=(showDir&&showBreak&&showCol)?'':'none';
+    if(showDir&&showBreak&&showCol) visible++;
   }});
-  var anyActive=dirVals.length>0||breakVals.length>0||Object.keys(colFilters).length>0;
-  document.getElementById('iw-count').textContent=anyActive?('Showing '+visible+' of '+IW_TOTAL+' stocks'):('Showing '+IW_TOTAL+' stocks');
+  var any=dirVals.length>0||breakVals.length>0||Object.keys(colFilters).length>0;
+  document.getElementById('iw-count').textContent=any?('Showing '+visible+' of '+IW_TOTAL+' stocks'):('Showing '+IW_TOTAL+' stocks');
 }}
 
 function abClearDD(ddId, filterType) {{
@@ -1215,12 +954,11 @@ function abApplyFilter() {{
   var dirVals=Array.from(document.querySelectorAll('input[data-abf="dir"]:checked')).map(function(c){{return c.value;}});
   var breakVals=Array.from(document.querySelectorAll('input[data-abf="break"]:checked')).map(function(c){{return c.value;}});
   document.getElementById('ab-dir-dot').className='dd-dot'+(dirVals.length?' active':'');
-  document.getElementById('ab-break-dot').className='dd-dot'+(breakVals.length?' active':'');
   var rows=document.querySelectorAll('#ab-body .ab-row');
   var visible=0;
   rows.forEach(function(row){{
     var dir=row.getAttribute('data-dir');
-    var brk=row.getAttribute('data-break');
+    var brk=row.getAttribute('data-break')||'';
     var showDir=!dirVals.length||dirVals.indexOf(dir)>=0;
     var showBreak=!breakVals.length||breakVals.indexOf(brk)>=0;
     row.style.display=(showDir&&showBreak)?'':'none';
@@ -1249,7 +987,7 @@ document.querySelectorAll('input[data-abf]').forEach(function(cb){{
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN RESULTS TABLE (unchanged)
+# MAIN RESULTS TABLE
 # ══════════════════════════════════════════════════════════════════════════════
 
 COL = [1.4, 2.0, 2.1, 1.2, 1.3, 1.8, 1.0, 0.9]
