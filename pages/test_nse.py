@@ -32,6 +32,7 @@ STOCKS = {
 # ========== PAGE SETUP ==========
 st.set_page_config(page_title="NSE Live Test", layout="wide")
 st.title("📡 NSE Live Data")
+st.markdown('<meta http-equiv="refresh" content="1">', unsafe_allow_html=True)
 
 # ========== SESSION STATE ==========
 if "live_data" not in st.session_state:
@@ -134,5 +135,7 @@ if st.session_state.ws_connected:
                 })
             df = pd.DataFrame(rows)
             placeholder.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            placeholder.info("⏳ Waiting for tick data...")
         time.sleep(1)
         st.rerun()
