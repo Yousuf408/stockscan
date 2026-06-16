@@ -12,10 +12,10 @@ st.title("⚡ Nifty 50 High-Speed WebSocket Stream")
 # =====================================================================
 # 1. API CREDENTIALS
 # =====================================================================
-API_KEY = "YOUR_API_KEY"
-CLIENT_CODE = "YOUR_CLIENT_CODE"
-PASSWORD = "YOUR_PIN"
-TOTP_SECRET = "YOUR_TOTP_QR_SECRET_KEY"
+API_KEY = "QFectj5C"
+CLIENT_CODE = "IIRA29771"
+PASSWORD = "1993"
+TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"  # Alphanumeric secret key string
 
 TRACKED_STOCKS = {
     "1398": "RELIANCE-EQ", "1333": "HDFCBANK-EQ", "11536": "TCS-EQ", "1594": "INFY-EQ",
