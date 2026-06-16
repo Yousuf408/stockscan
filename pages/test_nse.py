@@ -56,12 +56,12 @@ STOCKS = {
     "DABUR": "772",
 }
 
-# ========== LOGIN ==========
-print("\n===== ANGEL ONE LOGIN =====")
-API_KEY = input("API Key: ").strip()
-CLIENT_CODE = input("Client Code: ").strip()
-PASSWORD = input("Password: ").strip()
-TOTP = input("TOTP: ").strip()
+    # ========== LOGIN ==========
+    print("\n===== ANGEL ONE LOGIN =====")
+    API_KEY = input("QFectj5C: ").strip()
+    CLIENT_CODE = input("IIRA29771: ").strip()
+    PASSWORD = input("1993: ").strip()
+    TOTP = input("JFTG3DYADWLYSW6FC6RVV4THWM: ").strip()
 
 print("\n⏳ Logging in...")
 obj = SmartConnect(api_key=API_KEY)
