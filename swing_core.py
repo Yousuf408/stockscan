@@ -702,12 +702,12 @@ def refresh_live() -> dict:
     updated = 0
     if to_save:
         try:
-            resp = requests.delete(
-                _url("swing_live_data"),
-                headers=_headers(),
-                params={"user_id": f"eq.{uid}"},
-                timeout=20,
-            )
+           resp = requests.post(
+    _url("swing_live_data"),
+    headers={**_headers(), "Prefer": "return=minimal"},
+    json=batch,
+    timeout=20,
+)
             resp.raise_for_status()
             print(f"[swing_core] refresh_live — deleted old live rows")
         except Exception as e:
@@ -1090,12 +1090,14 @@ def start_background_refresh(interval_secs: int = 180):
                 _time.sleep(interval_secs)
                 try:
                     if is_market_open():
-                        print("[bg_refresh] fetching yfinance...")
-                        refresh_live()
-                        _db_updated_at = _time.time()   # ← set timestamp after save
-                        print(f"[bg_refresh] DB updated at {_db_updated_at}")
-                    else:
-                        print("[bg_refresh] market closed — skipping")
+                     print("[bg_refresh] fetching yfinance...")
+                res = refresh_live()
+                if res.get("updated", 0) > 0:
+                    _db_updated_at = _time.time()
+                    print(f"[bg_refresh] DB updated at {_db_updated_at} — {res['updated']} rows")
+                else:
+                    print(f"[bg_refresh] No updates — {len(res.get('errors',[]))} errors")
+                    
                 except Exception as e:
                     print(f"[bg_refresh] error: {e}")
         _bg_thread = _threading.Thread(target=_loop, daemon=True, name="sw_bg_refresh")
