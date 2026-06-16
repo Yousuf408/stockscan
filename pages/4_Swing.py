@@ -97,18 +97,19 @@ if st.session_state.get("user_id"):
 # ── Fragment: polls every 10s, acts ONLY when thread signals DB is ready ──
 @st.fragment(run_every=10)
 def _silent_auto_refresh():
-    if not st.session_state.get("user_id"):       return
-    if not st.session_state.get("sw_loaded"):     return
-    if not st.session_state.get("sw_db_updated"): return
-    st.session_state.sw_db_updated        = False
+    if not st.session_state.get("user_id"):   return
+    if not st.session_state.get("sw_loaded"): return
+    db_ts = get_db_updated_at()
+    if db_ts is None:                         return
+    last  = st.session_state.get("sw_auto_refresh_time") or 0
+    if db_ts <= last:                         return
     results, errors = load_from_db()
     if results:
         st.session_state.sw_results           = results
         st.session_state.sw_errors            = errors
-        st.session_state.sw_auto_refresh_time = time.time()
+        st.session_state.sw_auto_refresh_time = db_ts
 
 _silent_auto_refresh()
-
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
         results, errors = load_from_db()
