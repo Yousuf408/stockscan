@@ -2,14 +2,12 @@
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from logzero import logger
 import threading
-import time
 
 latest_ticks = {}
 _sws = None
 _thread = None
 _token_list = None
 _correlation_id = "stockscan_live"
-_mode = 2
 
 def on_data(wsapp, message):
     try:
@@ -30,11 +28,24 @@ def on_data(wsapp, message):
         logger.error(f"on_data error: {e}")
 
 def on_open(wsapp):
-    """Connection open hone par YAHAN subscribe karo — ye correct tarika hai"""
-    logger.info("WebSocket Connected! Subscribing now...")
+    logger.info("WebSocket Connected! Subscribing...")
     try:
-        _sws.subscribe(_correlation_id, _mode, _token_list)
-        logger.info(f"Subscribed! Tokens: {_token_list}")
+        # Indices — Mode 1 only (LTP)
+        index_tokens = {
+            "exchangeType": 1,
+            "tokens": ["26000", "26009"]   # NIFTY 50, BANK NIFTY
+        }
+        _sws.subscribe(_correlation_id, 1, [index_tokens])
+        logger.info("Indices subscribed in Mode 1")
+
+        # Stocks — Mode 2 (Quote — full data)
+        stock_tokens = {
+            "exchangeType": 1,
+            "tokens": ["2885", "1594", "11536", "1333"]  # RELIANCE, INFY, TCS, HDFC
+        }
+        _sws.subscribe(_correlation_id, 2, [stock_tokens])
+        logger.info("Stocks subscribed in Mode 2")
+
     except Exception as e:
         logger.error(f"Subscribe error: {e}")
 
@@ -59,7 +70,6 @@ def get_latest_ticks():
 def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
     global _sws, _thread, _token_list
 
-    # Token list globally store karo taaki on_open mein use ho sake
     _token_list = token_list
 
     _sws = SmartWebSocketV2(
@@ -69,8 +79,7 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
         feed_token  = feed_token
     )
 
-    # Callbacks assign karo
-    _sws.on_open  = on_open   # ← Subscribe yahan hoga
+    _sws.on_open  = on_open
     _sws.on_data  = on_data
     _sws.on_error = on_error
     _sws.on_close = on_close
@@ -78,10 +87,11 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
     def _run():
         try:
             logger.info("Connecting WebSocket...")
-            _sws.connect()  # ← Ye blocking hai, on_open automatically call hoga
+            _sws.connect()
         except Exception as e:
             logger.error(f"WebSocket run error: {e}")
 
     _thread = threading.Thread(target=_run, daemon=True)
     _thread.start()
     logger.info("WebSocket thread started!")
+    
