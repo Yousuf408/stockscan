@@ -9,7 +9,7 @@ _sws = None
 _thread = None
 _token_list = None
 _correlation_id = "stockscan_live"
-_mode = 1
+_mode = 2
 
 def on_data(wsapp, message):
     try:
