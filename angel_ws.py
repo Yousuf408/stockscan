@@ -4,7 +4,8 @@
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from logzero import logger
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # ── Plain global dict — shared across all threads ──────────────
 latest_ticks    = {}
@@ -43,7 +44,7 @@ def on_data(wsapp, message):
 
         # Timestamp: epoch milliseconds → HH:MM:SS
         raw_ts    = message.get('exchange_timestamp', 0)
-        timestamp = datetime.fromtimestamp(raw_ts / 1000).strftime('%H:%M:%S') if raw_ts else '-'
+        timestamp = datetime.utcfromtimestamp(raw_ts / 1000).strftime('%H:%M:%S') if raw_ts else '-'
 
         latest_ticks[token] = {
             "ltp"        : ltp,
