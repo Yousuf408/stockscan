@@ -4,17 +4,18 @@ from logzero import logger
 import threading
 import time
 
-# Latest ticks store karne ke liye
 latest_ticks = {}
 _sws = None
 _thread = None
+_token_list = None
+_correlation_id = "stockscan_live"
+_mode = 1
 
 def on_data(wsapp, message):
-    """Har tick aane par yahan aata hai"""
     try:
         token = str(message.get('token', ''))
         latest_ticks[token] = {
-            "ltp"        : message.get('last_traded_price', 0) / 100,  # paise to rupees
+            "ltp"        : message.get('last_traded_price', 0) / 100,
             "open"       : message.get('open_price_of_the_day', 0) / 100,
             "high"       : message.get('high_price_of_the_day', 0) / 100,
             "low"        : message.get('low_price_of_the_day', 0) / 100,
@@ -24,54 +25,24 @@ def on_data(wsapp, message):
             "change_pct" : message.get('net_change_percentage', 0),
             "timestamp"  : message.get('exchange_timestamp', '')
         }
-        logger.info(f"Tick received: {token} → LTP: {latest_ticks[token]['ltp']}")
+        logger.info(f"Tick: {token} → LTP: {latest_ticks[token]['ltp']}")
     except Exception as e:
         logger.error(f"on_data error: {e}")
 
 def on_open(wsapp):
-    logger.info("WebSocket Connected!")
+    """Connection open hone par YAHAN subscribe karo — ye correct tarika hai"""
+    logger.info("WebSocket Connected! Subscribing now...")
+    try:
+        _sws.subscribe(_correlation_id, _mode, _token_list)
+        logger.info(f"Subscribed! Tokens: {_token_list}")
+    except Exception as e:
+        logger.error(f"Subscribe error: {e}")
 
 def on_error(wsapp, error):
     logger.error(f"WebSocket Error: {error}")
 
 def on_close(wsapp):
     logger.info("WebSocket Closed")
-
-def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
-    """
-    WebSocket background thread mein start karo.
-
-    token_list example:
-    [{"exchangeType": 1, "tokens": ["26000", "2885"]}]
-    """
-    global _sws, _thread
-
-    correlation_id = "stockscan_live"
-    mode = 1  # 1 = LTP only | 2 = Quote | 3 = Snap Quote
-
-    _sws = SmartWebSocketV2(
-        auth_token  = jwt_token,
-        api_key     = api_key,
-        client_code = client_id,
-        feed_token  = feed_token
-    )
-
-    _sws.on_open  = on_open
-    _sws.on_data  = on_data
-    _sws.on_error = on_error
-    _sws.on_close = on_close
-
-    def _run():
-        try:
-            _sws.connect()
-            time.sleep(1)
-            _sws.subscribe(correlation_id, mode, token_list)
-        except Exception as e:
-            logger.error(f"WebSocket thread error: {e}")
-
-    _thread = threading.Thread(target=_run, daemon=True)
-    _thread.start()
-    logger.info("WebSocket thread started!")
 
 def stop_websocket():
     global _sws
@@ -83,5 +54,34 @@ def stop_websocket():
             logger.error(f"Stop error: {e}")
 
 def get_latest_ticks():
-    """Streamlit page se call karo latest data lene ke liye"""
     return latest_ticks
+
+def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
+    global _sws, _thread, _token_list
+
+    # Token list globally store karo taaki on_open mein use ho sake
+    _token_list = token_list
+
+    _sws = SmartWebSocketV2(
+        auth_token  = jwt_token,
+        api_key     = api_key,
+        client_code = client_id,
+        feed_token  = feed_token
+    )
+
+    # Callbacks assign karo
+    _sws.on_open  = on_open   # ← Subscribe yahan hoga
+    _sws.on_data  = on_data
+    _sws.on_error = on_error
+    _sws.on_close = on_close
+
+    def _run():
+        try:
+            logger.info("Connecting WebSocket...")
+            _sws.connect()  # ← Ye blocking hai, on_open automatically call hoga
+        except Exception as e:
+            logger.error(f"WebSocket run error: {e}")
+
+    _thread = threading.Thread(target=_run, daemon=True)
+    _thread.start()
+    logger.info("WebSocket thread started!")
