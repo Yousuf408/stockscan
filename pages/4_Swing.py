@@ -229,25 +229,23 @@ with c2:
 
 with c3:
     from swing_core import can_refresh, refresh_label
-    if st.button(refresh_label(), use_container_width=True, disabled=False,
-                 help="Weekday: fetch today's price. Weekend: fetch last trading day"):
-       with st.spinner("Refreshing live prices..."):
-    res = refresh_live()
-    st.session_state.sw_last_refresh = time.time()
+   if st.button(refresh_label(), use_container_width=True, disabled=False,
+                     help="Weekday: fetch today's price. Weekend: fetch last trading day"):
+            with st.spinner("Refreshing live prices..."):
+                res = refresh_live()
+                st.session_state.sw_last_refresh = time.time()
 
-# Source indicator
-source = res.get("source", "unknown")
-if source == "angel_one":
-    st.success(f"✅ Angel One WebSocket — {res.get('updated', 0)} stocks updated")
-else:
-    st.warning(f"⚠️ Yahoo Finance fallback — {res.get('updated', 0)} stocks updated")
+            # Source indicator
+            source = res.get("source", "unknown")
+            if source == "angel_one":
+                st.success(f"✅ Angel One WebSocket — {res.get('updated', 0)} stocks updated")
+            else:
+                st.warning(f"⚠️ Yahoo Finance fallback — {res.get('updated', 0)} stocks updated")
 
-results, errors = load_from_db()
-
-        st.session_state.sw_results = results
-        st.session_state.sw_errors  = errors
-        st.rerun()
-
+            results, errors = load_from_db()
+            st.session_state.sw_results = results
+            st.session_state.sw_errors  = errors
+            st.rerun()
 with c4:
     if st.button("🗑 Clear", use_container_width=True, disabled=len(st.session_state.sw_results)==0):
         st.session_state.sw_results = []
