@@ -1,11 +1,5 @@
 # angel_ws.py
 # Place this file in your ROOT folder (same level as app.py)
-#
-# KEY DESIGN:
-# - latest_ticks is a plain Python dict at MODULE level
-# - WebSocket thread writes to it directly
-# - Streamlit page reads from it via get_latest_ticks()
-# - No st.session_state used here (session_state not thread-safe)
 
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from logzero import logger
@@ -13,11 +7,11 @@ import threading
 from datetime import datetime
 
 # ── Plain global dict — shared across all threads ──────────────
-latest_ticks = {}
-_raw_messages = []       # stores last 5 raw msgs for debug
-_sws          = None
-_thread       = None
-_connected    = False
+latest_ticks    = {}
+_raw_messages   = []
+_sws            = None
+_thread         = None
+_connected      = False
 _correlation_id = "stockscan_live"
 # ───────────────────────────────────────────────────────────────
 
@@ -27,7 +21,7 @@ def on_data(wsapp, message):
     global latest_ticks, _raw_messages
 
     try:
-        # ── Store raw message for debugging (last 5 only) ──────
+        # Store raw message for debugging (last 5 only)
         _raw_messages.append(message)
         if len(_raw_messages) > 5:
             _raw_messages.pop(0)
@@ -37,19 +31,19 @@ def on_data(wsapp, message):
             logger.warning(f"No token in message: {message}")
             return
 
-        # ── Angel One sends prices in paise → divide by 100 ───
-        # ── These are the ACTUAL keys Angel One sends ──────────
+        # Angel One sends prices in paise → divide by 100
         ltp        = message.get('last_traded_price', 0) / 100
         open_price = message.get('open_price_of_the_day', 0) / 100
         high_price = message.get('high_price_of_the_day', 0) / 100
         low_price  = message.get('low_price_of_the_day', 0) / 100
         close      = message.get('closed_price', 0) / 100
         volume     = message.get('volume_trade_for_the_day', 0)
-      close      = message.get('closed_price', 0) / 100
-change     = message.get('net_change_value', 0) / 100
-chng_pct   = ((ltp - close) / close * 100) if close > 0 else 0
-raw_ts     = message.get('exchange_timestamp', 0)
-timestamp  = datetime.fromtimestamp(raw_ts / 1000).strftime('%H:%M:%S') if raw_ts else '-'
+        change     = message.get('net_change_value', 0) / 100
+        chng_pct   = ((ltp - close) / close * 100) if close > 0 else 0
+
+        # Timestamp: epoch milliseconds → HH:MM:SS
+        raw_ts    = message.get('exchange_timestamp', 0)
+        timestamp = datetime.fromtimestamp(raw_ts / 1000).strftime('%H:%M:%S') if raw_ts else '-'
 
         latest_ticks[token] = {
             "ltp"        : ltp,
@@ -63,7 +57,7 @@ timestamp  = datetime.fromtimestamp(raw_ts / 1000).strftime('%H:%M:%S') if raw_t
             "timestamp"  : timestamp,
         }
 
-        logger.info(f"TICK [{token}] LTP={ltp} | O={open_price} H={high_price} L={low_price} | Vol={volume}")
+        logger.info(f"TICK [{token}] LTP={ltp} | chng%={chng_pct:.2f} | time={timestamp}")
 
     except Exception as e:
         logger.error(f"on_data error: {e} | raw msg: {message}")
@@ -124,7 +118,7 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     def _run():
         try:
             logger.info("WebSocket connecting...")
-            _sws.connect()   # blocking — runs until closed
+            _sws.connect()
         except Exception as e:
             logger.error(f"WebSocket _run error: {e}")
 
@@ -146,12 +140,10 @@ def stop_websocket():
 
 
 def get_latest_ticks():
-    """Return the current ticks dict — read directly from module global."""
     return latest_ticks
 
 
 def get_raw_messages():
-    """Return last 5 raw messages — for debugging."""
     return _raw_messages
 
 
