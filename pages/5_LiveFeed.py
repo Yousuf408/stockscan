@@ -102,11 +102,11 @@ if st.session_state.angel_connected:
 
         with placeholder.container():
            st.dataframe(
-    df,
-    width='stretch',
-    hide_index=True,
-    height=300
-)
+                df,
+                width='stretch',
+                hide_index=True,
+                height=300
+             )
             st.caption(f"🕐 Last updated: {pd.Timestamp.now().strftime('%H:%M:%S')}")
 
         time.sleep(2)
