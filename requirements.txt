@@ -1,13 +1,12 @@
-streamlit
+streamlit>=1.40.0
 pyotp
-pandas
+pandas>=2.0.0
 yfinance
 logzero
 websocket-client
 jugaad-data
 pytz
 plotly>=5.0.0
-numpy>=1.23.0  
-streamlit==1.35.0
-pandas>=2.0.0
+numpy>=1.23.0
+pillow>=11.0.0
 extra-streamlit-components
