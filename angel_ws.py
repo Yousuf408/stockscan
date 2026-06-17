@@ -1,66 +1,110 @@
 # angel_ws.py
+# Place this file in your ROOT folder (same level as app.py)
+#
+# KEY DESIGN:
+# - latest_ticks is a plain Python dict at MODULE level
+# - WebSocket thread writes to it directly
+# - Streamlit page reads from it via get_latest_ticks()
+# - No st.session_state used here (session_state not thread-safe)
+
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from logzero import logger
 import threading
-import time
 
+# ── Plain global dict — shared across all threads ──────────────
 latest_ticks = {}
-_sws = None
-_thread = None
-_token_list = None
+_raw_messages = []       # stores last 5 raw msgs for debug
+_sws          = None
+_thread       = None
+_connected    = False
 _correlation_id = "stockscan_live"
-_mode = 1
+# ───────────────────────────────────────────────────────────────
+
 
 def on_data(wsapp, message):
+    """Called on every tick from Angel One WebSocket."""
+    global latest_ticks, _raw_messages
+
     try:
+        # ── Store raw message for debugging (last 5 only) ──────
+        _raw_messages.append(message)
+        if len(_raw_messages) > 5:
+            _raw_messages.pop(0)
+
         token = str(message.get('token', ''))
+        if not token:
+            logger.warning(f"No token in message: {message}")
+            return
+
+        # ── Angel One sends prices in paise → divide by 100 ───
+        # ── These are the ACTUAL keys Angel One sends ──────────
+        ltp        = message.get('last_traded_price', 0) / 100
+        open_price = message.get('open_price_of_the_day', 0) / 100
+        high_price = message.get('high_price_of_the_day', 0) / 100
+        low_price  = message.get('low_price_of_the_day', 0) / 100
+        close      = message.get('closed_price', 0) / 100
+        volume     = message.get('volume_trade_for_the_day', 0)
+        change     = message.get('net_change_value', 0) / 100
+        chng_pct   = message.get('net_change_percentage', 0)
+        timestamp  = message.get('exchange_timestamp', '')
+
         latest_ticks[token] = {
-            "ltp"        : message.get('last_traded_price', 0) / 100,
-            "open"       : message.get('open_price_of_the_day', 0) / 100,
-            "high"       : message.get('high_price_of_the_day', 0) / 100,
-            "low"        : message.get('low_price_of_the_day', 0) / 100,
-            "close"      : message.get('closed_price', 0) / 100,
-            "volume"     : message.get('volume_trade_for_the_day', 0),
-            "change"     : message.get('net_change_value', 0) / 100,
-            "change_pct" : message.get('net_change_percentage', 0),
-            "timestamp"  : message.get('exchange_timestamp', '')
+            "ltp"        : ltp,
+            "open"       : open_price,
+            "high"       : high_price,
+            "low"        : low_price,
+            "close"      : close,
+            "volume"     : volume,
+            "change"     : change,
+            "change_pct" : chng_pct,
+            "timestamp"  : timestamp,
         }
-        logger.info(f"Tick: {token} → LTP: {latest_ticks[token]['ltp']}")
+
+        logger.info(f"TICK [{token}] LTP={ltp} | O={open_price} H={high_price} L={low_price} | Vol={volume}")
+
     except Exception as e:
-        logger.error(f"on_data error: {e}")
+        logger.error(f"on_data error: {e} | raw msg: {message}")
+
 
 def on_open(wsapp):
-    """Connection open hone par YAHAN subscribe karo — ye correct tarika hai"""
+    """Called when WebSocket connection opens — subscribe here."""
+    global _connected
+    _connected = True
     logger.info("WebSocket Connected! Subscribing now...")
+
     try:
-        _sws.subscribe(_correlation_id, _mode, _token_list)
-        logger.info(f"Subscribed! Tokens: {_token_list}")
+        # Mode 1 = LTP only (Indices only support Mode 1)
+        _sws.subscribe(_correlation_id, 1, [
+            {"exchangeType": 1, "tokens": ["26000", "26009"]}
+        ])
+        logger.info("Subscribed Indices in Mode 1 (LTP)")
+
+        # Mode 2 = Quote (LTP + OHLC + Volume + Change)
+        _sws.subscribe(_correlation_id, 2, [
+            {"exchangeType": 1, "tokens": ["2885", "1594", "11536", "1333"]}
+        ])
+        logger.info("Subscribed Stocks in Mode 2 (OHLC + Volume)")
+
     except Exception as e:
         logger.error(f"Subscribe error: {e}")
+
 
 def on_error(wsapp, error):
     logger.error(f"WebSocket Error: {error}")
 
+
 def on_close(wsapp):
+    global _connected
+    _connected = False
     logger.info("WebSocket Closed")
 
-def stop_websocket():
-    global _sws
-    if _sws:
-        try:
-            _sws.close_connection()
-            logger.info("WebSocket stopped.")
-        except Exception as e:
-            logger.error(f"Stop error: {e}")
 
-def get_latest_ticks():
-    return latest_ticks
+def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
+    """Start WebSocket in a background daemon thread."""
+    global _sws, _thread, latest_ticks
 
-def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
-    global _sws, _thread, _token_list
-
-    # Token list globally store karo taaki on_open mein use ho sake
-    _token_list = token_list
+    # Reset ticks on new connection
+    latest_ticks = {}
 
     _sws = SmartWebSocketV2(
         auth_token  = jwt_token,
@@ -69,19 +113,44 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list):
         feed_token  = feed_token
     )
 
-    # Callbacks assign karo
-    _sws.on_open  = on_open   # ← Subscribe yahan hoga
+    _sws.on_open  = on_open
     _sws.on_data  = on_data
     _sws.on_error = on_error
     _sws.on_close = on_close
 
     def _run():
         try:
-            logger.info("Connecting WebSocket...")
-            _sws.connect()  # ← Ye blocking hai, on_open automatically call hoga
+            logger.info("WebSocket connecting...")
+            _sws.connect()   # blocking — runs until closed
         except Exception as e:
-            logger.error(f"WebSocket run error: {e}")
+            logger.error(f"WebSocket _run error: {e}")
 
     _thread = threading.Thread(target=_run, daemon=True)
     _thread.start()
     logger.info("WebSocket thread started!")
+
+
+def stop_websocket():
+    """Close the WebSocket connection."""
+    global _sws, _connected
+    if _sws:
+        try:
+            _sws.close_connection()
+            _connected = False
+            logger.info("WebSocket stopped.")
+        except Exception as e:
+            logger.error(f"Stop error: {e}")
+
+
+def get_latest_ticks():
+    """Return the current ticks dict — read directly from module global."""
+    return latest_ticks
+
+
+def get_raw_messages():
+    """Return last 5 raw messages — for debugging."""
+    return _raw_messages
+
+
+def is_connected():
+    return _connected
