@@ -7,6 +7,12 @@
 #  v4.1: Added populate_status_history() — saves last 10 days status snapshot
 #        to swing_status_history table. Called by "Populate History" button.
 #
+#  FIX (threading): Captured _headers() in main thread before spawning daemon
+#        threads in sync_5d_history() and populate_status_history().
+#        Root cause: _headers() → _get_access_token() → st.session_state,
+#        which is NOT accessible from background/daemon threads, causing
+#        "Tried to use SessionInfo before it was initialized" error.
+#
 #  TABLES:
 #    swing_watchlist      — master symbol list (user's tracked stocks)
 #    swing_hist_data      — last 5 trading days OHLCV per symbol (no NULLs ever)
@@ -463,18 +469,18 @@ def get_5day_median_volume(symbol: str, uid: str) -> float:
         )
         resp.raise_for_status()
         data = resp.json()
-        
+
         if not data:
             return 1  # Fallback if no history
-        
+
         volumes = [int(row["volume"]) for row in data if row.get("volume")]
         if not volumes:
             return 1
-        
+
         clean_vols = [v for v in volumes if v > 0]
         median = statistics.median(clean_vols) if clean_vols else 1
         return median
-        
+
     except Exception as e:
         print(f"[swing_core] get_5day_median_volume error for {symbol}: {e}")
         return 1
@@ -545,6 +551,10 @@ def sync_5d_history() -> dict:
     """
     Smart sync — fetches only MISSING trading days from yfinance.
     Saves to swing_hist_data. Deletes rows older than HIST_DAYS.
+
+    FIX: captured_headers is captured in the main thread before spawning the
+    daemon thread, so _headers() (which touches st.session_state) is never
+    called from a background thread.
     """
     uid    = _get_user_id()
     stocks = load_swing_stocks()
@@ -648,11 +658,14 @@ def sync_5d_history() -> dict:
 
     oldest_required = min(required_days).isoformat()
 
+    # FIX: capture headers in main thread — st.session_state not accessible in daemon threads
+    captured_headers = _headers()
+
     def _delete_old():
         try:
             resp = requests.delete(
                 _url("swing_hist_data"),
-                headers=_headers(),
+                headers=captured_headers,   # use pre-captured headers, not _headers()
                 params={
                     "user_id":    f"eq.{uid}",
                     "trade_date": f"lt.{oldest_required}",
@@ -719,13 +732,13 @@ def refresh_live() -> dict:
         # Instead of df.tail(5) which only has 2 days and is inaccurate
         median_vol_db = get_5day_median_volume(sym, uid)
         vol_ratio     = round(v / median_vol_db, 2) if median_vol_db > 0 else 0
-        
+
         # For status calculation, also need current context
         context        = df.tail(5)
         context_closes = [float(x) for x in context["Close"].tolist()]
         context_vols   = [int(x)   for x in context["Volume"].tolist()]
         max_close      = max(context_closes) if context_closes else c
-        
+
         vol_signal     = _vol_signal(vol_ratio)
         status         = _calc_status(c, max_close, v, context_vols, vol_ratio)
         vol_signal_clean = vol_signal.split("(")[0].strip()
@@ -791,6 +804,10 @@ def populate_status_history() -> dict:
       - Calculate vol_ratio, vol_signal, status using same logic as _build_result()
       - Save to swing_status_history (upsert — safe to run multiple times)
     Delete rows older than HISTORY_DAYS trading days.
+
+    FIX: captured_headers is captured in the main thread before spawning the
+    daemon thread, so _headers() (which touches st.session_state) is never
+    called from a background thread.
 
     Returns: {"saved": int, "errors": list}
     """
@@ -896,11 +913,14 @@ def populate_status_history() -> dict:
     # Delete rows older than HISTORY_DAYS in background
     oldest = min(required_days).isoformat()
 
+    # FIX: capture headers in main thread — st.session_state not accessible in daemon threads
+    captured_headers = _headers()
+
     def _delete_old_history():
         try:
             resp = requests.delete(
                 _url("swing_status_history"),
-                headers=_headers(),
+                headers=captured_headers,   # use pre-captured headers, not _headers()
                 params={
                     "user_id":    f"eq.{uid}",
                     "trade_date": f"lt.{oldest}",
