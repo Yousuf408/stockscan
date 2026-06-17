@@ -8,9 +8,6 @@ from angel_ws import start_websocket, stop_websocket, get_latest_ticks
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
 
-# ─── JO STOCKS TRACK KARNE HAIN ──────────────────────────────
-# Format: (Name, NSE Token, exchangeType)
-# exchangeType: 1=NSE, 2=NFO, 3=BSE
 WATCHLIST = [
     ("NIFTY 50",   "26000", 1),
     ("BANK NIFTY", "26009", 1),
@@ -19,29 +16,22 @@ WATCHLIST = [
     ("TCS",        "11536", 1),
     ("HDFC BANK",  "1333",  1),
 ]
-# ─────────────────────────────────────────────────────────────
 
-# Token list angel_ws ke liye
-TOKEN_LIST = [
-    {
-        "exchangeType": 1,
-        "tokens": [t for _, t, ex in WATCHLIST if ex == 1]
-    }
-]
+TOKEN_LIST = [{"exchangeType": 1, "tokens": [t for _, t, _ in WATCHLIST]}]
 
-# ─── SESSION STATE SETUP ──────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
+if "latest_ticks" not in st.session_state:
+    st.session_state.latest_ticks = {}
 
-# ─── CONNECT / DISCONNECT BUTTONS ────────────────────────────
 col1, col2 = st.columns([1, 1])
 
 with col1:
     if not st.session_state.angel_connected:
         if st.button("🔌 Connect Angel One", use_container_width=True):
-            with st.spinner("Logging in to Angel One..."):
+            with st.spinner("Logging in..."):
                 creds = angel_login()
                 if creds:
                     st.session_state.angel_creds = creds
@@ -53,11 +43,11 @@ with col1:
                         feed_token = creds['feed_token'],
                         token_list = TOKEN_LIST
                     )
-                    st.success("Connected! Live data aa raha hai...")
-                    time.sleep(1)
+                    st.success("Connected!")
+                    time.sleep(2)
                     st.rerun()
                 else:
-                    st.error("Login failed! Credentials check karo.")
+                    st.error("Login failed!")
     else:
         st.success("🟢 Angel One Connected")
 
@@ -67,15 +57,13 @@ with col2:
             stop_websocket()
             st.session_state.angel_connected = False
             st.session_state.angel_creds = None
+            st.session_state.latest_ticks = {}
             st.rerun()
 
 st.divider()
 
-# ─── LIVE DATA TABLE ─────────────────────────────────────────
 if st.session_state.angel_connected:
 
-    # Auto refresh every 2 seconds
-    refresh = st.empty()
     placeholder = st.empty()
 
     while True:
@@ -88,30 +76,23 @@ if st.session_state.angel_connected:
             change     = tick.get('change', 0)
             change_pct = tick.get('change_pct', 0)
             rows.append({
-                "Stock"      : name,
-                "LTP (₹)"    : f"{ltp:.2f}" if ltp else "⏳ Waiting...",
-                "Open"       : f"{tick.get('open', 0):.2f}",
-                "High"       : f"{tick.get('high', 0):.2f}",
-                "Low"        : f"{tick.get('low', 0):.2f}",
-                "Change"     : f"{change:+.2f}",
-                "Change %"   : f"{change_pct:+.2f}%",
-                "Volume"     : tick.get('volume', '-'),
+                "Stock"    : name,
+                "LTP (₹)"  : f"₹{ltp:.2f}" if ltp else "⏳ Waiting...",
+                "Open"     : f"₹{tick.get('open', 0):.2f}" if tick else "-",
+                "High"     : f"₹{tick.get('high', 0):.2f}" if tick else "-",
+                "Low"      : f"₹{tick.get('low', 0):.2f}" if tick else "-",
+                "Change"   : f"{change:+.2f}" if tick else "-",
+                "Change %" : f"{change_pct:+.2f}%" if tick else "-",
+                "Volume"   : f"{tick.get('volume', 0):,}" if tick else "-",
             })
 
         df = pd.DataFrame(rows)
 
         with placeholder.container():
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                height=300
-            )
+            st.dataframe(df, hide_index=True, use_container_width=True, height=300)
             st.caption(f"🕐 Last updated: {pd.Timestamp.now().strftime('%H:%M:%S')}")
 
         time.sleep(2)
-        placeholder.empty()
 
 else:
-    st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
-    
+    st.info("👆 Connect Angel One button dabao.")
