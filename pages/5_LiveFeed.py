@@ -101,12 +101,12 @@ if st.session_state.angel_connected:
         df = pd.DataFrame(rows)
 
         with placeholder.container():
-           st.dataframe(
+            st.dataframe(
                 df,
-                width='stretch',
+                use_container_width=True,
                 hide_index=True,
                 height=300
-             )
+            )
             st.caption(f"🕐 Last updated: {pd.Timestamp.now().strftime('%H:%M:%S')}")
 
         time.sleep(2)
@@ -114,3 +114,4 @@ if st.session_state.angel_connected:
 
 else:
     st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
+    
