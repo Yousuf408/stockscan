@@ -439,7 +439,48 @@ def load_from_db() -> tuple:
     return results, errors
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 6 — SYNC 5D HISTORY
+# SECTION 6.5 — GET 5-DAY MEDIAN VOLUME FROM DB
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_5day_median_volume(symbol: str, uid: str) -> float:
+    """
+    Get median volume of last 5 trading days from swing_status_history.
+    Used for accurate vol_ratio calculation in refresh_live().
+    Falls back to 1 if no data found.
+    """
+    try:
+        resp = requests.get(
+            _url("swing_status_history"),
+            headers=_headers(),
+            params={
+                "user_id": f"eq.{uid}",
+                "symbol": f"eq.{symbol}",
+                "select": "volume",
+                "order": "trade_date.desc",
+                "limit": "5"
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+        if not data:
+            return 1  # Fallback if no history
+        
+        volumes = [int(row["volume"]) for row in data if row.get("volume")]
+        if not volumes:
+            return 1
+        
+        clean_vols = [v for v in volumes if v > 0]
+        median = statistics.median(clean_vols) if clean_vols else 1
+        return median
+        
+    except Exception as e:
+        print(f"[swing_core] get_5day_median_volume error for {symbol}: {e}")
+        return 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 7 — REFRESH LIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
@@ -643,7 +684,7 @@ def refresh_live() -> dict:
         return {"updated": 0, "errors": []}
 
     symbols = [s["symbol"] for s in stocks]
-    bulk    = _fetch_yf_bulk(symbols, period="2d")
+    bulk    = _fetch_yf_bulk(symbols, period="2d")  # Reverted to "2d" to ensure today's data is fetched
     errors  = []
     to_save = []
 
@@ -674,13 +715,17 @@ def refresh_live() -> dict:
         if v == 0:
             v = 1
 
+        # v4.3.3: Calculate vol_ratio using 5-day median from swing_status_history (DB)
+        # Instead of df.tail(5) which only has 2 days and is inaccurate
+        median_vol_db = get_5day_median_volume(sym, uid)
+        vol_ratio     = round(v / median_vol_db, 2) if median_vol_db > 0 else 0
+        
+        # For status calculation, also need current context
         context        = df.tail(5)
         context_closes = [float(x) for x in context["Close"].tolist()]
         context_vols   = [int(x)   for x in context["Volume"].tolist()]
         max_close      = max(context_closes) if context_closes else c
-        clean_vols     = [x for x in context_vols if x > 0]
-        median_vol     = statistics.median(clean_vols) if clean_vols else 1
-        vol_ratio      = round(v / median_vol, 2) if median_vol > 0 else 0
+        
         vol_signal     = _vol_signal(vol_ratio)
         status         = _calc_status(c, max_close, v, context_vols, vol_ratio)
         vol_signal_clean = vol_signal.split("(")[0].strip()
@@ -952,7 +997,7 @@ def get_intraday_watch() -> list:
 
             days.append({
                 "date":       r["trade_date"],
-                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d"),
+                "date_label": datetime.strptime(r["trade_date"], "%Y-%m-%d").strftime("%d%b"),
                 "status":     r.get("status", "NONE"),
                 "vol_signal": vs_clean,
                 "vol_ratio":  float(r.get("vol_ratio", 0)),
@@ -1067,5 +1112,3 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
-
-
