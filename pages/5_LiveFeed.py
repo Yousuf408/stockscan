@@ -34,13 +34,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 4: SUPABASE UPLOAD FUNCTION (MODIFIED - Step 1)
+# SECTION 4: SUPABASE UPLOAD FUNCTION (MODIFIED - Step 2)
 # ──────────────────────────────────────────────────────────────────────────────
 def upload_to_supabase(ticks):
-    """Upload current stock data to Supabase - Add date field"""
+    """Upload current stock data - Delete only today's data"""
     rows = []
     
-    # ✅ NEW: Get today's date
     from datetime import date
     today = date.today().isoformat()  # "2026-06-18"
     
@@ -48,7 +47,7 @@ def upload_to_supabase(ticks):
         tick = ticks.get(token, {})
         ltp = tick.get('ltp', 0)
         
-        if ltp > 0:  # Only upload if we have data
+        if ltp > 0:
             rows.append({
                 "stock": name,
                 "type": "Index" if kind == "index" else "Stock",
@@ -60,19 +59,22 @@ def upload_to_supabase(ticks):
                 "change_percent": float(tick.get('change_pct', 0)),
                 "volume": int(tick.get('volume', 0)),
                 "time": str(tick.get('timestamp', '-')),
-                "date": today  # ✅ NEW: Added date field
+                "date": today
             })
     
     if not rows:
         return False, "No data to upload"
     
     try:
-        # ⚠️ STEP 1 ONLY: Delete all old data (same as before)
-        supabase.table("websocket_stock_values").delete().neq("stock", "").execute()
+        # ✅ STEP 2 CHANGE: Delete ONLY today's data
+        supabase.table("websocket_stock_values")\
+                 .delete()\
+                 .eq("date", today)\
+                 .execute()
         
-        # ✅ Insert fresh data with date
+        # Insert fresh data
         response = supabase.table("websocket_stock_values").insert(rows).execute()
-        return True, f"✅ Updated {len(response.data)} stocks with date: {today}"
+        return True, f"✅ Updated {len(response.data)} stocks for {today} (only today's data replaced)"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
