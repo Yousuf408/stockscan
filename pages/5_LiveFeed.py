@@ -1,53 +1,129 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 1: IMPORTS
+# pages/5_LiveFeed.py - COMPLETE WORKING CODE
 # ──────────────────────────────────────────────────────────────────────────────
+
 import streamlit as st
 import pandas as pd
 import time
 import sys
 import os
+from statistics import median
+from datetime import datetime, date, timedelta
 
 # ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import angel_ws   # import MODULE directly — not just functions
+import angel_ws
 from angel_auth import angel_login
-from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
+from config import STOCKS_WATCHLIST
 
 # ── SUPABASE IMPORTS ──────────────────────────────────────────
 from supabase import create_client, Client
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# SECTION 2: PAGE CONFIGURATION
-# ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# SECTION 3: SUPABASE CONFIGURATION
-# ──────────────────────────────────────────────────────────────────────────────
+# ── SUPABASE CONFIGURATION ────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 4: SUPABASE UPLOAD FUNCTION (MODIFIED - Step 2)
+# SECTION: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
-def upload_to_supabase(ticks):
-    """Upload current stock data - Delete only today's data"""
-    rows = []
+
+def get_last_5_days_volumes(stock_name):
+    """Get last 5 trading days volumes from Supabase"""
+    today = date.today()
+    volumes = []
     
-    from datetime import date
-    today = date.today().isoformat()  # "2026-06-18"
+    for i in range(1, 6):
+        past_date = (today - timedelta(days=i)).isoformat()
+        
+        try:
+            response = supabase.table("websocket_stock_values")\
+                               .select("volume")\
+                               .eq("stock", stock_name)\
+                               .eq("date", past_date)\
+                               .execute()
+            
+            if response.data and response.data[0]['volume'] > 0:
+                volumes.append(response.data[0]['volume'])
+        except Exception as e:
+            continue
+    
+    return volumes
+
+
+def calculate_volume_metrics(stock_name, current_volume, change_pct):
+    """
+    Calculate vol_ratio, vol_signal, and status
+    Returns: (vol_ratio, vol_signal, status)
+    """
+    
+    # Get last 5 days volumes
+    hist_volumes = get_last_5_days_volumes(stock_name)
+    
+    # If less than 5 days data, show building message
+    if len(hist_volumes) < 5:
+        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    
+    # Calculate median of last 5 days
+    try:
+        median_volume = median(hist_volumes)
+    except:
+        return 0, "🔴 Weak (0)", "WATCH"
+    
+    if median_volume == 0:
+        return 0, "🔴 Weak (0)", "WATCH"
+    
+    # Calculate volume ratio
+    vol_ratio = current_volume / median_volume
+    
+    # Determine vol_signal based on ratio
+    if vol_ratio > 2:
+        vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
+    elif vol_ratio > 1.5:
+        vol_signal = f"🟢 Strong ({vol_ratio:.2f})"
+    elif vol_ratio > 1:
+        vol_signal = f"🟡 Build ({vol_ratio:.2f})"
+    else:
+        vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
+    
+    # Determine status
+    if vol_ratio > 1.5 and change_pct > 0:
+        status = "READY"
+    else:
+        status = "WATCH"
+    
+    return round(vol_ratio, 2), vol_signal, status
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: SUPABASE UPLOAD FUNCTION
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upload_to_supabase(ticks):
+    """Upload live data with vol_ratio, vol_signal, status"""
+    rows = []
+    today = date.today().isoformat()
     
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
         ltp = tick.get('ltp', 0)
         
         if ltp > 0:
+            current_volume = int(tick.get('volume', 0))
+            change_pct = float(tick.get('change_pct', 0))
+            
+            # Calculate volume metrics
+            vol_ratio, vol_signal, status = calculate_volume_metrics(
+                name, 
+                current_volume,
+                change_pct
+            )
+            
             rows.append({
                 "stock": name,
                 "type": "Index" if kind == "index" else "Stock",
@@ -56,17 +132,20 @@ def upload_to_supabase(ticks):
                 "high": float(tick.get('high', 0)),
                 "low": float(tick.get('low', 0)),
                 "change": float(tick.get('change', 0)),
-                "change_percent": float(tick.get('change_pct', 0)),
-                "volume": int(tick.get('volume', 0)),
+                "change_percent": change_pct,
+                "volume": current_volume,
                 "time": str(tick.get('timestamp', '-')),
-                "date": today
+                "date": today,
+                "vol_ratio": vol_ratio,
+                "vol_signal": vol_signal,
+                "status": status
             })
     
     if not rows:
         return False, "No data to upload"
     
     try:
-        # ✅ STEP 2 CHANGE: Delete ONLY today's data
+        # Delete only today's data
         supabase.table("websocket_stock_values")\
                  .delete()\
                  .eq("date", today)\
@@ -74,13 +153,15 @@ def upload_to_supabase(ticks):
         
         # Insert fresh data
         response = supabase.table("websocket_stock_values").insert(rows).execute()
-        return True, f"✅ Updated {len(response.data)} stocks for {today} (only today's data replaced)"
+        return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
+
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 5: SESSION STATE INITIALIZATION
+# SECTION: SESSION STATE INITIALIZATION
 # ──────────────────────────────────────────────────────────────────────────────
+
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
@@ -88,8 +169,9 @@ if "angel_creds" not in st.session_state:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 6: CONNECT / DISCONNECT BUTTONS
+# SECTION: CONNECT / DISCONNECT BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -98,16 +180,16 @@ with col1:
             with st.spinner("Logging in to Angel One..."):
                 creds = angel_login()
                 if creds:
-                    st.session_state.angel_creds   = creds
+                    st.session_state.angel_creds = creds
                     st.session_state.angel_connected = True
                     angel_ws.start_websocket(
-                        jwt_token  = creds['jwt_token'],
-                        api_key    = creds['api_key'],
-                        client_id  = creds['client_id'],
-                        feed_token = creds['feed_token'],
+                        jwt_token=creds['jwt_token'],
+                        api_key=creds['api_key'],
+                        client_id=creds['client_id'],
+                        feed_token=creds['feed_token'],
                     )
                     st.success("Connected! Waiting for ticks...")
-                    time.sleep(3)   # give WS time to connect + subscribe
+                    time.sleep(3)
                     st.rerun()
                 else:
                     st.error("Login failed! Check credentials in angel_auth.py")
@@ -119,13 +201,9 @@ with col2:
         if st.button("⛔ Disconnect", use_container_width=True):
             angel_ws.stop_websocket()
             st.session_state.angel_connected = False
-            st.session_state.angel_creds     = None
+            st.session_state.angel_creds = None
             st.rerun()
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# SECTION 7: UPDATE TO SUPABASE BUTTON
-# ──────────────────────────────────────────────────────────────────────────────
 with col3:
     if st.session_state.angel_connected:
         if st.button("📤 Update to Supabase", use_container_width=True):
@@ -142,21 +220,20 @@ with col3:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 8: DIVIDER
+# SECTION: DIVIDER
 # ──────────────────────────────────────────────────────────────────────────────
+
 st.divider()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 9: MAIN DISPLAY (WHEN CONNECTED)
+# SECTION: MAIN DISPLAY (WHEN CONNECTED)
 # ──────────────────────────────────────────────────────────────────────────────
+
 if st.session_state.angel_connected:
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # SECTION 9A: DEBUG PANEL
-    # ──────────────────────────────────────────────────────────────────────────
+    # ── Debug Panel ────────────────────────────────────────────
     with st.expander("🔍 Debug Panel", expanded=False):
-        # Read directly from angel_ws MODULE global
         raw = angel_ws._raw_messages
         ticks_debug = angel_ws.latest_ticks
 
@@ -170,57 +247,69 @@ if st.session_state.angel_connected:
             st.warning("No raw messages yet — WebSocket may still be connecting...")
 
         st.write("**Full ticks dict (sample):**")
-        # Show only first 10 for readability
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # SECTION 9B: LIVE TABLE DISPLAY
-    # ──────────────────────────────────────────────────────────────────────────
+    # ── Live Table ────────────────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
     while True:
-        # ── Read directly from angel_ws module global ─────────
         ticks = angel_ws.latest_ticks
 
         rows = []
         for name, token, kind in STOCKS_WATCHLIST:
             tick = ticks.get(token, {})
-            ltp        = tick.get('ltp', 0)
-            open_p     = tick.get('open', 0)
-            high_p     = tick.get('high', 0)
-            low_p      = tick.get('low', 0)
-            change     = tick.get('change', 0)
+            ltp = tick.get('ltp', 0)
+            open_p = tick.get('open', 0)
+            high_p = tick.get('high', 0)
+            low_p = tick.get('low', 0)
+            change = tick.get('change', 0)
             change_pct = tick.get('change_pct', 0)
-            volume     = tick.get('volume', 0)
-            timestamp  = tick.get('timestamp', '-')
+            volume = tick.get('volume', 0)
+            timestamp = tick.get('timestamp', '-')
+
+            # ✅ Calculate Signal & Status
+            if tick and ltp > 0:
+                current_volume = int(volume)
+                vol_ratio, vol_signal, status = calculate_volume_metrics(
+                    name, 
+                    current_volume,
+                    change_pct
+                )
+            else:
+                vol_signal = "⏳"
+                status = "⏳"
 
             # Format based on whether we have data
             if tick:
-                ltp_str    = f"₹{ltp:.2f}"
-                open_str   = f"₹{open_p:.2f}"
-                high_str   = f"₹{high_p:.2f}"
-                low_str    = f"₹{low_p:.2f}"
-                chng_str   = f"{change:+.2f}"
-                pct_str    = f"{change_pct:+.2f}%"
-                vol_str    = f"{volume:,}"
-                time_str   = timestamp
+                ltp_str = f"₹{ltp:.2f}"
+                open_str = f"₹{open_p:.2f}"
+                high_str = f"₹{high_p:.2f}"
+                low_str = f"₹{low_p:.2f}"
+                chng_str = f"{change:+.2f}"
+                pct_str = f"{change_pct:+.2f}%"
+                vol_str = f"{volume:,}"
+                time_str = timestamp
             else:
                 ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
                 time_str = "-"
+                vol_signal = "⏳"
+                status = "⏳"
 
             rows.append({
-                "Stock"    : name,
-                "Type"     : "📈 Index" if kind == "index" else "🏢 Stock",
-                "LTP (₹)"  : ltp_str,
-                "Open"     : open_str,
-                "High"     : high_str,
-                "Low"      : low_str,
-                "Change"   : chng_str,
-                "Change %" : pct_str,
-                "Volume"   : vol_str,
-                "Time"     : time_str,
+                "Stock": name,
+                "Type": "📈 Index" if kind == "index" else "🏢 Stock",
+                "LTP (₹)": ltp_str,
+                "Open": open_str,
+                "High": high_str,
+                "Low": low_str,
+                "Change": chng_str,
+                "Change %": pct_str,
+                "Volume": vol_str,
+                "Signal": vol_signal,
+                "Status": status,
+                "Time": time_str,
             })
 
         df = pd.DataFrame(rows)
@@ -240,8 +329,9 @@ if st.session_state.angel_connected:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 10: DISPLAY WHEN NOT CONNECTED
+# SECTION: DISPLAY WHEN NOT CONNECTED
 # ──────────────────────────────────────────────────────────────────────────────
+
 else:
     st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
     st.markdown(f"""
