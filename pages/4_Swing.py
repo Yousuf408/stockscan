@@ -8,6 +8,7 @@
 import streamlit as st
 import os, sys, time
 from datetime import datetime, date, timedelta
+print(f"[PAGE_LOAD] sw_loaded={st.session_state.get('sw_loaded')}")
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
