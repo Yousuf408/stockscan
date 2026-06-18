@@ -1,0 +1,7 @@
+[global]
+maxCachedMessageAge = 0
+
+[server]
+enableWebsocketCompression = false
+headless = true
+port = 7860
