@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/6_UploadCSV.py - Complete Working Code
+# pages/6_UploadCSV.py - Complete Fixed Code
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -24,7 +24,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FUNCTION: Upload CSV Data (Fixed NaN Handling)
+# FUNCTION: Upload CSV Data
 # ──────────────────────────────────────────────────────────────────────────────
 def upload_csv_data(df, test_mode=True, specific_date=None):
     """Upload CSV data - Delete old, insert new with NaN handling"""
@@ -144,6 +144,19 @@ if uploaded_file is not None:
     try:
         # Read CSV
         df = pd.read_csv(uploaded_file)
+        
+        # 🔥 FIX: Convert trade_date to string (handles both float and string)
+        df['trade_date'] = df['trade_date'].astype(str).str.replace('.0', '').str.strip()
+        
+        # 🔥 FIX: If dates are in Excel format (numbers), convert them
+        # Try to convert to datetime, if fails, keep as string
+        try:
+            # Check if dates are in Excel format (e.g., 44567)
+            if df['trade_date'].str.match(r'^\d+$').all():
+                df['trade_date'] = pd.to_datetime(df['trade_date'].astype(float), unit='D', origin='1899-12-30').dt.strftime('%Y-%m-%d')
+        except:
+            pass  # If conversion fails, keep as string
+        
         st.success(f"✅ CSV loaded successfully!")
         
         # Show file info
@@ -250,6 +263,7 @@ if uploaded_file is not None:
         
     except Exception as e:
         st.error(f"❌ Error reading CSV: {str(e)}")
+        st.info("💡 Try: Make sure date column has values like '2026-06-17' format")
 
 else:
     st.info("👆 Upload your CSV file using the file uploader above.")
