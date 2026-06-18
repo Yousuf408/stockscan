@@ -10,8 +10,7 @@ import os
 # ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import angel_ws   # import MODULE directly — not just functions
-from angel_ws import start_batch_insert, stop_batch_insert  # ← NEW: Import batch functions
+import angel_ws   # import MODULE directly
 from angel_auth import angel_login
 from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
@@ -74,7 +73,7 @@ with col1:
                             )
                             
                             # ── NEW: Start batch insert in background ────
-                            start_batch_insert(
+                            angel_ws.start_batch_insert(
                                 supabase_client=supabase,
                                 user_id=user_id,
                                 interval_seconds=15
@@ -95,7 +94,7 @@ with col2:
     if st.session_state.angel_connected:
         if st.button("⛔ Disconnect", use_container_width=True):
             angel_ws.stop_websocket()
-            stop_batch_insert()  # ← NEW: Stop batch insert
+            angel_ws.stop_batch_insert()  # ← Use angel_ws prefix
             st.session_state.angel_connected = False
             st.session_state.angel_creds     = None
             st.session_state.user_id         = None
