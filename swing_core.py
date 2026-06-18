@@ -1,8 +1,5 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.4
-#  v4.4: refresh_live() now uses Angel One WebSocket (angel_ws.latest_ticks)
-#        instead of Yahoo Finance for live price updates.
-#        Fallback to Yahoo Finance if WebSocket not connected.
+#  TRADE SENTRY — swing_core.py  v4.3
 #  v4.3: populate_status_history() now saves open,high,low to swing_status_history
 #        get_intraday_watch() now fetches open,high,low from swing_status_history
 #        days[] array now includes open,high,low for real OHLC candles
@@ -19,8 +16,7 @@
 #  FLOW:
 #    Page load             → load_from_db()            — reads both tables, instant, no yfinance
 #    Sync 5D button        → sync_5d_history()         — fetch only MISSING days from yfinance
-#    Refresh Live          → refresh_live()            — Angel One WebSocket data → swing_live_data
-#                                                        Fallback: Yahoo Finance if WS not connected
+#    Refresh Live          → refresh_live()            — fetch today only, update swing_live_data
 #    Populate History btn  → populate_status_history() — calc + save last 10 days snapshots
 #    Intraday Watch        → get_intraday_watch()      — 8-day history + live signal analysis
 #
@@ -633,158 +629,15 @@ def sync_5d_history() -> dict:
     return {"synced": synced, "skipped": skip_count, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 7 — REFRESH LIVE  ← ONLY THIS SECTION CHANGED IN v4.4
+# SECTION 7 — REFRESH LIVE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def refresh_live() -> dict:
     """
-    v4.4: Uses Angel One WebSocket (angel_ws.latest_ticks) for live prices.
-    Falls back to Yahoo Finance if WebSocket is not connected.
-
-    Flow:
-      1. Check if angel_ws is connected
-      2. If YES → use latest_ticks (token → OHLCV)
-         - Fetch swing_live_data rows to build token→symbol map
-         - Calculate vol_ratio, vol_signal, status using hist data
-         - PATCH swing_live_data rows by token
-      3. If NO  → fallback to Yahoo Finance (same as v4.3)
+    v4.3: Fetch last trading day + calculate and save vol_ratio, vol_signal, status
+    to swing_live_data table.
     """
-    uid = _get_user_id()
-
-    # ── Check WebSocket connection ────────────────────────────
-    try:
-        import angel_ws
-        ws_connected = angel_ws.is_connected()
-        ticks        = angel_ws.latest_ticks if ws_connected else {}
-    except Exception:
-        ws_connected = False
-        ticks        = {}
-
-    print(f"[swing_core] refresh_live — WebSocket connected: {ws_connected}, ticks: {len(ticks)}")
-
-    # ── PATH A: Angel One WebSocket ───────────────────────────
-    if ws_connected and ticks:
-        errors  = []
-        updated = 0
-
-        try:
-            # Fetch all live rows to get token → symbol mapping
-            live_rows = _fetch_all_rows("swing_live_data", uid, {
-                "select": "symbol,token,open,high,low,close,volume",
-            })
-        except Exception as e:
-            print(f"[swing_core] refresh_live — fetch live rows error: {e}")
-            live_rows = []
-
-        if not live_rows:
-            print("[swing_core] refresh_live — no live rows found, falling back to Yahoo")
-            ws_connected = False
-
-        else:
-            # Fetch hist data for vol_ratio calculation
-            from_d = (date.today() - timedelta(days=14)).isoformat()
-            try:
-                hist_rows = _fetch_all_rows("swing_hist_data", uid, {
-                    "select":     "symbol,volume",
-                    "trade_date": f"gte.{from_d}",
-                })
-                # Build symbol → list of hist volumes
-                hist_vol_map = {}
-                for row in hist_rows:
-                    sym = row["symbol"]
-                    if sym not in hist_vol_map:
-                        hist_vol_map[sym] = []
-                    v = int(row.get("volume") or 0)
-                    if v > 0:
-                        hist_vol_map[sym].append(v)
-
-                # Build symbol → max_close from hist
-                hist_close_rows = _fetch_all_rows("swing_hist_data", uid, {
-                    "select":     "symbol,close",
-                    "trade_date": f"gte.{from_d}",
-                })
-                hist_close_map = {}
-                for row in hist_close_rows:
-                    sym = row["symbol"]
-                    c   = float(row.get("close") or 0)
-                    if sym not in hist_close_map:
-                        hist_close_map[sym] = []
-                    if c > 0:
-                        hist_close_map[sym].append(c)
-
-            except Exception as e:
-                print(f"[swing_core] refresh_live — hist fetch error: {e}")
-                hist_vol_map   = {}
-                hist_close_map = {}
-
-            now_ist    = datetime.utcnow().isoformat()
-            trade_date = date.today().isoformat()
-            hdrs       = {**_headers(), "Prefer": "return=minimal"}
-
-            for row in live_rows:
-                sym   = row.get("symbol")
-                token = str(row.get("token", ""))
-
-                if not token or token not in ticks:
-                    continue  # no tick for this token yet
-
-                tick = ticks[token]
-                ltp  = tick.get("ltp", 0)
-                o    = tick.get("open", 0)
-                h    = tick.get("high", 0)
-                l    = tick.get("low", 0)
-                v    = tick.get("volume", 0)
-
-                if not ltp:
-                    continue
-
-                if v == 0:
-                    v = 1
-
-                # vol_ratio, vol_signal, status calculation
-                hist_vols  = hist_vol_map.get(sym, [])
-                hist_closes = hist_close_map.get(sym, [])
-                median_vol  = statistics.median(hist_vols) if hist_vols else 1
-                max_close   = max(hist_closes) if hist_closes else ltp
-                vol_ratio   = round(v / median_vol, 2) if median_vol > 0 else 0
-                vol_signal  = _vol_signal(vol_ratio).split("(")[0].strip()
-                status      = _calc_status(ltp, max_close, v, hist_vols, vol_ratio)
-
-                try:
-                    resp = requests.patch(
-                        _url("swing_live_data"),
-                        headers=hdrs,
-                        params={
-                            "user_id": f"eq.{uid}",
-                            "token"  : f"eq.{token}",
-                        },
-                        json={
-                            "open"      : round(o, 2),
-                            "high"      : round(h, 2),
-                            "low"       : round(l, 2),
-                            "close"     : round(ltp, 2),  # LTP → close
-                            "volume"    : v,
-                            "vol_ratio" : vol_ratio,
-                            "vol_signal": vol_signal,
-                            "status"    : status,
-                            "trade_date": trade_date,
-                            "updated_at": now_ist,
-                        },
-                        timeout=10,
-                    )
-                    if resp.status_code in (200, 204):
-                        updated += 1
-                    else:
-                        errors.append({"symbol": sym, "error": f"PATCH {resp.status_code}"})
-                except Exception as e:
-                    errors.append({"symbol": sym, "error": str(e)})
-
-            print(f"[swing_core] refresh_live (Angel One) — {updated} updated, {len(errors)} errors")
-            return {"updated": updated, "errors": errors, "source": "angel_one"}
-
-    # ── PATH B: Yahoo Finance Fallback ────────────────────────
-    print("[swing_core] refresh_live — using Yahoo Finance fallback")
-
+    uid    = _get_user_id()
     stocks = load_swing_stocks()
     if not stocks:
         return {"updated": 0, "errors": []}
@@ -876,8 +729,8 @@ def refresh_live() -> dict:
                 print(f"[swing_core] refresh_live save error batch {i}: {e}")
                 errors.append({"symbol": "batch", "error": str(e)})
 
-    print(f"[swing_core] refresh_live (Yahoo) — {updated} updated, {len(errors)} errors")
-    return {"updated": updated, "errors": errors, "source": "yahoo_finance"}
+    print(f"[swing_core] refresh_live complete — {updated} updated, {len(errors)} errors")
+    return {"updated": updated, "errors": errors}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 8 — POPULATE STATUS HISTORY
@@ -887,17 +740,26 @@ def populate_status_history() -> dict:
     """
     v4.3: Populate swing_status_history with last HISTORY_DAYS (10) trading days.
     Now saves open, high, low in addition to close, volume, vol_ratio, vol_signal, status.
+
+    For each symbol × each day:
+      - Use 5-row context window ending on that day to calculate median_vol
+      - Calculate vol_ratio, vol_signal, status using same logic as _build_result()
+      - Save to swing_status_history (upsert — safe to run multiple times)
+    Delete rows older than HISTORY_DAYS trading days.
+
+    Returns: {"saved": int, "errors": list}
     """
-    uid    = _get_user_id()
+    uid    = _get_user_id()  # capture in main thread
     stocks = load_swing_stocks()
     if not stocks:
         return {"saved": 0, "errors": []}
 
     symbols       = [s["symbol"] for s in stocks]
-    required_days = _last_n_trading_days(HISTORY_DAYS)
+    required_days = _last_n_trading_days(HISTORY_DAYS)  # last 10 trading days
 
     print(f"[swing_core] populate_history — {len(symbols)} symbols, {HISTORY_DAYS} days")
 
+    # period="15d" guarantees 10 trading days (covers 2 weekends + holidays)
     bulk    = _fetch_yf_bulk(symbols, period="15d")
     errors  = []
     to_save = []
@@ -916,10 +778,11 @@ def populate_status_history() -> dict:
         for req_date in required_days:
             matching = df[df.index.date == req_date] if not df.empty else None
             if matching is None or matching.empty:
-                continue
+                continue  # holiday or no data for this day
 
             row_data = matching.iloc[0]
 
+            # v4.3: read full OHLCV
             o = float(row_data["Open"])
             h = float(row_data["High"])
             l = float(row_data["Low"])
@@ -929,6 +792,7 @@ def populate_status_history() -> dict:
             if not all([o, h, l, c, v]):
                 continue
 
+            # Context: up to 5 rows ending on req_date for median/status calc
             df_before = df[df.index.date <= req_date]
             if len(df_before) < 2:
                 continue
@@ -943,8 +807,11 @@ def populate_status_history() -> dict:
             vol_ratio  = round(v / median_vol, 2) if median_vol > 0 else 0
             vs         = _vol_signal(vol_ratio)
             st         = _calc_status(c, max_close, v, ctx_vols, vol_ratio)
-            vs_clean   = vs.split("(")[0].strip()
 
+            # Strip ratio from vol_signal for clean DB storage e.g. "🔥 Explosive"
+            vs_clean = vs.split("(")[0].strip()
+
+            # v4.3: save open, high, low alongside existing fields
             to_save.append({
                 "user_id":    uid,
                 "symbol":     sym,
@@ -959,6 +826,7 @@ def populate_status_history() -> dict:
                 "status":     st if st else "NONE",
             })
 
+    # Upsert to swing_status_history
     saved = 0
     if to_save:
         hdrs = {**_headers(), "Prefer": "resolution=merge-duplicates,return=minimal"}
@@ -980,6 +848,7 @@ def populate_status_history() -> dict:
                 print(f"[swing_core] populate_history save error batch {i}: {e}")
                 errors.append({"symbol": "batch", "error": str(e)})
 
+    # Delete rows older than HISTORY_DAYS in background
     oldest = min(required_days).isoformat()
 
     def _delete_old_history():
@@ -1009,12 +878,32 @@ def populate_status_history() -> dict:
 
 def get_intraday_watch() -> list:
     """
-    v4.3: Fetch last 8 trading days from swing_status_history + today's live signal.
+    v4.3: Fetch last 8 trading days from swing_status_history (now includes open,high,low) +
+    today's live signal from swing_live_data.
+
+    Returns list of dicts per symbol:
+    {
+        symbol          : str
+        days            : [ {date, date_label, status, vol_signal, vol_ratio,
+                              open, high, low, close, volume}, ... ]  ← 8 days oldest→newest
+        live_signal     : str   ← today's vol_signal from swing_live_data
+        live_price      : float ← today's close from swing_live_data
+        live_open       : float ← today's open from swing_live_data
+        live_high       : float ← today's high from swing_live_data
+        live_low        : float ← today's low from swing_live_data
+        high_8d         : float ← max close in last 8 days from swing_status_history
+        pct_vs_high     : float ← (live_price - high_8d) / high_8d * 100
+        consec_weak     : int   ← max consecutive WATCH+Weak days in last 8 days
+        min_vol         : int   ← min daily volume in last 8 days
+    }
+    Sorted: most recent Explosive/Strong first, then by consec_weak desc.
     """
     uid = _get_user_id()
     if not uid:
         return []
 
+    # ── Query 1: last 8 trading days from swing_status_history ──
+    # v4.3: now fetches open, high, low too
     required_days = _last_n_trading_days(8)
     from_d        = min(required_days).isoformat()
 
@@ -1029,6 +918,8 @@ def get_intraday_watch() -> list:
         print(f"[swing_core] intraday_watch history query error: {e}")
         return []
 
+    # ── Query 2: today's live data from swing_live_data ──
+    # v4.3: now fetches open, high, low too
     live_map = {}
     try:
         live_rows = _fetch_all_rows("swing_live_data", uid, {
@@ -1039,6 +930,7 @@ def get_intraday_watch() -> list:
     except Exception as e:
         print(f"[swing_core] intraday_watch live query error: {e}")
 
+    # ── Group history rows by symbol ──
     sym_map = {}
     for row in hist_rows:
         sym = row["symbol"]
@@ -1049,8 +941,10 @@ def get_intraday_watch() -> list:
     results = []
 
     for sym, rows in sym_map.items():
+        # Sort oldest → newest, take last 8
         rows = sorted(rows, key=lambda x: x["trade_date"])[-8:]
 
+        # Build day entries — v4.3: now includes open, high, low
         days = []
         for r in rows:
             vs_raw   = r.get("vol_signal", "")
@@ -1062,9 +956,9 @@ def get_intraday_watch() -> list:
                 "status":     r.get("status", "NONE"),
                 "vol_signal": vs_clean,
                 "vol_ratio":  float(r.get("vol_ratio", 0)),
-                "open":       float(r.get("open")  or 0),
-                "high":       float(r.get("high")  or 0),
-                "low":        float(r.get("low")   or 0),
+                "open":       float(r.get("open")  or 0),   # v4.3: added
+                "high":       float(r.get("high")  or 0),   # v4.3: added
+                "low":        float(r.get("low")   or 0),   # v4.3: added
                 "close":      float(r.get("close", 0)),
                 "volume":     int(r.get("volume", 0)),
             })
@@ -1072,8 +966,10 @@ def get_intraday_watch() -> list:
         if not days:
             continue
 
+        # ── Calculate metrics ──
         high_8d = max(d["close"] for d in days)
 
+        # Live price + signal — v4.3: now pulls open, high, low from live_row
         live_row       = live_map.get(sym)
         live_price     = float(live_row["close"]) if live_row else days[-1]["close"]
         live_open      = float(live_row["open"])  if live_row else days[-1]["open"]
@@ -1108,8 +1004,10 @@ def get_intraday_watch() -> list:
             live_vol_ratio = days[-1]["vol_ratio"]
             live_status    = days[-1]["status"]
 
+        # % vs 8-day high
         pct_vs_high = round(((live_price - high_8d) / high_8d) * 100, 1) if high_8d else 0
 
+        # Max consecutive WATCH+Weak streak
         consec_weak    = 0
         current_streak = 0
         for d in days:
@@ -1119,9 +1017,11 @@ def get_intraday_watch() -> list:
             else:
                 current_streak = 0
 
+        # Min volume in last 8 days
         vols    = [d["volume"] for d in days if d["volume"] > 0]
         min_vol = min(vols) if vols else 0
 
+        # Calculate 5D average price and direction for Intraday Watch
         closes_5d       = [d["close"] for d in days[-5:]] if len(days) >= 5 else [d["close"] for d in days]
         avg_5d_price_iw = sum(closes_5d) / len(closes_5d) if closes_5d else live_price
         pct_vs_avg_iw   = round(((live_price - avg_5d_price_iw) / avg_5d_price_iw) * 100, 1) if avg_5d_price_iw else 0
@@ -1143,9 +1043,9 @@ def get_intraday_watch() -> list:
             "live_status":         live_status,
             "live_vol_ratio":      live_vol_ratio,
             "live_price":          live_price,
-            "live_open":           live_open,
-            "live_high":           live_high,
-            "live_low":            live_low,
+            "live_open":           live_open,       # v4.3: added
+            "live_high":           live_high,       # v4.3: added
+            "live_low":            live_low,        # v4.3: added
             "live_date":           live_date,
             "high_8d":             high_8d,
             "pct_vs_high":         pct_vs_high,
@@ -1157,6 +1057,7 @@ def get_intraday_watch() -> list:
             "min_vol":             min_vol,
         })
 
+    # ── Sort: recent Explosive/Strong first, then consec_weak desc ──
     def _sort_key(r):
         last_sig = r["days"][-1]["vol_signal"] if r["days"] else ""
         sig_rank = 0 if "Explosive" in last_sig else (1 if "Strong" in last_sig else 2)
@@ -1166,3 +1067,5 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
+
+
