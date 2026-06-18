@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/6_UploadCSV.py - Complete Fixed Code
+# pages/6_UploadCSV.py - Complete Fixed Code with Date Conversion
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -90,7 +90,7 @@ def upload_csv_data(df, test_mode=True, specific_date=None):
                 "change_percent": round(change_percent, 2),
                 "volume": volume_val,
                 "time": time_str,
-                "date": row['trade_date'],
+                "date": row['trade_date'],  # Already in YYYY-MM-DD format
                 "created_at": row['created_at'] if pd.notna(row['created_at']) else datetime.now().isoformat(),
                 "vol_ratio": vol_ratio_val,
                 "vol_signal": row['vol_signal'] if pd.notna(row['vol_signal']) else "🔴 Weak",
@@ -145,17 +145,26 @@ if uploaded_file is not None:
         # Read CSV
         df = pd.read_csv(uploaded_file)
         
-        # 🔥 FIX: Convert trade_date to string (handles both float and string)
-        df['trade_date'] = df['trade_date'].astype(str).str.replace('.0', '').str.strip()
-        
-        # 🔥 FIX: If dates are in Excel format (numbers), convert them
-        # Try to convert to datetime, if fails, keep as string
+        # 🔥 FIX 1: Convert trade_date to proper format
+        # Try different date formats
         try:
-            # Check if dates are in Excel format (e.g., 44567)
-            if df['trade_date'].str.match(r'^\d+$').all():
-                df['trade_date'] = pd.to_datetime(df['trade_date'].astype(float), unit='D', origin='1899-12-30').dt.strftime('%Y-%m-%d')
+            # Try DD-MM-YYYY format first (e.g., 15-06-2026)
+            df['trade_date'] = pd.to_datetime(df['trade_date'], format='%d-%m-%Y').dt.strftime('%Y-%m-%d')
+            st.info("✅ Date format detected: DD-MM-YYYY")
         except:
-            pass  # If conversion fails, keep as string
+            try:
+                # Try YYYY-MM-DD format (e.g., 2026-06-15)
+                df['trade_date'] = pd.to_datetime(df['trade_date']).dt.strftime('%Y-%m-%d')
+                st.info("✅ Date format detected: YYYY-MM-DD")
+            except:
+                try:
+                    # Try DD/MM/YYYY format (e.g., 15/06/2026)
+                    df['trade_date'] = pd.to_datetime(df['trade_date'], format='%d/%m/%Y').dt.strftime('%Y-%m-%d')
+                    st.info("✅ Date format detected: DD/MM/YYYY")
+                except:
+                    # Fallback: convert to string and clean
+                    df['trade_date'] = df['trade_date'].astype(str).str.replace('.0', '').str.strip()
+                    st.info("✅ Date format detected: String format")
         
         st.success(f"✅ CSV loaded successfully!")
         
@@ -263,7 +272,7 @@ if uploaded_file is not None:
         
     except Exception as e:
         st.error(f"❌ Error reading CSV: {str(e)}")
-        st.info("💡 Try: Make sure date column has values like '2026-06-17' format")
+        st.info("💡 Make sure date column has proper format (YYYY-MM-DD or DD-MM-YYYY)")
 
 else:
     st.info("👆 Upload your CSV file using the file uploader above.")
