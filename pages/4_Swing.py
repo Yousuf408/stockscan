@@ -1,9 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v5.1
+#  TRADE SENTRY — pages/4_Swing.py  v5.1 (AUTO-REFRESH REMOVED)
 #  v5.1: Intraday Watch now uses price_svg() with real OHLC (open,high,low,close)
 #        instead of _price_svg_iw() which only used close — fixes wrong candle colors
 #  v5.0: Accumulation Breakout added as sub-tab inside Intraday Watch HTML
 #        Same table style: STOCK▼ | PRICE CANDLES | VOLUME RATIO | dates... | BREAKOUT TYPE▼
+#
+#  MODIFIED: Removed auto-refresh fragments (_auto_refresh_every_5min, _refresh_status_bar)
+#            Manual buttons still work: Sync 5D, Refresh Live, Populate History
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -72,7 +75,6 @@ for k, v in [
     ("sw_sel_status",        None),
     ("sw_sel_vol",           None),
     ("sw_sel_iw",            None),
-    ("sw_auto_refresh_time", None),
     ("sw_db_updated",        False),
     ("sw_fetch_start_time",  None),
 ]:
@@ -87,30 +89,6 @@ def load_cached():
 def refresh_cache():
     st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
-
-# ── Fragment: auto-refresh every 5 min, only when market is open ──
-@st.fragment(run_every=999999)  # Disable temporarily
-def _auto_refresh_every_5min():
-    if not st.session_state.get("user_id"):   return
-    if not st.session_state.get("sw_loaded"): return
-    if not is_market_open():                  return
-
-    print("[fragment_refresh] ⏰ Starting 5-min refresh...")
-
-    res = refresh_live()
-
-    if res.get("updated", 0) > 0:
-        results, errors = load_from_db()
-        st.session_state.sw_results = results
-        st.session_state.sw_errors  = errors
-        st.session_state.sw_auto_refresh_time = time.time()
-        print(f"✅ [fragment_refresh] Updated {res['updated']} rows")
-    else:
-        print(f"⚠️ [fragment_refresh] No updates — {len(res.get('errors',[]))} errors")
-        if res.get("errors"):
-            print(f"   First error: {res['errors'][0]}")
-
-_auto_refresh_every_5min()
 
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
@@ -255,31 +233,6 @@ with c5:
         if res["saved"] > 0: st.success(f"✅ Saved {res['saved']} rows")
         if res["errors"]:    st.warning(f"⚠ {len(res['errors'])} errors")
         st.rerun()
-
-# ── Auto-refresh status indicator (updates every 1 sec) ──
-@st.fragment(run_every=1)
-def _refresh_status_bar():
-    _now    = time.time()
-    _mlabel = "🟢 Live fetch active" if market_open else "🟠 Market closed"
-
-    last_refresh = st.session_state.get("sw_auto_refresh_time") or 0
-    if last_refresh:
-        _elapsed = int(_now - last_refresh)
-        _next_in = max(0, 300 - _elapsed)
-        _status  = (f"🔁 Last updated {_elapsed//60}m {_elapsed%60}s ago · "
-                    f"Next fetch in {_next_in//60}m {_next_in%60}s · {_mlabel}")
-        _color   = "#6b7280"
-    else:
-        _status = f"🔁 Waiting for auto-refresh (5 min) · {_mlabel}"
-        _color  = "#9ca3af"
-
-    st.markdown(
-        f"<div style='font-size:10px;padding:4px 10px;background:#f9fafb;"
-        f"border-radius:6px;border:1px solid #e5e7eb;color:{_color};"
-        f"display:inline-block;margin-bottom:4px;'>{_status}</div>",
-        unsafe_allow_html=True)
-
-_refresh_status_bar()
 
 st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
