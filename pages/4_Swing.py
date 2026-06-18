@@ -89,7 +89,7 @@ def refresh_cache():
     return st.session_state.sw_stocks_cache
 
 # ── Fragment: auto-refresh every 5 min, only when market is open ──
-@st.fragment(run_every=300)  # 300 sec = 5 min
+@st.fragment(run_every=999999)  # Disable temporarily
 def _auto_refresh_every_5min():
     if not st.session_state.get("user_id"):   return
     if not st.session_state.get("sw_loaded"): return
