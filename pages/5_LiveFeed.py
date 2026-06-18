@@ -14,8 +14,48 @@ import angel_ws   # import MODULE directly — not just functions
 from angel_auth import angel_login
 from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
+# ── SUPABASE IMPORTS ──────────────────────────────────────────
+from supabase import create_client, Client
+
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
+
+# ── SUPABASE CONFIGURATION ────────────────────────────────────
+SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ── SUPABASE UPLOAD FUNCTION ──────────────────────────────────
+def upload_to_supabase(ticks):
+    """Upload current stock data to Supabase"""
+    rows = []
+    
+    for name, token, kind in STOCKS_WATCHLIST:
+        tick = ticks.get(token, {})
+        ltp = tick.get('ltp', 0)
+        
+        if ltp > 0:  # Only upload if we have data
+            rows.append({
+                "stock": name,
+                "type": "Index" if kind == "index" else "Stock",
+                "ltp": float(tick.get('ltp', 0)),
+                "open": float(tick.get('open', 0)),
+                "high": float(tick.get('high', 0)),
+                "low": float(tick.get('low', 0)),
+                "change": float(tick.get('change', 0)),
+                "change_percent": float(tick.get('change_pct', 0)),
+                "volume": int(tick.get('volume', 0)),
+                "time": str(tick.get('timestamp', '-'))
+            })
+    
+    if not rows:
+        return False, "No data to upload"
+    
+    try:
+        response = supabase.table("websocket_stock_values").insert(rows).execute()
+        return True, f"✅ Saved {len(response.data)} stocks to database"
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
 
 # ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
@@ -24,7 +64,7 @@ if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
 
 # ── Connect / Disconnect Buttons ─────────────────────────────
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     if not st.session_state.angel_connected:
@@ -55,6 +95,21 @@ with col2:
             st.session_state.angel_connected = False
             st.session_state.angel_creds     = None
             st.rerun()
+
+# ── UPDATE TO SUPABASE BUTTON ─────────────────────────────────
+with col3:
+    if st.session_state.angel_connected:
+        if st.button("📤 Update to Supabase", use_container_width=True):
+            ticks = angel_ws.latest_ticks
+            if not ticks:
+                st.warning("⚠️ No data yet. Wait for WebSocket.")
+            else:
+                with st.spinner("Uploading..."):
+                    success, message = upload_to_supabase(ticks)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
 
 st.divider()
 
