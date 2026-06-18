@@ -1,87 +1,27 @@
-# angel_ws.py
+# angel_ws.py - MODIFIED for config.py
 # Place this file in your ROOT folder (same level as app.py)
 
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from logzero import logger
 import threading
-import requests
 import time
 from datetime import datetime, timezone, timedelta
+from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# ── Plain global dict — shared across all threads ──────────────
-latest_ticks    = {}
+# ── Global state — shared across all threads ──────────────────
+latest_ticks    = {}          # {token: {ltp, volume, open, high, low, close, ...}}
 _raw_messages   = []
 _sws            = None
 _thread         = None
-_sync_thread    = None
 _connected      = False
 _correlation_id = "stockscan_live"
 # ───────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 1 — SUPABASE HELPERS (imported from swing_core)
-# ─────────────────────────────────────────────────────────────
-
-def _get_supabase():
-    """Get Supabase URL and headers from swing_core."""
-    try:
-        from swing_core import _get_config, _get_access_token, _get_user_id
-        url, key   = _get_config()
-        token      = _get_access_token()
-        uid        = _get_user_id()
-        headers    = {
-            "apikey"       : key,
-            "Authorization": f"Bearer {token or key}",
-            "Content-Type" : "application/json",
-            "Prefer"       : "return=minimal",
-        }
-        return url, headers, uid
-    except Exception as e:
-        logger.error(f"_get_supabase error: {e}")
-        return None, None, None
-
-
-# ─────────────────────────────────────────────────────────────
-# SECTION 2 — FETCH TOKENS FROM swing_live_data
-# ─────────────────────────────────────────────────────────────
-
-def _fetch_tokens_from_db() -> list:
-    """
-    Fetch all tokens from swing_live_data table.
-    Returns list of token strings.
-    """
-    try:
-        url, headers, uid = _get_supabase()
-        if not url or not uid:
-            logger.error("Supabase config missing — cannot fetch tokens")
-            return []
-
-        r = requests.get(
-            f"{url}/rest/v1/swing_live_data",
-            headers=headers,
-            params={
-                "select"  : "token",
-                "user_id" : f"eq.{uid}",
-                "token"   : "not.is.null",  # sirf filled tokens
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        rows   = r.json()
-        tokens = [str(row["token"]) for row in rows if row.get("token")]
-        logger.info(f"Fetched {len(tokens)} tokens from swing_live_data")
-        return tokens
-
-    except Exception as e:
-        logger.error(f"_fetch_tokens_from_db error: {e}")
-        return []
-
-
-# ─────────────────────────────────────────────────────────────
-# SECTION 3 — BATCH SYNC TO SUPABASE (har 5 sec)
+# SECTION 1 — MARKET HOURS CHECK
 # ─────────────────────────────────────────────────────────────
 
 def _is_market_open() -> bool:
@@ -93,79 +33,8 @@ def _is_market_open() -> bool:
     return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
 
 
-def _batch_sync_to_supabase():
-    """
-    Background thread — har 5 sec mein latest_ticks → Supabase UPDATE.
-    Sirf market hours mein chalega (9:15 AM - 3:30 PM IST).
-    Token se match karke swing_live_data mein update karega.
-    """
-    logger.info("Batch sync thread started!")
-
-    while _connected:
-        try:
-            time.sleep(5)
-
-            if not _connected:
-                break
-
-            if not latest_ticks:
-                continue
-
-            # Market hours check
-            if not _is_market_open():
-                logger.info("Market closed — skipping sync")
-                time.sleep(60)
-                continue
-
-            url, headers, uid = _get_supabase()
-            if not url or not uid:
-                continue
-
-            now_ist = datetime.now(IST).isoformat()
-
-            # Har token ke liye ek update request
-            # Batch mein karte hain — 50 at a time
-            tokens_snapshot = dict(latest_ticks)  # thread-safe copy
-            updated = 0
-
-            for token, tick in tokens_snapshot.items():
-                try:
-                    r = requests.patch(
-                        f"{url}/rest/v1/swing_live_data",
-                        headers=headers,
-                        params={
-                            "user_id": f"eq.{uid}",
-                            "token"  : f"eq.{token}",
-                        },
-                        json={
-                            "open"      : round(tick.get("open", 0), 2),
-                            "high"      : round(tick.get("high", 0), 2),
-                            "low"       : round(tick.get("low", 0), 2),
-                            "close"     : round(tick.get("ltp", 0), 2),  # LTP → close column
-                            "volume"    : tick.get("volume", 0),
-                            "updated_at": now_ist,
-                        },
-                        timeout=10,
-                    )
-                    if r.status_code in (200, 204):
-                        updated += 1
-                    else:
-                        logger.warning(f"Sync failed token {token}: {r.status_code} {r.text}")
-
-                except Exception as e:
-                    logger.error(f"Sync error token {token}: {e}")
-
-            logger.info(f"Batch sync done — {updated}/{len(tokens_snapshot)} tokens updated")
-
-        except Exception as e:
-            logger.error(f"_batch_sync_to_supabase error: {e}")
-            time.sleep(5)
-
-    logger.info("Batch sync thread stopped.")
-
-
 # ─────────────────────────────────────────────────────────────
-# SECTION 4 — WEBSOCKET CALLBACKS (same as before)
+# SECTION 2 — WEBSOCKET CALLBACKS
 # ─────────────────────────────────────────────────────────────
 
 def on_data(wsapp, message):
@@ -180,7 +49,7 @@ def on_data(wsapp, message):
 
         token = str(message.get('token', ''))
         if not token:
-            logger.warning(f"No token in message: {message}")
+            logger.warning(f"🔴 No token in message!")
             return
 
         # Angel One sends prices in paise → divide by 100
@@ -209,76 +78,86 @@ def on_data(wsapp, message):
             "timestamp"  : timestamp,
         }
 
-        logger.info(f"TICK [{token}] LTP={ltp} | chng%={chng_pct:.2f} | time={timestamp}")
+        logger.info(f"✓ TICK [{token}] LTP={ltp:.2f} | chng%={chng_pct:.2f}% | vol={volume} | time={timestamp}")
 
     except Exception as e:
-        logger.error(f"on_data error: {e} | raw msg: {message}")
+        logger.error(f"on_data error: {e}", exc_info=True)
 
 
 def on_open(wsapp):
     """
     Called when WebSocket connection opens.
-    Tokens fetch from swing_live_data → subscribe in batches of 950.
+    Subscribe to ALL tokens from config.py STOCKS_WATCHLIST.
     """
     global _connected
     _connected = True
-    logger.info("WebSocket Connected! Fetching tokens from DB...")
+    logger.info("🔗 WebSocket Connected!")
 
     try:
-        # DB se tokens fetch karo
-        all_tokens = _fetch_tokens_from_db()
+        logger.info(f"📡 Subscribing to {len(STOCKS_WATCHLIST)} stocks from config.py...")
 
-        if not all_tokens:
-            # Fallback — hardcoded indices + stocks (5_LiveFeed.py ke liye)
-            logger.warning("No tokens from DB — using fallback tokens")
+        # Extract tokens from config
+        # Format: [(name, token, kind), ...]
+        indices = []  # Mode 1 tokens
+        stocks = []   # Mode 2 tokens
+
+        for name, token, kind in STOCKS_WATCHLIST:
+            if kind == "index":
+                indices.append(token)
+            else:
+                stocks.append(token)
+
+        logger.info(f"  • Indices: {len(indices)} (Mode 1) - {indices}")
+        logger.info(f"  • Stocks: {len(stocks)} (Mode 2)")
+
+        # Subscribe to indices in Mode 1
+        if indices:
             _sws.subscribe(_correlation_id, 1, [
-                {"exchangeType": 1, "tokens": ["26000", "26009"]}
+                {"exchangeType": 1, "tokens": indices}
             ])
-            _sws.subscribe(_correlation_id, 2, [
-                {"exchangeType": 1, "tokens": ["2885", "1594", "11536", "1333"]}
-            ])
-            logger.info("Fallback tokens subscribed")
-            return
+            logger.info(f"✓ Subscribed {len(indices)} indices in Mode 1")
 
-        # Angel One limit: 1000 per session
-        # Mode 2 = 1 subscription per token
-        # 950 safe limit rakhte hain
+        # Subscribe to stocks in Mode 2 (batches of 950)
         BATCH_SIZE = 950
-
-        for i in range(0, len(all_tokens), BATCH_SIZE):
-            batch = all_tokens[i:i + BATCH_SIZE]
+        for i in range(0, len(stocks), BATCH_SIZE):
+            batch = stocks[i:i + BATCH_SIZE]
             _sws.subscribe(_correlation_id, 2, [
                 {"exchangeType": 1, "tokens": batch}
             ])
-            logger.info(f"Subscribed batch {i//BATCH_SIZE + 1}: {len(batch)} tokens")
+            batch_num = (i // BATCH_SIZE) + 1
+            logger.info(f"✓ Subscribed batch {batch_num}: {len(batch)} stocks in Mode 2")
 
-        logger.info(f"Total {len(all_tokens)} tokens subscribed in Mode 2")
+        logger.info(f"✅ Total subscribed: {len(STOCKS_WATCHLIST)} tokens ({len(indices)} indices + {len(stocks)} stocks)")
 
     except Exception as e:
-        logger.error(f"Subscribe error: {e}")
+        logger.error(f"🔴 Subscribe error: {e}", exc_info=True)
 
 
 def on_error(wsapp, error):
-    logger.error(f"WebSocket Error: {error}")
+    """Called when WebSocket has an error."""
+    logger.error(f"🔴 WebSocket Error: {error}")
 
 
 def on_close(wsapp):
+    """Called when WebSocket connection closes."""
     global _connected
     _connected = False
-    logger.info("WebSocket Closed")
+    logger.info("🔌 WebSocket Closed")
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 5 — START / STOP
+# SECTION 3 — START / STOP
 # ─────────────────────────────────────────────────────────────
 
-def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
-    """Start WebSocket + batch sync thread in background."""
-    global _sws, _thread, _sync_thread, latest_ticks, _connected
+def start_websocket(jwt_token, api_key, client_id, feed_token):
+    """Start WebSocket in background thread."""
+    global _sws, _thread, latest_ticks, _connected
 
-    # Reset ticks on new connection
+    # Reset on new connection
     latest_ticks = {}
     _connected   = True
+
+    logger.info("🚀 Initializing Angel One WebSocket...")
 
     _sws = SmartWebSocketV2(
         auth_token  = jwt_token,
@@ -292,47 +171,63 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     _sws.on_error = on_error
     _sws.on_close = on_close
 
-    # WebSocket thread
+    # WebSocket thread (daemon = auto-kills when main thread exits)
     def _run():
         try:
-            logger.info("WebSocket connecting...")
+            logger.info("📡 WebSocket connecting...")
             _sws.connect()
         except Exception as e:
-            logger.error(f"WebSocket _run error: {e}")
+            logger.error(f"🔴 WebSocket connection failed: {e}", exc_info=True)
+            global _connected
+            _connected = False
 
     _thread = threading.Thread(target=_run, daemon=True)
     _thread.start()
-    logger.info("WebSocket thread started!")
-
-    # Batch sync thread — har 5 sec Supabase update
-    _sync_thread = threading.Thread(target=_batch_sync_to_supabase, daemon=True)
-    _sync_thread.start()
-    logger.info("Batch sync thread started!")
+    logger.info("✓ WebSocket thread started!")
 
 
 def stop_websocket():
-    """Close WebSocket — sync thread bhi automatically stop hoga."""
+    """Close WebSocket connection."""
     global _sws, _connected
-    _connected = False  # sync thread bhi ruk jayega
+    _connected = False
+    
     if _sws:
         try:
             _sws.close_connection()
-            logger.info("WebSocket stopped.")
+            logger.info("🛑 WebSocket stopped.")
         except Exception as e:
             logger.error(f"Stop error: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 6 — GETTERS (same as before)
+# SECTION 4 — GETTERS
 # ─────────────────────────────────────────────────────────────
 
 def get_latest_ticks():
+    """Get all latest tick data."""
     return latest_ticks
 
 
 def get_raw_messages():
+    """Get last 5 raw messages for debugging."""
     return _raw_messages
 
 
 def is_connected():
+    """Check if WebSocket is connected."""
     return _connected
+
+
+def get_subscription_status():
+    """Get subscription info for debugging."""
+    indices_count = sum(1 for _, _, kind in STOCKS_WATCHLIST if kind == "index")
+    stocks_count = sum(1 for _, _, kind in STOCKS_WATCHLIST if kind == "stock")
+    ticks_count = len(latest_ticks)
+    
+    return {
+        "total_subscribed": len(STOCKS_WATCHLIST),
+        "indices": indices_count,
+        "stocks": stocks_count,
+        "ticks_received": ticks_count,
+        "connected": _connected
+    }
