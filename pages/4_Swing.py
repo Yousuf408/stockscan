@@ -82,6 +82,7 @@ for k, v in [
         st.session_state[k] = v
 
 def load_cached():
+    print("[DEBUG] load_cached() called")
     if st.session_state.sw_stocks_cache is None:
         st.session_state.sw_stocks_cache = load_swing_stocks()
     return st.session_state.sw_stocks_cache
@@ -93,6 +94,7 @@ def refresh_cache():
 if not st.session_state.sw_loaded:
     with st.spinner("Loading..."):
         results, errors = load_from_db()
+    print("[DEBUG] load_from_db() returned")
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
         st.session_state.sw_loaded  = True
@@ -196,6 +198,7 @@ with c2:
             res = sync_5d_history()
             st.session_state.sw_last_sync = time.time()
         results, errors = load_from_db()
+    print("[DEBUG] load_from_db() returned")
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
         if res["synced"] > 0:
@@ -211,8 +214,10 @@ with c3:
                  help="Weekday: fetch today's price. Weekend: fetch last trading day"):
         with st.spinner("Refreshing live prices..."):
             res = refresh_live()
+    print(f"[DEBUG] refresh_live() returned: {res}")
             st.session_state.sw_last_refresh = time.time()
         results, errors = load_from_db()
+    print("[DEBUG] load_from_db() returned")
         st.session_state.sw_results = results
         st.session_state.sw_errors  = errors
         st.rerun()
@@ -259,6 +264,7 @@ if st.session_state.sw_show_manage:
                         refresh_cache(); st.success(f"✅ {sym.upper()} added."); st.rerun()
                     except ValueError as e: st.warning(str(e))
                     except Exception as e:  st.error(str(e))
+    print(f"[DEBUG] Exception: {str(e)}")
     with t2:
         txt = st.text_area("Symbols — one per line or comma separated", height=150,
                            placeholder="HEROMOTOCO\nTITAN\nHDFCBANK")
@@ -287,10 +293,12 @@ if st.session_state.sw_show_manage:
                     if new_bd:
                         try: update_swing_stock(s["id"], {"breakout_date": str(new_bd)}); refresh_cache(); st.rerun()
                         except Exception as e: st.error(str(e))
+    print(f"[DEBUG] Exception: {str(e)}")
                 with r5:
                     if st.button("✕", key=f"del_{s['id']}"):
                         try: delete_swing_stock(s["id"]); refresh_cache(); st.rerun()
                         except Exception as e: st.error(str(e))
+    print(f"[DEBUG] Exception: {str(e)}")
     st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -386,6 +394,7 @@ if sel_status and "Intraday Watch" in sel_status:
     if "sw_intraday" not in st.session_state:
         with st.spinner("Loading intraday watch data..."):
             st.session_state.sw_intraday = get_intraday_watch()
+    print("[DEBUG] get_intraday_watch() called")
 
     iw_data = st.session_state.sw_intraday or []
 
@@ -522,9 +531,11 @@ if sel_status and "Intraday Watch" in sel_status:
             results.sort(key=lambda x: x["price_gain"], reverse=True)
             return results
         except Exception as e:
+    print(f"[DEBUG] Exception: {str(e)}")
             return []
 
     ab_data = load_ab_data(st.session_state.user_id)
+    print("[DEBUG] load_ab_data() called")
 
     # ── Helper functions for HTML ──
     def _vol_emoji(vs):
@@ -1202,6 +1213,7 @@ for col, lbl in zip(header, labels):
         unsafe_allow_html=True)
 
 for r in view:
+    print(f"[DEBUG] Rendering {len(view)} rows")
     sym    = r["symbol"]
     status = r.get("status","")
     bc     = border_color(status)
@@ -1270,6 +1282,7 @@ if ready_blast and WATCHLIST_PUSH:
                     })
                     st.success(f"✅ {sym} → {chosen}")
                 except Exception as e: st.error(str(e))
+    print(f"[DEBUG] Exception: {str(e)}")
 
 if st.session_state.sw_errors:
     with st.expander(f"⚠ {len(st.session_state.sw_errors)} errors"):
