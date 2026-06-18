@@ -27,7 +27,8 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── SUPABASE UPLOAD FUNCTION ──────────────────────────────────
 def upload_to_supabase(ticks):
-    """Upload current stock data to Supabase"""
+def upload_to_supabase(ticks):
+    """Upload current stock data to Supabase - Delete old, insert new"""
     rows = []
     
     for name, token, kind in STOCKS_WATCHLIST:
@@ -52,12 +53,15 @@ def upload_to_supabase(ticks):
         return False, "No data to upload"
     
     try:
-        # ✅ CHANGED: insert() → upsert() to UPDATE existing records
-        response = supabase.table("websocket_stock_values").upsert(rows, ignore_duplicates=False).execute()
-        return True, f"✅ Updated {len(response.data)} stocks in database"
+        # ✅ STEP 1: Delete all old data first
+        supabase.table("websocket_stock_values").delete().neq("stock", "").execute()
+        
+        # ✅ STEP 2: Insert fresh data
+        response = supabase.table("websocket_stock_values").insert(rows).execute()
+        return True, f"✅ Updated {len(response.data)} stocks in database (fresh data)"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
-
+        
 # ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
