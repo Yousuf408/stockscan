@@ -1,9 +1,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — pages/4_Swing.py  v5.1
-#  v5.1: Intraday Watch now uses price_svg() with real OHLC (open,high,low,close)
-#        instead of _price_svg_iw() which only used close — fixes wrong candle colors
-#  v5.0: Accumulation Breakout added as sub-tab inside Intraday Watch HTML
-#        Same table style: STOCK▼ | PRICE CANDLES | VOLUME RATIO | dates... | BREAKOUT TYPE▼
+#  TRADE SENTRY — pages/4_Swing.py  v5.2
+#  v5.2: Fixed "SessionInfo before initialized" error
+#        - restore_session() called immediately after set_page_config()
+#        - Auth guard moved before any st. UI calls
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -11,6 +10,24 @@ import os, sys, time
 from datetime import datetime, date, timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+# ✅ STEP 1 — set_page_config MUST be first st. call
+st.set_page_config(page_title="Swing · TradeSentry", layout="wide",
+                   page_icon="📈", initial_sidebar_state="collapsed")
+
+# ✅ STEP 2 — restore_session before ANY other st. call
+from auth_session import restore_session
+if not st.session_state.get("user_id"):
+    restore_session()
+
+# ✅ STEP 3 — auth guard
+if not st.session_state.get("user_id"):
+    st.warning("Please login.")
+    if st.button("Go to Login →", type="primary"):
+        st.switch_page("pages/0_Login.py")
+    st.stop()
+
+# ✅ STEP 4 — now safe to import and use styles
 from styles import apply_styles, sidebar_brand, page_header
 from swing_core import (
     load_swing_stocks, add_swing_stock, update_swing_stock,
@@ -28,16 +45,8 @@ try:
 except Exception:
     WATCHLIST_PUSH = False
 
-st.set_page_config(page_title="Swing · TradeSentry", layout="wide",
-                   page_icon="📈", initial_sidebar_state="collapsed")
 apply_styles()
 sidebar_brand()
-
-if not st.session_state.get("user_id"):
-    st.warning("Please login.")
-    if st.button("Go to Login →", type="primary"):
-        st.switch_page("pages/0_Login.py")
-    st.stop()
 
 page_header("Swing Scanner", "Positional trade setups — 5d + current")
 
@@ -465,7 +474,7 @@ if sel_status and "Intraday Watch" in sel_status:
     elif sel_iw and "Vol > 50K" in sel_iw: iw_view = [r for r in iw_data if r["min_vol"] >= 50000]
     else: iw_view = iw_data
 
-    # ── Load Accumulation Breakout data — uses same structure as old working file ──
+    # ── Load Accumulation Breakout data ──
     @st.cache_data(ttl=300)
     def load_ab_data(user_id: str):
         try:
@@ -543,10 +552,9 @@ if sel_status and "Intraday Watch" in sel_status:
                 elif v8 > 0.8:         btype = "Washout"
                 else:                  btype = "Shakeout"
 
-                # ── hist_rows kept for build_ab_rows() compatibility ──
                 results.append({
                     "symbol":        sym,
-                    "hist_rows":     rows_sorted,     # ← needed by build_ab_rows
+                    "hist_rows":     rows_sorted,
                     "trading_days":  trading_days,
                     "price_gain":    round(price_gain, 2),
                     "vol_improve":   round(vol_improve, 2),
@@ -563,7 +571,7 @@ if sel_status and "Intraday Watch" in sel_status:
                     "direction":     direction,
                     "dir_arrow":     dir_arrow,
                     "dir_color":     dir_color,
-                    "breakout_type": btype,           # ← needed by build_ab_rows
+                    "breakout_type": btype,
                     "screener_url":  f"https://www.screener.in/company/{sym}/",
                 })
             results.sort(key=lambda x: x["price_gain"], reverse=True)
@@ -573,7 +581,6 @@ if sel_status and "Intraday Watch" in sel_status:
 
     ab_data = load_ab_data(st.session_state.user_id)
 
-    # ── Helper functions for HTML ──
     def _vol_emoji(vs):
         if "Explosive" in vs: return "🔥"
         if "Strong"    in vs: return "🟢"
@@ -590,23 +597,17 @@ if sel_status and "Intraday Watch" in sel_status:
     def _cat_label(s):
         return {"BLASTING":"BLASTING","READY":"READY","WATCH":"WATCH"}.get(s,"—")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # v5.1: price_svg_for_iw — real OHLC candles for Intraday Watch
-    # ══════════════════════════════════════════════════════════════════════════
     def price_svg_for_iw(days, live_open, live_high, live_low, live_close, live_date, h=70):
         if not days:
             return f'<svg width="160" height="{h}"><text x="6" y="30" font-size="10" fill="#9ca3af">No data</text></svg>'
-
         hist_opens  = [d["open"]       for d in days]
         hist_highs  = [d["high"]       for d in days]
         hist_lows   = [d["low"]        for d in days]
         hist_closes = [d["close"]      for d in days]
         hist_dates  = [d["date_label"] for d in days]
-
         hist_opens  = [o if o > 0 else c for o, c in zip(hist_opens,  hist_closes)]
         hist_highs  = [hh if hh > 0 else c for hh, c in zip(hist_highs, hist_closes)]
         hist_lows   = [l if l > 0 else c for l, c in zip(hist_lows,  hist_closes)]
-
         cur_open  = live_open  if live_open  and live_open  > 0 else live_close
         cur_high  = live_high  if live_high  and live_high  > 0 else live_close
         cur_low   = live_low   if live_low   and live_low   > 0 else live_close
@@ -615,7 +616,6 @@ if sel_status and "Intraday Watch" in sel_status:
             cur_date = str(live_date)[8:10] if live_date else "—"
         except Exception:
             cur_date = "—"
-
         return price_svg(
             opens=hist_opens, highs=hist_highs, lows=hist_lows, closes=hist_closes,
             dates=hist_dates,
@@ -642,7 +642,6 @@ if sel_status and "Intraday Watch" in sel_status:
         tw = pad+n*(bw+gap)
         return f'<svg width="{tw}" height="{h}" viewBox="0 0 {tw} {h}">{"".join(parts)}</svg>'
 
-    # ── _iw_dropdown must be defined BEFORE build_iw_rows uses it ──
     def _iw_dropdown(col_id):
         return f'''<div id="{col_id}-dd" class="dd-menu">
   <div class="dd-section">Vol Signal</div>
@@ -659,7 +658,6 @@ if sel_status and "Intraday Watch" in sel_status:
   <div class="dd-clear"><button type="button" onclick="iwClearCol('{col_id}')">Clear</button></div>
 </div>'''
 
-    # ── Build Intraday Watch rows ──
     def build_iw_rows(iw_view, date_labels, n_days, live_date_hdr):
         header = '''<th class="stock-col">
   <div class="date-trigger" onclick="toggleDD('iw-dir-dd')">
@@ -715,18 +713,13 @@ if sel_status and "Intraday Watch" in sel_status:
             dir_arrow_iw = r.get("direction_arrow_iw", "→")
             dir_color_iw = r.get("direction_color_iw", "#6b7280")
             days         = r["days"][-6:]
-
             live_open  = r.get("live_open",  0)
             live_high  = r.get("live_high",  0)
             live_low   = r.get("live_low",   0)
             live_date  = r.get("live_date",  "")
-
-            # Direction for JS filtering
-            if pct_avg_iw > 1:   iw_dir = "up"
+            if pct_avg_iw > 1:    iw_dir = "up"
             elif pct_avg_iw < -1: iw_dir = "down"
             else:                 iw_dir = "side"
-
-            # Accumulation Breakout detection
             breakout_type = "—"
             has_breakout  = False
             if len(days) >= 5:
@@ -740,12 +733,7 @@ if sel_status and "Intraday Watch" in sel_status:
                     if (4.0 <= price_gain <= 10.0 and 2.0 <= vol_today <= 4.5 and vol_improve >= 1.5):
                         breakout_type = "Accumulation"
                         has_breakout  = True
-
             btype_lower = "accumulation" if has_breakout else "none"
-
-            # ── FIX: use data-iw-dir / data-iw-break (matches JS) ──
-            # ── FIX: always write data-iw-break (even when "none") ──
-            # ── FIX: write per-column sig/sta attributes for col filters ──
             d_attrs = f' data-iw-dir="{iw_dir}" data-iw-break="{btype_lower}"'
             for col_idx in range(n_days):
                 col_id_attr = f"col-{col_idx}"
@@ -758,12 +746,10 @@ if sel_status and "Intraday Watch" in sel_status:
             live_sig = _sig_key(r.get("live_signal", ""))
             live_sta = r.get("live_status", "WATCH")
             d_attrs += f' data-col-live-sig="{live_sig}" data-col-live-sta="{live_sta}"'
-
             p_svg = price_svg_for_iw(
                 days=days, live_open=live_open, live_high=live_high,
                 live_low=live_low, live_close=prc, live_date=live_date,
             )
-
             rows += (f'<tr class="iw-row"{d_attrs}>'
                      f'<td class="stock-cell">'
                      f'<div class="sym">{sym}</div>'
@@ -798,12 +784,9 @@ if sel_status and "Intraday Watch" in sel_status:
                 rows += f'<td class="data-cell break-cell">—</td></tr>'
         return header, rows
 
-    # ── Build Accumulation Breakout rows — restored from old working file ──
     def build_ab_rows(ab_data):
         if not ab_data:
             return "", ""
-
-        # Build date labels from hist_rows of first result
         sample = ab_data[0]["hist_rows"]
         date_labels = []
         for r in sample:
@@ -813,7 +796,6 @@ if sel_status and "Intraday Watch" in sel_status:
             except:
                 lbl = d[-5:]
             date_labels.append(lbl)
-
         try:
             live_lbl = datetime.strptime(ab_data[0]["live_date"], "%Y-%m-%d").strftime("%-d%b").upper() + " · LIVE"
         except:
@@ -951,10 +933,8 @@ if sel_status and "Intraday Watch" in sel_status:
             ld    = r["live_date"]
             ls    = r["live_status"]
             lsig  = r["live_vsig"]
-
             p_svg = price_candle_svg(hist, lc, ld)
             v_svg = vol_ratio_svg(hist, lvr, ld)
-
             date_cells = ""
             for hr in hist:
                 sig   = _sig_key(hr.get("vol_signal",""))
@@ -967,7 +947,6 @@ if sel_status and "Intraday Watch" in sel_status:
                                f'<span class="cell-cat">{cat}</span>'
                                f'<span class="cell-ratio">{rv:.1f}x</span>'
                                f'</div></td>')
-
             live_emoji = _vol_emoji(lsig)
             live_cat   = _cat_label(ls)
             date_cells += (f'<td class="data-cell live-cell"><div class="cell-stack">'
@@ -975,7 +954,6 @@ if sel_status and "Intraday Watch" in sel_status:
                           f'<span class="cell-cat">{live_cat}</span>'
                           f'<span class="cell-ratio">{lvr:.1f}x</span>'
                           f'</div></td>')
-
             rows += (f'<tr class="ab-row" data-dir="{r["direction"]}" data-break="{btype.lower()}">'
                      f'<td class="stock-cell">'
                      f'<div class="sym">{sym}</div>'
@@ -1011,21 +989,18 @@ if sel_status and "Intraday Watch" in sel_status:
     total_iw = len(iw_view)
     total_ab = len(ab_data)
 
-    # ══ SINGLE HTML with two sub-tabs ══
     full_html = f'''<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"/>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:transparent;color:#111;}}
-
 .subtab-bar{{display:flex;gap:0;border-bottom:1px solid #e5e7eb;margin-bottom:12px;}}
 .subtab{{padding:8px 20px;font-size:13px;font-weight:500;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}}
 .subtab:hover{{color:#111;}}
 .subtab.active{{color:#7c3aed;border-bottom:2px solid #7c3aed;font-weight:600;}}
 .subtab-panel{{display:none;}}
 .subtab-panel.active{{display:block;}}
-
 .count-bar{{font-size:11px;color:#6b7280;padding:4px 0 8px;}}
 .table-wrap{{background:white;border:0.5px solid #e5e7eb;border-radius:8px;overflow-x:auto;}}
 table{{width:100%;border-collapse:collapse;}}
@@ -1036,14 +1011,12 @@ th.ab-stock-col{{text-align:left;padding:10px 16px;min-width:160px;}}
 th.chart-col{{min-width:160px;}}
 th.date-col{{min-width:90px;}}
 th.ab-break-col{{color:#7c3aed;border-left:2px solid #e9d5ff;min-width:150px;}}
-
 .date-trigger{{display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:2px 5px;border-radius:4px;user-select:none;}}
 .date-trigger:hover{{background:#f3f4f6;}}
 .date-text{{font-weight:600;}}
 .dd-arrow{{font-size:10px;color:#9ca3af;}}
 .dd-dot{{display:none;width:7px;height:7px;background:#7c3aed;border-radius:50%;position:absolute;top:5px;right:5px;}}
 .dd-dot.active{{display:block;}}
-
 .dd-menu{{display:none;position:absolute;top:105%;left:50%;transform:translateX(-50%);background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:9999;min-width:185px;padding:8px 0;text-align:left;margin-top:4px;}}
 .dd-menu.open{{display:block;}}
 .dd-section{{padding:5px 14px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;}}
@@ -1053,7 +1026,6 @@ th.ab-break-col{{color:#7c3aed;border-left:2px solid #e9d5ff;min-width:150px;}}
 .dd-divider{{height:1px;background:#f3f4f6;margin:5px 0;}}
 .dd-clear{{display:flex;justify-content:center;padding:4px 0;}}
 .dd-clear button{{font-size:11px;color:#6b7280;background:none;border:none;cursor:pointer;text-decoration:underline;}}
-
 tbody tr{{border-bottom:0.5px solid #f3f4f6;background:white;}}
 tbody tr:last-child{{border-bottom:none;}}
 td.stock-cell{{padding:12px 16px;text-align:left;vertical-align:middle;}}
@@ -1071,43 +1043,33 @@ td.live-cell{{background:#fafaf8;}}
 </style>
 </head>
 <body>
-
 <div class="subtab-bar">
   <div class="subtab active" onclick="switchTab('iw')" id="tab-iw">📊 Intraday Watch ({total_iw})</div>
   <div class="subtab" onclick="switchTab('ab')" id="tab-ab">🚀 Accumulation Breakout ({total_ab})</div>
 </div>
-
 <div class="subtab-panel active" id="panel-iw">
   <div class="count-bar" id="iw-count">Showing {total_iw} stocks</div>
   <div class="table-wrap">
-  <table>
-  <thead><tr>{iw_header_html}</tr></thead>
-  <tbody id="iw-body">{iw_rows_html}</tbody>
-  </table>
+  <table><thead><tr>{iw_header_html}</tr></thead>
+  <tbody id="iw-body">{iw_rows_html}</tbody></table>
   </div>
 </div>
-
 <div class="subtab-panel" id="panel-ab">
   <div class="count-bar" id="ab-count">Showing {total_ab} stocks</div>
   <div class="table-wrap">
-  <table>
-  <thead><tr>{ab_header_html}</tr></thead>
-  <tbody id="ab-body">{ab_rows_html}</tbody>
-  </table>
+  <table><thead><tr>{ab_header_html}</tr></thead>
+  <tbody id="ab-body">{ab_rows_html}</tbody></table>
   </div>
 </div>
-
 <script>
 var IW_TOTAL = {total_iw};
 var AB_TOTAL = {total_ab};
-
 function switchTab(tab) {{
   document.querySelectorAll('.subtab').forEach(function(t){{t.classList.remove('active');}});
   document.querySelectorAll('.subtab-panel').forEach(function(p){{p.classList.remove('active');}});
   document.getElementById('tab-'+tab).classList.add('active');
   document.getElementById('panel-'+tab).classList.add('active');
 }}
-
 function toggleDD(ddId) {{
   document.querySelectorAll('.dd-menu').forEach(function(m) {{
     if (m.id !== ddId) m.classList.remove('open');
@@ -1115,39 +1077,31 @@ function toggleDD(ddId) {{
   var el = document.getElementById(ddId);
   if (el) el.classList.toggle('open');
 }}
-
 document.addEventListener('click', function(e) {{
   if (!e.target.closest('.dd-menu') && !e.target.closest('.date-trigger')) {{
     document.querySelectorAll('.dd-menu').forEach(function(m){{m.classList.remove('open');}});
   }}
 }});
-
-/* ── Intraday Watch filters ── */
 function iwClearDir() {{
   document.querySelectorAll('input[data-iwf="dir"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById('iw-dir-dd').classList.remove('open');
   iwApplyFilter();
 }}
-
 function iwClearBreak() {{
   document.querySelectorAll('input[data-iwf="break"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById('iw-break-dd').classList.remove('open');
   iwApplyFilter();
 }}
-
 function iwClearCol(colId) {{
   document.querySelectorAll('input[data-col="'+colId+'"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById(colId+'-dd').classList.remove('open');
   iwApplyFilter();
 }}
-
 function iwApplyFilter() {{
   var dirVals   = Array.from(document.querySelectorAll('input[data-iwf="dir"]:checked')).map(function(c){{return c.value;}});
   var breakVals = Array.from(document.querySelectorAll('input[data-iwf="break"]:checked')).map(function(c){{return c.value;}});
   document.getElementById('iw-dir-dot').className   = 'dd-dot' + (dirVals.length   ? ' active' : '');
   document.getElementById('iw-break-dot').className = 'dd-dot' + (breakVals.length ? ' active' : '');
-
-  /* Build col filters — split sig vs sta */
   var colFilters = {{}};
   document.querySelectorAll('input[data-col]:checked').forEach(function(cb) {{
     var col = cb.getAttribute('data-col');
@@ -1156,21 +1110,17 @@ function iwApplyFilter() {{
     if (['Explosive','Strong','Build','Weak'].indexOf(val) >= 0) colFilters[col].sigs.push(val);
     else colFilters[col].stas.push(val);
   }});
-
-  /* Update dot indicators for col headers */
   document.querySelectorAll('.dd-dot').forEach(function(dot) {{
     var colId = dot.id.replace('-dot','');
     if (colFilters[colId]) dot.classList.add('active');
     else dot.classList.remove('active');
   }});
-
   var rows = document.querySelectorAll('#iw-body .iw-row');
   var visible = 0;
   rows.forEach(function(row) {{
     var showDir   = !dirVals.length   || dirVals.indexOf(row.getAttribute('data-iw-dir'))   >= 0;
     var showBreak = !breakVals.length || breakVals.indexOf(row.getAttribute('data-iw-break')) >= 0;
     var show = showDir && showBreak;
-    /* Apply column filters */
     Object.keys(colFilters).forEach(function(col) {{
       var f   = colFilters[col];
       var rs  = row.getAttribute('data-' + col + '-sig') || '';
@@ -1186,14 +1136,11 @@ function iwApplyFilter() {{
     ? ('Showing ' + visible + ' of ' + IW_TOTAL + ' stocks')
     : ('Showing ' + IW_TOTAL + ' stocks');
 }}
-
-/* ── Accumulation Breakout filters ── */
 function abClearDD(ddId, filterType) {{
   document.querySelectorAll('input[data-abf="'+filterType+'"]').forEach(function(cb){{cb.checked=false;}});
   document.getElementById(ddId).classList.remove('open');
   abApplyFilter();
 }}
-
 function abApplyFilter() {{
   var dirVals   = Array.from(document.querySelectorAll('input[data-abf="dir"]:checked')).map(function(c){{return c.value;}});
   var breakVals = Array.from(document.querySelectorAll('input[data-abf="break"]:checked')).map(function(c){{return c.value;}});
@@ -1214,8 +1161,6 @@ function abApplyFilter() {{
     ? ('Showing ' + visible + ' of ' + AB_TOTAL + ' stocks')
     : ('Showing ' + AB_TOTAL + ' stocks');
 }}
-
-/* ── Attach listeners ── */
 document.querySelectorAll('input[data-col]').forEach(function(cb) {{
   cb.addEventListener('change', function() {{ iwApplyFilter(); }});
 }});
@@ -1252,7 +1197,6 @@ for r in view:
     sym    = r["symbol"]
     status = r.get("status","")
     bc     = border_color(status)
-
     p_svg = price_svg(
         r.get("hist_opens",[]), r.get("hist_highs",[]),
         r.get("hist_lows",[]),  r.get("hist_closes",[]),
@@ -1264,7 +1208,6 @@ for r in view:
         r.get("hist_volumes",[]), r.get("current_vol",0),
         r.get("median_vol",1), dates=r.get("hist_dates",[]),
         cur_date=r.get("current_date"))
-
     ltp       = r.get("current_price",0)
     pct_avg   = r.get("pct_vs_avg",0)
     dir_arrow = r.get("direction_arrow","→")
@@ -1276,7 +1219,6 @@ for r in view:
     med_v     = fmt_vol(r.get("median_vol"))
     bd        = r.get("breakout_date") or "—"
     s_url     = r.get("screener_url", f"https://www.screener.in/company/{sym}/")
-
     st.markdown(f"<div style='border-left:3px solid {bc};margin-bottom:0;border-bottom:1px solid #f0f2f5;'></div>",
                 unsafe_allow_html=True)
     row = st.columns(COL)
