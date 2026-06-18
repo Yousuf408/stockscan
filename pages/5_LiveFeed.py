@@ -1,4 +1,4 @@
-# pages/5_LiveFeed.py
+# pages/5_LiveFeed.py - COMPLETE WITH BATCH INSERT
 # Place this file inside your pages/ folder
 
 import streamlit as st
@@ -11,17 +11,39 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import angel_ws   # import MODULE directly — not just functions
+from angel_ws import start_batch_insert, stop_batch_insert  # ← NEW: Import batch functions
 from angel_auth import angel_login
 from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
+# Import Supabase
+from supabase import create_client
+import streamlit_authenticator as stauth
+
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
+
+# ── Initialize Supabase ──────────────────────────────────────
+@st.cache_resource
+def init_supabase():
+    """Initialize Supabase client."""
+    # Get credentials from secrets
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
+try:
+    supabase = init_supabase()
+except Exception as e:
+    st.error(f"❌ Supabase connection failed: {e}")
+    st.stop()
 
 # ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
 
 # ── Connect / Disconnect Buttons ─────────────────────────────
 col1, col2 = st.columns(2)
@@ -30,21 +52,42 @@ with col1:
     if not st.session_state.angel_connected:
         if st.button("🔌 Connect Angel One", use_container_width=True):
             with st.spinner("Logging in to Angel One..."):
-                creds = angel_login()
-                if creds:
-                    st.session_state.angel_creds   = creds
-                    st.session_state.angel_connected = True
-                    angel_ws.start_websocket(
-                        jwt_token  = creds['jwt_token'],
-                        api_key    = creds['api_key'],
-                        client_id  = creds['client_id'],
-                        feed_token = creds['feed_token'],
-                    )
-                    st.success("Connected! Waiting for ticks...")
-                    time.sleep(3)   # give WS time to connect + subscribe
-                    st.rerun()
-                else:
-                    st.error("Login failed! Check credentials in angel_auth.py")
+                # ── NEW: Get user_id from Supabase auth ──────────────
+                try:
+                    user = supabase.auth.get_user()
+                    user_id = user.id if user else None
+                    
+                    if not user_id:
+                        st.error("❌ Not logged in! Please login from Login page first.")
+                    else:
+                        creds = angel_login()
+                        if creds:
+                            st.session_state.angel_creds   = creds
+                            st.session_state.user_id       = user_id  # ← Store user_id
+                            st.session_state.angel_connected = True
+                            
+                            angel_ws.start_websocket(
+                                jwt_token  = creds['jwt_token'],
+                                api_key    = creds['api_key'],
+                                client_id  = creds['client_id'],
+                                feed_token = creds['feed_token'],
+                            )
+                            
+                            # ── NEW: Start batch insert in background ────
+                            start_batch_insert(
+                                supabase_client=supabase,
+                                user_id=user_id,
+                                interval_seconds=15
+                            )
+                            # ─────────────────────────────────────────────
+                            
+                            st.success("✅ Connected! Waiting for ticks...")
+                            time.sleep(3)
+                            st.rerun()
+                        else:
+                            st.error("❌ Login failed! Check credentials in angel_auth.py")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
     else:
         st.success("🟢 Angel One Connected")
 
@@ -52,8 +95,10 @@ with col2:
     if st.session_state.angel_connected:
         if st.button("⛔ Disconnect", use_container_width=True):
             angel_ws.stop_websocket()
+            stop_batch_insert()  # ← NEW: Stop batch insert
             st.session_state.angel_connected = False
             st.session_state.angel_creds     = None
+            st.session_state.user_id         = None
             st.rerun()
 
 st.divider()
@@ -76,10 +121,18 @@ if st.session_state.angel_connected:
         else:
             st.warning("No raw messages yet — WebSocket may still be connecting...")
 
-        st.write("**Full ticks dict (sample):**")
+        st.write("**Full ticks dict (sample - first 10):**")
         # Show only first 10 for readability
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
+        
+        # ── NEW: Batch insert status ─────────────────────────
+        st.divider()
+        st.write("**Batch Insert Status:**")
+        st.write(f"🔄 Active: {angel_ws._batch_insert_active}")
+        st.write(f"👤 User ID: {st.session_state.user_id}")
+        st.write(f"📦 Ticks ready for insert: {len(ticks_debug)}")
+        # ─────────────────────────────────────────────────────
 
     # ── Live Table ────────────────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
@@ -138,7 +191,8 @@ if st.session_state.angel_connected:
             )
             st.caption(
                 f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens | "
+                f"💾 DB updating every 15 seconds"
             )
 
         time.sleep(2)
@@ -150,10 +204,12 @@ else:
     - ✅ **Total Watchlist:** {len(STOCKS_WATCHLIST)} stocks (2 indices + 849 stocks)
     - ✅ Data source: `config.py`
     - ✅ Real-time updates from Angel One WebSocket
+    - ✅ Automatic batch insert to swing_live_data table every 15 seconds
     
     ### Checklist
     - ✅ `angel_auth.py` mein credentials fill kiye?
     - ✅ `config.py` root folder mein hai?
     - ✅ `smartapi-python` installed hai?
     - ✅ Internet connection hai?
+    - ✅ Login page se pehle login kiya hai?
     """)
