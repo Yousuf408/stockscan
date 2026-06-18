@@ -52,8 +52,9 @@ def upload_to_supabase(ticks):
         return False, "No data to upload"
     
     try:
-        response = supabase.table("websocket_stock_values").insert(rows).execute()
-        return True, f"✅ Saved {len(response.data)} stocks to database"
+        # ✅ CHANGED: insert() → upsert() to UPDATE existing records
+        response = supabase.table("websocket_stock_values").upsert(rows, ignore_duplicates=False).execute()
+        return True, f"✅ Updated {len(response.data)} stocks in database"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
