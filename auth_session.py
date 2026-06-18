@@ -1,20 +1,23 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — auth_session.py  v2.0
-#  Session persistence using Supabase sessions table + st.query_params
-#  Works 100% on Streamlit Cloud — no cookies, no extra libraries needed.
+# TRADE SENTRY — auth_session.py v2.1
+# Session persistence using Supabase sessions table + st.query_params
+# Works 100% on Streamlit Cloud — no cookies, no extra libraries needed.
 #
-#  HOW IT WORKS:
-#    Login → saves refresh_token to Supabase sessions table
-#          → puts session ID in URL as ?sid=xxxx
-#    Page load → reads ?sid from URL → fetches token from Supabase
-#              → calls Supabase refresh endpoint → restores session_state
-#    Logout → deletes session row from Supabase → clears URL param
+# HOW IT WORKS:
+# Login → saves refresh_token to Supabase sessions table
+#       → puts session ID in URL as ?sid=xxxx
+# Page load → reads ?sid from URL → fetches token from Supabase
+#           → calls Supabase refresh endpoint → restores session_state
+# Logout → deletes session row from Supabase → clears URL param
+#
+# v2.1 FIXES:
+# - Added infinite loop guard (_restore_attempted flag)
+# - SessionInfo error fixed — restore_session() now safe to call early
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import requests
 import os
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERNAL: Supabase config
@@ -22,12 +25,12 @@ import os
 
 def _get_config():
     try:
-        url         = st.secrets["SUPABASE_URL"].rstrip("/")
-        key         = st.secrets["SUPABASE_KEY"]
+        url = st.secrets["SUPABASE_URL"].rstrip("/")
+        key = st.secrets["SUPABASE_KEY"]
         service_key = st.secrets["SUPABASE_SERVICE_KEY"]
     except Exception:
-        url         = os.environ.get("SUPABASE_URL", "").rstrip("/")
-        key         = os.environ.get("SUPABASE_KEY", "")
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_KEY", "")
         service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     return url, key, service_key
 
@@ -35,10 +38,10 @@ def _get_config():
 def _service_headers():
     _, _, service_key = _get_config()
     return {
-        "apikey":        service_key,
+        "apikey": service_key,
         "Authorization": f"Bearer {service_key}",
-        "Content-Type":  "application/json",
-        "Prefer":        "return=representation",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
     }
 
 
@@ -55,7 +58,7 @@ def save_refresh_token(refresh_token: str):
     if not refresh_token:
         return
 
-    user_id    = st.session_state.get("user_id", "")
+    user_id = st.session_state.get("user_id", "")
     user_email = st.session_state.get("user_email", "")
 
     try:
@@ -64,8 +67,8 @@ def save_refresh_token(refresh_token: str):
             f"{url}/rest/v1/sessions",
             headers=_service_headers(),
             json={
-                "user_id":       user_id,
-                "user_email":    user_email,
+                "user_id": user_id,
+                "user_email": user_email,
                 "refresh_token": refresh_token,
             },
             timeout=10,
@@ -109,7 +112,10 @@ def delete_refresh_token():
         st.query_params.clear()
     except Exception:
         pass
-    st.session_state.pop("session_id", None)
+
+    # Clear all session state keys
+    for key in ["session_id", "user_id", "user_email", "access_token", "_restore_attempted"]:
+        st.session_state.pop(key, None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,20 +125,25 @@ def delete_refresh_token():
 def restore_session() -> bool:
     """
     Call this BEFORE the auth guard on every protected page.
-
     Flow:
       1. Already logged in → skip
-      2. Read ?sid from URL
-      3. Fetch refresh_token from Supabase sessions table
-      4. Call Supabase refresh endpoint → get fresh access_token
-      5. Repopulate st.session_state
+      2. Infinite loop guard → skip if already attempted
+      3. Read ?sid from URL
+      4. Fetch refresh_token from Supabase sessions table
+      5. Call Supabase refresh endpoint → get fresh access_token
+      6. Repopulate st.session_state
     """
 
-    # Already logged in
+    # ── Step 1: Already logged in — no need to restore ──
     if st.session_state.get("user_id"):
         return True
 
-    # Read session ID from URL
+    # ── Step 2: Infinite loop guard — only attempt once per page load ──
+    if st.session_state.get("_restore_attempted"):
+        return False
+    st.session_state["_restore_attempted"] = True
+
+    # ── Step 3: Read session ID from URL ──
     session_id = st.query_params.get("sid", "")
     if not session_id:
         return False
@@ -140,7 +151,7 @@ def restore_session() -> bool:
     try:
         url, key, service_key = _get_config()
 
-        # Fetch session row from Supabase
+        # ── Step 4: Fetch session row from Supabase ──
         res = requests.get(
             f"{url}/rest/v1/sessions?id=eq.{session_id}&select=*",
             headers=_service_headers(),
@@ -157,7 +168,7 @@ def restore_session() -> bool:
             st.query_params.clear()
             return False
 
-        # Call Supabase refresh endpoint
+        # ── Step 5: Call Supabase refresh endpoint ──
         refresh_res = requests.post(
             f"{url}/auth/v1/token?grant_type=refresh_token",
             headers={"apikey": key, "Content-Type": "application/json"},
@@ -176,7 +187,7 @@ def restore_session() -> bool:
             st.query_params.clear()
             return False
 
-        # Restore session state
+        # ── Step 6: Restore session state ──
         user = data.get("user") or {}
         st.session_state["user_id"]      = user.get("id", "")
         st.session_state["user_email"]   = user.get("email", "")
