@@ -10,10 +10,6 @@ from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# ── Supabase config — Service Key bypasses RLS ─────────────────
-SUPABASE_URL         = "https://atyqkbrmrosnoczktsmm.supabase.co"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDU2Mjg4NywiZXhwIjoyMDk2MTM4ODg3fQ.w3PiYb4G09QAam7hZ1rkZPjrHy934ywc8BUfDR77syo"
-
 # ── Plain global dict — shared across all threads ──────────────
 latest_ticks    = {}
 _raw_messages   = []
@@ -26,16 +22,26 @@ _correlation_id = "stockscan_live"
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 1 — SUPABASE HELPERS
+# SECTION 1 — SUPABASE HELPERS (imported from swing_core)
 # ─────────────────────────────────────────────────────────────
 
-def _get_supabase_headers():
-    return {
-        "apikey"       : SUPABASE_SERVICE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-        "Content-Type" : "application/json",
-        "Prefer"       : "return=minimal",
-    }
+def _get_supabase():
+    """Get Supabase URL and headers from swing_core."""
+    try:
+        from swing_core import _get_config, _get_access_token, _get_user_id
+        url, key   = _get_config()
+        token      = _get_access_token()
+        uid        = _get_user_id()
+        headers    = {
+            "apikey"       : key,
+            "Authorization": f"Bearer {token or key}",
+            "Content-Type" : "application/json",
+            "Prefer"       : "return=minimal",
+        }
+        return url, headers, uid
+    except Exception as e:
+        logger.error(f"_get_supabase error: {e}")
+        return None, None, None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -44,16 +50,22 @@ def _get_supabase_headers():
 
 def _fetch_tokens_from_db() -> list:
     """
-    Fetch all tokens from swing_live_data.
-    Service Key used — no user_id filter needed (RLS bypassed).
+    Fetch all tokens from swing_live_data table.
+    Returns list of token strings.
     """
     try:
+        url, headers, uid = _get_supabase()
+        if not url or not uid:
+            logger.error("Supabase config missing — cannot fetch tokens")
+            return []
+
         r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/swing_live_data",
-            headers=_get_supabase_headers(),
+            f"{url}/rest/v1/swing_live_data",
+            headers=headers,
             params={
-                "select": "token",
-                "token" : "not.is.null",
+                "select"  : "token",
+                "user_id" : f"eq.{uid}",
+                "token"   : "not.is.null",  # sirf filled tokens
             },
             timeout=15,
         )
@@ -69,27 +81,23 @@ def _fetch_tokens_from_db() -> list:
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 3 — MARKET HOURS CHECK
+# SECTION 3 — BATCH SYNC TO SUPABASE (har 5 sec)
 # ─────────────────────────────────────────────────────────────
 
 def _is_market_open() -> bool:
     """Check if NSE market is open (9:15 AM - 3:30 PM IST, Mon-Fri)."""
     now  = datetime.now(IST)
-    if now.weekday() >= 5:
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
         return False
     mins = now.hour * 60 + now.minute
     return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
 
 
-# ─────────────────────────────────────────────────────────────
-# SECTION 4 — BATCH SYNC TO SUPABASE (har 5 sec)
-# ─────────────────────────────────────────────────────────────
-
 def _batch_sync_to_supabase():
     """
-    Background thread — har 5 sec mein latest_ticks → Supabase PATCH.
-    Service Key use karta hai — no user_id needed (RLS bypassed).
-    Token se match karke swing_live_data rows update karta hai.
+    Background thread — har 5 sec mein latest_ticks → Supabase UPDATE.
+    Sirf market hours mein chalega (9:15 AM - 3:30 PM IST).
+    Token se match karke swing_live_data mein update karega.
     """
     logger.info("Batch sync thread started!")
 
@@ -103,30 +111,37 @@ def _batch_sync_to_supabase():
             if not latest_ticks:
                 continue
 
+            # Market hours check
             if not _is_market_open():
                 logger.info("Market closed — skipping sync")
                 time.sleep(60)
                 continue
 
-            headers         = _get_supabase_headers()
-            now_ist         = datetime.now(IST).isoformat()
-            tokens_snapshot = dict(latest_ticks)
-            updated         = 0
-            errors          = 0
+            url, headers, uid = _get_supabase()
+            if not url or not uid:
+                continue
+
+            now_ist = datetime.now(IST).isoformat()
+
+            # Har token ke liye ek update request
+            # Batch mein karte hain — 50 at a time
+            tokens_snapshot = dict(latest_ticks)  # thread-safe copy
+            updated = 0
 
             for token, tick in tokens_snapshot.items():
                 try:
                     r = requests.patch(
-                        f"{SUPABASE_URL}/rest/v1/swing_live_data",
+                        f"{url}/rest/v1/swing_live_data",
                         headers=headers,
                         params={
-                            "token": f"eq.{token}",
+                            "user_id": f"eq.{uid}",
+                            "token"  : f"eq.{token}",
                         },
                         json={
                             "open"      : round(tick.get("open", 0), 2),
                             "high"      : round(tick.get("high", 0), 2),
                             "low"       : round(tick.get("low", 0), 2),
-                            "close"     : round(tick.get("ltp", 0), 2),
+                            "close"     : round(tick.get("ltp", 0), 2),  # LTP → close column
                             "volume"    : tick.get("volume", 0),
                             "updated_at": now_ist,
                         },
@@ -135,14 +150,12 @@ def _batch_sync_to_supabase():
                     if r.status_code in (200, 204):
                         updated += 1
                     else:
-                        errors += 1
-                        logger.warning(f"Sync failed token {token}: {r.status_code} {r.text[:100]}")
+                        logger.warning(f"Sync failed token {token}: {r.status_code} {r.text}")
 
                 except Exception as e:
-                    errors += 1
                     logger.error(f"Sync error token {token}: {e}")
 
-            logger.info(f"Batch sync done — {updated} updated, {errors} errors")
+            logger.info(f"Batch sync done — {updated}/{len(tokens_snapshot)} tokens updated")
 
         except Exception as e:
             logger.error(f"_batch_sync_to_supabase error: {e}")
@@ -152,7 +165,7 @@ def _batch_sync_to_supabase():
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 5 — WEBSOCKET CALLBACKS
+# SECTION 4 — WEBSOCKET CALLBACKS (same as before)
 # ─────────────────────────────────────────────────────────────
 
 def on_data(wsapp, message):
@@ -160,14 +173,17 @@ def on_data(wsapp, message):
     global latest_ticks, _raw_messages
 
     try:
+        # Store raw message for debugging (last 5 only)
         _raw_messages.append(message)
         if len(_raw_messages) > 5:
             _raw_messages.pop(0)
 
         token = str(message.get('token', ''))
         if not token:
+            logger.warning(f"No token in message: {message}")
             return
 
+        # Angel One sends prices in paise → divide by 100
         ltp        = message.get('last_traded_price', 0) / 100
         open_price = message.get('open_price_of_the_day', 0) / 100
         high_price = message.get('high_price_of_the_day', 0) / 100
@@ -177,6 +193,7 @@ def on_data(wsapp, message):
         change     = message.get('net_change_value', 0) / 100
         chng_pct   = ((ltp - close) / close * 100) if close > 0 else 0
 
+        # Timestamp: epoch milliseconds → IST HH:MM:SS
         raw_ts    = message.get('exchange_timestamp', 0)
         timestamp = datetime.fromtimestamp(raw_ts / 1000, tz=IST).strftime('%H:%M:%S') if raw_ts else '-'
 
@@ -195,19 +212,24 @@ def on_data(wsapp, message):
         logger.info(f"TICK [{token}] LTP={ltp} | chng%={chng_pct:.2f} | time={timestamp}")
 
     except Exception as e:
-        logger.error(f"on_data error: {e}")
+        logger.error(f"on_data error: {e} | raw msg: {message}")
 
 
 def on_open(wsapp):
-    """Called when WebSocket opens — fetch tokens from DB and subscribe."""
+    """
+    Called when WebSocket connection opens.
+    Tokens fetch from swing_live_data → subscribe in batches of 950.
+    """
     global _connected
     _connected = True
     logger.info("WebSocket Connected! Fetching tokens from DB...")
 
     try:
+        # DB se tokens fetch karo
         all_tokens = _fetch_tokens_from_db()
 
         if not all_tokens:
+            # Fallback — hardcoded indices + stocks (5_LiveFeed.py ke liye)
             logger.warning("No tokens from DB — using fallback tokens")
             _sws.subscribe(_correlation_id, 1, [
                 {"exchangeType": 1, "tokens": ["26000", "26009"]}
@@ -218,8 +240,11 @@ def on_open(wsapp):
             logger.info("Fallback tokens subscribed")
             return
 
-        # Angel One limit: 1000 per session — 950 safe limit
+        # Angel One limit: 1000 per session
+        # Mode 2 = 1 subscription per token
+        # 950 safe limit rakhte hain
         BATCH_SIZE = 950
+
         for i in range(0, len(all_tokens), BATCH_SIZE):
             batch = all_tokens[i:i + BATCH_SIZE]
             _sws.subscribe(_correlation_id, 2, [
@@ -244,13 +269,14 @@ def on_close(wsapp):
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 6 — START / STOP
+# SECTION 5 — START / STOP
 # ─────────────────────────────────────────────────────────────
 
 def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     """Start WebSocket + batch sync thread in background."""
     global _sws, _thread, _sync_thread, latest_ticks, _connected
 
+    # Reset ticks on new connection
     latest_ticks = {}
     _connected   = True
 
@@ -266,6 +292,7 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     _sws.on_error = on_error
     _sws.on_close = on_close
 
+    # WebSocket thread
     def _run():
         try:
             logger.info("WebSocket connecting...")
@@ -277,6 +304,7 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     _thread.start()
     logger.info("WebSocket thread started!")
 
+    # Batch sync thread — har 5 sec Supabase update
     _sync_thread = threading.Thread(target=_batch_sync_to_supabase, daemon=True)
     _sync_thread.start()
     logger.info("Batch sync thread started!")
@@ -285,7 +313,7 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
 def stop_websocket():
     """Close WebSocket — sync thread bhi automatically stop hoga."""
     global _sws, _connected
-    _connected = False
+    _connected = False  # sync thread bhi ruk jayega
     if _sws:
         try:
             _sws.close_connection()
@@ -295,14 +323,16 @@ def stop_websocket():
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 7 — GETTERS
+# SECTION 6 — GETTERS (same as before)
 # ─────────────────────────────────────────────────────────────
 
 def get_latest_ticks():
     return latest_ticks
 
+
 def get_raw_messages():
     return _raw_messages
+
 
 def is_connected():
     return _connected
