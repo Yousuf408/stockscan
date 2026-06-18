@@ -10,6 +10,10 @@ from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# ── Supabase config — Service Key bypasses RLS ─────────────────
+SUPABASE_URL         = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDU2Mjg4NywiZXhwIjoyMDk2MTM4ODg3fQ.w3PiYb4G09QAam7hZ1rkZPjrHy934ywc8BUfDR77syo"
+
 # ── Plain global dict — shared across all threads ──────────────
 latest_ticks    = {}
 _raw_messages   = []
@@ -18,12 +22,6 @@ _thread         = None
 _sync_thread    = None
 _connected      = False
 _correlation_id = "stockscan_live"
-
-# ── Supabase credentials — captured once in main thread ────────
-_supabase_url   = None
-_supabase_key   = None
-_supabase_token = None
-_supabase_uid   = None
 # ───────────────────────────────────────────────────────────────
 
 
@@ -31,22 +29,13 @@ _supabase_uid   = None
 # SECTION 1 — SUPABASE HELPERS
 # ─────────────────────────────────────────────────────────────
 
-def _get_supabase():
-    """
-    Use pre-captured credentials — no st.session_state needed.
-    Works safely from background threads.
-    """
-    if not _supabase_url or not _supabase_uid:
-        logger.error("Supabase credentials not set — call start_websocket first")
-        return None, None, None
-
-    headers = {
-        "apikey"       : _supabase_key,
-        "Authorization": f"Bearer {_supabase_token or _supabase_key}",
+def _get_supabase_headers():
+    return {
+        "apikey"       : SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "Content-Type" : "application/json",
         "Prefer"       : "return=minimal",
     }
-    return _supabase_url, headers, _supabase_uid
 
 
 # ─────────────────────────────────────────────────────────────
@@ -55,22 +44,16 @@ def _get_supabase():
 
 def _fetch_tokens_from_db() -> list:
     """
-    Fetch all tokens from swing_live_data table.
-    Returns list of token strings.
+    Fetch all tokens from swing_live_data.
+    Service Key used — no user_id filter needed (RLS bypassed).
     """
     try:
-        url, headers, uid = _get_supabase()
-        if not url or not uid:
-            logger.error("Supabase config missing — cannot fetch tokens")
-            return []
-
         r = requests.get(
-            f"{url}/rest/v1/swing_live_data",
-            headers=headers,
+            f"{SUPABASE_URL}/rest/v1/swing_live_data",
+            headers=_get_supabase_headers(),
             params={
-                "select"  : "token",
-                "user_id" : f"eq.{uid}",
-                "token"   : "not.is.null",
+                "select": "token",
+                "token" : "not.is.null",
             },
             timeout=15,
         )
@@ -105,8 +88,8 @@ def _is_market_open() -> bool:
 def _batch_sync_to_supabase():
     """
     Background thread — har 5 sec mein latest_ticks → Supabase PATCH.
+    Service Key use karta hai — no user_id needed (RLS bypassed).
     Token se match karke swing_live_data rows update karta hai.
-    st.session_state use nahi karta — pre-captured credentials use karta hai.
     """
     logger.info("Batch sync thread started!")
 
@@ -125,24 +108,19 @@ def _batch_sync_to_supabase():
                 time.sleep(60)
                 continue
 
-            url, headers, uid = _get_supabase()
-            if not url or not uid:
-                logger.error("Batch sync: Supabase credentials missing")
-                continue
-
-            now_ist = datetime.now(IST).isoformat()
+            headers         = _get_supabase_headers()
+            now_ist         = datetime.now(IST).isoformat()
             tokens_snapshot = dict(latest_ticks)
-            updated = 0
-            errors  = 0
+            updated         = 0
+            errors          = 0
 
             for token, tick in tokens_snapshot.items():
                 try:
                     r = requests.patch(
-                        f"{url}/rest/v1/swing_live_data",
+                        f"{SUPABASE_URL}/rest/v1/swing_live_data",
                         headers=headers,
                         params={
-                            "user_id": f"eq.{uid}",
-                            "token"  : f"eq.{token}",
+                            "token": f"eq.{token}",
                         },
                         json={
                             "open"      : round(tick.get("open", 0), 2),
@@ -158,7 +136,7 @@ def _batch_sync_to_supabase():
                         updated += 1
                     else:
                         errors += 1
-                        logger.warning(f"Sync failed token {token}: {r.status_code}")
+                        logger.warning(f"Sync failed token {token}: {r.status_code} {r.text[:100]}")
 
                 except Exception as e:
                     errors += 1
@@ -188,7 +166,6 @@ def on_data(wsapp, message):
 
         token = str(message.get('token', ''))
         if not token:
-            logger.warning(f"No token in message: {message}")
             return
 
         ltp        = message.get('last_traded_price', 0) / 100
@@ -218,7 +195,7 @@ def on_data(wsapp, message):
         logger.info(f"TICK [{token}] LTP={ltp} | chng%={chng_pct:.2f} | time={timestamp}")
 
     except Exception as e:
-        logger.error(f"on_data error: {e} | raw msg: {message}")
+        logger.error(f"on_data error: {e}")
 
 
 def on_open(wsapp):
@@ -231,7 +208,6 @@ def on_open(wsapp):
         all_tokens = _fetch_tokens_from_db()
 
         if not all_tokens:
-            # Fallback — hardcoded tokens
             logger.warning("No tokens from DB — using fallback tokens")
             _sws.subscribe(_correlation_id, 1, [
                 {"exchangeType": 1, "tokens": ["26000", "26009"]}
@@ -272,24 +248,9 @@ def on_close(wsapp):
 # ─────────────────────────────────────────────────────────────
 
 def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
-    """
-    Start WebSocket + batch sync thread.
-    Captures Supabase credentials from main thread (st.session_state accessible here).
-    """
+    """Start WebSocket + batch sync thread in background."""
     global _sws, _thread, _sync_thread, latest_ticks, _connected
-    global _supabase_url, _supabase_key, _supabase_token, _supabase_uid
 
-    # ── Capture Supabase credentials NOW (main thread) ────────
-    try:
-        from swing_core import _get_config, _get_access_token, _get_user_id
-        _supabase_url, _supabase_key = _get_config()
-        _supabase_token = _get_access_token()
-        _supabase_uid   = _get_user_id()
-        logger.info(f"Supabase credentials captured: uid={_supabase_uid}")
-    except Exception as e:
-        logger.error(f"Supabase credentials capture error: {e}")
-
-    # ── Reset state ───────────────────────────────────────────
     latest_ticks = {}
     _connected   = True
 
@@ -305,7 +266,6 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     _sws.on_error = on_error
     _sws.on_close = on_close
 
-    # ── WebSocket thread ──────────────────────────────────────
     def _run():
         try:
             logger.info("WebSocket connecting...")
@@ -317,7 +277,6 @@ def start_websocket(jwt_token, api_key, client_id, feed_token, token_list=None):
     _thread.start()
     logger.info("WebSocket thread started!")
 
-    # ── Batch sync thread ─────────────────────────────────────
     _sync_thread = threading.Thread(target=_batch_sync_to_supabase, daemon=True)
     _sync_thread.start()
     logger.info("Batch sync thread started!")
@@ -342,10 +301,8 @@ def stop_websocket():
 def get_latest_ticks():
     return latest_ticks
 
-
 def get_raw_messages():
     return _raw_messages
-
 
 def is_connected():
     return _connected
