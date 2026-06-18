@@ -34,11 +34,15 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 4: SUPABASE UPLOAD FUNCTION
+# SECTION 4: SUPABASE UPLOAD FUNCTION (MODIFIED - Step 1)
 # ──────────────────────────────────────────────────────────────────────────────
 def upload_to_supabase(ticks):
-    """Upload current stock data to Supabase - Delete old, insert new"""
+    """Upload current stock data to Supabase - Add date field"""
     rows = []
+    
+    # ✅ NEW: Get today's date
+    from datetime import date
+    today = date.today().isoformat()  # "2026-06-18"
     
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
@@ -55,22 +59,22 @@ def upload_to_supabase(ticks):
                 "change": float(tick.get('change', 0)),
                 "change_percent": float(tick.get('change_pct', 0)),
                 "volume": int(tick.get('volume', 0)),
-                "time": str(tick.get('timestamp', '-'))
+                "time": str(tick.get('timestamp', '-')),
+                "date": today  # ✅ NEW: Added date field
             })
     
     if not rows:
         return False, "No data to upload"
     
     try:
-        # ✅ STEP 1: Delete all old data first
+        # ⚠️ STEP 1 ONLY: Delete all old data (same as before)
         supabase.table("websocket_stock_values").delete().neq("stock", "").execute()
         
-        # ✅ STEP 2: Insert fresh data
+        # ✅ Insert fresh data with date
         response = supabase.table("websocket_stock_values").insert(rows).execute()
-        return True, f"✅ Updated {len(response.data)} stocks in database (fresh data)"
+        return True, f"✅ Updated {len(response.data)} stocks with date: {today}"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 5: SESSION STATE INITIALIZATION
