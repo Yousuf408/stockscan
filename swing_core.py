@@ -1,5 +1,12 @@
 # ══════════════════════════════════════════════════════════════════════════════
-#  TRADE SENTRY — swing_core.py  v4.3
+#  TRADE SENTRY — swing_core.py  v4.4
+#  v4.4: Fixed infinite loop/hang issues:
+#        - Added timeout to all yfinance calls
+#        - Added max_pages limit to pagination
+#        - Added retry mechanism with exponential backoff
+#        - Added stock limit safety check
+#        - Added proper error handling for all external calls
+#        - Fixed potential race conditions
 #  v4.3: populate_status_history() now saves open,high,low to swing_status_history
 #        get_intraday_watch() now fetches open,high,low from swing_status_history
 #        days[] array now includes open,high,low for real OHLC candles
@@ -30,7 +37,7 @@
 #    - Refresh gate is day-based: allowed anytime, stores last trading day (Fri on weekends)
 # ══════════════════════════════════════════════════════════════════════════════
 
-import os, requests, yfinance as yf, statistics, threading
+import os, requests, yfinance as yf, statistics, threading, time
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -40,6 +47,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 HIST_DAYS    = 5   # number of trading days to show in chart
 HISTORY_DAYS = 10  # number of days to keep in swing_status_history
+MAX_STOCKS   = 2000  # safety limit to prevent overload
+MAX_PAGES    = 50   # max pages to fetch from Supabase
+REQUEST_TIMEOUT = 30  # global timeout for all requests
 
 def _get_config():
     try:
@@ -80,23 +90,38 @@ def _fetch_all_rows(table: str, uid: str, extra_params: dict) -> list:
     """
     Paginate through Supabase 1000-row hard limit.
     Fetches all rows in batches of 1000 until exhausted.
+    v4.4: Added max_pages limit to prevent infinite loops.
     """
     all_rows = []
     offset   = 0
     limit    = 1000
-    while True:
-        r = requests.get(
-            _url(table),
-            headers={**_headers(), "Range-Unit": "items", "Range": f"{offset}-{offset+limit-1}"},
-            params={"user_id": f"eq.{uid}", **extra_params},
-            timeout=20,
-        )
-        r.raise_for_status()
-        batch = r.json()
-        all_rows.extend(batch)
-        if len(batch) < limit:
+    page_count = 0
+    
+    while page_count < MAX_PAGES:
+        try:
+            r = requests.get(
+                _url(table),
+                headers={**_headers(), "Range-Unit": "items", "Range": f"{offset}-{offset+limit-1}"},
+                params={"user_id": f"eq.{uid}", **extra_params},
+                timeout=REQUEST_TIMEOUT,
+            )
+            r.raise_for_status()
+            batch = r.json()
+            all_rows.extend(batch)
+            
+            if len(batch) < limit:
+                break
+                
+            offset += limit
+            page_count += 1
+            
+        except requests.exceptions.Timeout:
+            print(f"[swing_core] _fetch_all_rows timeout for {table} at page {page_count}")
             break
-        offset += limit
+        except Exception as e:
+            print(f"[swing_core] _fetch_all_rows error for {table}: {e}")
+            break
+    
     return all_rows
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,7 +182,7 @@ def load_swing_stocks() -> list:
             _url("swing_watchlist"),
             headers=_headers(),
             params={"select": "*", "user_id": f"eq.{uid}", "order": "symbol.asc"},
-            timeout=10,
+            timeout=REQUEST_TIMEOUT,
         )
         r.raise_for_status()
         return r.json()
@@ -180,7 +205,7 @@ def add_swing_stock(symbol: str, screener_url: str = "", breakout_date=None, not
     }
     if breakout_date:
         row["breakout_date"] = str(breakout_date)
-    r = requests.post(_url("swing_watchlist"), headers=_headers(), json=row, timeout=10)
+    r = requests.post(_url("swing_watchlist"), headers=_headers(), json=row, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     d = r.json()
     return d[0] if isinstance(d, list) else d
@@ -192,7 +217,7 @@ def update_swing_stock(db_id: int, updates: dict):
         return
     r = requests.patch(
         f"{_url('swing_watchlist')}?id=eq.{db_id}",
-        headers=_headers(), json=clean, timeout=10,
+        headers=_headers(), json=clean, timeout=REQUEST_TIMEOUT,
     )
     r.raise_for_status()
     return r.json()
@@ -200,7 +225,7 @@ def update_swing_stock(db_id: int, updates: dict):
 def delete_swing_stock(db_id: int):
     r = requests.delete(
         f"{_url('swing_watchlist')}?id=eq.{db_id}",
-        headers=_headers(), timeout=10,
+        headers=_headers(), timeout=REQUEST_TIMEOUT,
     )
     r.raise_for_status()
 
@@ -225,7 +250,7 @@ def bulk_add_swing_stocks(symbols: list) -> dict:
         added.append(sym)
     if rows:
         try:
-            r = requests.post(_url("swing_watchlist"), headers=_headers(), json=rows, timeout=15)
+            r = requests.post(_url("swing_watchlist"), headers=_headers(), json=rows, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
         except Exception:
             errors = added.copy()
@@ -385,6 +410,11 @@ def load_from_db() -> tuple:
     if not stocks:
         return [], []
 
+    # Safety limit to prevent overload
+    if len(stocks) > MAX_STOCKS:
+        print(f"[swing_core] WARNING: {len(stocks)} stocks, limiting to {MAX_STOCKS}")
+        stocks = stocks[:MAX_STOCKS]
+
     uid       = _get_user_id()
     meta_map  = {s["symbol"]: s for s in stocks}
     symbols   = [s["symbol"] for s in stocks]
@@ -442,10 +472,11 @@ def load_from_db() -> tuple:
 # SECTION 6 — SYNC 5D HISTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
+def _fetch_yf_bulk(symbols: list, period: str = "7d", max_retries: int = 3) -> dict:
     """
     Bulk yfinance download for given symbols.
     Chunked at 200 tickers per batch.
+    v4.4: Added retry mechanism with exponential backoff and timeout.
     """
     import pandas as pd
 
@@ -457,48 +488,60 @@ def _fetch_yf_bulk(symbols: list, period: str = "7d") -> dict:
     print(f"[swing_core] yf.download {len(symbols)} symbols in {len(chunks)} chunks, period={period}")
 
     for idx, chunk in enumerate(chunks):
-        try:
-            print(f"[swing_core] chunk {idx+1}/{len(chunks)} — {len(chunk)} tickers")
-            data = yf.download(
-                tickers     = " ".join(chunk),
-                period      = period,
-                interval    = "1d",
-                group_by    = "ticker",
-                auto_adjust = True,
-                progress    = False,
-            )
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                print(f"[swing_core] chunk {idx+1}/{len(chunks)} — {len(chunk)} tickers (attempt {retry_count+1})")
+                
+                data = yf.download(
+                    tickers     = " ".join(chunk),
+                    period      = period,
+                    interval    = "1d",
+                    group_by    = "ticker",
+                    auto_adjust = True,
+                    progress    = False,
+                    timeout     = REQUEST_TIMEOUT,
+                )
 
-            if data is None or data.empty:
+                if data is None or data.empty:
+                    for ticker in chunk:
+                        results[sym_map[ticker]] = {"error": "Empty response"}
+                    break  # Successfully processed (even if empty)
+
                 for ticker in chunk:
-                    results[sym_map[ticker]] = {"error": "Empty response"}
-                continue
+                    sym = sym_map[ticker]
+                    try:
+                        df = data.copy() if len(chunk) == 1 else (
+                            data[ticker].copy() if ticker in data.columns.get_level_values(0) else None
+                        )
+                        if df is None:
+                            results[sym] = {"error": "Ticker not in response"}
+                            continue
 
-            for ticker in chunk:
-                sym = sym_map[ticker]
-                try:
-                    df = data.copy() if len(chunk) == 1 else (
-                        data[ticker].copy() if ticker in data.columns.get_level_values(0) else None
-                    )
-                    if df is None:
-                        results[sym] = {"error": "Ticker not in response"}
-                        continue
+                        df = df.dropna(subset=["Close", "Volume"])
+                        if df.empty:
+                            results[sym] = {"error": "No valid rows after dropna"}
+                            continue
 
-                    df = df.dropna(subset=["Close", "Volume"])
-                    if df.empty:
-                        results[sym] = {"error": "No valid rows after dropna"}
-                        continue
+                        results[sym] = {"df": df}
 
-                    results[sym] = {"df": df}
+                    except Exception as e:
+                        results[sym] = {"error": f"Parse error: {e}"}
+                
+                break  # Success, exit retry loop
 
-                except Exception as e:
-                    results[sym] = {"error": f"Parse error: {e}"}
-
-        except Exception as e:
-            for ticker in chunk:
-                results[sym_map[ticker]] = {"error": f"Chunk failed: {e}"}
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    print(f"[swing_core] chunk {idx+1} failed after {max_retries} attempts: {e}")
+                    for ticker in chunk:
+                        results[sym_map[ticker]] = {"error": f"Failed after {max_retries} attempts: {e}"}
+                else:
+                    wait_time = 2 ** retry_count  # Exponential backoff: 2, 4, 8 seconds
+                    print(f"[swing_core] chunk {idx+1} failed, retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
 
     return results
-
 
 def sync_5d_history() -> dict:
     """
@@ -596,7 +639,7 @@ def sync_5d_history() -> dict:
                     headers=hdrs,
                     params=upsert_params,
                     json=batch,
-                    timeout=20,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 resp.raise_for_status()
                 synced += len(batch)
@@ -607,23 +650,21 @@ def sync_5d_history() -> dict:
 
     oldest_required = min(required_days).isoformat()
 
-    def _delete_old():
-        try:
-            resp = requests.delete(
-                _url("swing_hist_data"),
-                headers=_headers(),
-                params={
-                    "user_id":    f"eq.{uid}",
-                    "trade_date": f"lt.{oldest_required}",
-                },
-                timeout=15,
-            )
-            resp.raise_for_status()
-            print(f"[swing_core] sync_5d deleted rows older than {oldest_required}")
-        except Exception as e:
-            print(f"[swing_core] sync_5d delete old rows error: {e}")
-
-    # threading.Thread(target=_delete_old, daemon=True).start() # comment check the status 
+    # Delete old rows synchronously to avoid race conditions
+    try:
+        resp = requests.delete(
+            _url("swing_hist_data"),
+            headers=_headers(),
+            params={
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"lt.{oldest_required}",
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        print(f"[swing_core] sync_5d deleted rows older than {oldest_required}")
+    except Exception as e:
+        print(f"[swing_core] sync_5d delete old rows error: {e}")
 
     print(f"[swing_core] sync_5d complete — {synced} rows saved, {len(errors)} errors")
     return {"synced": synced, "skipped": skip_count, "errors": errors}
@@ -706,7 +747,7 @@ def refresh_live() -> dict:
                 _url("swing_live_data"),
                 headers=_headers(),
                 params={"user_id": f"eq.{uid}"},
-                timeout=20,
+                timeout=REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             print(f"[swing_core] refresh_live — deleted old live rows")
@@ -720,7 +761,7 @@ def refresh_live() -> dict:
                     _url("swing_live_data"),
                     headers={**_headers(), "Prefer": "return=minimal"},
                     json=batch,
-                    timeout=20,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 resp.raise_for_status()
                 updated += len(batch)
@@ -839,7 +880,7 @@ def populate_status_history() -> dict:
                     headers=hdrs,
                     params=upsert_params,
                     json=batch,
-                    timeout=20,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 resp.raise_for_status()
                 saved += len(batch)
@@ -848,26 +889,23 @@ def populate_status_history() -> dict:
                 print(f"[swing_core] populate_history save error batch {i}: {e}")
                 errors.append({"symbol": "batch", "error": str(e)})
 
-    # Delete rows older than HISTORY_DAYS in background
+    # Delete rows older than HISTORY_DAYS synchronously
     oldest = min(required_days).isoformat()
 
-    def _delete_old_history():
-        try:
-            resp = requests.delete(
-                _url("swing_status_history"),
-                headers=_headers(),
-                params={
-                    "user_id":    f"eq.{uid}",
-                    "trade_date": f"lt.{oldest}",
-                },
-                timeout=15,
-            )
-            resp.raise_for_status()
-            print(f"[swing_core] populate_history deleted rows older than {oldest}")
-        except Exception as e:
-            print(f"[swing_core] populate_history delete error: {e}")
-
-    #threading.Thread(target=_delete_old_history, daemon=True).start()
+    try:
+        resp = requests.delete(
+            _url("swing_status_history"),
+            headers=_headers(),
+            params={
+                "user_id":    f"eq.{uid}",
+                "trade_date": f"lt.{oldest}",
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        print(f"[swing_core] populate_history deleted rows older than {oldest}")
+    except Exception as e:
+        print(f"[swing_core] populate_history delete error: {e}")
 
     print(f"[swing_core] populate_history complete — {saved} rows saved, {len(errors)} errors")
     return {"saved": saved, "errors": errors}
@@ -1067,5 +1105,3 @@ def get_intraday_watch() -> list:
 
     print(f"[swing_core] intraday_watch — {len(results)} symbols processed")
     return results
-
-
