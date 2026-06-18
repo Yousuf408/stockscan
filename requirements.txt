@@ -9,5 +9,5 @@ pytz
 plotly>=5.0.0
 numpy>=1.23.0
 pillow>=11.0.0
-extra-streamlit-components
+extra-streamlit-components==0.1.60
 smartapi-python   
