@@ -1,6 +1,6 @@
-# pages/5_LiveFeed.py
-# Place this file inside your pages/ folder
-
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 1: IMPORTS
+# ──────────────────────────────────────────────────────────────────────────────
 import streamlit as st
 import pandas as pd
 import time
@@ -17,15 +17,25 @@ from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 # ── SUPABASE IMPORTS ──────────────────────────────────────────
 from supabase import create_client, Client
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 2: PAGE CONFIGURATION
+# ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
 
-# ── SUPABASE CONFIGURATION ────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 3: SUPABASE CONFIGURATION
+# ──────────────────────────────────────────────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── SUPABASE UPLOAD FUNCTION ──────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 4: SUPABASE UPLOAD FUNCTION
+# ──────────────────────────────────────────────────────────────────────────────
 def upload_to_supabase(ticks):
     """Upload current stock data to Supabase - Delete old, insert new"""
     rows = []
@@ -61,13 +71,19 @@ def upload_to_supabase(ticks):
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
-# ── Session State Init ────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 5: SESSION STATE INITIALIZATION
+# ──────────────────────────────────────────────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
 
-# ── Connect / Disconnect Buttons ─────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 6: CONNECT / DISCONNECT BUTTONS
+# ──────────────────────────────────────────────────────────────────────────────
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -100,7 +116,10 @@ with col2:
             st.session_state.angel_creds     = None
             st.rerun()
 
-# ── UPDATE TO SUPABASE BUTTON ─────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 7: UPDATE TO SUPABASE BUTTON
+# ──────────────────────────────────────────────────────────────────────────────
 with col3:
     if st.session_state.angel_connected:
         if st.button("📤 Update to Supabase", use_container_width=True):
@@ -115,12 +134,21 @@ with col3:
                     else:
                         st.error(message)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 8: DIVIDER
+# ──────────────────────────────────────────────────────────────────────────────
 st.divider()
 
-# ── Main Display ──────────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 9: MAIN DISPLAY (WHEN CONNECTED)
+# ──────────────────────────────────────────────────────────────────────────────
 if st.session_state.angel_connected:
 
-    # ── Debug Panel (can be removed later) ───────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    # SECTION 9A: DEBUG PANEL
+    # ──────────────────────────────────────────────────────────────────────────
     with st.expander("🔍 Debug Panel", expanded=False):
         # Read directly from angel_ws MODULE global
         raw = angel_ws._raw_messages
@@ -140,7 +168,9 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-    # ── Live Table ────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
+    # SECTION 9B: LIVE TABLE DISPLAY
+    # ──────────────────────────────────────────────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
@@ -202,6 +232,10 @@ if st.session_state.angel_connected:
 
         time.sleep(2)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 10: DISPLAY WHEN NOT CONNECTED
+# ──────────────────────────────────────────────────────────────────────────────
 else:
     st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
     st.markdown(f"""
