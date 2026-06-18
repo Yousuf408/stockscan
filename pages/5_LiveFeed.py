@@ -27,7 +27,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── SUPABASE UPLOAD FUNCTION ──────────────────────────────────
 def upload_to_supabase(ticks):
-def upload_to_supabase(ticks):
     """Upload current stock data to Supabase - Delete old, insert new"""
     rows = []
     
@@ -61,7 +60,7 @@ def upload_to_supabase(ticks):
         return True, f"✅ Updated {len(response.data)} stocks in database (fresh data)"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
-        
+
 # ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
