@@ -12,22 +12,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import angel_ws   # import MODULE directly — not just functions
 from angel_auth import angel_login
+from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
-
-# ── Watchlist ─────────────────────────────────────────────────
-# (Name, Token, ExchangeType)
-# Indices → Mode 1 only
-# Stocks  → Mode 2 (OHLC + Volume)
-WATCHLIST = [
-    ("NIFTY 50",   "26000", "index"),
-    ("BANK NIFTY", "26009", "index"),
-    ("RELIANCE",   "2885",  "stock"),
-    ("INFOSYS",    "1594",  "stock"),
-    ("TCS",        "11536", "stock"),
-    ("HDFC BANK",  "1333",  "stock"),
-]
 
 # ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
@@ -80,7 +68,7 @@ if st.session_state.angel_connected:
         ticks_debug = angel_ws.latest_ticks
 
         st.write(f"**Total tokens received:** {len(ticks_debug)}")
-        st.write(f"**Tokens:** {list(ticks_debug.keys())}")
+        st.write(f"**Tokens with data:** {sorted(list(ticks_debug.keys()))}")
 
         if raw:
             st.write("**Last raw message from Angel One:**")
@@ -88,11 +76,13 @@ if st.session_state.angel_connected:
         else:
             st.warning("No raw messages yet — WebSocket may still be connecting...")
 
-        st.write("**Full ticks dict:**")
-        st.json(ticks_debug)
+        st.write("**Full ticks dict (sample):**")
+        # Show only first 10 for readability
+        sample = dict(list(ticks_debug.items())[:10])
+        st.json(sample)
 
     # ── Live Table ────────────────────────────────────────────
-    st.subheader("📊 Live Prices")
+    st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
     while True:
@@ -100,7 +90,7 @@ if st.session_state.angel_connected:
         ticks = angel_ws.latest_ticks
 
         rows = []
-        for name, token, kind in WATCHLIST:
+        for name, token, kind in STOCKS_WATCHLIST:
             tick = ticks.get(token, {})
             ltp        = tick.get('ltp', 0)
             open_p     = tick.get('open', 0)
@@ -109,22 +99,33 @@ if st.session_state.angel_connected:
             change     = tick.get('change', 0)
             change_pct = tick.get('change_pct', 0)
             volume     = tick.get('volume', 0)
+            timestamp  = tick.get('timestamp', '-')
 
-            # Color logic for change
-            chng_str = f"{change:+.2f}" if tick else "-"
-            pct_str  = f"{change_pct:+.2f}%" if tick else "-"
+            # Format based on whether we have data
+            if tick:
+                ltp_str    = f"₹{ltp:.2f}"
+                open_str   = f"₹{open_p:.2f}"
+                high_str   = f"₹{high_p:.2f}"
+                low_str    = f"₹{low_p:.2f}"
+                chng_str   = f"{change:+.2f}"
+                pct_str    = f"{change_pct:+.2f}%"
+                vol_str    = f"{volume:,}"
+                time_str   = timestamp
+            else:
+                ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
+                time_str = "-"
 
             rows.append({
                 "Stock"    : name,
                 "Type"     : "📈 Index" if kind == "index" else "🏢 Stock",
-                "LTP (₹)"  : f"₹{ltp:.2f}" if ltp else "⏳",
-                "Open"     : f"₹{open_p:.2f}" if open_p else "-",
-                "High"     : f"₹{high_p:.2f}" if high_p else "-",
-                "Low"      : f"₹{low_p:.2f}" if low_p else "-",
+                "LTP (₹)"  : ltp_str,
+                "Open"     : open_str,
+                "High"     : high_str,
+                "Low"      : low_str,
                 "Change"   : chng_str,
                 "Change %" : pct_str,
-                "Volume"   : f"{volume:,}" if volume else "-",
-                "Time"     : tick.get('timestamp', '-'),
+                "Volume"   : vol_str,
+                "Time"     : time_str,
             })
 
         df = pd.DataFrame(rows)
@@ -134,20 +135,25 @@ if st.session_state.angel_connected:
                 df,
                 hide_index=True,
                 use_container_width=True,
-                height=310,
             )
             st.caption(
                 f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-                f"Ticks received: {len(ticks)} tokens"
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
             )
 
         time.sleep(2)
 
 else:
     st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
-    st.markdown("""
-    ### Setup Checklist
+    st.markdown(f"""
+    ### Live Feed Setup
+    - ✅ **Total Watchlist:** {len(STOCKS_WATCHLIST)} stocks (2 indices + 849 stocks)
+    - ✅ Data source: `config.py`
+    - ✅ Real-time updates from Angel One WebSocket
+    
+    ### Checklist
     - ✅ `angel_auth.py` mein credentials fill kiye?
+    - ✅ `config.py` root folder mein hai?
     - ✅ `smartapi-python` installed hai?
     - ✅ Internet connection hai?
     """)
