@@ -1,5 +1,5 @@
-# pages/5_LiveFeed.py - SIMPLE JSON VERSION
-# WebSocket → JSON file (no database issues)
+# pages/5_LiveFeed.py
+# Place this file inside your pages/ folder
 
 import streamlit as st
 import pandas as pd
@@ -7,48 +7,44 @@ import time
 import sys
 import os
 
+# ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import angel_ws
+import angel_ws   # import MODULE directly — not just functions
 from angel_auth import angel_login
-from config import STOCKS_WATCHLIST
-from websocket_to_json import start_json_saver, load_ticks_from_json
+from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 st.title("📡 Angel One — Live Market Feed")
 
+# ── Session State Init ────────────────────────────────────────
 if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
 
+# ── Connect / Disconnect Buttons ─────────────────────────────
 col1, col2 = st.columns(2)
 
 with col1:
     if not st.session_state.angel_connected:
         if st.button("🔌 Connect Angel One", use_container_width=True):
-            with st.spinner("Connecting..."):
+            with st.spinner("Logging in to Angel One..."):
                 creds = angel_login()
                 if creds:
-                    st.session_state.angel_creds = creds
+                    st.session_state.angel_creds   = creds
                     st.session_state.angel_connected = True
-                    
-                    # Start WebSocket
                     angel_ws.start_websocket(
-                        jwt_token=creds['jwt_token'],
-                        api_key=creds['api_key'],
-                        client_id=creds['client_id'],
-                        feed_token=creds['feed_token'],
+                        jwt_token  = creds['jwt_token'],
+                        api_key    = creds['api_key'],
+                        client_id  = creds['client_id'],
+                        feed_token = creds['feed_token'],
                     )
-                    
-                    # Start JSON saver (saves every 30 seconds)
-                    start_json_saver(angel_ws, interval_seconds=30)
-                    
-                    st.success("✅ Connected! Saving to JSON...")
-                    time.sleep(2)
+                    st.success("Connected! Waiting for ticks...")
+                    time.sleep(3)   # give WS time to connect + subscribe
                     st.rerun()
                 else:
-                    st.error("❌ Login failed!")
+                    st.error("Login failed! Check credentials in angel_auth.py")
     else:
         st.success("🟢 Angel One Connected")
 
@@ -57,72 +53,107 @@ with col2:
         if st.button("⛔ Disconnect", use_container_width=True):
             angel_ws.stop_websocket()
             st.session_state.angel_connected = False
-            st.session_state.angel_creds = None
+            st.session_state.angel_creds     = None
             st.rerun()
 
 st.divider()
 
+# ── Main Display ──────────────────────────────────────────────
 if st.session_state.angel_connected:
-    
-    with st.expander("🔍 Debug", expanded=False):
-        ticks = angel_ws.latest_ticks
-        st.write(f"Live ticks in memory: {len(ticks)}")
-        
-        json_ticks = load_ticks_from_json()
-        st.write(f"Saved to JSON: {len(json_ticks)}")
-        
-        sample = dict(list(json_ticks.items())[:5])
+
+    # ── Debug Panel (can be removed later) ───────────────────
+    with st.expander("🔍 Debug Panel", expanded=False):
+        # Read directly from angel_ws MODULE global
+        raw = angel_ws._raw_messages
+        ticks_debug = angel_ws.latest_ticks
+
+        st.write(f"**Total tokens received:** {len(ticks_debug)}")
+        st.write(f"**Tokens with data:** {sorted(list(ticks_debug.keys()))}")
+
+        if raw:
+            st.write("**Last raw message from Angel One:**")
+            st.json(raw[-1])
+        else:
+            st.warning("No raw messages yet — WebSocket may still be connecting...")
+
+        st.write("**Full ticks dict (sample):**")
+        # Show only first 10 for readability
+        sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
-    
+
+    # ── Live Table ────────────────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
-    
+
     while True:
-        # Read from memory (realtime)
+        # ── Read directly from angel_ws module global ─────────
         ticks = angel_ws.latest_ticks
-        
+
         rows = []
         for name, token, kind in STOCKS_WATCHLIST:
             tick = ticks.get(token, {})
-            ltp = tick.get('ltp', 0)
-            open_p = tick.get('open', 0)
-            high_p = tick.get('high', 0)
-            low_p = tick.get('low', 0)
+            ltp        = tick.get('ltp', 0)
+            open_p     = tick.get('open', 0)
+            high_p     = tick.get('high', 0)
+            low_p      = tick.get('low', 0)
+            change     = tick.get('change', 0)
             change_pct = tick.get('change_pct', 0)
-            volume = tick.get('volume', 0)
-            
+            volume     = tick.get('volume', 0)
+            timestamp  = tick.get('timestamp', '-')
+
+            # Format based on whether we have data
             if tick:
-                ltp_str = f"₹{ltp:.2f}"
-                open_str = f"₹{open_p:.2f}"
-                high_str = f"₹{high_p:.2f}"
-                low_str = f"₹{low_p:.2f}"
-                pct_str = f"{change_pct:+.2f}%"
-                vol_str = f"{volume:,}"
+                ltp_str    = f"₹{ltp:.2f}"
+                open_str   = f"₹{open_p:.2f}"
+                high_str   = f"₹{high_p:.2f}"
+                low_str    = f"₹{low_p:.2f}"
+                chng_str   = f"{change:+.2f}"
+                pct_str    = f"{change_pct:+.2f}%"
+                vol_str    = f"{volume:,}"
+                time_str   = timestamp
             else:
-                ltp_str = open_str = high_str = low_str = pct_str = vol_str = "⏳"
-            
+                ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
+                time_str = "-"
+
             rows.append({
-                "Stock": name,
-                "Type": "📈" if kind == "index" else "🏢",
-                "LTP": ltp_str,
-                "Open": open_str,
-                "High": high_str,
-                "Low": low_str,
-                "Change %": pct_str,
-                "Volume": vol_str,
+                "Stock"    : name,
+                "Type"     : "📈 Index" if kind == "index" else "🏢 Stock",
+                "LTP (₹)"  : ltp_str,
+                "Open"     : open_str,
+                "High"     : high_str,
+                "Low"      : low_str,
+                "Change"   : chng_str,
+                "Change %" : pct_str,
+                "Volume"   : vol_str,
+                "Time"     : time_str,
             })
-        
+
         df = pd.DataFrame(rows)
-        
+
         with placeholder.container():
-            st.dataframe(df, hide_index=True, use_container_width=True)
-            st.caption(
-                f"🕐 {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-                f"Ticks: {len(ticks)}/{len(STOCKS_WATCHLIST)} | "
-                f"💾 Saved to: live_data.json"
+            st.dataframe(
+                df,
+                hide_index=True,
+                use_container_width=True,
             )
-        
+            st.caption(
+                f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+            )
+
         time.sleep(2)
 
 else:
-    st.info("👆 Click 'Connect Angel One' to start")
+    st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
+    st.markdown(f"""
+    ### Live Feed Setup
+    - ✅ **Total Watchlist:** {len(STOCKS_WATCHLIST)} stocks (2 indices + 849 stocks)
+    - ✅ Data source: `config.py`
+    - ✅ Real-time updates from Angel One WebSocket
+    
+    ### Checklist
+    - ✅ `angel_auth.py` mein credentials fill kiye?
+    - ✅ `config.py` root folder mein hai?
+    - ✅ `smartapi-python` installed hai?
+    - ✅ Internet connection hai?
+    """)
