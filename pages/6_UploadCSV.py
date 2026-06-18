@@ -1,11 +1,12 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/6_UploadCSV.py
+# pages/6_UploadCSV.py (Modified with File Uploader)
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
 import pandas as pd
 import sys
 import os
+from datetime import date
 
 # ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,14 +26,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ──────────────────────────────────────────────────────────────────────────────
 # FUNCTION: Upload CSV Data
 # ──────────────────────────────────────────────────────────────────────────────
-def upload_csv_data(csv_file_path, test_mode=True):
+def upload_csv_data(df, test_mode=True):
     """Upload CSV data to Supabase"""
     
     try:
-        # Read CSV
-        df = pd.read_csv(csv_file_path)
-        st.write(f"📄 CSV has {len(df)} records")
-        
         # TEST MODE: Only 2 stocks
         if test_mode:
             df = df[df['symbol'].isin(['NATIONSTD', 'RELIANCE'])]
@@ -76,12 +73,17 @@ def upload_csv_data(csv_file_path, test_mode=True):
         
         # Upload to Supabase
         with st.spinner(f"Uploading {len(rows)} records..."):
-            response = supabase.table("websocket_stock_values").insert(rows).execute()
+            # Upload in batches of 100
+            batch_size = 100
+            total = len(rows)
+            
+            for i in range(0, total, batch_size):
+                batch = rows[i:i+batch_size]
+                supabase.table("websocket_stock_values").insert(batch).execute()
+                st.progress((i + batch_size) / total if i + batch_size < total else 1.0)
             
         return True, f"✅ Successfully uploaded {len(rows)} records!"
         
-    except FileNotFoundError:
-        return False, f"❌ CSV file not found: {csv_file_path}"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
@@ -93,88 +95,109 @@ def upload_csv_data(csv_file_path, test_mode=True):
 st.markdown("""
 ### 📂 Upload Historical Data
 
-This page will upload data from `swing_status_history_rows.csv` to Supabase.
+Upload your `swing_status_history_rows.csv` file and store data in Supabase.
 
 **⚠️ Important:**
-- CSV file must be in the **root folder** of your project
-- File name: `swing_status_history_rows.csv`
 - Test mode will upload only **NATIONSTD & RELIANCE** first
-- Full mode will upload **ALL 850 stocks**
+- Full mode will upload **ALL stocks** in the CSV
+- File must have these columns: `symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at`
 """)
 
-# ── Check if CSV exists ──────────────────────────────────────
-csv_path = "swing_status_history_rows.csv"
+# ── File Uploader ─────────────────────────────────────────────
+uploaded_file = st.file_uploader(
+    "📁 Choose CSV file",
+    type=['csv'],
+    help="Upload your swing_status_history_rows.csv file"
+)
 
-if os.path.exists(csv_path):
-    st.success(f"✅ CSV found: {csv_path}")
-    
-    # Show sample data
-    df_sample = pd.read_csv(csv_path)
-    st.write(f"📊 Total records: {len(df_sample)}")
-    st.write(f"📋 Columns: {', '.join(df_sample.columns)}")
-    
-    with st.expander("🔍 Preview CSV Data (First 5 rows)"):
-        st.dataframe(df_sample.head(5))
-    
-    st.divider()
-    
-    # ── Upload Buttons ────────────────────────────────────────
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("🧪 TEST: Upload NATIONSTD & RELIANCE", use_container_width=True, type="primary"):
-            success, message = upload_csv_data(csv_path, test_mode=True)
-            if success:
-                st.success(message)
-                st.balloons()
-            else:
-                st.error(message)
-    
-    with col2:
-        if st.button("📤 FULL: Upload ALL Stocks", use_container_width=True):
-            # Confirm before full upload
-            if st.checkbox("✅ I confirm I want to upload ALL stocks"):
-                success, message = upload_csv_data(csv_path, test_mode=False)
+if uploaded_file is not None:
+    try:
+        # Read CSV
+        df = pd.read_csv(uploaded_file)
+        st.success(f"✅ CSV loaded successfully!")
+        
+        # Show file info
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Records", len(df))
+        with col2:
+            st.metric("Unique Stocks", df['symbol'].nunique())
+        with col3:
+            st.metric("Columns", len(df.columns))
+        
+        # Show sample data
+        with st.expander("🔍 Preview CSV Data (First 5 rows)"):
+            st.dataframe(df.head(5))
+        
+        # Check required columns
+        required_cols = ['symbol', 'trade_date', 'close', 'volume', 'vol_ratio', 
+                        'vol_signal', 'status', 'open', 'high', 'low', 'created_at']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            st.error(f"❌ Missing columns: {', '.join(missing_cols)}")
+            st.stop()
+        else:
+            st.success("✅ All required columns present!")
+        
+        st.divider()
+        
+        # ── Upload Buttons ────────────────────────────────────────
+        st.subheader("📤 Upload Data")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🧪 TEST: Upload NATIONSTD & RELIANCE", use_container_width=True, type="primary"):
+                success, message = upload_csv_data(df, test_mode=True)
                 if success:
                     st.success(message)
                     st.balloons()
                 else:
                     st.error(message)
-            else:
-                st.warning("⚠️ Please check the box to confirm full upload.")
-    
-    with col3:
-        if st.button("🗑️ Check Today's Data", use_container_width=True):
-            from datetime import date
-            today = date.today().isoformat()
-            
-            response = supabase.table("websocket_stock_values")\
-                               .select("stock", "date", "ltp")\
-                               .eq("date", today)\
-                               .limit(10)\
-                               .execute()
-            
-            if response.data:
-                st.success(f"✅ Found {len(response.data)} records for today")
-                st.dataframe(pd.DataFrame(response.data))
-            else:
-                st.warning(f"⚠️ No data found for {today}")
-    
+        
+        with col2:
+            confirm = st.checkbox("✅ I confirm I want to upload ALL stocks")
+            if st.button("📤 FULL: Upload ALL Stocks", use_container_width=True, disabled=not confirm):
+                success, message = upload_csv_data(df, test_mode=False)
+                if success:
+                    st.success(message)
+                    st.balloons()
+                else:
+                    st.error(message)
+        
+        st.divider()
+        
+        # ── Check Today's Data ──────────────────────────────────
+        with st.expander("📊 Check Today's Data in Supabase"):
+            if st.button("🔄 Refresh Today's Data"):
+                today = date.today().isoformat()
+                
+                response = supabase.table("websocket_stock_values")\
+                                   .select("stock", "date", "ltp", "vol_signal", "status")\
+                                   .eq("date", today)\
+                                   .limit(20)\
+                                   .execute()
+                
+                if response.data:
+                    st.success(f"✅ Found {len(response.data)} records for {today}")
+                    st.dataframe(pd.DataFrame(response.data))
+                else:
+                    st.warning(f"⚠️ No data found for {today}")
+        
+    except Exception as e:
+        st.error(f"❌ Error reading CSV: {str(e)}")
+
 else:
-    st.error(f"❌ CSV file not found: {csv_path}")
-    st.info("""
-    **Please ensure:**
-    1. CSV file is in the root folder of your project
-    2. File name is exactly: `swing_status_history_rows.csv`
-    3. File has these columns: symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at
-    """)
+    st.info("👆 Upload your CSV file using the file uploader above.")
     
-    # Show current directory
-    st.write(f"📁 Current directory: {os.getcwd()}")
-    st.write("📂 Files in current directory:")
-    for file in os.listdir():
-        if file.endswith('.csv'):
-            st.write(f"  - {file}")
+    # Show required columns format
+    with st.expander("📋 Required CSV Format"):
+        st.code("""
+        symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at
+        NATIONSTD, 2026-06-17, 1250.0, 20, 1.0, 🔴 Weak, WATCH, 1202.3, 1250.0, 1202.3, 2026-06-18 03:03:23.271934+00
+        RELIANCE, 2026-06-17, 1332.7, 10029170, 0.76, 🔴 Weak, WATCH, 1333.0, 1334.0, 1317.0, 2026-06-18 03:03:24.84838+00
+        """)
 
 st.divider()
-st.caption("⚠️ This page is for temporary use. You can remove this page after data upload.")
+st.caption("⚠️ This page is for temporary use. Remove this page after data upload.")
