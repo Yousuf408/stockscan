@@ -623,7 +623,7 @@ def sync_5d_history() -> dict:
         except Exception as e:
             print(f"[swing_core] sync_5d delete old rows error: {e}")
 
-    threading.Thread(target=_delete_old, daemon=True).start()
+    # threading.Thread(target=_delete_old, daemon=True).start() # comment check the status 
 
     print(f"[swing_core] sync_5d complete — {synced} rows saved, {len(errors)} errors")
     return {"synced": synced, "skipped": skip_count, "errors": errors}
@@ -867,7 +867,7 @@ def populate_status_history() -> dict:
         except Exception as e:
             print(f"[swing_core] populate_history delete error: {e}")
 
-    threading.Thread(target=_delete_old_history, daemon=True).start()
+    #threading.Thread(target=_delete_old_history, daemon=True).start()
 
     print(f"[swing_core] populate_history complete — {saved} rows saved, {len(errors)} errors")
     return {"saved": saved, "errors": errors}
