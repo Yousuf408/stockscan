@@ -1,12 +1,12 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/6_UploadCSV.py (Modified with File Uploader)
+# pages/6_UploadCSV.py - Complete Working Code
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
 import pandas as pd
 import sys
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 
 # ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,65 +24,95 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FUNCTION: Upload CSV Data
+# FUNCTION: Upload CSV Data (Fixed NaN Handling)
 # ──────────────────────────────────────────────────────────────────────────────
-def upload_csv_data(df, test_mode=True):
-    """Upload CSV data to Supabase"""
+def upload_csv_data(df, test_mode=True, specific_date=None):
+    """Upload CSV data - Delete old, insert new with NaN handling"""
     
     try:
-        # TEST MODE: Only 2 stocks
+        # ── STEP 1: Filter data ──────────────────────────────────
+        if specific_date:
+            df = df[df['trade_date'] == specific_date]
+            st.info(f"📅 Uploading data for {specific_date}")
+            
+            # Delete existing data for this date
+            with st.spinner(f"🗑️ Deleting existing {specific_date} data..."):
+                supabase.table("websocket_stock_values")\
+                         .delete()\
+                         .eq("date", specific_date)\
+                         .execute()
+            st.success(f"✅ {specific_date} data deleted!")
+        else:
+            st.info("📅 Uploading ALL data from CSV")
+        
         if test_mode:
             df = df[df['symbol'].isin(['NATIONSTD', 'RELIANCE'])]
-            st.info(f"🔬 TEST MODE: Uploading {len(df)} records for NATIONSTD & RELIANCE only")
+            st.info(f"🔬 TEST MODE: {len(df)} records")
         else:
-            st.info(f"📤 FULL MODE: Uploading {len(df)} records for ALL stocks")
+            st.info(f"📤 FULL MODE: {len(df)} records")
         
         if df.empty:
             return False, "❌ No data to upload! Check if symbols exist."
         
+        # ── STEP 2: Prepare rows with NaN handling ──────────────
         rows = []
         for _, row in df.iterrows():
-            # Calculate change from open-close
-            if row['close'] > 0 and row['open'] > 0:
-                change = row['close'] - row['open']
-                change_percent = (change / row['open']) * 100
+            # Handle NaN values for all columns
+            close_val = float(row['close']) if pd.notna(row['close']) else 0
+            open_val = float(row['open']) if pd.notna(row['open']) else 0
+            high_val = float(row['high']) if pd.notna(row['high']) else 0
+            low_val = float(row['low']) if pd.notna(row['low']) else 0
+            volume_val = int(row['volume']) if pd.notna(row['volume']) else 0
+            vol_ratio_val = float(row['vol_ratio']) if pd.notna(row['vol_ratio']) else 0
+            
+            # Calculate change
+            if close_val > 0 and open_val > 0:
+                change = close_val - open_val
+                change_percent = (change / open_val) * 100
             else:
                 change = 0
                 change_percent = 0
             
+            # Handle time
+            if pd.notna(row['created_at']):
+                time_str = pd.to_datetime(row['created_at']).strftime('%H:%M:%S')
+            else:
+                time_str = "00:00:00"
+            
             rows.append({
                 "stock": row['symbol'],
                 "type": "Stock",
-                "ltp": float(row['close']),
-                "open": float(row['open']),
-                "high": float(row['high']),
-                "low": float(row['low']),
+                "ltp": close_val,
+                "open": open_val,
+                "high": high_val,
+                "low": low_val,
                 "change": round(change, 2),
                 "change_percent": round(change_percent, 2),
-                "volume": int(row['volume']),
-                "time": pd.to_datetime(row['created_at']).strftime('%H:%M:%S'),
+                "volume": volume_val,
+                "time": time_str,
                 "date": row['trade_date'],
-                "created_at": row['created_at'],
-                "vol_ratio": float(row['vol_ratio']),
-                "vol_signal": row['vol_signal'],
-                "status": row['status']
+                "created_at": row['created_at'] if pd.notna(row['created_at']) else datetime.now().isoformat(),
+                "vol_ratio": vol_ratio_val,
+                "vol_signal": row['vol_signal'] if pd.notna(row['vol_signal']) else "🔴 Weak",
+                "status": row['status'] if pd.notna(row['status']) else "WATCH"
             })
         
         if not rows:
             return False, "❌ No rows to upload"
         
-        # Upload to Supabase
+        # ── STEP 3: Upload in batches ──────────────────────────
         with st.spinner(f"Uploading {len(rows)} records..."):
-            # Upload in batches of 100
             batch_size = 100
             total = len(rows)
+            progress_bar = st.progress(0)
             
             for i in range(0, total, batch_size):
                 batch = rows[i:i+batch_size]
                 supabase.table("websocket_stock_values").insert(batch).execute()
-                st.progress((i + batch_size) / total if i + batch_size < total else 1.0)
-            
-        return True, f"✅ Successfully uploaded {len(rows)} records!"
+                progress_bar.progress(min((i + batch_size) / total, 1.0))
+        
+        date_str = specific_date if specific_date else "ALL dates"
+        return True, f"✅ Successfully uploaded {len(rows)} records for {date_str}!"
         
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
@@ -95,12 +125,12 @@ def upload_csv_data(df, test_mode=True):
 st.markdown("""
 ### 📂 Upload Historical Data
 
-Upload your `swing_status_history_rows.csv` file and store data in Supabase.
+Upload your CSV file and store data in Supabase.
 
 **⚠️ Important:**
-- Test mode will upload only **NATIONSTD & RELIANCE** first
-- Full mode will upload **ALL stocks** in the CSV
-- File must have these columns: `symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at`
+- Test mode will upload only **NATIONSTD & RELIANCE**
+- Full mode will upload **ALL stocks**
+- File must have columns: `symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at`
 """)
 
 # ── File Uploader ─────────────────────────────────────────────
@@ -123,7 +153,11 @@ if uploaded_file is not None:
         with col2:
             st.metric("Unique Stocks", df['symbol'].nunique())
         with col3:
-            st.metric("Columns", len(df.columns))
+            st.metric("Unique Dates", df['trade_date'].nunique())
+        
+        # Show available dates
+        available_dates = sorted(df['trade_date'].unique())
+        st.write(f"📅 Dates available: {', '.join(available_dates[:5])}{'...' if len(available_dates) > 5 else ''}")
         
         # Show sample data
         with st.expander("🔍 Preview CSV Data (First 5 rows)"):
@@ -140,16 +174,36 @@ if uploaded_file is not None:
         else:
             st.success("✅ All required columns present!")
         
+        # Data quality check
+        with st.expander("📊 Data Quality Check"):
+            null_volume = df['volume'].isna().sum()
+            null_close = df['close'].isna().sum()
+            null_open = df['open'].isna().sum()
+            
+            st.write(f"📊 Records with null volume: {null_volume}")
+            st.write(f"📊 Records with null close: {null_close}")
+            st.write(f"📊 Records with null open: {null_open}")
+            
+            if null_volume > 0:
+                st.warning(f"⚠️ {null_volume} records have missing volume. Will be set to 0.")
+        
         st.divider()
         
-        # ── Upload Buttons ────────────────────────────────────────
-        st.subheader("📤 Upload Data")
+        # ── Upload Options ──────────────────────────────────────
+        st.subheader("📤 Upload Options")
+        
+        # Select date to upload
+        selected_date = st.selectbox(
+            "📅 Select date to upload (or 'ALL' for all dates)",
+            ['ALL'] + available_dates
+        )
         
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("🧪 TEST: Upload NATIONSTD & RELIANCE", use_container_width=True, type="primary"):
-                success, message = upload_csv_data(df, test_mode=True)
+            if st.button("🧪 TEST: Upload 2 Stocks", use_container_width=True, type="primary"):
+                date_filter = None if selected_date == 'ALL' else selected_date
+                success, message = upload_csv_data(df, test_mode=True, specific_date=date_filter)
                 if success:
                     st.success(message)
                     st.balloons()
@@ -157,9 +211,10 @@ if uploaded_file is not None:
                     st.error(message)
         
         with col2:
-            confirm = st.checkbox("✅ I confirm I want to upload ALL stocks")
+            confirm = st.checkbox("✅ I confirm: Delete existing data and upload fresh")
             if st.button("📤 FULL: Upload ALL Stocks", use_container_width=True, disabled=not confirm):
-                success, message = upload_csv_data(df, test_mode=False)
+                date_filter = None if selected_date == 'ALL' else selected_date
+                success, message = upload_csv_data(df, test_mode=False, specific_date=date_filter)
                 if success:
                     st.success(message)
                     st.balloons()
@@ -169,21 +224,29 @@ if uploaded_file is not None:
         st.divider()
         
         # ── Check Today's Data ──────────────────────────────────
-        with st.expander("📊 Check Today's Data in Supabase"):
-            if st.button("🔄 Refresh Today's Data"):
-                today = date.today().isoformat()
-                
+        with st.expander("📊 Check Data in Supabase"):
+            date_to_check = st.date_input("Select date to check", value=date.today())
+            date_str = date_to_check.isoformat()
+            
+            if st.button("🔄 Refresh Data"):
                 response = supabase.table("websocket_stock_values")\
                                    .select("stock", "date", "ltp", "vol_signal", "status")\
-                                   .eq("date", today)\
+                                   .eq("date", date_str)\
                                    .limit(20)\
                                    .execute()
                 
                 if response.data:
-                    st.success(f"✅ Found {len(response.data)} records for {today}")
+                    st.success(f"✅ Found {len(response.data)} records for {date_str}")
                     st.dataframe(pd.DataFrame(response.data))
+                    
+                    # Show count
+                    count_res = supabase.table("websocket_stock_values")\
+                                       .select("stock", count="exact")\
+                                       .eq("date", date_str)\
+                                       .execute()
+                    st.metric("Total records for this date", count_res.count)
                 else:
-                    st.warning(f"⚠️ No data found for {today}")
+                    st.warning(f"⚠️ No data found for {date_str}")
         
     except Exception as e:
         st.error(f"❌ Error reading CSV: {str(e)}")
