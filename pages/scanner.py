@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 #  TRADE SENTRY — scanner.py  v4.0.0
-#  v4.0.0:
+#  v4.0.0:d
 #    - Scan and Entry/SL completely separated
 #    - "Get Targets" button fetches exact 9:15 from AngelOne
 #    - 🟡 on EMA row (yfinance source), 🟢 on Entry row (AngelOne exact)
