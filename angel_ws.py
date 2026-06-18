@@ -1,4 +1,4 @@
-# angel_ws.py - COMPLETE WITH BATCH INSERT
+# angel_ws.py - MODIFIED for config.py
 # Place this file in your ROOT folder (same level as app.py)
 
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
@@ -17,19 +17,6 @@ _sws            = None
 _thread         = None
 _connected      = False
 _correlation_id = "stockscan_live"
-
-# ── Batch Insert State ────────────────────────────────────────
-_batch_insert_thread = None
-_batch_insert_active = False
-_supabase_client = None
-_user_id = None
-
-# Create token → symbol mapping once at startup
-TOKEN_TO_SYMBOL = {}
-for symbol, token, kind in STOCKS_WATCHLIST:
-    TOKEN_TO_SYMBOL[token] = symbol
-
-logger.info(f"✓ Token mapping created: {len(TOKEN_TO_SYMBOL)} tokens → symbols")
 # ───────────────────────────────────────────────────────────────
 
 
@@ -159,7 +146,7 @@ def on_close(wsapp):
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 3 — START / STOP WEBSOCKET
+# SECTION 3 — START / STOP
 # ─────────────────────────────────────────────────────────────
 
 def start_websocket(jwt_token, api_key, client_id, feed_token):
@@ -244,106 +231,3 @@ def get_subscription_status():
         "ticks_received": ticks_count,
         "connected": _connected
     }
-
-
-# ─────────────────────────────────────────────────────────────
-# SECTION 5 — BATCH INSERT TO SUPABASE
-# ─────────────────────────────────────────────────────────────
-
-def start_batch_insert(supabase_client, user_id, interval_seconds=15):
-    """
-    Start background thread to batch insert ticks to Supabase every N seconds.
-    
-    Args:
-        supabase_client: Supabase client instance
-        user_id: UUID of logged-in user
-        interval_seconds: How often to batch insert (default 15s)
-    """
-    global _batch_insert_thread, _batch_insert_active, _supabase_client, _user_id
-    
-    if _batch_insert_active:
-        logger.warning("⚠️ Batch insert already running!")
-        return
-    
-    _supabase_client = supabase_client
-    _user_id = user_id
-    _batch_insert_active = True
-    
-    def _run_batch():
-        logger.info(f"🔄 Batch insert started (every {interval_seconds}s)")
-        
-        while _batch_insert_active:
-            try:
-                time.sleep(interval_seconds)
-                _batch_insert_ticks()
-            except Exception as e:
-                logger.error(f"Batch insert error: {e}", exc_info=True)
-    
-    _batch_insert_thread = threading.Thread(target=_run_batch, daemon=True)
-    _batch_insert_thread.start()
-    logger.info("✓ Batch insert thread started")
-
-
-def stop_batch_insert():
-    """Stop the batch insert background thread."""
-    global _batch_insert_active
-    _batch_insert_active = False
-    logger.info("🛑 Batch insert stopped")
-
-
-def _batch_insert_ticks():
-    """
-    Read all ticks from memory, convert to DB format, and insert/update.
-    Called every 15 seconds.
-    """
-    global latest_ticks, _supabase_client, _user_id
-    
-    if not _supabase_client or not _user_id:
-        logger.warning("⚠️ Supabase client or user_id not set!")
-        return
-    
-    ticks = latest_ticks.copy()  # Read current memory
-    
-    if not ticks:
-        logger.debug("No ticks to insert")
-        return
-    
-    # Convert ticks to Supabase format
-    rows = []
-    today = datetime.now().strftime('%Y-%m-%d')
-    
-    for token, tick_data in ticks.items():
-        symbol = TOKEN_TO_SYMBOL.get(token)
-        
-        if not symbol:
-            logger.warning(f"⚠️ Token {token} not in mapping, skipping")
-            continue
-        
-        row = {
-            "user_id": _user_id,
-            "symbol": symbol,
-            "trade_date": today,
-            "open": float(tick_data.get('open', 0)),
-            "high": float(tick_data.get('high', 0)),
-            "low": float(tick_data.get('low', 0)),
-            "close": float(tick_data.get('ltp', 0)),  # ltp = current price
-            "volume": int(tick_data.get('volume', 0)),
-            "token": int(token),
-            "updated_at": datetime.now().isoformat(),
-        }
-        rows.append(row)
-    
-    if not rows:
-        return
-    
-    # Batch insert/update to Supabase
-    try:
-        result = _supabase_client.table('swing_live_data').upsert(
-            rows,
-            ignore_duplicates=False  # Update if exists (by user_id, symbol unique constraint)
-        ).execute()
-        
-        logger.info(f"✓ Batch insert: {len(rows)} ticks inserted/updated")
-        
-    except Exception as e:
-        logger.error(f"🔴 Batch insert failed: {e}", exc_info=True)
