@@ -1,21 +1,27 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/6_UploadCSV.py - Complete Fixed Code with Date Conversion
+# pages/5_LiveFeed.py - COMPLETE WORKING CODE WITH VOLUME SIGNALS
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
 import pandas as pd
+import time
 import sys
 import os
-from datetime import date, datetime, timedelta
+from statistics import median
+from datetime import datetime, date, timedelta
 
 # ── Make sure root folder is in path ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import angel_ws
+from angel_auth import angel_login
+from config import STOCKS_WATCHLIST
+
 # ── SUPABASE IMPORTS ──────────────────────────────────────────
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Upload CSV Data", page_icon="📤", layout="wide")
-st.title("📤 Upload Historical CSV Data")
+st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
+st.title("📡 Angel One — Live Market Feed")
 
 # ── SUPABASE CONFIGURATION ────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
@@ -24,266 +30,309 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FUNCTION: Upload CSV Data
+# SECTION: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
-def upload_csv_data(df, test_mode=True, specific_date=None):
-    """Upload CSV data - Delete old, insert new with NaN handling"""
+
+def get_last_5_days_volumes(stock_name):
+    """Get last 5 trading days volumes from Supabase"""
+    today = date.today()
+    volumes = []
     
+    for i in range(1, 6):
+        past_date = (today - timedelta(days=i)).isoformat()
+        
+        try:
+            response = supabase.table("websocket_stock_values")\
+                               .select("volume")\
+                               .eq("stock", stock_name)\
+                               .eq("date", past_date)\
+                               .execute()
+            
+            if response.data and response.data[0]['volume'] > 0:
+                volumes.append(response.data[0]['volume'])
+        except Exception as e:
+            # If error, just skip this date
+            continue
+    
+    return volumes
+
+def calculate_volume_metrics(stock_name, current_volume, change_pct):
+    """
+    Calculate vol_ratio, vol_signal, and status
+    Returns: (vol_ratio, vol_signal, status)
+    """
+    
+    # Get last 5 days volumes
+    hist_volumes = get_last_5_days_volumes(stock_name)
+    
+    # If less than 5 days data, show building message
+    if len(hist_volumes) < 5:
+        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    
+    # Calculate median of last 5 days
     try:
-        # ── STEP 1: Filter data ──────────────────────────────────
-        if specific_date:
-            df = df[df['trade_date'] == specific_date]
-            st.info(f"📅 Uploading data for {specific_date}")
-            
-            # Delete existing data for this date
-            with st.spinner(f"🗑️ Deleting existing {specific_date} data..."):
-                supabase.table("websocket_stock_values")\
-                         .delete()\
-                         .eq("date", specific_date)\
-                         .execute()
-            st.success(f"✅ {specific_date} data deleted!")
-        else:
-            st.info("📅 Uploading ALL data from CSV")
+        median_volume = median(hist_volumes)
+    except:
+        return 0, "🔴 Weak (0)", "WATCH"
+    
+    if median_volume == 0:
+        return 0, "🔴 Weak (0)", "WATCH"
+    
+    # Calculate volume ratio
+    vol_ratio = current_volume / median_volume
+    
+    # Determine vol_signal based on ratio
+    if vol_ratio > 2:
+        vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
+    elif vol_ratio > 1.5:
+        vol_signal = f"🟢 Strong ({vol_ratio:.2f})"
+    elif vol_ratio > 1:
+        vol_signal = f"🟡 Build ({vol_ratio:.2f})"
+    else:
+        vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
+    
+    # Determine status
+    if vol_ratio > 1.5 and change_pct > 0:
+        status = "READY"
+    else:
+        status = "WATCH"
+    
+    return round(vol_ratio, 2), vol_signal, status
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: SUPABASE UPLOAD FUNCTION
+# ──────────────────────────────────────────────────────────────────────────────
+
+def upload_to_supabase(ticks):
+    """Upload live data with vol_ratio, vol_signal, status"""
+    rows = []
+    today = date.today().isoformat()
+    
+    for name, token, kind in STOCKS_WATCHLIST:
+        tick = ticks.get(token, {})
+        ltp = tick.get('ltp', 0)
         
-        if test_mode:
-            df = df[df['symbol'].isin(['NATIONSTD', 'RELIANCE'])]
-            st.info(f"🔬 TEST MODE: {len(df)} records")
-        else:
-            st.info(f"📤 FULL MODE: {len(df)} records")
-        
-        if df.empty:
-            return False, "❌ No data to upload! Check if symbols exist."
-        
-        # ── STEP 2: Prepare rows with NaN handling ──────────────
-        rows = []
-        for _, row in df.iterrows():
-            # Handle NaN values for all columns
-            close_val = float(row['close']) if pd.notna(row['close']) else 0
-            open_val = float(row['open']) if pd.notna(row['open']) else 0
-            high_val = float(row['high']) if pd.notna(row['high']) else 0
-            low_val = float(row['low']) if pd.notna(row['low']) else 0
-            volume_val = int(row['volume']) if pd.notna(row['volume']) else 0
-            vol_ratio_val = float(row['vol_ratio']) if pd.notna(row['vol_ratio']) else 0
+        if ltp > 0:
+            current_volume = int(tick.get('volume', 0))
+            change_pct = float(tick.get('change_pct', 0))
             
-            # Calculate change
-            if close_val > 0 and open_val > 0:
-                change = close_val - open_val
-                change_percent = (change / open_val) * 100
-            else:
-                change = 0
-                change_percent = 0
-            
-            # Handle time
-            if pd.notna(row['created_at']):
-                time_str = pd.to_datetime(row['created_at']).strftime('%H:%M:%S')
-            else:
-                time_str = "00:00:00"
+            # Calculate volume metrics
+            vol_ratio, vol_signal, status = calculate_volume_metrics(
+                name, 
+                current_volume,
+                change_pct
+            )
             
             rows.append({
-                "stock": row['symbol'],
-                "type": "Stock",
-                "ltp": close_val,
-                "open": open_val,
-                "high": high_val,
-                "low": low_val,
-                "change": round(change, 2),
-                "change_percent": round(change_percent, 2),
-                "volume": volume_val,
-                "time": time_str,
-                "date": row['trade_date'],  # Already in YYYY-MM-DD format
-                "created_at": row['created_at'] if pd.notna(row['created_at']) else datetime.now().isoformat(),
-                "vol_ratio": vol_ratio_val,
-                "vol_signal": row['vol_signal'] if pd.notna(row['vol_signal']) else "🔴 Weak",
-                "status": row['status'] if pd.notna(row['status']) else "WATCH"
+                "stock": name,
+                "type": "Index" if kind == "index" else "Stock",
+                "ltp": float(tick.get('ltp', 0)),
+                "open": float(tick.get('open', 0)),
+                "high": float(tick.get('high', 0)),
+                "low": float(tick.get('low', 0)),
+                "change": float(tick.get('change', 0)),
+                "change_percent": change_pct,
+                "volume": current_volume,
+                "time": str(tick.get('timestamp', '-')),
+                "date": today,
+                "vol_ratio": vol_ratio,
+                "vol_signal": vol_signal,
+                "status": status
             })
+    
+    if not rows:
+        return False, "No data to upload"
+    
+    try:
+        # Delete only today's data
+        supabase.table("websocket_stock_values")\
+                 .delete()\
+                 .eq("date", today)\
+                 .execute()
         
-        if not rows:
-            return False, "❌ No rows to upload"
-        
-        # ── STEP 3: Upload in batches ──────────────────────────
-        with st.spinner(f"Uploading {len(rows)} records..."):
-            batch_size = 100
-            total = len(rows)
-            progress_bar = st.progress(0)
-            
-            for i in range(0, total, batch_size):
-                batch = rows[i:i+batch_size]
-                supabase.table("websocket_stock_values").insert(batch).execute()
-                progress_bar.progress(min((i + batch_size) / total, 1.0))
-        
-        date_str = specific_date if specific_date else "ALL dates"
-        return True, f"✅ Successfully uploaded {len(rows)} records for {date_str}!"
-        
+        # Insert fresh data
+        response = supabase.table("websocket_stock_values").insert(rows).execute()
+        return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# UI: Main Page
+# SECTION: SESSION STATE INITIALIZATION
 # ──────────────────────────────────────────────────────────────────────────────
 
-st.markdown("""
-### 📂 Upload Historical Data
+if "angel_connected" not in st.session_state:
+    st.session_state.angel_connected = False
+if "angel_creds" not in st.session_state:
+    st.session_state.angel_creds = None
 
-Upload your CSV file and store data in Supabase.
 
-**⚠️ Important:**
-- Test mode will upload only **NATIONSTD & RELIANCE**
-- Full mode will upload **ALL stocks**
-- File must have columns: `symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at`
-""")
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: CONNECT / DISCONNECT BUTTONS
+# ──────────────────────────────────────────────────────────────────────────────
 
-# ── File Uploader ─────────────────────────────────────────────
-uploaded_file = st.file_uploader(
-    "📁 Choose CSV file",
-    type=['csv'],
-    help="Upload your swing_status_history_rows.csv file"
-)
+col1, col2, col3 = st.columns(3)
 
-if uploaded_file is not None:
-    try:
-        # Read CSV
-        df = pd.read_csv(uploaded_file)
-        
-        # 🔥 FIX 1: Convert trade_date to proper format
-        # Try different date formats
-        try:
-            # Try DD-MM-YYYY format first (e.g., 15-06-2026)
-            df['trade_date'] = pd.to_datetime(df['trade_date'], format='%d-%m-%Y').dt.strftime('%Y-%m-%d')
-            st.info("✅ Date format detected: DD-MM-YYYY")
-        except:
-            try:
-                # Try YYYY-MM-DD format (e.g., 2026-06-15)
-                df['trade_date'] = pd.to_datetime(df['trade_date']).dt.strftime('%Y-%m-%d')
-                st.info("✅ Date format detected: YYYY-MM-DD")
-            except:
-                try:
-                    # Try DD/MM/YYYY format (e.g., 15/06/2026)
-                    df['trade_date'] = pd.to_datetime(df['trade_date'], format='%d/%m/%Y').dt.strftime('%Y-%m-%d')
-                    st.info("✅ Date format detected: DD/MM/YYYY")
-                except:
-                    # Fallback: convert to string and clean
-                    df['trade_date'] = df['trade_date'].astype(str).str.replace('.0', '').str.strip()
-                    st.info("✅ Date format detected: String format")
-        
-        st.success(f"✅ CSV loaded successfully!")
-        
-        # Show file info
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Records", len(df))
-        with col2:
-            st.metric("Unique Stocks", df['symbol'].nunique())
-        with col3:
-            st.metric("Unique Dates", df['trade_date'].nunique())
-        
-        # Show available dates
-        available_dates = sorted(df['trade_date'].unique())
-        st.write(f"📅 Dates available: {', '.join(available_dates[:5])}{'...' if len(available_dates) > 5 else ''}")
-        
-        # Show sample data
-        with st.expander("🔍 Preview CSV Data (First 5 rows)"):
-            st.dataframe(df.head(5))
-        
-        # Check required columns
-        required_cols = ['symbol', 'trade_date', 'close', 'volume', 'vol_ratio', 
-                        'vol_signal', 'status', 'open', 'high', 'low', 'created_at']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        
-        if missing_cols:
-            st.error(f"❌ Missing columns: {', '.join(missing_cols)}")
-            st.stop()
-        else:
-            st.success("✅ All required columns present!")
-        
-        # Data quality check
-        with st.expander("📊 Data Quality Check"):
-            null_volume = df['volume'].isna().sum()
-            null_close = df['close'].isna().sum()
-            null_open = df['open'].isna().sum()
-            
-            st.write(f"📊 Records with null volume: {null_volume}")
-            st.write(f"📊 Records with null close: {null_close}")
-            st.write(f"📊 Records with null open: {null_open}")
-            
-            if null_volume > 0:
-                st.warning(f"⚠️ {null_volume} records have missing volume. Will be set to 0.")
-        
-        st.divider()
-        
-        # ── Upload Options ──────────────────────────────────────
-        st.subheader("📤 Upload Options")
-        
-        # Select date to upload
-        selected_date = st.selectbox(
-            "📅 Select date to upload (or 'ALL' for all dates)",
-            ['ALL'] + available_dates
-        )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🧪 TEST: Upload 2 Stocks", use_container_width=True, type="primary"):
-                date_filter = None if selected_date == 'ALL' else selected_date
-                success, message = upload_csv_data(df, test_mode=True, specific_date=date_filter)
-                if success:
-                    st.success(message)
-                    st.balloons()
+with col1:
+    if not st.session_state.angel_connected:
+        if st.button("🔌 Connect Angel One", use_container_width=True):
+            with st.spinner("Logging in to Angel One..."):
+                creds = angel_login()
+                if creds:
+                    st.session_state.angel_creds = creds
+                    st.session_state.angel_connected = True
+                    angel_ws.start_websocket(
+                        jwt_token=creds['jwt_token'],
+                        api_key=creds['api_key'],
+                        client_id=creds['client_id'],
+                        feed_token=creds['feed_token'],
+                    )
+                    st.success("Connected! Waiting for ticks...")
+                    time.sleep(3)
+                    st.rerun()
                 else:
-                    st.error(message)
-        
-        with col2:
-            confirm = st.checkbox("✅ I confirm: Delete existing data and upload fresh")
-            if st.button("📤 FULL: Upload ALL Stocks", use_container_width=True, disabled=not confirm):
-                date_filter = None if selected_date == 'ALL' else selected_date
-                success, message = upload_csv_data(df, test_mode=False, specific_date=date_filter)
-                if success:
-                    st.success(message)
-                    st.balloons()
-                else:
-                    st.error(message)
-        
-        st.divider()
-        
-        # ── Check Today's Data ──────────────────────────────────
-        with st.expander("📊 Check Data in Supabase"):
-            date_to_check = st.date_input("Select date to check", value=date.today())
-            date_str = date_to_check.isoformat()
-            
-            if st.button("🔄 Refresh Data"):
-                response = supabase.table("websocket_stock_values")\
-                                   .select("stock", "date", "ltp", "vol_signal", "status")\
-                                   .eq("date", date_str)\
-                                   .limit(20)\
-                                   .execute()
-                
-                if response.data:
-                    st.success(f"✅ Found {len(response.data)} records for {date_str}")
-                    st.dataframe(pd.DataFrame(response.data))
-                    
-                    # Show count
-                    count_res = supabase.table("websocket_stock_values")\
-                                       .select("stock", count="exact")\
-                                       .eq("date", date_str)\
-                                       .execute()
-                    st.metric("Total records for this date", count_res.count)
-                else:
-                    st.warning(f"⚠️ No data found for {date_str}")
-        
-    except Exception as e:
-        st.error(f"❌ Error reading CSV: {str(e)}")
-        st.info("💡 Make sure date column has proper format (YYYY-MM-DD or DD-MM-YYYY)")
+                    st.error("Login failed! Check credentials in angel_auth.py")
+    else:
+        st.success("🟢 Angel One Connected")
 
-else:
-    st.info("👆 Upload your CSV file using the file uploader above.")
-    
-    # Show required columns format
-    with st.expander("📋 Required CSV Format"):
-        st.code("""
-        symbol, trade_date, close, volume, vol_ratio, vol_signal, status, open, high, low, created_at
-        NATIONSTD, 2026-06-17, 1250.0, 20, 1.0, 🔴 Weak, WATCH, 1202.3, 1250.0, 1202.3, 2026-06-18 03:03:23.271934+00
-        RELIANCE, 2026-06-17, 1332.7, 10029170, 0.76, 🔴 Weak, WATCH, 1333.0, 1334.0, 1317.0, 2026-06-18 03:03:24.84838+00
-        """)
+with col2:
+    if st.session_state.angel_connected:
+        if st.button("⛔ Disconnect", use_container_width=True):
+            angel_ws.stop_websocket()
+            st.session_state.angel_connected = False
+            st.session_state.angel_creds = None
+            st.rerun()
+
+with col3:
+    if st.session_state.angel_connected:
+        if st.button("📤 Update to Supabase", use_container_width=True):
+            ticks = angel_ws.latest_ticks
+            if not ticks:
+                st.warning("⚠️ No data yet. Wait for WebSocket.")
+            else:
+                with st.spinner("Uploading..."):
+                    success, message = upload_to_supabase(ticks)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: DIVIDER
+# ──────────────────────────────────────────────────────────────────────────────
 
 st.divider()
-st.caption("⚠️ This page is for temporary use. Remove this page after data upload.")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: MAIN DISPLAY (WHEN CONNECTED)
+# ──────────────────────────────────────────────────────────────────────────────
+
+if st.session_state.angel_connected:
+
+    # ── Debug Panel ────────────────────────────────────────────
+    with st.expander("🔍 Debug Panel", expanded=False):
+        raw = angel_ws._raw_messages
+        ticks_debug = angel_ws.latest_ticks
+
+        st.write(f"**Total tokens received:** {len(ticks_debug)}")
+        st.write(f"**Tokens with data:** {sorted(list(ticks_debug.keys()))}")
+
+        if raw:
+            st.write("**Last raw message from Angel One:**")
+            st.json(raw[-1])
+        else:
+            st.warning("No raw messages yet — WebSocket may still be connecting...")
+
+        st.write("**Full ticks dict (sample):**")
+        sample = dict(list(ticks_debug.items())[:10])
+        st.json(sample)
+
+    # ── Live Table ────────────────────────────────────────────
+    st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
+    placeholder = st.empty()
+
+    while True:
+        ticks = angel_ws.latest_ticks
+
+        rows = []
+        for name, token, kind in STOCKS_WATCHLIST:
+            tick = ticks.get(token, {})
+            ltp = tick.get('ltp', 0)
+            open_p = tick.get('open', 0)
+            high_p = tick.get('high', 0)
+            low_p = tick.get('low', 0)
+            change = tick.get('change', 0)
+            change_pct = tick.get('change_pct', 0)
+            volume = tick.get('volume', 0)
+            timestamp = tick.get('timestamp', '-')
+
+            # Get vol_signal and status from tick (if available)
+            vol_signal = tick.get('vol_signal', '⏳')
+            status = tick.get('status', '⏳')
+
+            # Format based on whether we have data
+            if tick:
+                ltp_str = f"₹{ltp:.2f}"
+                open_str = f"₹{open_p:.2f}"
+                high_str = f"₹{high_p:.2f}"
+                low_str = f"₹{low_p:.2f}"
+                chng_str = f"{change:+.2f}"
+                pct_str = f"{change_pct:+.2f}%"
+                vol_str = f"{volume:,}"
+                time_str = timestamp
+            else:
+                ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
+                time_str = "-"
+
+            rows.append({
+                "Stock": name,
+                "Type": "📈 Index" if kind == "index" else "🏢 Stock",
+                "LTP (₹)": ltp_str,
+                "Open": open_str,
+                "High": high_str,
+                "Low": low_str,
+                "Change": chng_str,
+                "Change %": pct_str,
+                "Volume": vol_str,
+                "Signal": vol_signal,
+                "Status": status,
+                "Time": time_str,
+            })
+
+        df = pd.DataFrame(rows)
+
+        with placeholder.container():
+            st.dataframe(
+                df,
+                hide_index=True,
+                use_container_width=True,
+            )
+            st.caption(
+                f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+            )
+
+        time.sleep(2)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: DISPLAY WHEN NOT CONNECTED
+# ──────────────────────────────────────────────────────────────────────────────
+
+else:
+    st.info("👆 Upar 'Connect Angel One' button dabao live data dekhne ke liye.")
+    st.markdown(f"""
+    ### Live Feed Setup
+    - ✅ **Total Watchlist:** {len(STOCKS_WATCHLIST)} stocks (2 indices + 849 stocks)
+    - ✅ Data source: `config.py`
+    - ✅ Real-time updates from Angel One WebSocket
+    
+    ### Checklist
+    - ✅ `angel_auth.py` mein credentials fill kiye?
+    - ✅ `config.py` root folder mein hai?
+    - ✅ `smartapi-python` installed hai?
+    - ✅ Internet connection hai?
+    """)
