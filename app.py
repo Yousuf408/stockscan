@@ -41,24 +41,27 @@ st.set_page_config(
     page_icon="⚡",
     initial_sidebar_state="expanded"
 )
-# Yahan se code paste karein
-hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-# Yahan tak
 
-# ── Auth guard ──
-restore_session()
+# ✅ Pehle session restore karo — koi bhi st. call se pehle
+if not st.session_state.get("user_id"):
+    restore_session()
+
+# Auth guard
 if not st.session_state.get("user_id"):
     st.warning("Please login to access this page.")
     if st.button("Go to Login →", type="primary"):
         st.switch_page("pages/0_Login.py")
     st.stop()
+
+# ✅ Baad mein styling
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 apply_styles()
 sidebar_brand()
