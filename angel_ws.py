@@ -1,174 +1,233 @@
-# ╔════════════════════════════════════════════════════════════╗
-# ║         SUPABASE HANDLER - BACKEND CONFIGURATION            ║
-# ║      All database operations for stock prices storage       ║
-# ╚════════════════════════════════════════════════════════════╝
+# angel_ws.py - MODIFIED for config.py
+# Place this file in your ROOT folder (same level as app.py)
 
-# ── SECTION 1: IMPORTS ────────────────────────────────────────
-import streamlit as st
-import pandas as pd
-from supabase import create_client, Client
-from datetime import datetime
-import json
+from SmartApi.smartWebSocketV2 import SmartWebSocketV2
+from logzero import logger
+import threading
+import time
+from datetime import datetime, timezone, timedelta
+from config import STOCKS_WATCHLIST  # ← IMPORT from config.py
 
+IST = timezone(timedelta(hours=5, minutes=30))
 
-# ── SECTION 2: SUPABASE CREDENTIALS & CLIENT INITIALIZATION ───
-# ⚠️ These credentials are your Anon Key (safe for frontend)
-# Do NOT expose Service Role Key in frontend code
-
-SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
-
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# ── Global state — shared across all threads ──────────────────
+latest_ticks    = {}          # {token: {ltp, volume, open, high, low, close, ...}}
+_raw_messages   = []
+_sws            = None
+_thread         = None
+_connected      = False
+_correlation_id = "stockscan_live"
+# ───────────────────────────────────────────────────────────────
 
 
-# ── SECTION 3: DATA EXTRACTION FUNCTION ───────────────────────
-# Extract stock data from Streamlit session state (angel_ws.latest_ticks)
+# ─────────────────────────────────────────────────────────────
+# SECTION 1 — MARKET HOURS CHECK
+# ─────────────────────────────────────────────────────────────
 
-def extract_stock_data_from_websocket(ticks_dict, watchlist):
-    """
-    Convert WebSocket ticks dictionary to a list of dictionaries
-    ready for Supabase insertion.
-    
-    Args:
-        ticks_dict: Dictionary of ticks from angel_ws.latest_ticks
-        watchlist: List of tuples (name, token, kind) from config.py
-    
-    Returns:
-        List of dictionaries with stock data
-    """
-    rows = []
-    
-    for name, token, kind in watchlist:
-        tick = ticks_dict.get(token, {})
-        
-        # Extract values with defaults if no data
-        ltp = tick.get('ltp', 0)
-        open_p = tick.get('open', 0)
-        high_p = tick.get('high', 0)
-        low_p = tick.get('low', 0)
-        change = tick.get('change', 0)
-        change_pct = tick.get('change_pct', 0)
-        volume = tick.get('volume', 0)
-        timestamp = tick.get('timestamp', '-')
-        
-        # Only include if we have LTP data
-        if ltp > 0:
-            rows.append({
-                "stock": name,
-                "type": "Index" if kind == "index" else "Stock",
-                "ltp": float(ltp),
-                "open": float(open_p),
-                "high": float(high_p),
-                "low": float(low_p),
-                "change": float(change),
-                "change_percent": float(change_pct),
-                "volume": int(volume) if volume else 0,
-                "time": str(timestamp)
-            })
-    
-    return rows
+def _is_market_open() -> bool:
+    """Check if NSE market is open (9:15 AM - 3:30 PM IST, Mon-Fri)."""
+    now  = datetime.now(IST)
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    mins = now.hour * 60 + now.minute
+    return (9 * 60 + 15) <= mins <= (15 * 60 + 30)
 
 
-# ── SECTION 4: DATA UPLOAD FUNCTION ───────────────────────────
-# Insert/Update data to Supabase table
+# ─────────────────────────────────────────────────────────────
+# SECTION 2 — WEBSOCKET CALLBACKS
+# ─────────────────────────────────────────────────────────────
 
-def upload_stocks_to_supabase(stock_data):
-    """
-    Upload stock data to Supabase 'websocket_stock_values' table.
-    Uses UPSERT to avoid duplicate entries for the same stock on same day.
-    
-    Args:
-        stock_data: List of dictionaries containing stock information
-    
-    Returns:
-        Tuple: (success: bool, message: str, count: int)
-    """
-    
-    if not stock_data:
-        return False, "❌ No stock data to upload!", 0
-    
+def on_data(wsapp, message):
+    """Called on every tick from Angel One WebSocket."""
+    global latest_ticks, _raw_messages
+
     try:
-        # Insert data into Supabase table
-        response = supabase.table("websocket_stock_values").insert(stock_data).execute()
-        
-        # Check if insertion was successful
-        if response.data:
-            count = len(response.data)
-            message = f"✅ Successfully uploaded {count} stocks to Supabase!"
-            return True, message, count
-        else:
-            return False, "⚠️ Data inserted but no response received", len(stock_data)
-    
-    except Exception as error:
-        # Catch and return specific error messages
-        error_msg = str(error)
-        
-        if "duplicate key" in error_msg.lower():
-            message = "⚠️ Some stocks already exist for today. Try again tomorrow or delete old entries."
-        elif "connection" in error_msg.lower():
-            message = "❌ Connection error! Check your internet or Supabase status."
-        else:
-            message = f"❌ Error: {error_msg}"
-        
-        return False, message, 0
+        # Store raw message for debugging (last 5 only)
+        _raw_messages.append(message)
+        if len(_raw_messages) > 5:
+            _raw_messages.pop(0)
+
+        token = str(message.get('token', ''))
+        if not token:
+            logger.warning(f"🔴 No token in message!")
+            return
+
+        # Angel One sends prices in paise → divide by 100
+        ltp        = message.get('last_traded_price', 0) / 100
+        open_price = message.get('open_price_of_the_day', 0) / 100
+        high_price = message.get('high_price_of_the_day', 0) / 100
+        low_price  = message.get('low_price_of_the_day', 0) / 100
+        close      = message.get('closed_price', 0) / 100
+        volume     = message.get('volume_trade_for_the_day', 0)
+        change     = message.get('net_change_value', 0) / 100
+        chng_pct   = ((ltp - close) / close * 100) if close > 0 else 0
+
+        # Timestamp: epoch milliseconds → IST HH:MM:SS
+        raw_ts    = message.get('exchange_timestamp', 0)
+        timestamp = datetime.fromtimestamp(raw_ts / 1000, tz=IST).strftime('%H:%M:%S') if raw_ts else '-'
+
+        latest_ticks[token] = {
+            "ltp"        : ltp,
+            "open"       : open_price,
+            "high"       : high_price,
+            "low"        : low_price,
+            "close"      : close,
+            "volume"     : volume,
+            "change"     : change,
+            "change_pct" : chng_pct,
+            "timestamp"  : timestamp,
+        }
+
+        logger.info(f"✓ TICK [{token}] LTP={ltp:.2f} | chng%={chng_pct:.2f}% | vol={volume} | time={timestamp}")
+
+    except Exception as e:
+        logger.error(f"on_data error: {e}", exc_info=True)
 
 
-# ── SECTION 5: DATA VERIFICATION FUNCTION ─────────────────────
-# Check what's already in Supabase
-
-def get_latest_stocks_from_supabase(limit=10):
+def on_open(wsapp):
     """
-    Fetch latest stock records from Supabase for verification.
-    
-    Args:
-        limit: Number of records to fetch (default: 10)
-    
-    Returns:
-        List of dictionaries with stock data from database
+    Called when WebSocket connection opens.
+    Subscribe to ALL tokens from config.py STOCKS_WATCHLIST.
     """
-    
+    global _connected
+    _connected = True
+    logger.info("🔗 WebSocket Connected!")
+
     try:
-        response = supabase.table("websocket_stock_values") \
-            .select("*") \
-            .order("created_at", desc=True) \
-            .limit(limit) \
-            .execute()
-        
-        return response.data if response.data else []
-    
-    except Exception as error:
-        st.error(f"Could not fetch data: {error}")
-        return []
+        logger.info(f"📡 Subscribing to {len(STOCKS_WATCHLIST)} stocks from config.py...")
+
+        # Extract tokens from config
+        # Format: [(name, token, kind), ...]
+        indices = []  # Mode 1 tokens
+        stocks = []   # Mode 2 tokens
+
+        for name, token, kind in STOCKS_WATCHLIST:
+            if kind == "index":
+                indices.append(token)
+            else:
+                stocks.append(token)
+
+        logger.info(f"  • Indices: {len(indices)} (Mode 1) - {indices}")
+        logger.info(f"  • Stocks: {len(stocks)} (Mode 2)")
+
+        # Subscribe to indices in Mode 1
+        if indices:
+            _sws.subscribe(_correlation_id, 1, [
+                {"exchangeType": 1, "tokens": indices}
+            ])
+            logger.info(f"✓ Subscribed {len(indices)} indices in Mode 1")
+
+        # Subscribe to stocks in Mode 2 (batches of 950)
+        BATCH_SIZE = 950
+        for i in range(0, len(stocks), BATCH_SIZE):
+            batch = stocks[i:i + BATCH_SIZE]
+            _sws.subscribe(_correlation_id, 2, [
+                {"exchangeType": 1, "tokens": batch}
+            ])
+            batch_num = (i // BATCH_SIZE) + 1
+            logger.info(f"✓ Subscribed batch {batch_num}: {len(batch)} stocks in Mode 2")
+
+        logger.info(f"✅ Total subscribed: {len(STOCKS_WATCHLIST)} tokens ({len(indices)} indices + {len(stocks)} stocks)")
+
+    except Exception as e:
+        logger.error(f"🔴 Subscribe error: {e}", exc_info=True)
 
 
-# ── SECTION 6: DATA DELETION FUNCTION (Optional - for testing) ─
-# Delete records if needed for testing
-
-def delete_stock_records(limit_hours=24):
-    """
-    Delete old stock records (useful for testing).
-    
-    Args:
-        limit_hours: Delete records older than X hours
-    
-    Returns:
-        Tuple: (success: bool, message: str)
-    """
-    
-    try:
-        from datetime import timedelta
-        cutoff_time = datetime.now() - timedelta(hours=limit_hours)
-        
-        response = supabase.table("websocket_stock_values") \
-            .delete() \
-            .lt("created_at", cutoff_time.isoformat()) \
-            .execute()
-        
-        return True, f"✅ Deleted records older than {limit_hours} hours"
-    
-    except Exception as error:
-        return False, f"❌ Delete error: {error}"
+def on_error(wsapp, error):
+    """Called when WebSocket has an error."""
+    logger.error(f"🔴 WebSocket Error: {error}")
 
 
-# ── END OF SUPABASE HANDLER ───────────────────────────────────
+def on_close(wsapp):
+    """Called when WebSocket connection closes."""
+    global _connected
+    _connected = False
+    logger.info("🔌 WebSocket Closed")
+
+
+# ─────────────────────────────────────────────────────────────
+# SECTION 3 — START / STOP
+# ─────────────────────────────────────────────────────────────
+
+def start_websocket(jwt_token, api_key, client_id, feed_token):
+    """Start WebSocket in background thread."""
+    global _sws, _thread, latest_ticks, _connected
+
+    # Reset on new connection
+    latest_ticks = {}
+    _connected   = True
+
+    logger.info("🚀 Initializing Angel One WebSocket...")
+
+    _sws = SmartWebSocketV2(
+        auth_token  = jwt_token,
+        api_key     = api_key,
+        client_code = client_id,
+        feed_token  = feed_token
+    )
+
+    _sws.on_open  = on_open
+    _sws.on_data  = on_data
+    _sws.on_error = on_error
+    _sws.on_close = on_close
+
+    # WebSocket thread (daemon = auto-kills when main thread exits)
+    def _run():
+        try:
+            logger.info("📡 WebSocket connecting...")
+            _sws.connect()
+        except Exception as e:
+            logger.error(f"🔴 WebSocket connection failed: {e}", exc_info=True)
+            global _connected
+            _connected = False
+
+    _thread = threading.Thread(target=_run, daemon=True)
+    _thread.start()
+    logger.info("✓ WebSocket thread started!")
+
+
+def stop_websocket():
+    """Close WebSocket connection."""
+    global _sws, _connected
+    _connected = False
+    
+    if _sws:
+        try:
+            _sws.close_connection()
+            logger.info("🛑 WebSocket stopped.")
+        except Exception as e:
+            logger.error(f"Stop error: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# SECTION 4 — GETTERS
+# ─────────────────────────────────────────────────────────────
+
+def get_latest_ticks():
+    """Get all latest tick data."""
+    return latest_ticks
+
+
+def get_raw_messages():
+    """Get last 5 raw messages for debugging."""
+    return _raw_messages
+
+
+def is_connected():
+    """Check if WebSocket is connected."""
+    return _connected
+
+
+def get_subscription_status():
+    """Get subscription info for debugging."""
+    indices_count = sum(1 for _, _, kind in STOCKS_WATCHLIST if kind == "index")
+    stocks_count = sum(1 for _, _, kind in STOCKS_WATCHLIST if kind == "stock")
+    ticks_count = len(latest_ticks)
+    
+    return {
+        "total_subscribed": len(STOCKS_WATCHLIST),
+        "indices": indices_count,
+        "stocks": stocks_count,
+        "ticks_received": ticks_count,
+        "connected": _connected
+    }
