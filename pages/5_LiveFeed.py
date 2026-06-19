@@ -32,7 +32,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_volumes_batch():
     """
     Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
