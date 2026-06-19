@@ -33,32 +33,44 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def get_all_volumes_batch():
-    """
-    Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
-    Automatically skips weekends/holidays when no data exists.
-    """
     today = date.today()
     result = {}
     
     try:
-        cutoff_date = (today - timedelta(days=30)).isoformat()
+        cutoff_date = (today - timedelta(days=10)).isoformat()
         
-        response = supabase.table("websocket_stock_values")\
-                           .select("stock", "volume", "date")\
-                           .gte("date", cutoff_date)\
-                           .lt("date", today.isoformat())\
-                           .order("date", desc=True)\
-                           .limit(50000)\
-                           .execute()
-           # ← ADD THESE 3 LINES
-        st.write(f"Total rows fetched: {len(response.data)}")
-        sika_rows = [r for r in response.data if r['stock'] == 'SIKA']
-        st.write(f"SIKA raw rows from DB: {sika_rows}")
+        all_data = []
+        offset = 0
+        batch_size = 1000
+        
+        while True:
+            response = supabase.table("websocket_stock_values")\
+                               .select("stock", "volume", "date")\
+                               .gte("date", cutoff_date)\
+                               .lt("date", today.isoformat())\
+                               .order("date", desc=True)\
+                               .range(offset, offset + batch_size - 1)\
+                               .execute()
+            
+            all_data.extend(response.data)
+            
+            if len(response.data) < batch_size:
+                break
+            
+            offset += batch_size
         
         temp_data = {}
-        for record in response.data:
+        seen_dates = {}
+        
+        for record in all_data:
             stock = record['stock']
             volume = record['volume']
+            d = record['date']
+            
+            key = (stock, d)
+            if key in seen_dates:
+                continue
+            seen_dates[key] = True
             
             if stock not in temp_data:
                 temp_data[stock] = []
@@ -67,10 +79,7 @@ def get_all_volumes_batch():
                 temp_data[stock].append(volume)
         
         for stock, volumes in temp_data.items():
-            if len(volumes) >= 5:
-                result[stock] = volumes[:5]
-            else:
-                result[stock] = volumes
+            result[stock] = volumes[:5]
         
         return result
         
