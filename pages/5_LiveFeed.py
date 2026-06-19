@@ -32,17 +32,18 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_volumes_batch():
     """
-    Fetch last 5 available trading days volumes for ALL stocks in one go.
-    Handles missing dates by getting last 5 records per stock.
+    Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
+    Automatically skips weekends/holidays when no data exists.
     """
     today = date.today()
     result = {}
     
     try:
-        # Fetch ALL historical data (last 30 days) for volume calculation
+        # Fetch ALL historical data for last 30 days
         cutoff_date = (today - timedelta(days=30)).isoformat()
         
         response = supabase.table("websocket_stock_values")\
@@ -57,7 +58,6 @@ def get_all_volumes_batch():
         for record in response.data:
             stock = record['stock']
             volume = record['volume']
-            date_val = record['date']
             
             if stock not in temp_data:
                 temp_data[stock] = []
@@ -65,12 +65,12 @@ def get_all_volumes_batch():
             if volume and volume > 0:
                 temp_data[stock].append(volume)
         
-        # Take last 5 volumes for each stock
+        # Take last 5 volumes for each stock (already in descending order)
         for stock, volumes in temp_data.items():
             if len(volumes) >= 5:
-                result[stock] = volumes[:5]  # Already in descending date order
+                result[stock] = volumes[:5]  # Last 5 available days
             else:
-                result[stock] = volumes
+                result[stock] = volumes  # Less than 5 days available
         
         return result
         
@@ -82,27 +82,33 @@ def get_all_volumes_batch():
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
     Calculate vol_ratio, vol_signal, and status using pre-fetched data.
-    Handles case when less than 5 days data available.
+    ALWAYS calculates ratio, even with less than 5 days data.
     """
     
     # Get volumes from pre-fetched data
     hist_volumes = all_volumes.get(stock_name, [])
     
-    # If less than 5 days data, show building message
-    if len(hist_volumes) < 5:
-        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    # If NO historical data at all
+    if not hist_volumes:
+        return 0, "⏳ Building (0/5 days)", "WATCH"
     
+    # ALWAYS calculate ratio if we have at least 1 day of history
     try:
         median_volume = median(hist_volumes)
     except:
-        return 0, "🔴 Weak (0.00)", "WATCH"
+        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
     
     if median_volume == 0 or current_volume == 0:
-        return 0, "🔴 Weak (0.00)", "WATCH"
+        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
     
+    # ALWAYS calculate vol_ratio
     vol_ratio = current_volume / median_volume
     
-    # Generate signal with emojis (Option 2 - Store with emojis)
+    # If less than 5 days, show building message (but keep ratio)
+    if len(hist_volumes) < 5:
+        return round(vol_ratio, 2), f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    
+    # 5+ days available - full signal
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -112,14 +118,12 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
-    # Determine status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
         status = "WATCH"
     
     return round(vol_ratio, 2), vol_signal, status
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 5: SUPABASE UPLOAD FUNCTION
