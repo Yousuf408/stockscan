@@ -117,10 +117,12 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks):
-    """Upload live data with vol_ratio, vol_signal, status"""
-     # Clear cache to ensure fresh historical data
+    """
+    Upload live data with vol_ratio, vol_signal, status.
+    Clears cache to ensure fresh historical volumes.
+    """
+    # Clear cache to ensure fresh historical data
     get_all_volumes_batch.clear()
-
     
     rows = []
     today = date.today().isoformat()
@@ -213,7 +215,7 @@ if "angel_creds" not in st.session_state:
             
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 7: CONNECT / DISCONNECT BUTTONS
+# SECTION 7: CONNECT / DISCONNECT / UPLOAD BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
 
 col1, col2, col3 = st.columns(3)
@@ -261,7 +263,6 @@ with col3:
                         st.success(message)
                     else:
                         st.error(message)
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 8: DIVIDER
