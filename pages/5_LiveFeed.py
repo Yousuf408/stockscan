@@ -30,47 +30,73 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FUNCTION: calculate_volume_metrics
+# SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_all_volumes_batch():
+    """
+    Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
+    Automatically skips weekends/holidays when no data exists.
+    """
+    today = date.today()
+    result = {}
+    
+    try:
+        cutoff_date = (today - timedelta(days=30)).isoformat()
+        
+        response = supabase.table("websocket_stock_values")\
+                           .select("stock", "volume", "date")\
+                           .gte("date", cutoff_date)\
+                           .lt("date", today.isoformat())\
+                           .order("date", desc=True)\
+                           .execute()
+        
+        temp_data = {}
+        for record in response.data:
+            stock = record['stock']
+            volume = record['volume']
+            
+            if stock not in temp_data:
+                temp_data[stock] = []
+            
+            if volume and volume > 0:
+                temp_data[stock].append(volume)
+        
+        for stock, volumes in temp_data.items():
+            if len(volumes) >= 5:
+                result[stock] = volumes[:5]
+            else:
+                result[stock] = volumes
+        
+        return result
+        
+    except Exception as e:
+        st.warning(f"⚠️ Volume data fetch issue: {str(e)}")
+        return {}
+
 
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
     Calculate vol_ratio, vol_signal, and status using pre-fetched data.
-    
-    Logic:
-      1. Fetch historical volumes for this stock from pre-fetched dict.
-      2. If no history → show "No history".
-      3. Calculate median of available historical volumes.
-      4. Compute vol_ratio = current_volume / median_volume.
-      5. ALWAYS generate emoji-based signal (🔥, 🟢, 🟡, 🔴) based on ratio.
-      6. If less than 5 days of history → append "[Building X/5]" to signal.
-      7. Determine status: READY if ratio > 1.5 and price change positive, else WATCH.
-    
-    Returns:
-        (vol_ratio, vol_signal, status)
+    Always shows emoji signal, adds building suffix if insufficient history.
     """
-    
-    # 1️⃣ Get historical volumes for this stock (list of volumes from last 5 available days)
     hist_volumes = all_volumes.get(stock_name, [])
     
-    # 2️⃣ If no historical data at all, return "No history"
     if not hist_volumes:
         return 0, "⏳ No history (0/5 days)", "WATCH"
     
-    # 3️⃣ Calculate median of available historical volumes
     try:
         median_volume = median(hist_volumes)
     except:
         return 0, "⏳ Error (median)", "WATCH"
     
-    # 4️⃣ Safety checks: zero values
     if median_volume == 0 or current_volume == 0:
         return 0, "⏳ Insufficient data", "WATCH"
     
-    # 5️⃣ Calculate vol_ratio
     vol_ratio = current_volume / median_volume
     
-    # 6️⃣ ALWAYS generate emoji signal based on vol_ratio
+    # Always generate emoji signal
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -80,17 +106,16 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
-    # 7️⃣ If less than 5 days of history, append building indicator (keeps emoji)
+    # Add building suffix if less than 5 days
     if len(hist_volumes) < 5:
         vol_signal = f"{vol_signal} [Building {len(hist_volumes)}/5]"
     
-    # 8️⃣ Determine status: READY only if Strong/Explosive and price up
+    # Status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
         status = "WATCH"
     
-    # 9️⃣ Return rounded ratio, signal with emoji, and status
     return round(vol_ratio, 2), vol_signal, status
 
 # ──────────────────────────────────────────────────────────────────────────────
