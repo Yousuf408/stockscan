@@ -81,17 +81,18 @@ def get_all_volumes_batch():
 
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
-    Calculate vol_ratio, vol_signal, and status.
+    Calculate vol_ratio, vol_signal, and status using pre-fetched data.
+    ALWAYS calculates ratio, even with less than 5 days data.
     """
     
-    # Step 1: Get historical volumes (last 5 trading days)
+    # Get volumes from pre-fetched data
     hist_volumes = all_volumes.get(stock_name, [])
     
-    # If no historical data
-    if len(hist_volumes) < 5:
-        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    # If NO historical data at all
+    if not hist_volumes:
+        return 0, "⏳ Building (0/5 days)", "WATCH"
     
-    # Step 2: Calculate MEDIAN
+    # ALWAYS calculate ratio if we have at least 1 day of history
     try:
         median_volume = median(hist_volumes)
     except:
@@ -100,10 +101,14 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     if median_volume == 0 or current_volume == 0:
         return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
     
-    # Step 3: Calculate vol_ratio
+    # ALWAYS calculate vol_ratio
     vol_ratio = current_volume / median_volume
     
-    # Step 4: Determine vol_signal (with emojis)
+    # If less than 5 days, show building message (but keep ratio)
+    if len(hist_volumes) < 5:
+        return round(vol_ratio, 2), f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+    
+    # 5+ days available - full signal
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -113,7 +118,6 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
-    # Step 5: Determine status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
