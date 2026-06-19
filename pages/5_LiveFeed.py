@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/5_LiveFeed.py - PRODUCTION READY (OPTION A — raw ticks, no Signal in table)
+# pages/5_LiveFeed.py - PRODUCTION READY
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -49,8 +49,10 @@ if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
-if "auto_refresh" not in st.session_state:
-    st.session_state.auto_refresh = True
+if "auto_upload" not in st.session_state:
+    st.session_state.auto_upload = False
+if "last_upload_time" not in st.session_state:
+    st.session_state.last_upload_time = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -107,7 +109,7 @@ def calculate_volume_metrics(stock_name: str, current_volume: int, change_pct: f
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SUPABASE UPLOAD — computes Signal/Status here, not in table
+# SUPABASE UPLOAD — computes Signal/Status, called on button OR auto toggle
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks: dict):
@@ -154,14 +156,14 @@ def upload_to_supabase(ticks: dict):
                 .eq("date", today) \
                 .execute()
         supabase.table("websocket_stock_values").insert(rows).execute()
+        st.session_state.last_upload_time = datetime.now().strftime("%H:%M:%S")
         return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# BUILD DISPLAY DATAFRAME — raw ticks only, ZERO Supabase calls
-# Signal/Status columns removed from here (computed only on upload)
+# BUILD DISPLAY DATAFRAME — raw ticks only, ZERO Supabase calls, instant render
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_dataframe(ticks: dict) -> pd.DataFrame:
@@ -205,7 +207,7 @@ def build_dataframe(ticks: dict) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CONNECT / DISCONNECT / UPLOAD BUTTONS
+# CONNECT / DISCONNECT / MANUAL UPLOAD BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
 
 col1, col2, col3 = st.columns(3)
@@ -238,7 +240,7 @@ with col2:
             angel_ws.stop_websocket()
             st.session_state.angel_connected = False
             st.session_state.angel_creds = None
-            st.session_state.auto_refresh = False
+            st.session_state.auto_upload = False
             st.rerun()
 
 with col3:
@@ -278,15 +280,21 @@ if st.session_state.angel_connected:
         st.write("**Sample ticks (first 5):**")
         st.json(dict(list(ticks_dbg.items())[:5]))
 
-    # ── Auto-refresh toggle + manual button ───────────────────
-    auto_col, manual_col = st.columns([3, 1])
-    with auto_col:
-        st.session_state.auto_refresh = st.toggle(
-            "🔁 Auto Refresh (every 1 min)", value=st.session_state.auto_refresh
+    # ── Auto Upload Toggle + Refresh Now ─────────────────────
+    # Toggle ON  → uploads to Supabase + reruns page every 1 min
+    # Toggle OFF → manual upload only via "📤 Update to Supabase" button above
+    toggle_col, refresh_col, status_col = st.columns([3, 1, 1])
+    with toggle_col:
+        st.session_state.auto_upload = st.toggle(
+            "🔁 Auto Upload to Supabase (every 1 min)",
+            value=st.session_state.auto_upload
         )
-    with manual_col:
+    with refresh_col:
         if st.button("🔄 Refresh Now", use_container_width=True):
             st.rerun()
+    with status_col:
+        if st.session_state.last_upload_time:
+            st.caption(f"Last upload: {st.session_state.last_upload_time}")
 
     # ── Pull latest ticks ─────────────────────────────────────
     ticks = angel_ws.latest_ticks
@@ -311,11 +319,10 @@ if st.session_state.angel_connected:
     if not ticks:
         st.warning(
             "⏳ **No ticks received yet.**  \n"
-            "WebSocket is connecting — usually takes 3–10 seconds. "
-            "Page auto-refreshes every 1 min."
+            "WebSocket is connecting — usually takes 3–10 seconds."
         )
 
-    # ── Render table instantly — no Supabase calls here ───────
+    # ── Render table instantly — zero Supabase calls ──────────
     else:
         if stocks_with_ltp == 0:
             st.warning(
@@ -325,7 +332,7 @@ if st.session_state.angel_connected:
         else:
             st.success(f"✅ {stocks_with_ltp} / {len(STOCKS_WATCHLIST)} stocks have live LTP")
 
-        df = build_dataframe(ticks)   # ← pure dict lookup, instant
+        df = build_dataframe(ticks)   # pure dict lookup — instant
 
         st.dataframe(
             df,
@@ -337,12 +344,19 @@ if st.session_state.angel_connected:
         st.caption(
             f"🕐 {datetime.now().strftime('%H:%M:%S')}  |  "
             f"Tokens: {len(ticks)}/{len(STOCKS_WATCHLIST)}  |  "
-            f"LTP active: {stocks_with_ltp}  |  "
-            f"Signal/Status: click '📤 Update to Supabase'"
+            f"LTP active: {stocks_with_ltp}"
         )
 
-    # ── Auto-refresh (1 min, no JavaScript) ───────────────────
-    if st.session_state.auto_refresh:
+    # ── Auto Upload every 1 min (also triggers page rerun) ────
+    # Page naturally refreshes on each rerun so table stays live
+    if st.session_state.auto_upload:
+        if ticks:
+            with st.spinner("⏳ Auto uploading to Supabase..."):
+                ok, msg = upload_to_supabase(ticks)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
         time.sleep(60)
         st.rerun()
 
