@@ -370,3 +370,21 @@ else:
     - ✅ `smartapi-python` installed hai?
     - ✅ Internet connection hai?
     """)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 11: AUTO-CLICK "Update to Supabase" EVERY 60 SECONDS
+# ──────────────────────────────────────────────────────────────────────────────
+
+st.components.v1.html("""
+    <script>
+        setInterval(function() {
+            const buttons = document.querySelectorAll('button');
+            for (let btn of buttons) {
+                if (btn.innerText.includes('Update to Supabase')) {
+                    btn.click();
+                    break;
+                }
+            }
+        }, 60000);  // 60,000 ms = 1 minute
+    </script>
+""", height=0)
