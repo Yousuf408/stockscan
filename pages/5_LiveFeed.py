@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/5_LiveFeed.py - COMPLETE WORKING CODE
+# pages/5_LiveFeed.py - COMPLETE FIXED CODE WITH CACHING
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -30,11 +30,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: VOLUME METRICS FUNCTIONS
+# SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def get_last_5_days_volumes(stock_name):
-    """Get last 5 trading days volumes from Supabase"""
+@st.cache_data(ttl=300)  # ✅ Cache for 5 minutes
+def get_stock_volumes(stock_name):
+    """Get last 5 days volumes with caching"""
     today = date.today()
     volumes = []
     
@@ -50,7 +51,7 @@ def get_last_5_days_volumes(stock_name):
             
             if response.data and response.data[0]['volume'] > 0:
                 volumes.append(response.data[0]['volume'])
-        except Exception as e:
+        except:
             continue
     
     return volumes
@@ -62,14 +63,13 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct):
     Returns: (vol_ratio, vol_signal, status)
     """
     
-    # Get last 5 days volumes
-    hist_volumes = get_last_5_days_volumes(stock_name)
+    # ✅ Get cached volumes
+    hist_volumes = get_stock_volumes(stock_name)
     
     # If less than 5 days data, show building message
     if len(hist_volumes) < 5:
         return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
     
-    # Calculate median of last 5 days
     try:
         median_volume = median(hist_volumes)
     except:
@@ -78,10 +78,8 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct):
     if median_volume == 0:
         return 0, "🔴 Weak (0)", "WATCH"
     
-    # Calculate volume ratio
     vol_ratio = current_volume / median_volume
     
-    # Determine vol_signal based on ratio
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -91,7 +89,6 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct):
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
-    # Determine status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
@@ -101,7 +98,7 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: SUPABASE UPLOAD FUNCTION
+# SECTION 5: SUPABASE UPLOAD FUNCTION
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks):
@@ -117,7 +114,6 @@ def upload_to_supabase(ticks):
             current_volume = int(tick.get('volume', 0))
             change_pct = float(tick.get('change_pct', 0))
             
-            # Calculate volume metrics
             vol_ratio, vol_signal, status = calculate_volume_metrics(
                 name, 
                 current_volume,
@@ -145,21 +141,23 @@ def upload_to_supabase(ticks):
         return False, "No data to upload"
     
     try:
-        # Delete only today's data
         supabase.table("websocket_stock_values")\
                  .delete()\
                  .eq("date", today)\
                  .execute()
         
-        # Insert fresh data
         response = supabase.table("websocket_stock_values").insert(rows).execute()
+        
+        # ✅ Clear cache after upload
+        get_stock_volumes.clear()
+        
         return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: SESSION STATE INITIALIZATION
+# SECTION 6: SESSION STATE INITIALIZATION
 # ──────────────────────────────────────────────────────────────────────────────
 
 if "angel_connected" not in st.session_state:
@@ -169,7 +167,7 @@ if "angel_creds" not in st.session_state:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: CONNECT / DISCONNECT BUTTONS
+# SECTION 7: CONNECT / DISCONNECT BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
 
 col1, col2, col3 = st.columns(3)
@@ -220,19 +218,19 @@ with col3:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: DIVIDER
+# SECTION 8: DIVIDER
 # ──────────────────────────────────────────────────────────────────────────────
 
 st.divider()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: MAIN DISPLAY (WHEN CONNECTED)
+# SECTION 9: MAIN DISPLAY (WHEN CONNECTED)
 # ──────────────────────────────────────────────────────────────────────────────
 
 if st.session_state.angel_connected:
 
-    # ── Debug Panel ────────────────────────────────────────────
+    # ── SECTION 9A: Debug Panel ────────────────────────────────
     with st.expander("🔍 Debug Panel", expanded=False):
         raw = angel_ws._raw_messages
         ticks_debug = angel_ws.latest_ticks
@@ -250,7 +248,7 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-    # ── Live Table ────────────────────────────────────────────
+    # ── SECTION 9B: Live Table ──────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
@@ -269,7 +267,7 @@ if st.session_state.angel_connected:
             volume = tick.get('volume', 0)
             timestamp = tick.get('timestamp', '-')
 
-            # ✅ Calculate Signal & Status
+            # ✅ Calculate Signal & Status with caching
             if tick and ltp > 0:
                 current_volume = int(volume)
                 vol_ratio, vol_signal, status = calculate_volume_metrics(
@@ -329,7 +327,7 @@ if st.session_state.angel_connected:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION: DISPLAY WHEN NOT CONNECTED
+# SECTION 10: DISPLAY WHEN NOT CONNECTED
 # ──────────────────────────────────────────────────────────────────────────────
 
 else:
