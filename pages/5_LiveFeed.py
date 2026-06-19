@@ -110,15 +110,11 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     
     return round(vol_ratio, 2), vol_signal, status
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 5: SUPABASE UPLOAD FUNCTION
+# SECTION 5: SUPABASE UPLOAD FUNCTION (FIXED – NO .clear())
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks):
     """Upload live data with vol_ratio, vol_signal, status"""
-     # Clear cache to ensure fresh historical data
-    get_all_volumes_batch.clear()
-
-    
     rows = []
     today = date.today().isoformat()
     
@@ -167,9 +163,6 @@ def upload_to_supabase(ticks):
                  .execute()
         
         response = supabase.table("websocket_stock_values").insert(rows).execute()
-        
-        # Clear cache after upload
-        get_all_volumes_batch.clear()
         
         return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
