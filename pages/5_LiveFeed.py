@@ -32,41 +32,57 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
-
 @st.cache_data(ttl=600)  # Cache for 10 minutes
 def get_all_volumes_batch():
-    """Fetch last 5 days volumes for ALL stocks in one go"""
+    """
+    Fetch last 5 available trading days volumes for ALL stocks in one go.
+    Handles missing dates by getting last 5 records per stock.
+    """
     today = date.today()
     result = {}
     
-    # Get last 5 days dates
-    dates = [(today - timedelta(days=i)).isoformat() for i in range(1, 6)]
-    
     try:
-        # Fetch all data for last 5 days
+        # Fetch ALL historical data (last 30 days) for volume calculation
+        cutoff_date = (today - timedelta(days=30)).isoformat()
+        
         response = supabase.table("websocket_stock_values")\
                            .select("stock", "volume", "date")\
-                           .in_("date", dates)\
+                           .gte("date", cutoff_date)\
+                           .lt("date", today.isoformat())\
+                           .order("date", desc=True)\
                            .execute()
         
-        # Group by stock
+        # Group by stock and collect last 5 volumes
+        temp_data = {}
         for record in response.data:
             stock = record['stock']
             volume = record['volume']
-            if stock not in result:
-                result[stock] = []
-            if volume > 0:
-                result[stock].append(volume)
+            date_val = record['date']
+            
+            if stock not in temp_data:
+                temp_data[stock] = []
+            
+            if volume and volume > 0:
+                temp_data[stock].append(volume)
+        
+        # Take last 5 volumes for each stock
+        for stock, volumes in temp_data.items():
+            if len(volumes) >= 5:
+                result[stock] = volumes[:5]  # Already in descending date order
+            else:
+                result[stock] = volumes
         
         return result
+        
     except Exception as e:
+        st.warning(f"⚠️ Volume data fetch issue: {str(e)}")
         return {}
 
 
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
-    Calculate vol_ratio, vol_signal, and status using pre-fetched data
-    Returns: (vol_ratio, vol_signal, status)
+    Calculate vol_ratio, vol_signal, and status using pre-fetched data.
+    Handles case when less than 5 days data available.
     """
     
     # Get volumes from pre-fetched data
@@ -79,13 +95,14 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     try:
         median_volume = median(hist_volumes)
     except:
-        return 0, "🔴 Weak (0)", "WATCH"
+        return 0, "🔴 Weak (0.00)", "WATCH"
     
-    if median_volume == 0:
-        return 0, "🔴 Weak (0)", "WATCH"
+    if median_volume == 0 or current_volume == 0:
+        return 0, "🔴 Weak (0.00)", "WATCH"
     
     vol_ratio = current_volume / median_volume
     
+    # Generate signal with emojis (Option 2 - Store with emojis)
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -95,6 +112,7 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
+    # Determine status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
