@@ -48,6 +48,7 @@ def get_all_volumes_batch():
                            .gte("date", cutoff_date)\
                            .lt("date", today.isoformat())\
                            .order("date", desc=True)\
+                           .limit(50000)\
                            .execute()
         
         temp_data = {}
