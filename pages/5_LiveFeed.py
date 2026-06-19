@@ -50,6 +50,10 @@ def get_all_volumes_batch():
                            .order("date", desc=True)\
                            .limit(50000)\
                            .execute()
+           # ← ADD THESE 3 LINES
+        st.write(f"Total rows fetched: {len(response.data)}")
+        sika_rows = [r for r in response.data if r['stock'] == 'SIKA']
+        st.write(f"SIKA raw rows from DB: {sika_rows}")
         
         temp_data = {}
         for record in response.data:
