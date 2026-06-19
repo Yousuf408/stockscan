@@ -99,9 +99,6 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
 
 def upload_to_supabase(ticks):
     """Upload live data with vol_ratio, vol_signal, status"""
-
-    # ✅ Clear cache to get latest historical volumes
-    get_all_volumes_batch.clear()
     
     rows = []
     today = date.today().isoformat()
