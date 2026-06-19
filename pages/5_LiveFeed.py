@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/5_LiveFeed.py - COMPLETE FIXED CODE WITH CACHING
+# pages/5_LiveFeed.py - COMPLETE WORKING CODE (NO INFINITE LOOP)
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -33,38 +33,44 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)  # ✅ Cache for 5 minutes
-def get_stock_volumes(stock_name):
-    """Get last 5 days volumes with caching"""
+@st.cache_data(ttl=600)  # Cache for 10 minutes
+def get_all_volumes_batch():
+    """Fetch last 5 days volumes for ALL stocks in one go"""
     today = date.today()
-    volumes = []
+    result = {}
     
-    for i in range(1, 6):
-        past_date = (today - timedelta(days=i)).isoformat()
+    # Get last 5 days dates
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(1, 6)]
+    
+    try:
+        # Fetch all data for last 5 days
+        response = supabase.table("websocket_stock_values")\
+                           .select("stock", "volume", "date")\
+                           .in_("date", dates)\
+                           .execute()
         
-        try:
-            response = supabase.table("websocket_stock_values")\
-                               .select("volume")\
-                               .eq("stock", stock_name)\
-                               .eq("date", past_date)\
-                               .execute()
-            
-            if response.data and response.data[0]['volume'] > 0:
-                volumes.append(response.data[0]['volume'])
-        except:
-            continue
-    
-    return volumes
+        # Group by stock
+        for record in response.data:
+            stock = record['stock']
+            volume = record['volume']
+            if stock not in result:
+                result[stock] = []
+            if volume > 0:
+                result[stock].append(volume)
+        
+        return result
+    except Exception as e:
+        return {}
 
 
-def calculate_volume_metrics(stock_name, current_volume, change_pct):
+def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
-    Calculate vol_ratio, vol_signal, and status
+    Calculate vol_ratio, vol_signal, and status using pre-fetched data
     Returns: (vol_ratio, vol_signal, status)
     """
     
-    # ✅ Get cached volumes
-    hist_volumes = get_stock_volumes(stock_name)
+    # Get volumes from pre-fetched data
+    hist_volumes = all_volumes.get(stock_name, [])
     
     # If less than 5 days data, show building message
     if len(hist_volumes) < 5:
@@ -106,6 +112,9 @@ def upload_to_supabase(ticks):
     rows = []
     today = date.today().isoformat()
     
+    # Pre-fetch all volumes once
+    all_volumes = get_all_volumes_batch()
+    
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
         ltp = tick.get('ltp', 0)
@@ -117,7 +126,8 @@ def upload_to_supabase(ticks):
             vol_ratio, vol_signal, status = calculate_volume_metrics(
                 name, 
                 current_volume,
-                change_pct
+                change_pct,
+                all_volumes
             )
             
             rows.append({
@@ -148,8 +158,8 @@ def upload_to_supabase(ticks):
         
         response = supabase.table("websocket_stock_values").insert(rows).execute()
         
-        # ✅ Clear cache after upload
-        get_stock_volumes.clear()
+        # Clear cache after upload
+        get_all_volumes_batch.clear()
         
         return True, f"✅ Updated {len(rows)} stocks with volume signals"
     except Exception as e:
@@ -252,6 +262,10 @@ if st.session_state.angel_connected:
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
+    # ✅ Fetch volumes ONCE outside the loop
+    all_volumes = get_all_volumes_batch()
+    st.caption(f"✅ Loaded volume data for {len(all_volumes)} stocks")
+
     while True:
         ticks = angel_ws.latest_ticks
 
@@ -267,13 +281,14 @@ if st.session_state.angel_connected:
             volume = tick.get('volume', 0)
             timestamp = tick.get('timestamp', '-')
 
-            # ✅ Calculate Signal & Status with caching
+            # ✅ Calculate Signal & Status using pre-fetched data
             if tick and ltp > 0:
                 current_volume = int(volume)
                 vol_ratio, vol_signal, status = calculate_volume_metrics(
                     name, 
                     current_volume,
-                    change_pct
+                    change_pct,
+                    all_volumes
                 )
             else:
                 vol_signal = "⏳"
