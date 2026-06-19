@@ -188,7 +188,7 @@ if "angel_creds" not in st.session_state:
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 6.5: AUTO-CONNECT TO ANGEL ONE ON PAGE LOAD
 # ──────────────────────────────────────────────────────────────────────────────
-
+"""
 # Auto-connect only if not already connected
 if not st.session_state.angel_connected:
     with st.spinner("🔄 Auto-connecting to Angel One..."):
@@ -207,8 +207,8 @@ if not st.session_state.angel_connected:
             st.rerun()
         else:
             st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
-
-
+            
+"""
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 7: CONNECT / DISCONNECT BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
