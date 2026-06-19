@@ -120,6 +120,7 @@ def upload_to_supabase(ticks):
     
     # Pre-fetch all volumes once
     all_volumes = get_all_volumes_batch()
+    st.write("SIKA volumes:", all_volumes.get("SIKA"))   # ← ADD THIS LINE for debuging volume Ratio
     
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
