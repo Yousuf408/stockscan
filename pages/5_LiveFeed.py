@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/5_LiveFeed.py - COMPLETE WORKING CODE (FIXED)
+# pages/5_LiveFeed.py - PRODUCTION READY (No infinite loop)
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -33,36 +33,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Remove @st.cache_data to avoid SessionInfo error
-def get_all_volumes_batch():
-    """Fetch last 5 days volumes for ALL stocks in one go"""
-    today = date.today()
-    result = {}
-    
-    # Get last 5 days dates
-    dates = [(today - timedelta(days=i)).isoformat() for i in range(1, 6)]
-    
-    try:
-        # Fetch all data for last 5 days
-        response = supabase.table("websocket_stock_values")\
-                           .select("stock", "volume", "date")\
-                           .in_("date", dates)\
-                           .execute()
-        
-        # Group by stock
-        for record in response.data:
-            stock = record['stock']
-            volume = record['volume']
-            if stock not in result:
-                result[stock] = []
-            if volume and volume > 0:
-                result[stock].append(volume)
-        
-        return result
-    except Exception as e:
-        return {}
-
-
 def get_stock_volume_history(stock_name):
     """Get historical volumes for a specific stock"""
     today = date.today()
@@ -92,10 +62,8 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct):
     Returns: (vol_ratio, vol_signal, status)
     """
     
-    # Get historical volumes
     hist_volumes = get_stock_volume_history(stock_name)
     
-    # If no historical data, show building message
     if len(hist_volumes) < 5:
         return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
     
@@ -189,6 +157,8 @@ if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = datetime.now()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -275,80 +245,93 @@ if st.session_state.angel_connected:
 
     # ── SECTION 9B: Live Table ──────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
-    placeholder = st.empty()
+    
+    # ✅ Auto-refresh every 2 seconds using Streamlit's built-in rerun
+    if st.button("🔄 Auto-Refresh ON", use_container_width=True):
+        st.session_state.auto_refresh = True
+    
+    # Get latest ticks
+    ticks = angel_ws.latest_ticks
 
-    while True:
-        ticks = angel_ws.latest_ticks
+    rows = []
+    for name, token, kind in STOCKS_WATCHLIST:
+        tick = ticks.get(token, {})
+        ltp = tick.get('ltp', 0)
+        open_p = tick.get('open', 0)
+        high_p = tick.get('high', 0)
+        low_p = tick.get('low', 0)
+        change = tick.get('change', 0)
+        change_pct = tick.get('change_pct', 0)
+        volume = tick.get('volume', 0)
+        timestamp = tick.get('timestamp', '-')
 
-        rows = []
-        for name, token, kind in STOCKS_WATCHLIST:
-            tick = ticks.get(token, {})
-            ltp = tick.get('ltp', 0)
-            open_p = tick.get('open', 0)
-            high_p = tick.get('high', 0)
-            low_p = tick.get('low', 0)
-            change = tick.get('change', 0)
-            change_pct = tick.get('change_pct', 0)
-            volume = tick.get('volume', 0)
-            timestamp = tick.get('timestamp', '-')
-
-            # ✅ Calculate Signal & Status
-            if tick and ltp > 0:
-                current_volume = int(volume)
-                vol_ratio, vol_signal, status = calculate_volume_metrics(
-                    name, 
-                    current_volume,
-                    change_pct
-                )
-            else:
-                vol_signal = "⏳"
-                status = "⏳"
-
-            # Format based on whether we have data
-            if tick:
-                ltp_str = f"₹{ltp:.2f}"
-                open_str = f"₹{open_p:.2f}"
-                high_str = f"₹{high_p:.2f}"
-                low_str = f"₹{low_p:.2f}"
-                chng_str = f"{change:+.2f}"
-                pct_str = f"{change_pct:+.2f}%"
-                vol_str = f"{volume:,}" if volume > 0 else "0"
-                time_str = timestamp
-            else:
-                ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
-                time_str = "-"
-                vol_signal = "⏳"
-                status = "⏳"
-
-            rows.append({
-                "Stock": name,
-                "Type": "📈 Index" if kind == "index" else "🏢 Stock",
-                "LTP (₹)": ltp_str,
-                "Open": open_str,
-                "High": high_str,
-                "Low": low_str,
-                "Change": chng_str,
-                "Change %": pct_str,
-                "Volume": vol_str,
-                "Signal": vol_signal,
-                "Status": status,
-                "Time": time_str,
-            })
-
-        df = pd.DataFrame(rows)
-
-        with placeholder.container():
-            st.dataframe(
-                df,
-                hide_index=True,
-                use_container_width=True,
+        # ✅ Calculate Signal & Status
+        if tick and ltp > 0:
+            current_volume = int(volume)
+            vol_ratio, vol_signal, status = calculate_volume_metrics(
+                name, 
+                current_volume,
+                change_pct
             )
-            st.caption(
-                f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
-            )
+        else:
+            vol_signal = "⏳"
+            status = "⏳"
 
+        # Format based on whether we have data
+        if tick:
+            ltp_str = f"₹{ltp:.2f}"
+            open_str = f"₹{open_p:.2f}" if open_p > 0 else "⏳"
+            high_str = f"₹{high_p:.2f}" if high_p > 0 else "⏳"
+            low_str = f"₹{low_p:.2f}" if low_p > 0 else "⏳"
+            chng_str = f"{change:+.2f}"
+            pct_str = f"{change_pct:+.2f}%"
+            vol_str = f"{volume:,}" if volume > 0 else "0"
+            time_str = timestamp
+        else:
+            ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
+            time_str = "-"
+            vol_signal = "⏳"
+            status = "⏳"
+
+        rows.append({
+            "Stock": name,
+            "Type": "📈 Index" if kind == "index" else "🏢 Stock",
+            "LTP (₹)": ltp_str,
+            "Open": open_str,
+            "High": high_str,
+            "Low": low_str,
+            "Change": chng_str,
+            "Change %": pct_str,
+            "Volume": vol_str,
+            "Signal": vol_signal,
+            "Status": status,
+            "Time": time_str,
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Display the table
+    st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=True,
+    )
+    
+    # Show refresh info
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        st.caption(
+            f"🕐 Last refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+            f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+        )
+    with col_info2:
+        if st.button("🔄 Refresh Now", use_container_width=True):
+            st.rerun()
+    
+    # Auto-refresh logic (every 2 seconds)
+    if "auto_refresh" in st.session_state and st.session_state.auto_refresh:
         time.sleep(2)
+        st.rerun()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
