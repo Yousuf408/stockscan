@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# pages/5_LiveFeed.py - PRODUCTION READY (No infinite loop)
+# pages/5_LiveFeed.py - PRODUCTION READY (FIXED TABLE DISPLAY)
 # ──────────────────────────────────────────────────────────────────────────────
 
 import streamlit as st
@@ -157,8 +157,6 @@ if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = datetime.now()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -246,13 +244,26 @@ if st.session_state.angel_connected:
     # ── SECTION 9B: Live Table ──────────────────────────────────
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     
-    # ✅ Auto-refresh every 2 seconds using Streamlit's built-in rerun
-    if st.button("🔄 Auto-Refresh ON", use_container_width=True):
-        st.session_state.auto_refresh = True
-    
     # Get latest ticks
     ticks = angel_ws.latest_ticks
+    
+    # Debug: Check if ticks have data
+    if not ticks:
+        st.warning("⏳ Waiting for ticks from WebSocket...")
+    else:
+        # Count stocks with data
+        stocks_with_data = 0
+        for name, token, kind in STOCKS_WATCHLIST:
+            tick = ticks.get(token, {})
+            if tick.get('ltp', 0) > 0:
+                stocks_with_data += 1
+        
+        if stocks_with_data == 0:
+            st.warning(f"⏳ Received ticks for {len(ticks)} tokens but no LTP data yet. Waiting...")
+        else:
+            st.success(f"✅ {stocks_with_data} stocks have LTP data")
 
+    # Build table rows
     rows = []
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
@@ -265,7 +276,7 @@ if st.session_state.angel_connected:
         volume = tick.get('volume', 0)
         timestamp = tick.get('timestamp', '-')
 
-        # ✅ Calculate Signal & Status
+        # Calculate Signal & Status only if we have LTP
         if tick and ltp > 0:
             current_volume = int(volume)
             vol_ratio, vol_signal, status = calculate_volume_metrics(
@@ -278,7 +289,7 @@ if st.session_state.angel_connected:
             status = "⏳"
 
         # Format based on whether we have data
-        if tick:
+        if tick and ltp > 0:
             ltp_str = f"₹{ltp:.2f}"
             open_str = f"₹{open_p:.2f}" if open_p > 0 else "⏳"
             high_str = f"₹{high_p:.2f}" if high_p > 0 else "⏳"
@@ -288,8 +299,14 @@ if st.session_state.angel_connected:
             vol_str = f"{volume:,}" if volume > 0 else "0"
             time_str = timestamp
         else:
-            ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
-            time_str = "-"
+            ltp_str = "⏳"
+            open_str = "⏳"
+            high_str = "⏳"
+            low_str = "⏳"
+            chng_str = "⏳"
+            pct_str = "⏳"
+            vol_str = "⏳"
+            time_str = "⏳"
             vol_signal = "⏳"
             status = "⏳"
 
@@ -308,30 +325,37 @@ if st.session_state.angel_connected:
             "Time": time_str,
         })
 
-    df = pd.DataFrame(rows)
-
-    # Display the table
-    st.dataframe(
-        df,
-        hide_index=True,
-        use_container_width=True,
-    )
-    
-    # Show refresh info
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        st.caption(
-            f"🕐 Last refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-            f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+    if rows:
+        df = pd.DataFrame(rows)
+        
+        # Display the table
+        st.dataframe(
+            df,
+            hide_index=True,
+            use_container_width=True,
         )
-    with col_info2:
-        if st.button("🔄 Refresh Now", use_container_width=True):
-            st.rerun()
-    
-    # Auto-refresh logic (every 2 seconds)
-    if "auto_refresh" in st.session_state and st.session_state.auto_refresh:
-        time.sleep(2)
-        st.rerun()
+        
+        # Show refresh info
+        col_info1, col_info2 = st.columns([3, 1])
+        with col_info1:
+            st.caption(
+                f"🕐 Last refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+            )
+        with col_info2:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.rerun()
+        
+        # Auto-refresh with JavaScript
+        st.markdown("""
+            <script>
+                setTimeout(function() {
+                    window.location.reload();
+                }, 2000);
+            </script>
+        """, unsafe_allow_html=True)
+    else:
+        st.error("❌ No data to display. Please check WebSocket connection.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
