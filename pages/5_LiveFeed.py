@@ -28,12 +28,10 @@ SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_all_volumes_batch():
     """
     Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
@@ -43,7 +41,6 @@ def get_all_volumes_batch():
     result = {}
     
     try:
-        # Fetch ALL historical data for last 30 days
         cutoff_date = (today - timedelta(days=30)).isoformat()
         
         response = supabase.table("websocket_stock_values")\
@@ -53,7 +50,6 @@ def get_all_volumes_batch():
                            .order("date", desc=True)\
                            .execute()
         
-        # Group by stock and collect last 5 volumes
         temp_data = {}
         for record in response.data:
             stock = record['stock']
@@ -65,12 +61,11 @@ def get_all_volumes_batch():
             if volume and volume > 0:
                 temp_data[stock].append(volume)
         
-        # Take last 5 volumes for each stock (already in descending order)
         for stock, volumes in temp_data.items():
             if len(volumes) >= 5:
-                result[stock] = volumes[:5]  # Last 5 available days
+                result[stock] = volumes[:5]
             else:
-                result[stock] = volumes  # Less than 5 days available
+                result[stock] = volumes
         
         return result
         
@@ -81,34 +76,24 @@ def get_all_volumes_batch():
 
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
-    Calculate vol_ratio, vol_signal, and status using pre-fetched data.
-    ALWAYS calculates ratio, even with less than 5 days data.
+    Calculate vol_ratio, vol_signal, and status.
+    Always returns emoji-based signal.
     """
-    
-    # Get volumes from pre-fetched data
     hist_volumes = all_volumes.get(stock_name, [])
     
-    # If NO historical data at all
     if not hist_volumes:
-        return 0, "⏳ Building (0/5 days)", "WATCH"
+        return 0, "⏳ No history", "WATCH"
     
-    # ALWAYS calculate ratio if we have at least 1 day of history
     try:
         median_volume = median(hist_volumes)
     except:
-        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+        return 0, "⏳ Error", "WATCH"
     
     if median_volume == 0 or current_volume == 0:
-        return 0, f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
+        return 0, "⏳ Insufficient data", "WATCH"
     
-    # ALWAYS calculate vol_ratio
     vol_ratio = current_volume / median_volume
     
-    # If less than 5 days, show building message (but keep ratio)
-    if len(hist_volumes) < 5:
-        return round(vol_ratio, 2), f"⏳ Building ({len(hist_volumes)}/5 days)", "WATCH"
-    
-    # 5+ days available - full signal
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -124,13 +109,16 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
         status = "WATCH"
     
     return round(vol_ratio, 2), vol_signal, status
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 5: SUPABASE UPLOAD FUNCTION
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks):
     """Upload live data with vol_ratio, vol_signal, status"""
+     # Clear cache to ensure fresh historical data
+    get_all_volumes_batch.clear()
+
+    
     rows = []
     today = date.today().isoformat()
     
@@ -196,6 +184,29 @@ if "angel_connected" not in st.session_state:
     st.session_state.angel_connected = False
 if "angel_creds" not in st.session_state:
     st.session_state.angel_creds = None
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 6.5: AUTO-CONNECT TO ANGEL ONE ON PAGE LOAD
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Auto-connect only if not already connected
+if not st.session_state.angel_connected:
+    with st.spinner("🔄 Auto-connecting to Angel One..."):
+        creds = angel_login()
+        if creds:
+            st.session_state.angel_creds = creds
+            st.session_state.angel_connected = True
+            angel_ws.start_websocket(
+                jwt_token=creds['jwt_token'],
+                api_key=creds['api_key'],
+                client_id=creds['client_id'],
+                feed_token=creds['feed_token'],
+            )
+            st.success("✅ Auto-connected! Waiting for ticks...")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -381,3 +392,21 @@ else:
     - ✅ `smartapi-python` installed hai?
     - ✅ Internet connection hai?
     """)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION 11: AUTO-CLICK "Update to Supabase" EVERY 60 SECONDS
+# ──────────────────────────────────────────────────────────────────────────────
+
+st.components.v1.html("""
+    <script>
+        setInterval(function() {
+            const buttons = document.querySelectorAll('button');
+            for (let btn of buttons) {
+                if (btn.innerText.includes('Update to Supabase')) {
+                    btn.click();
+                    break;
+                }
+            }
+        }, 60000);  // 60,000 ms = 1 minute
+    </script>
+""", height=0)
