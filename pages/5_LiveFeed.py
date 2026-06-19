@@ -280,18 +280,15 @@ if st.session_state.angel_connected:
         st.write("**Sample ticks (first 5):**")
         st.json(dict(list(ticks_dbg.items())[:5]))
 
-    # ── Auto Upload Toggle + Refresh Now ─────────────────────
-    # Toggle ON  → uploads to Supabase + reruns page every 1 min
-    # Toggle OFF → manual upload only via "📤 Update to Supabase" button above
-    toggle_col, refresh_col, status_col = st.columns([3, 1, 1])
+    # ── Auto Upload Toggle ────────────────────────────────────
+    # Toggle ON  → uploads to Supabase every 1 min + page reruns
+    # Toggle OFF → table still live-updates every 3s, manual upload only
+    toggle_col, status_col = st.columns([3, 1])
     with toggle_col:
         st.session_state.auto_upload = st.toggle(
             "🔁 Auto Upload to Supabase (every 1 min)",
             value=st.session_state.auto_upload
         )
-    with refresh_col:
-        if st.button("🔄 Refresh Now", use_container_width=True):
-            st.rerun()
     with status_col:
         if st.session_state.last_upload_time:
             st.caption(f"Last upload: {st.session_state.last_upload_time}")
@@ -347,17 +344,21 @@ if st.session_state.angel_connected:
             f"LTP active: {stocks_with_ltp}"
         )
 
-    # ── Auto Upload every 1 min (also triggers page rerun) ────
-    # Page naturally refreshes on each rerun so table stays live
+    # ── Live table rerun + auto upload logic ─────────────────
     if st.session_state.auto_upload:
+        # Upload to Supabase, then wait 1 min before next rerun
         if ticks:
             with st.spinner("⏳ Auto uploading to Supabase..."):
                 ok, msg = upload_to_supabase(ticks)
                 if ok:
-                    st.success(msg)
+                    st.toast(msg, icon="✅")
                 else:
-                    st.error(msg)
+                    st.toast(msg, icon="❌")
         time.sleep(60)
+        st.rerun()
+    else:
+        # Even when auto upload is OFF, rerun every 3s to keep table live
+        time.sleep(3)
         st.rerun()
 
 
