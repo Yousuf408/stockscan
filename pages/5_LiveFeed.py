@@ -35,7 +35,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def get_all_volumes_batch():
     """
     Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
-    Automatically skips weekends/holidays when no data exists.
+    Stock names are stored in uppercase to ensure case‑insensitive matching.
     """
     today = date.today()
     result = {}
@@ -52,7 +52,7 @@ def get_all_volumes_batch():
         
         temp_data = {}
         for record in response.data:
-            stock = record['stock']
+            stock = record['stock'].strip().upper()   # Normalize to uppercase
             volume = record['volume']
             
             if stock not in temp_data:
@@ -61,6 +61,7 @@ def get_all_volumes_batch():
             if volume and volume > 0:
                 temp_data[stock].append(volume)
         
+        # Take the first 5 volumes (already ordered descending by date)
         for stock, volumes in temp_data.items():
             if len(volumes) >= 5:
                 result[stock] = volumes[:5]
@@ -77,9 +78,11 @@ def get_all_volumes_batch():
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
     Calculate vol_ratio, vol_signal, and status.
-    Always returns emoji-based signal.
+    Looks up the stock using uppercase name (case‑insensitive).
     """
-    hist_volumes = all_volumes.get(stock_name, [])
+    # Normalize stock name to uppercase for lookup
+    key = stock_name.strip().upper()
+    hist_volumes = all_volumes.get(key, [])
     
     if not hist_volumes:
         return 0, "⏳ No history", "WATCH"
@@ -291,7 +294,7 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-  # ── SECTION 9B: Live Table ──────────────────────────────────
+ # ── SECTION 9B: Live Table ──────────────────────────────────
 st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
 placeholder = st.empty()
 
@@ -314,7 +317,7 @@ while True:
         volume = tick.get('volume', 0)
         timestamp = tick.get('timestamp', '-')
 
-        # ✅ Calculate Signal & Status using pre-fetched data
+        # ✅ Calculate Signal & Status using pre‑fetched data
         if tick and ltp > 0:
             current_volume = int(volume)
             vol_ratio, vol_signal, status = calculate_volume_metrics(
@@ -327,7 +330,7 @@ while True:
             vol_signal = "⏳"
             status = "⏳"
 
-        # Format values
+        # Format values for display
         if tick:
             ltp_str = f"₹{ltp:.2f}"
             open_str = f"₹{open_p:.2f}"
