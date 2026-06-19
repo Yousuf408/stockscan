@@ -295,8 +295,8 @@ if st.session_state.angel_connected:
     st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
     placeholder = st.empty()
 
-    # ✅ Fetch volumes ONCE outside the loop
-  all_volumes = get_all_volumes_batch()
+   # ✅ Fetch volumes ONCE outside the loop
+all_volumes = get_all_volumes_batch()   # ← no extra space
 st.caption(f"✅ Loaded volume data for {len(all_volumes)} stocks")
 
 # ── DEBUG: Check volumes for SIKA ──
@@ -304,8 +304,10 @@ if "SIKA" in all_volumes:
     st.write(f"🔍 SIKA volumes: {all_volumes['SIKA']}")
 else:
     st.warning("⚠️ SIKA not found in all_volumes")
-    while True:
-        ticks = angel_ws.latest_ticks
+
+# ── Now the while loop starts here (outside the if/else) ──
+while True:
+    ticks = angel_ws.latest_ticks
 
         rows = []
         for name, token, kind in STOCKS_WATCHLIST:
