@@ -292,7 +292,7 @@ if st.session_state.angel_connected:
     auto_col, manual_col = st.columns([3, 1])
     with auto_col:
         st.session_state.auto_refresh = st.toggle(
-            "🔁 Auto Refresh (every 2s)", value=st.session_state.auto_refresh
+            "🔁 Auto Refresh (every 1 min)", value=st.session_state.auto_refresh
         )
     with manual_col:
         if st.button("🔄 Refresh Now", use_container_width=True):
@@ -353,7 +353,7 @@ if st.session_state.angel_connected:
 
     # ── Auto-refresh via st.rerun (NO JavaScript) ─────────────
     if st.session_state.auto_refresh:
-        time.sleep(2)
+        time.sleep(60)
         st.rerun()
 
 
