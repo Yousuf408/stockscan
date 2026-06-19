@@ -30,73 +30,36 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 4: VOLUME METRICS FUNCTIONS
+# FUNCTION: calculate_volume_metrics (UPDATED - No Building Suffix)
 # ──────────────────────────────────────────────────────────────────────────────
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_all_volumes_batch():
-    """
-    Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
-    Automatically skips weekends/holidays when no data exists.
-    """
-    today = date.today()
-    result = {}
-    
-    try:
-        cutoff_date = (today - timedelta(days=30)).isoformat()
-        
-        response = supabase.table("websocket_stock_values")\
-                           .select("stock", "volume", "date")\
-                           .gte("date", cutoff_date)\
-                           .lt("date", today.isoformat())\
-                           .order("date", desc=True)\
-                           .execute()
-        
-        temp_data = {}
-        for record in response.data:
-            stock = record['stock']
-            volume = record['volume']
-            
-            if stock not in temp_data:
-                temp_data[stock] = []
-            
-            if volume and volume > 0:
-                temp_data[stock].append(volume)
-        
-        for stock, volumes in temp_data.items():
-            if len(volumes) >= 5:
-                result[stock] = volumes[:5]
-            else:
-                result[stock] = volumes
-        
-        return result
-        
-    except Exception as e:
-        st.warning(f"⚠️ Volume data fetch issue: {str(e)}")
-        return {}
-
 
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
-    Calculate vol_ratio, vol_signal, and status using pre-fetched data.
-    Always shows emoji signal, adds building suffix if insufficient history.
+    Calculate vol_ratio, vol_signal, and status.
+    Always returns emoji-based signal (🔥, 🟢, 🟡, 🔴) using available history.
+    No "Building" suffix – just the signal.
     """
+    # 1️⃣ Get historical volumes for this stock
     hist_volumes = all_volumes.get(stock_name, [])
     
+    # 2️⃣ If no history, show a placeholder
     if not hist_volumes:
-        return 0, "⏳ No history (0/5 days)", "WATCH"
+        return 0, "⏳ No history", "WATCH"
     
+    # 3️⃣ Calculate median of available historical volumes
     try:
         median_volume = median(hist_volumes)
     except:
-        return 0, "⏳ Error (median)", "WATCH"
+        return 0, "⏳ Error", "WATCH"
     
+    # 4️⃣ Safety checks
     if median_volume == 0 or current_volume == 0:
         return 0, "⏳ Insufficient data", "WATCH"
     
+    # 5️⃣ Calculate vol_ratio
     vol_ratio = current_volume / median_volume
     
-    # Always generate emoji signal
+    # 6️⃣ Generate emoji signal based on ratio (no building suffix)
     if vol_ratio > 2:
         vol_signal = f"🔥 Explosive ({vol_ratio:.2f})"
     elif vol_ratio > 1.5:
@@ -106,11 +69,7 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
     else:
         vol_signal = f"🔴 Weak ({vol_ratio:.2f})"
     
-    # Add building suffix if less than 5 days
-    if len(hist_volumes) < 5:
-        vol_signal = f"{vol_signal} [Building {len(hist_volumes)}/5]"
-    
-    # Status
+    # 7️⃣ Determine status
     if vol_ratio > 1.5 and change_pct > 0:
         status = "READY"
     else:
