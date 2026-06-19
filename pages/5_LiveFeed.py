@@ -35,7 +35,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def get_all_volumes_batch():
     """
     Fetch last 5 AVAILABLE trading days volumes for ALL stocks.
-    Stock names are stored in uppercase to ensure case‑insensitive matching.
+    Automatically skips weekends/holidays when no data exists.
     """
     today = date.today()
     result = {}
@@ -52,7 +52,7 @@ def get_all_volumes_batch():
         
         temp_data = {}
         for record in response.data:
-            stock = record['stock'].strip().upper()   # Normalize to uppercase
+            stock = record['stock']
             volume = record['volume']
             
             if stock not in temp_data:
@@ -61,7 +61,6 @@ def get_all_volumes_batch():
             if volume and volume > 0:
                 temp_data[stock].append(volume)
         
-        # Take the first 5 volumes (already ordered descending by date)
         for stock, volumes in temp_data.items():
             if len(volumes) >= 5:
                 result[stock] = volumes[:5]
@@ -78,11 +77,9 @@ def get_all_volumes_batch():
 def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes):
     """
     Calculate vol_ratio, vol_signal, and status.
-    Looks up the stock using uppercase name (case‑insensitive).
+    Always returns emoji-based signal.
     """
-    # Normalize stock name to uppercase for lookup
-    key = stock_name.strip().upper()
-    hist_volumes = all_volumes.get(key, [])
+    hist_volumes = all_volumes.get(stock_name, [])
     
     if not hist_volumes:
         return 0, "⏳ No history", "WATCH"
@@ -117,12 +114,10 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
 # ──────────────────────────────────────────────────────────────────────────────
 
 def upload_to_supabase(ticks):
-    """
-    Upload live data with vol_ratio, vol_signal, status.
-    Clears cache to ensure fresh historical volumes.
-    """
-    # Clear cache to ensure fresh historical data
+    """Upload live data with vol_ratio, vol_signal, status"""
+     # Clear cache to ensure fresh historical data
     get_all_volumes_batch.clear()
+
     
     rows = []
     today = date.today().isoformat()
@@ -195,27 +190,27 @@ if "angel_creds" not in st.session_state:
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Auto-connect only if not already connected
-#if not st.session_state.angel_connected:
- #   with st.spinner("🔄 Auto-connecting to Angel One..."):
-  #      creds = angel_login()
-   #     if creds:
-    #        st.session_state.angel_creds = creds
-     #       st.session_state.angel_connected = True
-      #      angel_ws.start_websocket(
-       #         jwt_token=creds['jwt_token'],
-        #        api_key=creds['api_key'],
-         #       client_id=creds['client_id'],
-          #      feed_token=creds['feed_token'],
-           # )
-            #st.success("✅ Auto-connected! Waiting for ticks...")
-            #time.sleep(2)
-            #st.rerun()
-        #else:
-         #   st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
-            
+if not st.session_state.angel_connected:
+    with st.spinner("🔄 Auto-connecting to Angel One..."):
+        creds = angel_login()
+        if creds:
+            st.session_state.angel_creds = creds
+            st.session_state.angel_connected = True
+            angel_ws.start_websocket(
+                jwt_token=creds['jwt_token'],
+                api_key=creds['api_key'],
+                client_id=creds['client_id'],
+                feed_token=creds['feed_token'],
+            )
+            st.success("✅ Auto-connected! Waiting for ticks...")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 7: CONNECT / DISCONNECT / UPLOAD BUTTONS
+# SECTION 7: CONNECT / DISCONNECT BUTTONS
 # ──────────────────────────────────────────────────────────────────────────────
 
 col1, col2, col3 = st.columns(3)
@@ -264,6 +259,7 @@ with col3:
                     else:
                         st.error(message)
 
+
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 8: DIVIDER
 # ──────────────────────────────────────────────────────────────────────────────
@@ -295,87 +291,88 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
- # ── SECTION 9B: Live Table ──────────────────────────────────
-st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
-placeholder = st.empty()
+    # ── SECTION 9B: Live Table ──────────────────────────────────
+    st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
+    placeholder = st.empty()
 
-# ✅ Fetch volumes ONCE outside the loop
-all_volumes = get_all_volumes_batch()
-st.caption(f"✅ Loaded volume data for {len(all_volumes)} stocks")
+    # ✅ Fetch volumes ONCE outside the loop
+    all_volumes = get_all_volumes_batch()
+    st.caption(f"✅ Loaded volume data for {len(all_volumes)} stocks")
 
-while True:
-    ticks = angel_ws.latest_ticks
+    while True:
+        ticks = angel_ws.latest_ticks
 
-    rows = []
-    for name, token, kind in STOCKS_WATCHLIST:
-        tick = ticks.get(token, {})
-        ltp = tick.get('ltp', 0)
-        open_p = tick.get('open', 0)
-        high_p = tick.get('high', 0)
-        low_p = tick.get('low', 0)
-        change = tick.get('change', 0)
-        change_pct = tick.get('change_pct', 0)
-        volume = tick.get('volume', 0)
-        timestamp = tick.get('timestamp', '-')
+        rows = []
+        for name, token, kind in STOCKS_WATCHLIST:
+            tick = ticks.get(token, {})
+            ltp = tick.get('ltp', 0)
+            open_p = tick.get('open', 0)
+            high_p = tick.get('high', 0)
+            low_p = tick.get('low', 0)
+            change = tick.get('change', 0)
+            change_pct = tick.get('change_pct', 0)
+            volume = tick.get('volume', 0)
+            timestamp = tick.get('timestamp', '-')
 
-        # ✅ Calculate Signal & Status using pre‑fetched data
-        if tick and ltp > 0:
-            current_volume = int(volume)
-            vol_ratio, vol_signal, status = calculate_volume_metrics(
-                name,
-                current_volume,
-                change_pct,
-                all_volumes
+            # ✅ Calculate Signal & Status using pre-fetched data
+            if tick and ltp > 0:
+                current_volume = int(volume)
+                vol_ratio, vol_signal, status = calculate_volume_metrics(
+                    name, 
+                    current_volume,
+                    change_pct,
+                    all_volumes
+                )
+            else:
+                vol_signal = "⏳"
+                status = "⏳"
+
+            # Format based on whether we have data
+            if tick:
+                ltp_str = f"₹{ltp:.2f}"
+                open_str = f"₹{open_p:.2f}"
+                high_str = f"₹{high_p:.2f}"
+                low_str = f"₹{low_p:.2f}"
+                chng_str = f"{change:+.2f}"
+                pct_str = f"{change_pct:+.2f}%"
+                vol_str = f"{volume:,}"
+                time_str = timestamp
+            else:
+                ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
+                time_str = "-"
+                vol_signal = "⏳"
+                status = "⏳"
+
+            rows.append({
+                "Stock": name,
+                "Type": "📈 Index" if kind == "index" else "🏢 Stock",
+                "LTP (₹)": ltp_str,
+                "Open": open_str,
+                "High": high_str,
+                "Low": low_str,
+                "Change": chng_str,
+                "Change %": pct_str,
+                "Volume": vol_str,
+                "Signal": vol_signal,
+                "Status": status,
+                "Time": time_str,
+            })
+
+        df = pd.DataFrame(rows)
+
+        with placeholder.container():
+            st.dataframe(
+                df,
+                hide_index=True,
+                use_container_width=True,
             )
-        else:
-            vol_signal = "⏳"
-            status = "⏳"
+            st.caption(
+                f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+            )
 
-        # Format values for display
-        if tick:
-            ltp_str = f"₹{ltp:.2f}"
-            open_str = f"₹{open_p:.2f}"
-            high_str = f"₹{high_p:.2f}"
-            low_str = f"₹{low_p:.2f}"
-            chng_str = f"{change:+.2f}"
-            pct_str = f"{change_pct:+.2f}%"
-            vol_str = f"{volume:,}"
-            time_str = timestamp
-        else:
-            ltp_str = open_str = high_str = low_str = chng_str = pct_str = vol_str = "⏳"
-            time_str = "-"
-            vol_signal = "⏳"
-            status = "⏳"
+        time.sleep(2)
 
-        rows.append({
-            "Stock": name,
-            "Type": "📈 Index" if kind == "index" else "🏢 Stock",
-            "LTP (₹)": ltp_str,
-            "Open": open_str,
-            "High": high_str,
-            "Low": low_str,
-            "Change": chng_str,
-            "Change %": pct_str,
-            "Volume": vol_str,
-            "Signal": vol_signal,
-            "Status": status,
-            "Time": time_str,
-        })
-
-    df = pd.DataFrame(rows)
-
-    with placeholder.container():
-        st.dataframe(
-            df,
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.caption(
-            f"🕐 Page refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-            f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
-        )
-
-    time.sleep(2)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 10: DISPLAY WHEN NOT CONNECTED
