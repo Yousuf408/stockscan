@@ -241,28 +241,41 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-    # ── SECTION 9B: Live Table ──────────────────────────────────
-    st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
-    
-    # Get latest ticks
+ # ──────────────────────────────────────────────────────────────────────────────
+# SECTION 9B: Live Table (FIXED WITH ACTIVE LISTENER)
+# ──────────────────────────────────────────────────────────────────────────────
+
+st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
+
+# Remove the JavaScript auto-refresh completely - it causes conflicts!
+# <script>setTimeout(...window.location.reload())</script> ← DELETE THIS
+
+# Create a placeholder for the table
+table_placeholder = st.empty()
+info_placeholder = st.empty()
+
+# Active listener loop
+while st.session_state.angel_connected:
     ticks = angel_ws.latest_ticks
     
-    # Debug: Check if ticks have data
     if not ticks:
-        st.warning("⏳ Waiting for ticks from WebSocket...")
-    else:
-        # Count stocks with data
-        stocks_with_data = 0
-        for name, token, kind in STOCKS_WATCHLIST:
-            tick = ticks.get(token, {})
-            if tick.get('ltp', 0) > 0:
-                stocks_with_data += 1
-        
-        if stocks_with_data == 0:
-            st.warning(f"⏳ Received ticks for {len(ticks)} tokens but no LTP data yet. Waiting...")
-        else:
-            st.success(f"✅ {stocks_with_data} stocks have LTP data")
-
+        with table_placeholder.container():
+            st.warning("⏳ Waiting for ticks from WebSocket...")
+        time.sleep(1)
+        continue
+    
+    # Count stocks with data
+    stocks_with_data = sum(
+        1 for name, token, kind in STOCKS_WATCHLIST 
+        if ticks.get(token, {}).get('ltp', 0) > 0
+    )
+    
+    if stocks_with_data == 0:
+        with table_placeholder.container():
+            st.warning(f"⏳ Ticks received: {len(ticks)} tokens, waiting for LTP data...")
+        time.sleep(1)
+        continue
+    
     # Build table rows
     rows = []
     for name, token, kind in STOCKS_WATCHLIST:
@@ -307,8 +320,6 @@ if st.session_state.angel_connected:
             pct_str = "⏳"
             vol_str = "⏳"
             time_str = "⏳"
-            vol_signal = "⏳"
-            status = "⏳"
 
         rows.append({
             "Stock": name,
@@ -325,10 +336,9 @@ if st.session_state.angel_connected:
             "Time": time_str,
         })
 
-    if rows:
+    # Display the updated table
+    with table_placeholder.container():
         df = pd.DataFrame(rows)
-        
-        # Display the table
         st.dataframe(
             df,
             hide_index=True,
@@ -339,24 +349,19 @@ if st.session_state.angel_connected:
         col_info1, col_info2 = st.columns([3, 1])
         with col_info1:
             st.caption(
-                f"🕐 Last refreshed: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
-                f"Ticks received: {len(ticks)}/{len(STOCKS_WATCHLIST)} tokens"
+                f"🕐 Last updated: {pd.Timestamp.now().strftime('%H:%M:%S')} | "
+                f"Data: {stocks_with_data}/{len(STOCKS_WATCHLIST)} stocks"
             )
         with col_info2:
-            if st.button("🔄 Refresh", use_container_width=True):
-                st.rerun()
-        
-        # Auto-refresh with JavaScript
-        st.markdown("""
-            <script>
-                setTimeout(function() {
-                    window.location.reload();
-                }, 2000);
-            </script>
-        """, unsafe_allow_html=True)
-    else:
-        st.error("❌ No data to display. Please check WebSocket connection.")
-
+            if st.button("📤 Upload", use_container_width=True):
+                success, message = upload_to_supabase(ticks)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+    
+    # Update every 1 second (adjust as needed)
+    time.sleep(1)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 10: DISPLAY WHEN NOT CONNECTED
