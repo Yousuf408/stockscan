@@ -28,8 +28,8 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────
-SUPABASE_URL = "YOUR_SUPABASE_URL"       # ← replace
-SUPABASE_KEY = "YOUR_SUPABASE_KEY"       # ← replace
+SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
