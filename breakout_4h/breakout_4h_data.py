@@ -88,6 +88,11 @@ def fetch_1h_data(symbol: str) -> pd.DataFrame | None:
 
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
+        # Strip timezone → consistent timestamps
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"])
+            if df["datetime"].dt.tz is not None:
+                df["datetime"] = df["datetime"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
         return df[["datetime", "open", "high", "low", "close", "volume"]]
 
     except Exception:
