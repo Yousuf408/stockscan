@@ -1,12 +1,15 @@
 """
 breakout_4h_data.py
 Data layer:
-  - fetch_avg_volumes()  → Supabase avg daily volume per stock
-  - fetch_1h_data()      → yfinance 1h candles
-  - aggregate_to_4h()    → 1h → 4h candle aggregation
+  - fetch_avg_volumes()     → Supabase avg daily volume
+  - fetch_1h_data()         → yfinance 1h candles
+  - fetch_1h_and_4h_data()  → returns both 1H + 4H aggregated
+  - aggregate_to_4h()       → 1h → 4h aggregation
+  - fetch_daily_data()      → daily OHLCV + market cap
 """
 
 import pandas as pd
+import numpy as np
 import yfinance as yf
 from datetime import datetime
 from supabase import create_client
@@ -20,7 +23,7 @@ from breakout_4h.breakout_4h_config import (
 )
 
 # ─────────────────────────────────────────────────────────────
-# SUPABASE CLIENT (module-level singleton)
+# SUPABASE CLIENT
 # ─────────────────────────────────────────────────────────────
 _supabase = None
 
@@ -38,7 +41,7 @@ def fetch_avg_volumes() -> dict:
     """
     Fetch average daily volume for all stocks from Supabase.
     Uses past data only (date < today), deduplicates, takes last 10 days.
-    Returns: { "RELIANCE": 15000000, "HDFCBANK": 8000000, ... }
+    Returns: { "RELIANCE": 15000000, ... }
     """
     try:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -54,16 +57,10 @@ def fetch_avg_volumes() -> dict:
             return {}
 
         df = pd.DataFrame(resp.data)
-
-        # Remove duplicates — keep latest per stock per date
         df = df.drop_duplicates(subset=["stock", "date"], keep="first")
-
-        # Last 10 days per stock
         df_sorted = df.sort_values("date", ascending=False)
         df_top10  = df_sorted.groupby("stock").head(10)
-
-        # Average volume per stock
-        avg_vol = df_top10.groupby("stock")["volume"].mean().to_dict()
+        avg_vol   = df_top10.groupby("stock")["volume"].mean().to_dict()
         return avg_vol
 
     except Exception as e:
@@ -76,23 +73,26 @@ def fetch_avg_volumes() -> dict:
 # ─────────────────────────────────────────────────────────────
 def fetch_1h_data(symbol: str) -> pd.DataFrame | None:
     """
-    Fetch 1h OHLCV data from yfinance for an NSE stock.
-    Returns cleaned DataFrame or None if fetch fails.
+    Fetch 1h OHLCV data from yfinance for NSE stock.
+    Strips timezone for consistent Plotly rendering.
+    Returns cleaned DataFrame or None.
     """
     try:
         ticker = yf.Ticker(f"{symbol}.NS")
         df     = ticker.history(interval="1h", period=YFINANCE_1H_PERIOD)
 
-        if df is None or df.empty or len(df) < 4:
+        if df is None or df.empty or len(df) < 8:
             return None
 
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
+
         # Strip timezone → consistent timestamps
         if "datetime" in df.columns:
             df["datetime"] = pd.to_datetime(df["datetime"])
             if df["datetime"].dt.tz is not None:
                 df["datetime"] = df["datetime"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+
         return df[["datetime", "open", "high", "low", "close", "volume"]]
 
     except Exception:
@@ -105,13 +105,8 @@ def fetch_1h_data(symbol: str) -> pd.DataFrame | None:
 def aggregate_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
     """
     Aggregate 1h candles into 4h candles.
-    Every 4 consecutive 1h candles = 1 4h candle:
-      open   = first candle's open
-      high   = max of all 4 highs
-      low    = min of all 4 lows
-      close  = last candle's close
-      volume = sum of all 4 volumes
-    Only complete groups of 4 are kept.
+    Every 4 consecutive 1h candles = 1 4h candle.
+    Only complete groups of 4 kept.
     """
     candles = []
     rows    = df_1h.values.tolist()
@@ -134,11 +129,32 @@ def aggregate_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────
-# SECTION 4 — FETCH DAILY DATA (for checks 6,7,8)
+# SECTION 4 — FETCH BOTH 1H + 4H DATA TOGETHER
+# ─────────────────────────────────────────────────────────────
+def fetch_1h_and_4h_data(symbol: str):
+    """
+    Fetch 1H data and return both:
+    - df_1h : raw 1H candles
+    - df_4h : aggregated 4H candles
+    Returns (df_1h, df_4h) or (None, None)
+    """
+    df_1h = fetch_1h_data(symbol)
+    if df_1h is None or df_1h.empty:
+        return None, None
+
+    df_4h = aggregate_to_4h(df_1h)
+    if df_4h.empty:
+        return None, None
+
+    return df_1h, df_4h
+
+
+# ─────────────────────────────────────────────────────────────
+# SECTION 5 — FETCH DAILY DATA (for checks 5,6,7,8)
 # ─────────────────────────────────────────────────────────────
 def fetch_daily_data(symbol: str):
     """
-    Fetch daily OHLCV + market cap for checks 6, 7, 8.
+    Fetch daily OHLCV + market cap.
     Returns: (daily_close_array, market_cap) or (None, None)
     """
     try:
@@ -150,7 +166,6 @@ def fetch_daily_data(symbol: str):
 
         daily_close = df_daily["Close"].values
 
-        # Market cap
         try:
             info   = ticker.fast_info
             mktcap = getattr(info, "market_cap", 0) or 0
