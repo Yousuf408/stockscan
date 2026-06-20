@@ -1,6 +1,14 @@
-[global]
-maxCachedMessageAge = 0
+[theme]
+base = "dark"
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#cbd5e1"
+primaryColor = "#10b981"
+font = "sans serif"
 
 [server]
-enableWebsocketCompression = false
 headless = true
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
