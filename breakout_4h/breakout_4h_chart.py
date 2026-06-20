@@ -1,20 +1,21 @@
 """
 breakout_4h_chart.py
-Chart rendering:
-  - render_chart() → 4H candlestick with consolidation band
+Chart rendering — TradingView Light Theme style using Plotly
 """
 
-import json
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 
 def render_chart(result: dict):
     """
-    Render 4H candlestick chart using Lightweight Charts.
-    - Gray candles    = consolidation period
-    - Emerald candle  = breakout candle (last one)
-    - Red dashed lines = consolidation zone (high + low)
+    Render 4H candlestick chart — TradingView Light style.
+    Colors  : #26a69a (green) / #ef5350 (red)
+    Y-axis  : right side
+    Gaps    : weekends removed
+    Candles : last 10 trading days (~20 4H candles)
+    Zone    : pink dashed lines + shaded area
     """
     candles  = result["candles_4h"]
     con_high = result["con_high"]
@@ -22,142 +23,206 @@ def render_chart(result: dict):
     symbol   = result["symbol"]
 
     # ── Build chart data ──
-    chart_data = []
+    dates  = []
+    opens  = []
+    highs  = []
+    lows   = []
+    closes = []
+
     for c in candles:
         try:
             dt = c["datetime"]
-            if hasattr(dt, "timestamp"):
-                ts = int(dt.timestamp())
+            if hasattr(dt, "strftime"):
+                dates.append(dt)
             else:
-                ts = int(pd.Timestamp(dt).timestamp())
+                dates.append(pd.Timestamp(dt))
 
-            chart_data.append({
-                "time" : ts,
-                "open" : round(float(c["open"]),  2),
-                "high" : round(float(c["high"]),  2),
-                "low"  : round(float(c["low"]),   2),
-                "close": round(float(c["close"]), 2),
-            })
-        except Exception:
+            opens.append(float(c["open"]))
+            highs.append(float(c["high"]))
+            lows.append(float(c["low"]))
+            closes.append(float(c["close"]))
+        except Exception as e:
+            print(f"[chart] candle error: {e}")
             continue
 
-    if not chart_data:
+    if not dates:
         st.warning("Chart data unavailable.")
         return
 
-    # Last candle = breakout candle
-    breakout_time = chart_data[-1]["time"]
+    # Last 20 candles = ~10 trading days
+    dates  = dates[-20:]
+    opens  = opens[-20:]
+    highs  = highs[-20:]
+    lows   = lows[-20:]
+    closes = closes[-20:]
 
-    chart_json    = json.dumps(chart_data)
-    con_high_json = json.dumps(con_high)
-    con_low_json  = json.dumps(con_low)
-    brk_time_json = json.dumps(breakout_time)
+    # Consolidation = all except last
+    # Breakout = last candle
+    con_dates  = dates[:-1]
+    con_opens  = opens[:-1]
+    con_highs  = highs[:-1]
+    con_lows   = lows[:-1]
+    con_closes = closes[:-1]
 
-    html = f"""
-    <div id="chart_{symbol}" style="width:100%;height:400px;border-radius:8px;"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js"></script>
-    <script>
-    (function() {{
-        var container = document.getElementById('chart_{symbol}');
-        if (!container) return;
+    brk_date  = dates[-1]
+    brk_open  = opens[-1]
+    brk_high  = highs[-1]
+    brk_low   = lows[-1]
+    brk_close = closes[-1]
 
-        var chart = LightweightCharts.createChart(container, {{
-            width  : container.clientWidth,
-            height : 400,
-            layout : {{
-                background : {{ color: '#ffffff' }},
-                textColor  : '#475569',
-            }},
-            grid: {{
-                vertLines : {{ color: '#f1f5f9' }},
-                horzLines : {{ color: '#f1f5f9' }},
-            }},
-            crosshair        : {{ mode: LightweightCharts.CrosshairMode.Normal }},
-            rightPriceScale  : {{ borderColor: '#e2e8f0' }},
-            timeScale        : {{
-                borderColor    : '#e2e8f0',
-                timeVisible    : true,
-                secondsVisible : false,
-            }},
-        }});
+    # ── TV Light theme colors ──
+    UP_COLOR   = "#26a69a"
+    DOWN_COLOR = "#ef5350"
+    BRK_COLOR  = "#26a69a"
+    ZONE_COLOR = "rgba(244, 63, 94, 0.7)"
+    ZONE_FILL  = "rgba(244, 63, 94, 0.06)"
 
-        // ── Candlestick series ──
-        var candleSeries = chart.addCandlestickSeries({{
-            upColor         : '#10b981',
-            downColor       : '#f87171',
-            borderUpColor   : '#10b981',
-            borderDownColor : '#f87171',
-            wickUpColor     : '#10b981',
-            wickDownColor   : '#f87171',
-        }});
+    fig = go.Figure()
 
-        var allCandles = {chart_json};
-        var conHigh    = {con_high_json};
-        var conLow     = {con_low_json};
-        var brkTime    = {brk_time_json};
+    # ── 1. Zone shaded area ──
+    fig.add_hrect(
+        y0        = con_low,
+        y1        = con_high,
+        fillcolor = ZONE_FILL,
+        line_width= 0,
+        layer     = "below",
+    )
 
-        // Highlight breakout candle in emerald
-        var colored = allCandles.map(function(c) {{
-            if (c.time === brkTime) {{
-                return Object.assign({{}}, c, {{
-                    color       : '#10b981',
-                    borderColor : '#10b981',
-                    wickColor   : '#10b981',
-                }});
-            }}
-            return c;
-        }});
+    # ── 2. Zone High dashed line ──
+    fig.add_hline(
+        y          = con_high,
+        line_dash  = "dash",
+        line_color = ZONE_COLOR,
+        line_width = 1.5,
+    )
 
-        candleSeries.setData(colored);
+    # ── 3. Zone Low dashed line ──
+    fig.add_hline(
+        y          = con_low,
+        line_dash  = "dash",
+        line_color = ZONE_COLOR,
+        line_width = 1.5,
+    )
 
-        // ── Consolidation zone — upper dashed line ──
-        var upperLine = chart.addLineSeries({{
-            color            : 'rgba(244, 63, 94, 0.7)',
-            lineWidth        : 1,
-            lineStyle        : LightweightCharts.LineStyle.Dashed,
-            priceLineVisible : false,
-            lastValueVisible : false,
-        }});
+    # ── 4. Zone labels (right side) ──
+    fig.add_annotation(
+        xref      = "paper",
+        x         = 1.01,
+        y         = con_high,
+        text      = f"Zone High ₹{con_high:,.0f}",
+        showarrow = False,
+        xanchor   = "left",
+        yanchor   = "middle",
+        font      = dict(size=11, color=ZONE_COLOR),
+    )
+    fig.add_annotation(
+        xref      = "paper",
+        x         = 1.01,
+        y         = con_low,
+        text      = f"Zone Low ₹{con_low:,.0f}",
+        showarrow = False,
+        xanchor   = "left",
+        yanchor   = "middle",
+        font      = dict(size=11, color=ZONE_COLOR),
+    )
 
-        // ── Consolidation zone — lower dashed line ──
-        var lowerLine = chart.addLineSeries({{
-            color            : 'rgba(244, 63, 94, 0.7)',
-            lineWidth        : 1,
-            lineStyle        : LightweightCharts.LineStyle.Dashed,
-            priceLineVisible : false,
-            lastValueVisible : false,
-        }});
+    # ── 5. Consolidation candles ──
+    fig.add_trace(go.Candlestick(
+        x      = con_dates,
+        open   = con_opens,
+        high   = con_highs,
+        low    = con_lows,
+        close  = con_closes,
+        name   = "4H Candles",
+        increasing = dict(
+            line      = dict(color=UP_COLOR, width=1),
+            fillcolor = UP_COLOR,
+        ),
+        decreasing = dict(
+            line      = dict(color=DOWN_COLOR, width=1),
+            fillcolor = DOWN_COLOR,
+        ),
+    ))
 
-        var times = allCandles.map(function(c) {{ return c.time; }});
-        upperLine.setData(times.map(function(t) {{ return {{ time: t, value: conHigh }}; }}));
-        lowerLine.setData(times.map(function(t) {{ return {{ time: t, value: conLow  }}; }}));
+    # ── 6. Breakout candle ──
+    fig.add_trace(go.Candlestick(
+        x      = [brk_date],
+        open   = [brk_open],
+        high   = [brk_high],
+        low    = [brk_low],
+        close  = [brk_close],
+        name   = "Breakout",
+        increasing = dict(
+            line      = dict(color=BRK_COLOR, width=2),
+            fillcolor = BRK_COLOR,
+        ),
+        decreasing = dict(
+            line      = dict(color=BRK_COLOR, width=2),
+            fillcolor = BRK_COLOR,
+        ),
+    ))
 
-        // ── Price line labels ──
-        candleSeries.createPriceLine({{
-            price            : conHigh,
-            color            : 'rgba(244, 63, 94, 0.5)',
-            lineWidth        : 1,
-            lineStyle        : LightweightCharts.LineStyle.Dotted,
-            axisLabelVisible : true,
-            title            : 'Zone High',
-        }});
-        candleSeries.createPriceLine({{
-            price            : conLow,
-            color            : 'rgba(244, 63, 94, 0.5)',
-            lineWidth        : 1,
-            lineStyle        : LightweightCharts.LineStyle.Dotted,
-            axisLabelVisible : true,
-            title            : 'Zone Low',
-        }});
+    # ── 7. Breakout annotation ──
+    fig.add_annotation(
+        x          = brk_date,
+        y          = brk_high,
+        text       = f"⚡ Breakout<br><b>+{result['breakout_pct']:.1f}%</b>",
+        showarrow  = True,
+        arrowhead  = 2,
+        arrowcolor = BRK_COLOR,
+        arrowsize  = 1,
+        arrowwidth = 1.5,
+        ax         = 0,
+        ay         = -50,
+        font       = dict(size=11, color=BRK_COLOR),
+        bgcolor    = "rgba(38,166,154,0.08)",
+        bordercolor= BRK_COLOR,
+        borderwidth= 1,
+        borderpad  = 5,
+        align      = "center",
+    )
 
-        chart.timeScale().fitContent();
+    # ── Layout ──
+    fig.update_layout(
+        title = dict(
+            text = f"<b>{symbol}</b> · 4H Chart",
+            font = dict(size=14, color="#131722"),
+            x    = 0.01,
+        ),
+        xaxis_rangeslider_visible = False,
+        plot_bgcolor  = "#ffffff",
+        paper_bgcolor = "#ffffff",
+        height        = 460,
+        margin        = dict(l=10, r=160, t=45, b=40),
+        showlegend    = False,
+        hovermode     = "x unified",
 
-        // Responsive resize
-        window.addEventListener('resize', function() {{
-            chart.applyOptions({{ width: container.clientWidth }});
-        }});
-    }})();
-    </script>
-    """
+        xaxis = dict(
+            showgrid    = True,
+            gridcolor   = "#f0f3fa",
+            gridwidth   = 1,
+            linecolor   = "#e0e3eb",
+            tickfont    = dict(color="#787b86", size=11),
+            tickformat  = "%b %d",
+            dtick       = "D1",         # Show every day
+            tickangle   = 0,
+            type        = "date",
+            # Remove weekend gaps
+            rangebreaks = [
+                dict(bounds=["sat", "mon"]),
+            ],
+        ),
 
-    st.components.v1.html(html, height=420)
+        yaxis = dict(
+            showgrid    = True,
+            gridcolor   = "#f0f3fa",
+            gridwidth   = 1,
+            linecolor   = "#e0e3eb",
+            tickfont    = dict(color="#787b86", size=11),
+            tickprefix  = "₹",
+            side        = "right",
+            showline    = True,
+        ),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
