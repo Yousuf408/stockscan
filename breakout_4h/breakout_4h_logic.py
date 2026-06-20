@@ -117,19 +117,23 @@ def run_checks(
     # ── ALL 4 CHECKS PASSED ✅ ──
     body_pct = abs(cur_close - cur_open) / cur_open * 100 if cur_open > 0 else 0
 
+    # 1H breakout candle data for chart
+    brk_1h = current_1h.to_dict()
+
     return {
-        "symbol"       : symbol,
-        "price"        : round(cur_close,     2),
-        "breakout_pct" : round(breakout_pct,  2),
-        "body_pct"     : round(body_pct,      2),
-        "rel_vol"      : round(rel_vol,        2),
-        "con_high"     : round(con_high,       2),
-        "con_low"      : round(con_low,        2),
-        "range_pct"    : round(range_pct,      2),
-        "sma20"        : round(sma20,           2),
-        "sma50"        : round(sma50,           2),
-        "median_vol"   : int(median_vol),
-        "candles_4h"   : df_4h.tail(20).to_dict("records"),
+        "symbol"             : symbol,
+        "price"              : round(cur_close,    2),
+        "breakout_pct"       : round(breakout_pct, 2),
+        "body_pct"           : round(body_pct,     2),
+        "rel_vol"            : round(rel_vol,       2),
+        "con_high"           : round(con_high,      2),
+        "con_low"            : round(con_low,       2),
+        "range_pct"          : round(range_pct,     2),
+        "sma20"              : round(sma20,          2),
+        "sma50"              : round(sma50,          2),
+        "median_vol"         : int(median_vol),
+        "candles_4h"         : df_4h.tail(20).to_dict("records"),  # 4H for chart
+        "candle_1h_breakout" : brk_1h,                              # 1H breakout candle
     }
 
 
