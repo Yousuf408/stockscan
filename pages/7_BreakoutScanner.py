@@ -127,14 +127,21 @@ def render_table(results: list, ticks: dict):
         live_chg   = live_data.get("change_pct", 0)
         chg_str    = f"+{live_chg:.2f}%" if live_chg >= 0 else f"{live_chg:.2f}%"
 
+        brk_pct  = r["breakout_pct"]
+        rel_vol  = r["rel_vol"]
+        sma20    = r["sma20"]
+        sma50    = r["sma50"]
+        con_low  = r["con_low"]
+        con_high = r["con_high"]
+
         rows.append({
             "Ticker"      : symbol,
             "Live Price"  : f"₹{live_price:,.2f}  {chg_str}",
-            "Breakout %"  : f"+{r['breakout_pct']:.2f}%",
-            "Rel. Volume" : f"{r['rel_vol']:.1f}x",
-            "SMA20"       : f"₹{r['sma20']:,.0f}",
-            "SMA50"       : f"₹{r['sma50']:,.0f}",
-            "Zone"        : f"₹{r['con_low']:,.0f} – ₹{r['con_high']:,.0f}",
+            "Breakout %"  : f"+{brk_pct:.2f}%",
+            "Rel. Volume" : f"{rel_vol:.1f}x",
+            "SMA20"       : f"₹{sma20:,.0f}",
+            "SMA50"       : f"₹{sma50:,.0f}",
+            "Zone"        : f"₹{con_low:,.0f} – ₹{con_high:,.0f}",
         })
 
     st.dataframe(
@@ -289,12 +296,10 @@ def main():
         selected = next((r for r in results if r["symbol"] == selected_sym), None)
         if selected:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Price",        f"₹{selected['price']:,.2f}")
-            c2.metric("Breakout %",   f"+{selected['breakout_pct']:.2f}%")
-            c3.metric("Rel. Volume",  f"{selected['rel_vol']:.1f}x")
-            "SMA20"       : f"₹{r['sma20']:,.0f}",
-            "SMA50"       : f"₹{r['sma50']:,.0f}",
-            c4.metric("Zone Range %", f"{selected['range_pct']:.2f}%")
+            c1.metric("Price",        f"₹{selected["price"]:,.2f}")
+            c2.metric("Breakout %",   f"+{selected["breakout_pct"]:.2f}%")
+            c3.metric("Rel. Volume",  f"{selected["rel_vol"]:.1f}x")
+            c4.metric("Zone Range %", f"{selected["range_pct"]:.2f}%")
 
             st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
             render_chart(selected)
