@@ -1,6 +1,9 @@
 """
 breakout_4h_chart.py
-Chart rendering — TradingView Light Theme style using Plotly
+Chart:
+  - 4H candles = consolidation zone background
+  - 1H breakout candle = highlighted separately (emerald)
+  - Zone High/Low = dashed pink lines
 """
 
 import pandas as pd
@@ -10,76 +13,71 @@ import plotly.graph_objects as go
 
 def render_chart(result: dict):
     """
-    Render 4H candlestick chart — TradingView Light style.
-    Colors  : #26a69a (green) / #ef5350 (red)
-    Y-axis  : right side
-    Gaps    : weekends removed
-    Candles : last 10 trading days (~20 4H candles)
-    Zone    : pink dashed lines + shaded area
+    4H candles + 1H breakout candle chart.
     """
-    candles  = result["candles_4h"]
-    con_high = result["con_high"]
-    con_low  = result["con_low"]
-    symbol   = result["symbol"]
+    candles_4h   = result["candles_4h"]
+    brk_1h       = result.get("candle_1h_breakout", {})
+    con_high     = result["con_high"]
+    con_low      = result["con_low"]
+    symbol       = result["symbol"]
 
-    # ── Build chart data ──
-    dates  = []
-    opens  = []
-    highs  = []
-    lows   = []
-    closes = []
+    # ── TV Light colors ──
+    UP_COLOR   = "#26a69a"
+    DOWN_COLOR = "#ef5350"
+    BRK_COLOR  = "#059669"   # Darker emerald for 1H breakout candle
+    ZONE_COLOR = "rgba(244, 63, 94, 0.7)"
+    ZONE_FILL  = "rgba(244, 63, 94, 0.06)"
 
-    for c in candles:
+    # ── Build 4H candle data ──
+    dates_4h  = []
+    opens_4h  = []
+    highs_4h  = []
+    lows_4h   = []
+    closes_4h = []
+
+    for c in candles_4h:
         try:
             dt = c["datetime"]
             if hasattr(dt, "strftime"):
                 ts = pd.Timestamp(dt)
             else:
                 ts = pd.Timestamp(dt)
-            # Strip timezone → Plotly aligns correctly
             if ts.tzinfo is not None:
                 ts = ts.tz_convert("Asia/Kolkata").tz_localize(None)
-            dates.append(ts)
-
-            opens.append(float(c["open"]))
-            highs.append(float(c["high"]))
-            lows.append(float(c["low"]))
-            closes.append(float(c["close"]))
+            dates_4h.append(ts)
+            opens_4h.append(float(c["open"]))
+            highs_4h.append(float(c["high"]))
+            lows_4h.append(float(c["low"]))
+            closes_4h.append(float(c["close"]))
         except Exception as e:
-            print(f"[chart] candle error: {e}")
+            print(f"[chart] 4H candle error: {e}")
             continue
 
-    if not dates:
+    if not dates_4h:
         st.warning("Chart data unavailable.")
         return
 
-    # Last 20 candles = ~10 trading days
-    dates  = dates[-20:]
-    opens  = opens[-20:]
-    highs  = highs[-20:]
-    lows   = lows[-20:]
-    closes = closes[-20:]
+    # ── Build 1H breakout candle ──
+    brk_date  = None
+    brk_open  = None
+    brk_high  = None
+    brk_low   = None
+    brk_close = None
 
-    # Consolidation = all except last
-    # Breakout = last candle
-    con_dates  = dates[:-1]
-    con_opens  = opens[:-1]
-    con_highs  = highs[:-1]
-    con_lows   = lows[:-1]
-    con_closes = closes[:-1]
-
-    brk_date  = dates[-1]
-    brk_open  = opens[-1]
-    brk_high  = highs[-1]
-    brk_low   = lows[-1]
-    brk_close = closes[-1]
-
-    # ── TV Light theme colors ──
-    UP_COLOR   = "#26a69a"
-    DOWN_COLOR = "#ef5350"
-    BRK_COLOR  = "#26a69a"
-    ZONE_COLOR = "rgba(244, 63, 94, 0.7)"
-    ZONE_FILL  = "rgba(244, 63, 94, 0.06)"
+    if brk_1h:
+        try:
+            dt = brk_1h.get("datetime", None)
+            if dt:
+                ts = pd.Timestamp(dt)
+                if ts.tzinfo is not None:
+                    ts = ts.tz_convert("Asia/Kolkata").tz_localize(None)
+                brk_date  = ts
+                brk_open  = float(brk_1h.get("open",  0))
+                brk_high  = float(brk_1h.get("high",  0))
+                brk_low   = float(brk_1h.get("low",   0))
+                brk_close = float(brk_1h.get("close", 0))
+        except Exception as e:
+            print(f"[chart] 1H candle error: {e}")
 
     fig = go.Figure()
 
@@ -108,7 +106,7 @@ def render_chart(result: dict):
         line_width = 1.5,
     )
 
-    # ── 4. Zone labels (right side) ──
+    # ── 4. Zone labels ──
     fig.add_annotation(
         xref      = "paper",
         x         = 1.01,
@@ -130,13 +128,13 @@ def render_chart(result: dict):
         font      = dict(size=11, color=ZONE_COLOR),
     )
 
-    # ── 5. Consolidation candles ──
+    # ── 5. 4H consolidation candles ──
     fig.add_trace(go.Candlestick(
-        x      = con_dates,
-        open   = con_opens,
-        high   = con_highs,
-        low    = con_lows,
-        close  = con_closes,
+        x      = dates_4h,
+        open   = opens_4h,
+        high   = highs_4h,
+        low    = lows_4h,
+        close  = closes_4h,
         name   = "4H Candles",
         increasing = dict(
             line      = dict(color=UP_COLOR, width=1),
@@ -148,48 +146,49 @@ def render_chart(result: dict):
         ),
     ))
 
-    # ── 6. Breakout candle ──
-    fig.add_trace(go.Candlestick(
-        x      = [brk_date],
-        open   = [brk_open],
-        high   = [brk_high],
-        low    = [brk_low],
-        close  = [brk_close],
-        name   = "Breakout",
-        increasing = dict(
-            line      = dict(color=BRK_COLOR, width=2),
-            fillcolor = BRK_COLOR,
-        ),
-        decreasing = dict(
-            line      = dict(color=BRK_COLOR, width=2),
-            fillcolor = BRK_COLOR,
-        ),
-    ))
+    # ── 6. 1H Breakout candle ──
+    if brk_date and brk_open:
+        fig.add_trace(go.Candlestick(
+            x      = [brk_date],
+            open   = [brk_open],
+            high   = [brk_high],
+            low    = [brk_low],
+            close  = [brk_close],
+            name   = "1H Breakout",
+            increasing = dict(
+                line      = dict(color=BRK_COLOR, width=2),
+                fillcolor = BRK_COLOR,
+            ),
+            decreasing = dict(
+                line      = dict(color=BRK_COLOR, width=2),
+                fillcolor = BRK_COLOR,
+            ),
+        ))
 
-    # ── 7. Breakout annotation ──
-    fig.add_annotation(
-        x          = brk_date,
-        y          = brk_high,
-        text       = f"⚡ Breakout<br><b>+{result['breakout_pct']:.1f}%</b>",
-        showarrow  = True,
-        arrowhead  = 2,
-        arrowcolor = BRK_COLOR,
-        arrowsize  = 1,
-        arrowwidth = 1.5,
-        ax         = 0,
-        ay         = -50,
-        font       = dict(size=11, color=BRK_COLOR),
-        bgcolor    = "rgba(38,166,154,0.08)",
-        bordercolor= BRK_COLOR,
-        borderwidth= 1,
-        borderpad  = 5,
-        align      = "center",
-    )
+        # ── 7. Breakout annotation ──
+        fig.add_annotation(
+            x          = brk_date,
+            y          = brk_high,
+            text       = f"⚡ 1H Breakout<br><b>+{result['breakout_pct']:.1f}%</b>",
+            showarrow  = True,
+            arrowhead  = 2,
+            arrowcolor = BRK_COLOR,
+            arrowsize  = 1,
+            arrowwidth = 1.5,
+            ax         = 0,
+            ay         = -50,
+            font       = dict(size=11, color=BRK_COLOR),
+            bgcolor    = "rgba(5,150,105,0.08)",
+            bordercolor= BRK_COLOR,
+            borderwidth= 1,
+            borderpad  = 5,
+            align      = "center",
+        )
 
     # ── Layout ──
     fig.update_layout(
         title = dict(
-            text = f"<b>{symbol}</b> · 4H Chart",
+            text = f"<b>{symbol}</b> · 4H Zone + 1H Breakout",
             font = dict(size=14, color="#131722"),
             x    = 0.01,
         ),
@@ -208,13 +207,10 @@ def render_chart(result: dict):
             linecolor   = "#e0e3eb",
             tickfont    = dict(color="#787b86", size=11),
             tickformat  = "%b %d",
-            dtick       = "D1",         # Show every day
+            dtick       = "D1",
             tickangle   = 0,
             type        = "date",
-            # Remove weekend gaps
-            rangebreaks = [
-                dict(bounds=["sat", "mon"]),
-            ],
+            rangebreaks = [dict(bounds=["sat", "mon"])],
         ),
 
         yaxis = dict(
@@ -229,4 +225,14 @@ def render_chart(result: dict):
         ),
     )
 
+    # ── Legend manually ──
     st.plotly_chart(fig, use_container_width=True)
+
+    # Chart legend
+    st.markdown("""
+    <div style="display:flex;gap:20px;font-size:12px;color:#64748b;margin-top:4px;">
+        <span>🟩 4H candles (consolidation zone)</span>
+        <span style="color:#059669;">🟢 1H breakout candle</span>
+        <span>🔴 Zone High/Low</span>
+    </div>
+    """, unsafe_allow_html=True)
