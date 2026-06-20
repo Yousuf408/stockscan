@@ -32,8 +32,6 @@ st.set_page_config(
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
-
-
 @st.cache_resource
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -660,32 +658,46 @@ def render_table(results: list, ticks: dict):
         brk_class = "up-text" if r["breakout_pct"] >= 0 else "down-text"
         high_class = "up-text" if r["pct_from_high"] >= -5 else "down-text"
 
+        up_color   = "#059669"
+        down_color = "#dc2626"
+        brk_color  = up_color if r['breakout_pct'] >= 0 else down_color
+        high_color = up_color if r['pct_from_high'] >= -5 else down_color
+        chg_color  = up_color if live_chg >= 0 else down_color
+
         rows_html += f"""
-        <tr>
-            <td><span class="ticker-badge">{symbol}</span></td>
-            <td>{price_str} <span class="{chg_class}" style="font-size:11px">{chg_str}</span></td>
-            <td class="{brk_class}">+{r['breakout_pct']:.2f}%</td>
-            <td class="up-text">{r['body_pct']:.2f}%</td>
-            <td><span class="vol-badge">{r['rel_vol']:.1f}x</span></td>
-            <td class="{high_class}">{r['pct_from_high']:.2f}%</td>
-            <td style="color:#94a3b8;font-size:11px">
+        <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='white'">
+            <td style="padding:10px 14px;">
+                <span style="background:#d1fae5;color:#059669;padding:3px 9px;border-radius:6px;font-weight:700;font-size:12px;">{symbol}</span>
+            </td>
+            <td style="padding:10px 14px;color:#1e293b;">
+                {price_str} <span style="font-size:11px;color:{chg_color};font-weight:600;">{chg_str}</span>
+            </td>
+            <td style="padding:10px 14px;color:{brk_color};font-weight:600;">+{r['breakout_pct']:.2f}%</td>
+            <td style="padding:10px 14px;color:{up_color};font-weight:600;">{r['body_pct']:.2f}%</td>
+            <td style="padding:10px 14px;">
+                <span style="background:#fef3c7;color:#d97706;padding:2px 9px;border-radius:6px;font-weight:700;font-size:12px;">{r['rel_vol']:.1f}x</span>
+            </td>
+            <td style="padding:10px 14px;color:{high_color};font-weight:600;">{r['pct_from_high']:.2f}%</td>
+            <td style="padding:10px 14px;color:#94a3b8;font-size:11px;">
                 Zone: ₹{r['con_low']:,.0f}–₹{r['con_high']:,.0f}
             </td>
         </tr>
         """
 
+    th_style = "padding:10px 14px;text-align:left;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #e2e8f0;background:#f8fafc;"
     table_html = f"""
-    <div style="overflow-x:auto;border-radius:10px;border:1px solid #334155;">
-    <table class="results-table">
+    <style>body{{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}</style>
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;background:white;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead>
             <tr>
-                <th>Ticker</th>
-                <th>Live Price</th>
-                <th>Breakout %</th>
-                <th>Body Size %</th>
-                <th>Rel. Volume</th>
-                <th>% from High</th>
-                <th>Zone</th>
+                <th style="{th_style}">Ticker</th>
+                <th style="{th_style}">Live Price</th>
+                <th style="{th_style}">Breakout %</th>
+                <th style="{th_style}">Body Size %</th>
+                <th style="{th_style}">Rel. Volume</th>
+                <th style="{th_style}">% from High</th>
+                <th style="{th_style}">Zone</th>
             </tr>
         </thead>
         <tbody>
@@ -694,7 +706,8 @@ def render_table(results: list, ticks: dict):
     </table>
     </div>
     """
-    st.markdown(table_html, unsafe_allow_html=True)
+    import streamlit.components.v1 as components
+    components.html(table_html, height=min(len(results) * 48 + 60, 600), scrolling=True)
 
 
 # ─────────────────────────────────────────────────────────────
