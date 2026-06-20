@@ -1,10 +1,10 @@
 """
 breakout_4h_chart.py
-Chart:
-  - Sirf 4H candles dikhao
-  - Last 4H candle = emerald (breakout zone ke upar)
+Original working chart — Image 1 (GARFIBRES) style:
+  - 4H candles only
+  - Last 4H candle = emerald (breakout)
   - Zone High/Low = dashed pink lines + shading
-  - Annotation = 1H Breakout detected
+  - Zone lines span only consolidation period (not full width)
 """
 
 import pandas as pd
@@ -51,43 +51,33 @@ def render_chart(result: dict):
         st.warning("Chart data unavailable.")
         return
 
-    # Last 20 candles
+    # Last 20 4H candles
     dates  = dates[-20:]
     opens  = opens[-20:]
     highs  = highs[-20:]
     lows   = lows[-20:]
     closes = closes[-20:]
 
-    # All candles except last = consolidation
-    # Last candle = breakout (emerald)
+    # Zone spans from start of consolidation to breakout candle
+    # Consolidation = last 10 candles before breakout = dates[-11:-1]
+    zone_start = dates[-11] if len(dates) >= 11 else dates[0]
+    zone_end   = dates[-1]
+
     fig = go.Figure()
 
-    # ── 1. Zone shaded area ──
-    fig.add_hrect(
+    # ── 1. Zone shaded rectangle (only consolidation period) ──
+    fig.add_shape(
+        type      = "rect",
+        x0        = zone_start,
+        x1        = zone_end,
         y0        = con_low,
         y1        = con_high,
         fillcolor = ZONE_FILL,
-        line_width= 0,
+        line      = dict(color=ZONE_COLOR, width=1.5, dash="dash"),
         layer     = "below",
     )
 
-    # ── 2. Zone High dashed line ──
-    fig.add_hline(
-        y          = con_high,
-        line_dash  = "dash",
-        line_color = ZONE_COLOR,
-        line_width = 1.5,
-    )
-
-    # ── 3. Zone Low dashed line ──
-    fig.add_hline(
-        y          = con_low,
-        line_dash  = "dash",
-        line_color = ZONE_COLOR,
-        line_width = 1.5,
-    )
-
-    # ── 4. Zone labels right side ──
+    # ── 2. Zone labels right side ──
     fig.add_annotation(
         xref="paper", x=1.01, y=con_high,
         text=f"Zone High ₹{con_high:,.0f}",
@@ -101,7 +91,7 @@ def render_chart(result: dict):
         font=dict(size=11, color=ZONE_COLOR),
     )
 
-    # ── 5. Consolidation 4H candles (all except last) ──
+    # ── 3. Consolidation 4H candles (all except last) ──
     fig.add_trace(go.Candlestick(
         x      = dates[:-1],
         open   = opens[:-1],
@@ -113,7 +103,7 @@ def render_chart(result: dict):
         decreasing = dict(line=dict(color=DOWN_COLOR, width=1), fillcolor=DOWN_COLOR),
     ))
 
-    # ── 6. Last 4H candle = breakout (emerald) ──
+    # ── 4. Last 4H candle = breakout (emerald) ──
     fig.add_trace(go.Candlestick(
         x      = [dates[-1]],
         open   = [opens[-1]],
@@ -125,10 +115,10 @@ def render_chart(result: dict):
         decreasing = dict(line=dict(color=BRK_COLOR, width=2), fillcolor=BRK_COLOR),
     ))
 
-    # ── 7. Breakout annotation ──
+    # ── 5. Breakout annotation ──
     fig.add_annotation(
         x=dates[-1], y=highs[-1],
-        text=f"⚡ 1H Breakout<br><b>+{breakout_pct:.1f}%</b>",
+        text=f"⚡ Breakout<br><b>+{breakout_pct:.1f}%</b>",
         showarrow=True,
         arrowhead=2, arrowcolor=BRK_COLOR,
         arrowsize=1, arrowwidth=1.5,
@@ -143,7 +133,7 @@ def render_chart(result: dict):
     # ── Layout ──
     fig.update_layout(
         title=dict(
-            text=f"<b>{symbol}</b> · 4H Zone + 1H Breakout",
+            text=f"<b>{symbol}</b> · 4H Chart",
             font=dict(size=14, color="#131722"),
             x=0.01,
         ),
@@ -184,7 +174,7 @@ def render_chart(result: dict):
     <div style="display:flex;gap:20px;font-size:12px;color:#64748b;margin-top:4px;">
         <span>🟩 4H up candle</span>
         <span>🟥 4H down candle</span>
-        <span style="color:#059669;">🟢 Breakout candle (4H)</span>
+        <span style="color:#059669;">🟢 Breakout candle</span>
         <span>🔴 Consolidation zone</span>
     </div>
     """, unsafe_allow_html=True)
