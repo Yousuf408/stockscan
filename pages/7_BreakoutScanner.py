@@ -127,21 +127,21 @@ def render_table(results: list, ticks: dict):
         live_chg   = live_data.get("change_pct", 0)
         chg_str    = f"+{live_chg:.2f}%" if live_chg >= 0 else f"{live_chg:.2f}%"
 
-        brk_pct  = r["breakout_pct"]
-        rel_vol  = r["rel_vol"]
-        sma20    = r["sma20"]
-        sma50    = r["sma50"]
-        con_low  = r["con_low"]
-        con_high = r["con_high"]
+        brk_pct      = r["breakout_pct"]
+        body_pct     = r["body_pct"]
+        rel_vol      = r["rel_vol"]
+        pct_from_high= r["pct_from_high"]
+        con_low      = r["con_low"]
+        con_high     = r["con_high"]
 
         rows.append({
-            "Ticker"      : symbol,
-            "Live Price"  : f"₹{live_price:,.2f}  {chg_str}",
-            "Breakout %"  : f"+{brk_pct:.2f}%",
-            "Rel. Volume" : f"{rel_vol:.1f}x",
-            "SMA20"       : f"₹{sma20:,.0f}",
-            "SMA50"       : f"₹{sma50:,.0f}",
-            "Zone"        : f"₹{con_low:,.0f} – ₹{con_high:,.0f}",
+            "Ticker"        : symbol,
+            "Live Price"    : f"₹{live_price:,.2f}  {chg_str}",
+            "Breakout %"    : f"+{brk_pct:.2f}%",
+            "Body %"        : f"{body_pct:.2f}%",
+            "Rel. Volume"   : f"{rel_vol:.1f}x",
+            "% from High"   : f"{pct_from_high:.2f}%",
+            "Zone"          : f"₹{con_low:,.0f} – ₹{con_high:,.0f}",
         })
 
     st.dataframe(
