@@ -33,9 +33,13 @@ def render_chart(result: dict):
         try:
             dt = c["datetime"]
             if hasattr(dt, "strftime"):
-                dates.append(dt)
+                ts = pd.Timestamp(dt)
             else:
-                dates.append(pd.Timestamp(dt))
+                ts = pd.Timestamp(dt)
+            # Strip timezone → Plotly aligns correctly
+            if ts.tzinfo is not None:
+                ts = ts.tz_convert("Asia/Kolkata").tz_localize(None)
+            dates.append(ts)
 
             opens.append(float(c["open"]))
             highs.append(float(c["high"]))
