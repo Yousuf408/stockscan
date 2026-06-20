@@ -17,7 +17,6 @@ from breakout_4h.breakout_4h_config import (
     PARALLEL_WORKERS,
 )
 from breakout_4h.breakout_4h_data import (
-    fetch_avg_volumes,
     fetch_1h_and_4h_data,
     fetch_daily_data,
 )
