@@ -630,84 +630,39 @@ def render_chart(result: dict):
 # SECTION 7 — RESULTS TABLE
 # ─────────────────────────────────────────────────────────────
 def render_table(results: list, ticks: dict):
-    """Render results table with live prices from Angel WS."""
+    """Render results table using st.dataframe — guaranteed to work."""
 
     if not results:
-        st.markdown("""
-        <div class="empty-state">
-            <div class="empty-icon">📭</div>
-            <div class="empty-msg">No breakouts found — try scanning again.</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info("📭 No breakouts found — try scanning again.")
         return
 
-    rows_html = ""
+    # Build rows
+    rows = []
     for r in results:
-        symbol = r["symbol"]
-        token  = NAME_TO_TOKEN.get(symbol)
-
-        # Live price from WebSocket
+        symbol     = r["symbol"]
+        token      = NAME_TO_TOKEN.get(symbol)
         live_data  = ticks.get(token, {}) if token else {}
         live_price = live_data.get("ltp", r["price"])
         live_chg   = live_data.get("change_pct", 0)
+        chg_str    = f"+{live_chg:.2f}%" if live_chg >= 0 else f"{live_chg:.2f}%"
 
-        price_str = f"₹{live_price:,.2f}"
-        chg_class = "up-text" if live_chg >= 0 else "down-text"
-        chg_str   = f"+{live_chg:.2f}%" if live_chg >= 0 else f"{live_chg:.2f}%"
+        rows.append({
+            "Ticker"       : symbol,
+            "Live Price"   : f"₹{live_price:,.2f}  {chg_str}",
+            "Breakout %"   : f"+{r['breakout_pct']:.2f}%",
+            "Body Size %"  : f"{r['body_pct']:.2f}%",
+            "Rel. Volume"  : f"{r['rel_vol']:.1f}x",
+            "% from High"  : f"{r['pct_from_high']:.2f}%",
+            "Zone"         : f"₹{r['con_low']:,.0f} – ₹{r['con_high']:,.0f}",
+        })
 
-        brk_class = "up-text" if r["breakout_pct"] >= 0 else "down-text"
-        high_class = "up-text" if r["pct_from_high"] >= -5 else "down-text"
-
-        up_color   = "#059669"
-        down_color = "#dc2626"
-        brk_color  = up_color if r['breakout_pct'] >= 0 else down_color
-        high_color = up_color if r['pct_from_high'] >= -5 else down_color
-        chg_color  = up_color if live_chg >= 0 else down_color
-
-        rows_html += f"""
-        <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='white'">
-            <td style="padding:10px 14px;">
-                <span style="background:#d1fae5;color:#059669;padding:3px 9px;border-radius:6px;font-weight:700;font-size:12px;">{symbol}</span>
-            </td>
-            <td style="padding:10px 14px;color:#1e293b;">
-                {price_str} <span style="font-size:11px;color:{chg_color};font-weight:600;">{chg_str}</span>
-            </td>
-            <td style="padding:10px 14px;color:{brk_color};font-weight:600;">+{r['breakout_pct']:.2f}%</td>
-            <td style="padding:10px 14px;color:{up_color};font-weight:600;">{r['body_pct']:.2f}%</td>
-            <td style="padding:10px 14px;">
-                <span style="background:#fef3c7;color:#d97706;padding:2px 9px;border-radius:6px;font-weight:700;font-size:12px;">{r['rel_vol']:.1f}x</span>
-            </td>
-            <td style="padding:10px 14px;color:{high_color};font-weight:600;">{r['pct_from_high']:.2f}%</td>
-            <td style="padding:10px 14px;color:#94a3b8;font-size:11px;">
-                Zone: ₹{r['con_low']:,.0f}–₹{r['con_high']:,.0f}
-            </td>
-        </tr>
-        """
-
-    th_style = "padding:10px 14px;text-align:left;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #e2e8f0;background:#f8fafc;"
-    table_html = f"""
-    <style>body{{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}</style>
-    <div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;background:white;">
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead>
-            <tr>
-                <th style="{th_style}">Ticker</th>
-                <th style="{th_style}">Live Price</th>
-                <th style="{th_style}">Breakout %</th>
-                <th style="{th_style}">Body Size %</th>
-                <th style="{th_style}">Rel. Volume</th>
-                <th style="{th_style}">% from High</th>
-                <th style="{th_style}">Zone</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-    </table>
-    </div>
-    """
-    import streamlit.components.v1 as components
-    components.html(table_html, height=min(len(results) * 48 + 60, 600), scrolling=True)
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=min(len(rows) * 45 + 38, 600),
+    )
 
 
 # ─────────────────────────────────────────────────────────────
