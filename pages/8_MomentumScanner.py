@@ -25,6 +25,12 @@ st.set_page_config(
     layout="wide"
 )
 
+st.markdown("""
+    <style>
+    header {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────
