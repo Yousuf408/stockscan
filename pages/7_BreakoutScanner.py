@@ -30,8 +30,10 @@ st.set_page_config(
 # SUPABASE CONFIG — apni keys yahan daalo
 # ─────────────────────────────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
-
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+
+
+
 @st.cache_resource
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -59,161 +61,13 @@ NAME_TO_TOKEN = {
 ALL_STOCKS = [name for name, _, kind in STOCKS_WATCHLIST if kind == "stock"]
 
 # ─────────────────────────────────────────────────────────────
-# STYLES
+# STYLES — Light Theme
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Force white theme OFF ── */
-html, body, [data-testid="stApp"],
-[data-testid="stAppViewContainer"],
-[data-testid="stAppViewBlockContainer"],
-section.main, .main, .block-container,
-div[data-testid="stMainBlockContainer"],
-div[class*="appview-container"],
-div[class*="main"] {
-    background-color: #0f172a !important;
-    color: #cbd5e1 !important;
-}
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"],
-[data-testid="stSidebarContent"],
-section[data-testid="stSidebar"] > div {
-    background-color: #1e293b !important;
-}
-
-/* ── All text elements ── */
-p, span, label, div, h1, h2, h3, h4, li, a {
-    color: #cbd5e1 !important;
-}
-
-/* ── Inputs, selects ── */
-input, textarea, select,
-[data-testid="stSelectbox"] > div > div,
-[data-baseweb="select"] > div {
-    background-color: #1e293b !important;
-    color: #cbd5e1 !important;
-    border-color: #334155 !important;
-}
-
-/* ── Streamlit metric widget ── */
-[data-testid="metric-container"] {
-    background-color: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 10px !important;
-    padding: 12px !important;
-}
-[data-testid="metric-container"] label,
-[data-testid="metric-container"] div {
-    color: #94a3b8 !important;
-}
-[data-testid="stMetricValue"] > div {
-    color: #10b981 !important;
-}
-
-/* ── Spinner ── */
-[data-testid="stSpinner"] > div {
-    border-color: #10b981 !important;
-}
-
-/* ── Alerts / warnings ── */
-[data-testid="stAlert"] {
-    background-color: #1e293b !important;
-    border-color: #334155 !important;
-}
-
-/* ── Hide default header ── */
-[data-testid="stHeader"] { 
-    background: transparent !important; 
-    display: none;
-}
-
-/* ── Hide footer ── */
+/* ── Hide footer & header ── */
 footer { display: none !important; }
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #0f172a; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-
-/* ── Cards ── */
-.scan-card {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-}
-
-/* ── Metric tiles ── */
-.metric-row {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
-}
-.metric-tile {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 10px;
-    padding: 14px 18px;
-    flex: 1;
-    text-align: center;
-}
-.metric-val {
-    font-size: 26px;
-    font-weight: 700;
-    color: #10b981;
-}
-.metric-lbl {
-    font-size: 12px;
-    color: #94a3b8;
-    margin-top: 2px;
-}
-
-/* ── Table ── */
-.results-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-.results-table th {
-    background: #0f172a;
-    color: #94a3b8;
-    padding: 10px 14px;
-    text-align: left;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-bottom: 1px solid #334155;
-    position: sticky;
-    top: 0;
-}
-.results-table td {
-    padding: 10px 14px;
-    border-bottom: 1px solid #1e293b;
-    color: #cbd5e1;
-}
-.results-table tr:hover td {
-    background: rgba(148,163,184,0.05);
-}
-.ticker-badge {
-    background: rgba(16,185,129,0.1);
-    color: #10b981;
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-weight: 600;
-    font-size: 12px;
-}
-.up-text   { color: #34d399; font-weight: 600; }
-.down-text { color: #f87171; font-weight: 600; }
-.vol-badge {
-    background: rgba(251,191,36,0.1);
-    color: #fbbf24;
-    padding: 2px 8px;
-    border-radius: 6px;
-    font-weight: 600;
-    font-size: 12px;
-}
+[data-testid="stHeader"] { display: none !important; }
 
 /* ── Scan button ── */
 div[data-testid="stButton"] > button {
@@ -230,32 +84,97 @@ div[data-testid="stButton"] > button:hover {
     opacity: 0.88 !important;
 }
 
-/* ── Spinner text ── */
-.scanning-text {
-    color: #94a3b8;
-    font-size: 13px;
-    margin-top: 8px;
+/* ── Metric tiles ── */
+.metric-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
 }
+.metric-tile {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    padding: 14px 18px;
+    flex: 1;
+    text-align: center;
+}
+.metric-val {
+    font-size: 26px;
+    font-weight: 700;
+    color: #059669;
+}
+.metric-lbl {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+/* ── Table ── */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.results-table th {
+    background: #f8fafc;
+    color: #64748b;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #e2e8f0;
+    position: sticky;
+    top: 0;
+}
+.results-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #1e293b;
+}
+.results-table tr:hover td {
+    background: #f0fdf4;
+}
+.ticker-badge {
+    background: #d1fae5;
+    color: #059669;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 12px;
+}
+.up-text   { color: #059669; font-weight: 600; }
+.down-text { color: #dc2626; font-weight: 600; }
+.vol-badge {
+    background: #fef3c7;
+    color: #d97706;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 12px;
+}
+.zone-txt { color: #94a3b8; font-size: 11px; }
 
 /* ── Chart container ── */
 .chart-wrap {
-    background: #1e293b;
-    border: 1px solid #334155;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
     padding: 16px;
-    margin-top: 20px;
+    margin-top: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 /* ── Empty state ── */
 .empty-state {
     text-align: center;
     padding: 60px 20px;
-    color: #475569;
+    color: #94a3b8;
 }
 .empty-icon { font-size: 40px; margin-bottom: 12px; }
 .empty-msg  { font-size: 15px; }
 
-/* ── Status dot ── */
+/* ── WS status dot ── */
 .dot-live {
     display: inline-block;
     width: 8px; height: 8px;
@@ -269,8 +188,17 @@ div[data-testid="stButton"] > button:hover {
     50%      { opacity: 0.3; }
 }
 
-/* ── General text ── */
-h1,h2,h3,p,label,div { color: #cbd5e1; }
+/* ── Scanning text ── */
+.scanning-text {
+    color: #64748b;
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f8fafc; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -596,15 +524,15 @@ def render_chart(result: dict):
             width:  container.clientWidth,
             height: 400,
             layout: {{
-                background: {{ color: '#0f172a' }},
+                background: {{ color: '#ffffff' }},
                 textColor:  '#94a3b8',
             }},
             grid: {{
-                vertLines:  {{ color: '#1e293b' }},
-                horzLines:  {{ color: '#1e293b' }},
+                vertLines:  {{ color: '#f1f5f9' }},
+                horzLines:  {{ color: '#f1f5f9' }},
             }},
             crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
-            rightPriceScale: {{ borderColor: '#334155' }},
+            rightPriceScale: {{ borderColor: '#e2e8f0' }},
             timeScale: {{
                 borderColor:     '#334155',
                 timeVisible:     true,
@@ -740,7 +668,7 @@ def render_table(results: list, ticks: dict):
             <td class="up-text">{r['body_pct']:.2f}%</td>
             <td><span class="vol-badge">{r['rel_vol']:.1f}x</span></td>
             <td class="{high_class}">{r['pct_from_high']:.2f}%</td>
-            <td style="color:#64748b;font-size:11px">
+            <td style="color:#94a3b8;font-size:11px">
                 Zone: ₹{r['con_low']:,.0f}–₹{r['con_high']:,.0f}
             </td>
         </tr>
@@ -778,7 +706,7 @@ def main():
 
     with col_title:
         st.markdown(
-            '<h1 style="color:#f1f5f9;font-size:28px;font-weight:700;margin:0">⚡ Breakout Scanner</h1>',
+            '<h1 style="color:#0f172a;font-size:28px;font-weight:700;margin:0">⚡ Breakout Scanner</h1>',
             unsafe_allow_html=True
         )
         st.markdown(
@@ -810,12 +738,12 @@ def main():
         if ws_connected:
             st.markdown(
                 f'<span class="dot-live"></span>'
-                f'<span style="color:#10b981;font-size:13px">WebSocket Live · {ticks_count} stocks receiving ticks</span>',
+                f'<span style="color:#059669;font-size:13px;font-weight:500">WebSocket Live · {ticks_count} stocks receiving ticks</span>',
                 unsafe_allow_html=True
             )
         else:
             st.markdown(
-                '<span style="color:#f87171;font-size:13px">⚠️ WebSocket disconnected — live prices unavailable</span>',
+                '<span style="color:#dc2626;font-size:13px">⚠️ WebSocket disconnected — live prices unavailable</span>',
                 unsafe_allow_html=True
             )
 
@@ -845,7 +773,7 @@ def main():
             <div class="empty-icon">🔍</div>
             <div class="empty-msg" style="color:#475569">
                 Click <b style="color:#10b981">Scan Now</b> to find 4H breakout stocks.<br>
-                <span style="font-size:12px;color:#334155">Scans all {count} stocks from your watchlist.</span>
+                <span style="font-size:12px;color:#94a3b8">Scans all {count} stocks from your watchlist.</span>
             </div>
         </div>
         """.replace("{count}", str(len(ALL_STOCKS))), unsafe_allow_html=True)
@@ -880,7 +808,7 @@ def main():
 
     # ── Table ──
     st.markdown(
-        '<h3 style="color:#f1f5f9;font-size:16px;margin-bottom:10px">📋 Breakout Stocks</h3>',
+        '<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📋 Breakout Stocks</h3>',
         unsafe_allow_html=True
     )
     render_table(results, ticks)
@@ -889,7 +817,7 @@ def main():
     if results:
         st.markdown('<div style="margin-top:28px">', unsafe_allow_html=True)
         st.markdown(
-            '<h3 style="color:#f1f5f9;font-size:16px;margin-bottom:10px">📊 4H Candle Chart</h3>',
+            '<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📊 4H Candle Chart</h3>',
             unsafe_allow_html=True
         )
 
@@ -925,7 +853,7 @@ def main():
     # ── Footer ──
     st.markdown("---")
     st.markdown(
-        '<p style="text-align:center;color:#475569;font-size:12px">'
+        '<p style="text-align:center;color:#94a3b8;font-size:12px">'
         '⚠️ For educational and research purposes only. Not financial advice.'
         '</p>',
         unsafe_allow_html=True
