@@ -4,6 +4,7 @@ Breakout Scanner — finds stocks breaking out of consolidation zones
 Uses: yfinance (4H candles) + Supabase (volume filter) + Angel WS (live price)
 """
 
+import os
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -26,13 +27,14 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────
-# SUPABASE CLIENT
+# SUPABASE CONFIG — apni keys yahan daalo
 # ─────────────────────────────────────────────────────────────
+SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+
 @st.cache_resource
 def get_supabase():
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = get_supabase()
 
