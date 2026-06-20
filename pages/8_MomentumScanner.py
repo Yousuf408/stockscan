@@ -324,30 +324,31 @@ def style_table(df: pd.DataFrame):
 # ─────────────────────────────────────────────────────────────
 # MAIN PAGE
 # ─────────────────────────────────────────────────────────────
-st.title("🚀 Momentum Scanner")
+st.markdown("""
+    <style>
+    .block-container {padding-top: 1rem !important;}
+    </style>
+""", unsafe_allow_html=True)
 
 # ── Load historical once into session_state ──────────────────
 if "momentum_historical" not in st.session_state:
-    with st.spinner("Fetching historical data from Supabase..."):
+    with st.spinner("Loading historical data..."):
         hist = fetch_historical_data()
         if hist:
             st.session_state["momentum_historical"] = hist
-            st.success(f"✅ Historical loaded | Target: {hist['target_date']} | Prev: {hist['prev_date']}")
         else:
             st.error("❌ No data found in websocket_stock_values")
             st.stop()
 
 historical = st.session_state["momentum_historical"]
 
-# ── Top bar ──────────────────────────────────────────────────
-col1, col2, col3 = st.columns([2, 1, 1])
+# ── Compact top bar ──────────────────────────────────────────
+col1, col2 = st.columns([5, 1])
 with col1:
-    st.caption(f"📅 Scanning: **{historical['target_date']}** vs Prev: **{historical['prev_date']}**")
+    ws_status = "🟢 Live" if angel_ws.is_connected() else "🔴 Disconnected"
+    st.markdown(f"🚀 **Momentum Scanner** &nbsp;|&nbsp; 📅 {historical['target_date']} vs {historical['prev_date']} &nbsp;|&nbsp; WS: {ws_status}", unsafe_allow_html=True)
 with col2:
-    ws_status = "🟢 Connected" if angel_ws.is_connected() else "🔴 Disconnected"
-    st.caption(f"WebSocket: {ws_status}")
-with col3:
-    if st.button("🔄 Reload Historical"):
+    if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
         st.rerun()
 
