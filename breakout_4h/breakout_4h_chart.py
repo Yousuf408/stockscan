@@ -54,15 +54,21 @@ def render_chart(result: dict):
     brk_time_json = json.dumps(breakout_time)
 
     html = f"""
-    <div id="chart_{symbol}" style="width:100%;height:400px;border-radius:8px;"></div>
+    <div id="chart_{symbol}" style="width:100%;height:420px;border-radius:8px;overflow:hidden;"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js"></script>
     <script>
     (function() {{
-        var container = document.getElementById('chart_{symbol}');
-        if (!container) return;
+        // Wait for DOM + script to be ready
+        function initChart() {{
+            var container = document.getElementById('chart_{symbol}');
+            if (!container) {{ setTimeout(initChart, 100); return; }}
+            if (typeof LightweightCharts === 'undefined') {{ setTimeout(initChart, 100); return; }}
+
+            // Use fixed width since iframe clientWidth can be 0
+            var chartWidth = container.offsetWidth || window.innerWidth || 800;
 
         var chart = LightweightCharts.createChart(container, {{
-            width  : container.clientWidth,
+            width  : chartWidth,
             height : 400,
             layout : {{
                 background : {{ color: '#ffffff' }},
@@ -154,10 +160,15 @@ def render_chart(result: dict):
 
         // Responsive resize
         window.addEventListener('resize', function() {{
-            chart.applyOptions({{ width: container.clientWidth }});
+            var w = container.offsetWidth || window.innerWidth || 800;
+            chart.applyOptions({{ width: w }});
         }});
+        }} // end initChart
+
+        // Start after slight delay to ensure iframe is ready
+        setTimeout(initChart, 200);
     }})();
     </script>
     """
 
-    st.components.v1.html(html, height=420)
+    st.components.v1.html(html, height=440)
