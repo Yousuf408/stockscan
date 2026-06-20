@@ -30,8 +30,8 @@ st.set_page_config(
 # SUPABASE CONFIG — apni keys yahan daalo
 # ─────────────────────────────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 @st.cache_resource
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -63,16 +63,78 @@ ALL_STOCKS = [name for name, _, kind in STOCKS_WATCHLIST if kind == "stock"]
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Page background ── */
-[data-testid="stAppViewContainer"] {
-    background-color: #0f172a;
+/* ── Force white theme OFF ── */
+html, body, [data-testid="stApp"],
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+section.main, .main, .block-container,
+div[data-testid="stMainBlockContainer"],
+div[class*="appview-container"],
+div[class*="main"] {
+    background-color: #0f172a !important;
+    color: #cbd5e1 !important;
 }
-[data-testid="stSidebar"] {
-    background-color: #1e293b;
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"],
+[data-testid="stSidebarContent"],
+section[data-testid="stSidebar"] > div {
+    background-color: #1e293b !important;
+}
+
+/* ── All text elements ── */
+p, span, label, div, h1, h2, h3, h4, li, a {
+    color: #cbd5e1 !important;
+}
+
+/* ── Inputs, selects ── */
+input, textarea, select,
+[data-testid="stSelectbox"] > div > div,
+[data-baseweb="select"] > div {
+    background-color: #1e293b !important;
+    color: #cbd5e1 !important;
+    border-color: #334155 !important;
+}
+
+/* ── Streamlit metric widget ── */
+[data-testid="metric-container"] {
+    background-color: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 10px !important;
+    padding: 12px !important;
+}
+[data-testid="metric-container"] label,
+[data-testid="metric-container"] div {
+    color: #94a3b8 !important;
+}
+[data-testid="stMetricValue"] > div {
+    color: #10b981 !important;
+}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] > div {
+    border-color: #10b981 !important;
+}
+
+/* ── Alerts / warnings ── */
+[data-testid="stAlert"] {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
 }
 
 /* ── Hide default header ── */
-[data-testid="stHeader"] { background: transparent; }
+[data-testid="stHeader"] { 
+    background: transparent !important; 
+    display: none;
+}
+
+/* ── Hide footer ── */
+footer { display: none !important; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 
 /* ── Cards ── */
 .scan-card {
