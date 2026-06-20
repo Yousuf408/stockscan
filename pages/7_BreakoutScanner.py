@@ -131,9 +131,9 @@ def render_table(results: list, ticks: dict):
             "Ticker"      : symbol,
             "Live Price"  : f"₹{live_price:,.2f}  {chg_str}",
             "Breakout %"  : f"+{r['breakout_pct']:.2f}%",
-            "Body Size %" : f"{r['body_pct']:.2f}%",
             "Rel. Volume" : f"{r['rel_vol']:.1f}x",
-            "% from High" : f"{r['pct_from_high']:.2f}%",
+            "SMA20"       : f"₹{r['sma20']:,.0f}",
+            "SMA50"       : f"₹{r['sma50']:,.0f}",
             "Zone"        : f"₹{r['con_low']:,.0f} – ₹{r['con_high']:,.0f}",
         })
 
@@ -292,6 +292,8 @@ def main():
             c1.metric("Price",        f"₹{selected['price']:,.2f}")
             c2.metric("Breakout %",   f"+{selected['breakout_pct']:.2f}%")
             c3.metric("Rel. Volume",  f"{selected['rel_vol']:.1f}x")
+            "SMA20"       : f"₹{r['sma20']:,.0f}",
+            "SMA50"       : f"₹{r['sma50']:,.0f}",
             c4.metric("Zone Range %", f"{selected['range_pct']:.2f}%")
 
             st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
