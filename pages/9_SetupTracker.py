@@ -133,38 +133,46 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
     for col in ["volume", "ltp", "open"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Get latest price per stock per date
-    df_pivot = df.drop_duplicates(subset=["stock", "date"], keep="last")
+    # Get latest price per stock per date (remove duplicates)
+    df_pivot = df.sort_values("date").drop_duplicates(subset=["stock", "date"], keep="last")
 
     results = []
 
     for stock in df_pivot["stock"].unique():
         stock_data = df_pivot[df_pivot["stock"] == stock].sort_values("date", ascending=False)
         
+        # Must have at least 2 days
         if len(stock_data) < 2:
             continue
 
-        # ── Extract volumes and prices for each day ──────────────
+        # ── Build days_data dict safely ──────────────────────────
         days_data = {}
         for idx, row in stock_data.iterrows():
-            days_data[row["date"]] = {
-                "volume": row["volume"],
-                "ltp": row["ltp"],
-                "open": row["open"],
+            date_key = str(row["date"])
+            days_data[date_key] = {
+                "volume": float(row["volume"]) if row["volume"] > 0 else 0,
+                "ltp": float(row["ltp"]) if row["ltp"] > 0 else 0,
+                "open": float(row["open"]) if row["open"] > 0 else 0,
             }
 
-        # Get 4 days (or less if not available)
-        day_list = sorted(days_data.keys(), reverse=True)[:4]
+        # Get sorted dates (most recent first), take max 4
+        sorted_dates = sorted(days_data.keys(), reverse=True)
         
-        if len(day_list) < 2:
+        if len(sorted_dates) < 2:
             continue
 
-        # Day 1 (today), Day 2 (yesterday), Day 3 (2 days ago), Day 4 (3 days ago)
-        day1 = days_data.get(day_list[0], {})  # Today
-        day2 = days_data.get(day_list[1], {})  # Yesterday
-        day3 = days_data.get(day_list[2], {})  # 2 days ago
-        day4 = days_data.get(day_list[3], {})  # 3 days ago
+        # Safely extract day data ─────────────────────────────────
+        day1_date = sorted_dates[0] if len(sorted_dates) > 0 else None
+        day2_date = sorted_dates[1] if len(sorted_dates) > 1 else None
+        day3_date = sorted_dates[2] if len(sorted_dates) > 2 else None
+        day4_date = sorted_dates[3] if len(sorted_dates) > 3 else None
 
+        day1 = days_data.get(day1_date, {}) if day1_date else {}
+        day2 = days_data.get(day2_date, {}) if day2_date else {}
+        day3 = days_data.get(day3_date, {}) if day3_date else {}
+        day4 = days_data.get(day4_date, {}) if day4_date else {}
+
+        # Extract values with safety ─────────────────────────────
         vol1 = day1.get("volume", 0)
         vol2 = day2.get("volume", 0)
         vol3 = day3.get("volume", 0)
@@ -174,13 +182,14 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         ltp2 = day2.get("ltp", 0)
         ltp3 = day3.get("ltp", 0)
 
-        if vol1 == 0 or vol2 == 0 or ltp2 == 0:
+        # Skip if critical data missing
+        if vol1 == 0 or vol2 == 0 or ltp1 == 0 or ltp2 == 0:
             continue
 
         # ── Calculate consolidation metrics ──────────────────────
-        vol_ratio_today = vol1 / max(vol2, 1)  # Today vs Yesterday
-        vol_ratio_yest = vol2 / max(vol3, 1)   # Yesterday vs 2 days ago
-        vol_ratio_d3 = vol3 / max(vol4, 1)     # 2 days ago vs 3 days ago
+        vol_ratio_today = vol1 / vol2 if vol2 > 0 else 0
+        vol_ratio_yest = vol2 / vol3 if vol3 > 0 else 1.0
+        vol_ratio_d3 = vol3 / vol4 if vol4 > 0 else 1.0
 
         price_change_today = ((ltp1 - ltp2) / ltp2 * 100) if ltp2 > 0 else 0
         price_change_yest = ((ltp2 - ltp3) / ltp3 * 100) if ltp3 > 0 else 0
@@ -190,12 +199,12 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         setup_score = 0
 
         # Stage 1: Signal appearing (vol spike in early days)
-        if vol_ratio_d3 >= 1.5 or vol_ratio_yest >= 1.5:
+        if len(sorted_dates) >= 3 and (vol_ratio_d3 >= 1.5 or vol_ratio_yest >= 1.5):
             setup_stage = "📍 SIGNAL_START"
             setup_score = 1
 
         # Stage 2: Building (multiple days with elevated volume)
-        if (vol_ratio_d3 >= 1.3 or vol_ratio_yest >= 1.3) and abs(price_change_yest) <= 5:
+        if len(sorted_dates) >= 3 and (vol_ratio_d3 >= 1.3 or vol_ratio_yest >= 1.3) and abs(price_change_yest) <= 5:
             setup_stage = "📈 BUILDING"
             setup_score = 2
 
@@ -228,10 +237,10 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
 
         results.append({
             "Symbol": stock,
-            "Day_1_Vol": vol1,
-            "Day_2_Vol": vol2,
-            "Day_3_Vol": vol3,
-            "Day_4_Vol": vol4,
+            "Day_1_Vol": int(vol1),
+            "Day_2_Vol": int(vol2),
+            "Day_3_Vol": int(vol3),
+            "Day_4_Vol": int(vol4),
             "Vol_D1_D2": f"{vol_ratio_today:.2f}x",
             "Vol_D2_D3": f"{vol_ratio_yest:.2f}x",
             "Price_D1": f"₹{ltp1:.2f}",
@@ -240,7 +249,7 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
             "Chg_D2_%": f"{price_change_yest:+.2f}%",
             "Setup_Stage": setup_stage,
             "Readiness_%": readiness,
-            "Days_in_Setup": len(day_list),
+            "Days_in_Setup": len(sorted_dates),
             "setup_score": setup_score,
         })
 
