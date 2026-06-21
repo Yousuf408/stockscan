@@ -303,7 +303,7 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 # HTML TABLE WITH CLICK-TO-COPY SYMBOL
 # ─────────────────────────────────────────────────────────────
-def render_html_table(df: pd.DataFrame) -> str:
+def render_html_table(df: pd.DataFrame, search_term: str = "") -> str:
     def row_bg(momentum):
         if "STRONG BUILDING" in momentum: return "#d4edda"
         if "BUILDING"        in momentum: return "#cce5ff"
@@ -317,6 +317,7 @@ def render_html_table(df: pd.DataFrame) -> str:
     .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
     .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
     .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
+    .highlight {background:#fbbf24; font-weight:700; padding:2px 4px; border-radius:3px;}
     .copy-btn {
         cursor:pointer; font-weight:700; color:#0f172a;
         background:#e2e8f0; border:none; padding:3px 8px;
@@ -359,6 +360,14 @@ def render_html_table(df: pd.DataFrame) -> str:
         bg     = row_bg(str(row.get("Momentum", "")))
         symbol = str(row["Symbol"])
         signal_time = str(row.get("Signal Time", "-"))
+        
+        # Highlight search term in cells
+        def highlight_cell(value):
+            val_str = str(value)
+            if search_term and search_term.lower() in val_str.lower():
+                return val_str.replace(search_term, f"<span class='highlight'>{search_term}</span>")
+            return val_str
+        
         html += f"""
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
@@ -367,12 +376,12 @@ def render_html_table(df: pd.DataFrame) -> str:
             <td>₹{float(row['Open']):.2f}</td>
             <td>₹{float(row['LTP']):.2f}</td>
             <td>{int(float(row['Volume'])):,}</td>
-            <td>{row['Gap %']}</td>
-            <td>{row['Intraday %']}</td>
-            <td>{row['Chg vs Prev %']}</td>
-            <td>{row['Vol Ratio']}</td>
-            <td>{row['Momentum']}</td>
-            <td>{row['Action']}</td>
+            <td>{highlight_cell(row['Gap %'])}</td>
+            <td>{highlight_cell(row['Intraday %'])}</td>
+            <td>{highlight_cell(row['Chg vs Prev %'])}</td>
+            <td>{highlight_cell(row['Vol Ratio'])}</td>
+            <td>{highlight_cell(row['Momentum'])}</td>
+            <td>{highlight_cell(row['Action'])}</td>
             <td>{float(row['Score']):.2f}</td>
         </tr>"""
 
@@ -441,15 +450,58 @@ def scanner_table():
     df["Signal Time"] = signal_time_list
     
     # ── Reorder columns with Signal Time ──────────────────────
-    display_cols = [
+    all_cols = [
         "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Intraday %", "Chg vs Prev %",
         "Vol Ratio", "Momentum", "Action", "Score"
     ]
     
+    # ── Initialize visible columns in session_state ───────────
+    if "visible_columns" not in st.session_state:
+        st.session_state["visible_columns"] = {col: True for col in all_cols}
+    
+    # ── Top toolbar ──────────────────────────────────────────
+    col1, col2, col3 = st.columns([2, 2, 2])
+    
+    with col1:
+        search_query = st.text_input("🔍 Search stocks", key="search_input", placeholder="Type symbol or value...")
+    
+    with col2:
+        if st.button("📋 Show/Hide Columns", key="toggle_cols_btn"):
+            st.session_state["show_columns_menu"] = not st.session_state.get("show_columns_menu", False)
+    
+    with col3:
+        if st.button("📥 Download CSV", key="download_csv_btn"):
+            csv = df[all_cols].to_csv(index=False)
+            st.download_button(
+                label="📥 Download",
+                data=csv,
+                file_name=f"momentum_scan_{now_ist.replace(':', '')}.csv",
+                mime="text/csv"
+            )
+    
+    # ── Show column visibility menu ──────────────────────────
+    if st.session_state.get("show_columns_menu", False):
+        st.subheader("Choose columns to display:")
+        col_selection = st.columns(3)
+        for idx, col in enumerate(all_cols):
+            with col_selection[idx % 3]:
+                st.session_state["visible_columns"][col] = st.checkbox(
+                    col, 
+                    value=st.session_state["visible_columns"].get(col, True),
+                    key=f"col_{col}"
+                )
+    
+    # ── Filter visible columns ───────────────────────────────
+    display_cols = [col for col in all_cols if st.session_state["visible_columns"].get(col, True)]
     df_display = df[display_cols]
-
+    
+    # ── Apply search filter ──────────────────────────────────
+    if search_query:
+        mask = df_display.astype(str).apply(lambda row: row.str.contains(search_query, case=False).any(), axis=1)
+        df_display = df_display[mask]
+    
     st.success(f"**{len(df_display)} stocks** matching momentum criteria")
-    st.components.v1.html(render_html_table(df_display), height=min(600, 60 + len(df_display) * 38), scrolling=True)
+    st.components.v1.html(render_html_table(df_display, search_query), height=min(600, 60 + len(df_display) * 38), scrolling=True)
 
 scanner_table()
