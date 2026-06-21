@@ -35,7 +35,7 @@ st.markdown("""
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jekt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -49,6 +49,17 @@ NAME_TO_TOKEN = {name: token for name, token, kind in STOCKS_WATCHLIST}
 @st.cache_resource
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ─────────────────────────────────────────────────────────────
+# HELPER: Format date string for display
+# ─────────────────────────────────────────────────────────────
+def fmt_date(d):
+    """Convert '2026-06-20' → 'Jun 20' for column headers."""
+    try:
+        dt = datetime.strptime(str(d), "%Y-%m-%d")
+        return dt.strftime("%b %d")  # e.g., "Jun 20"
+    except Exception:
+        return str(d)
 
 # ─────────────────────────────────────────────────────────────
 # FETCH LAST 4 DAYS DATA FROM SUPABASE
@@ -265,7 +276,15 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 # HTML TABLE WITH CLICK-TO-COPY
 # ─────────────────────────────────────────────────────────────
-def render_setup_table(df: pd.DataFrame) -> str:
+def render_setup_table(df: pd.DataFrame, dates: list) -> str:
+    """Render HTML table with actual dates in headers instead of Day 1/Day 2."""
+
+    # ── Format dates for column headers ──────────────────────────
+    d1 = fmt_date(dates[0]) if len(dates) > 0 else "Day 1"
+    d2 = fmt_date(dates[1]) if len(dates) > 1 else "Day 2"
+    d3 = fmt_date(dates[2]) if len(dates) > 2 else "Day 3"
+    d4 = fmt_date(dates[3]) if len(dates) > 3 else "Day 4"
+
     def stage_color(stage):
         if "READY_TO_SPIKE" in stage:
             return "#d4edda"  # Green
@@ -277,52 +296,55 @@ def render_setup_table(df: pd.DataFrame) -> str:
             return "#f8d7da"  # Light red
         return "#ffffff"
 
-    html = """
+    html = f"""
     <style>
-    .setup-table {width:100%; border-collapse:collapse; font-size:12px; font-family:sans-serif;}
-    .setup-table th {background:#1e293b; color:#ffffff; font-weight:600; padding:10px 8px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
-    .setup-table td {padding:8px 8px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
-    .copy-btn {
+    .setup-table {{width:100%; border-collapse:collapse; font-size:12px; font-family:sans-serif;}}
+    .setup-table th {{background:#1e293b; color:#ffffff; font-weight:600; padding:10px 8px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}}
+    .setup-table td {{padding:8px 8px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}}
+    .copy-btn {{
         cursor:pointer; font-weight:700; color:#0f172a;
         background:#e2e8f0; border:none; padding:4px 10px;
         border-radius:4px; font-size:11px; transition:background 0.2s;
-    }
-    .copy-btn:hover {background:#10b981; color:white;}
-    .copy-btn.copied {background:#10b981; color:white;}
-    .readiness-bar {
+    }}
+    .copy-btn:hover {{background:#10b981; color:white;}}
+    .copy-btn.copied {{background:#10b981; color:white;}}
+    .readiness-bar {{
         width:100%; height:20px; background:#e2e8f0; border-radius:3px;
         overflow:hidden; font-size:10px; color:white; text-align:center;
         font-weight:bold; line-height:20px;
-    }
-    .readiness-fill {height:100%; background:linear-gradient(90deg, #ef4444, #f97316, #eab308, #10b981);}
-    .toast {
+    }}
+    .readiness-fill {{height:100%; background:linear-gradient(90deg, #ef4444, #f97316, #eab308, #10b981);}}
+    .toast {{
         position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
         background:#0f172a; color:white; padding:8px 20px;
         border-radius:8px; font-size:12px; z-index:9999;
         opacity:0; transition:opacity 0.3s; pointer-events:none;
-    }
-    .toast.show {opacity:1;}
+    }}
+    .toast.show {{opacity:1;}}
     </style>
     <div id="toast" class="toast">✅ Copied!</div>
     <script>
-    function copySymbol(btn, symbol) {
+    function copySymbol(btn, symbol) {{
         navigator.clipboard.writeText(symbol);
         btn.classList.add('copied');
         btn.innerText = '✓ ' + symbol;
         var toast = document.getElementById('toast');
         toast.classList.add('show');
-        setTimeout(function() {
+        setTimeout(function() {{
             btn.classList.remove('copied');
             btn.innerText = symbol;
             toast.classList.remove('show');
-        }, 1500);
-    }
+        }}, 1500);
+    }}
     </script>
     <table class="setup-table">
     <thead><tr>
-        <th>Symbol</th><th>Day 1 Vol</th><th>Day 2 Vol</th><th>Day 3 Vol</th>
-        <th>Vol D1:D2</th><th>Vol D2:D3</th><th>Price D1</th><th>Price D2</th>
-        <th>Chg D1 %</th><th>Chg D2 %</th><th>Setup Stage</th><th>Readiness</th>
+        <th>Symbol</th>
+        <th>{d1} Vol</th><th>{d2} Vol</th><th>{d3} Vol</th>
+        <th>Vol {d1}:{d2}</th><th>Vol {d2}:{d3}</th>
+        <th>Price {d1}</th><th>Price {d2}</th>
+        <th>Chg {d1} %</th><th>Chg {d2} %</th>
+        <th>Setup Stage</th><th>Readiness</th>
     </tr></thead><tbody>
     """
 
@@ -407,7 +429,7 @@ else:
             st.info("No stocks in READY_TO_SPIKE phase yet.")
         else:
             st.success(f"**{len(df_ready)} stocks** ready to spike!")
-            st.components.v1.html(render_setup_table(df_ready), height=min(600, 60 + len(df_ready) * 40), scrolling=True)
+            st.components.v1.html(render_setup_table(df_ready, historical["dates"]), height=min(600, 60 + len(df_ready) * 40), scrolling=True)
 
     with tab2:
         df_cons = df_setups[df_setups["Setup_Stage"].str.contains("CONSOLIDATING")]
@@ -415,7 +437,7 @@ else:
             st.info("No stocks consolidating. Watch for next signal.")
         else:
             st.warning(f"**{len(df_cons)} stocks** in consolidation phase (watch for spike tomorrow!)")
-            st.components.v1.html(render_setup_table(df_cons), height=min(600, 60 + len(df_cons) * 40), scrolling=True)
+            st.components.v1.html(render_setup_table(df_cons, historical["dates"]), height=min(600, 60 + len(df_cons) * 40), scrolling=True)
 
     with tab3:
         df_build = df_setups[df_setups["Setup_Stage"].str.contains("BUILDING")]
@@ -423,11 +445,11 @@ else:
             st.info("No stocks building momentum.")
         else:
             st.info(f"**{len(df_build)} stocks** still building momentum (2-3 days away)")
-            st.components.v1.html(render_setup_table(df_build), height=min(600, 60 + len(df_build) * 40), scrolling=True)
+            st.components.v1.html(render_setup_table(df_build, historical["dates"]), height=min(600, 60 + len(df_build) * 40), scrolling=True)
 
     with tab4:
         st.caption(f"All {len(df_setups)} stocks in setup phase")
-        st.components.v1.html(render_setup_table(df_setups), height=min(800, 60 + len(df_setups) * 40), scrolling=True)
+        st.components.v1.html(render_setup_table(df_setups, historical["dates"]), height=min(800, 60 + len(df_setups) * 40), scrolling=True)
 
 st.divider()
 
