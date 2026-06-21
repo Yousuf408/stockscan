@@ -28,7 +28,7 @@ except ImportError:
         fetch_1h_and_4h_data,
     )
 
-BREAKOUT_THRESHOLD = 1.02   # 2% above zone high = breakout
+BREAKOUT_THRESHOLD = 1.006  # 0.6% above zone high = breakout
 NEAR_ZONE_PCT      = 0.98   # within 2% of zone high = near zone
 
 
@@ -129,13 +129,21 @@ def check_live_alerts(watchlist: list, ticks: dict, name_to_token: dict) -> list
         live_data = ticks.get(token, {}) if token else {}
         ltp       = live_data.get("ltp", None)
 
+        # WS disconnected or no tick — show N/A
         if ltp is None or ltp <= 0:
-            ltp = con_low  # fallback
+            enriched.append({
+                **stock,
+                "ltp"            : None,
+                "pct_to_breakout": None,
+                "proximity_pct"  : 0,
+                "status"         : "no_data",
+            })
+            continue
 
         ltp = float(ltp)
 
         # Calculate proximity (0-100%)
-        zone_range   = con_high - con_low
+        zone_range = con_high - con_low
         if zone_range > 0:
             proximity_pct = min(100, max(0, (ltp - con_low) / zone_range * 100))
         else:
@@ -161,7 +169,7 @@ def check_live_alerts(watchlist: list, ticks: dict, name_to_token: dict) -> list
         })
 
     # Sort: broke_out first, then near_zone, then by proximity desc
-    order = {"broke_out": 0, "near_zone": 1, "watching": 2}
+    order = {"broke_out": 0, "near_zone": 1, "watching": 2, "no_data": 3}
     enriched.sort(key=lambda x: (order[x["status"]], -x["proximity_pct"]))
 
     return enriched
