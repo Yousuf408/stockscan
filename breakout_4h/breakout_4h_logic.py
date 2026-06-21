@@ -1,14 +1,6 @@
 """
 breakout_4h_logic.py
-8 checks — exactly as per original prompt:
-  Check 1: Consolidation  → last 10 4H candles ≤ 12%
-  Check 2: Breakout       → close ≥ conHigh × 1.02
-  Check 3: Body size      → abs(close-open)/open ≥ 5%
-  Check 4: Rel. Volume    → 1.5× avg of prior 10 4H candles
-  Check 5: Liquidity      → avg of last 20 daily vol ≥ 500k
-  Check 6: Market cap     → ≥ 50,000,000
-  Check 7: Price level    → within 10% of 20d/50d high
-  Check 8: Trend          → close > SMA20 & SMA50
+8 checks with dynamic filters from UI.
 """
 
 import numpy as np
@@ -39,27 +31,30 @@ except ImportError:
     )
 
 # ─────────────────────────────────────────────────────────────
-# CONSTANTS — exact as per original prompt
+# DEFAULT FILTERS — original prompt values
 # ─────────────────────────────────────────────────────────────
-BREAKOUT_MULTIPLIER = 1.02        # Check 2: 2% above zone
-MIN_BODY_PCT        = 5.0         # Check 3: body ≥ 5%
-MIN_REL_VOL         = 1.5         # Check 4: 1.5× avg of 10 4H
-VOL_LOOKBACK_4H     = 10          # Check 4: last 10 4H candles
-MIN_AVG_DAILY_VOL   = 500_000     # Check 5: 500k
-DAILY_VOL_LOOKBACK  = 20          # Check 5: last 20 daily
-MIN_MARKET_CAP      = 50_000_000  # Check 6: 50M
-NEAR_HIGH_PCT       = 0.90        # Check 7: within 10% of high
+DEFAULT_FILTERS = {
+    "consol_pct"    : 12,           # Check 1: ≤ 12%
+    "breakout_mult" : 1.02,         # Check 2: 2% above
+    "body_pct"      : 5.0,          # Check 3: ≥ 5%
+    "rel_vol"       : 1.5,          # Check 4: 1.5×
+    "daily_vol"     : 500_000,      # Check 5: 500k
+    "mktcap"        : 50_000_000,   # Check 6: 50M
+    "near_high"     : 10,           # Check 7: within 10%
+    "trend"         : "both",       # Check 8: SMA20 & SMA50
+}
 
 
 # ─────────────────────────────────────────────────────────────
 # 8 CHECKS
 # ─────────────────────────────────────────────────────────────
-def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0):
+def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0, filters=None):
+
+    f = {**DEFAULT_FILTERS, **(filters or {})}
 
     if df_4h is None or len(df_4h) < CONSOLIDATION_LOOKBACK + 2:
         return None
 
-    # ── Current + lookback 4H candles ──
     lookback_4h = df_4h.iloc[-(CONSOLIDATION_LOOKBACK + 1):-1]
     current_4h  = df_4h.iloc[-1]
     cur_open    = float(current_4h["open"])
@@ -68,36 +63,32 @@ def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0):
     cur_low     = float(current_4h["low"])
     cur_volume  = float(current_4h["volume"])
 
-    # ── CHECK 1: Consolidation ≤ 12% ──
-    con_high = lookback_4h.apply(
-        lambda r: max(r["open"], r["close"]), axis=1
-    ).max()
-    con_low  = lookback_4h.apply(
-        lambda r: min(r["open"], r["close"]), axis=1
-    ).min()
+    # ── CHECK 1: Consolidation ──
+    con_high = lookback_4h.apply(lambda r: max(r["open"], r["close"]), axis=1).max()
+    con_low  = lookback_4h.apply(lambda r: min(r["open"], r["close"]), axis=1).min()
 
     if con_low <= 0:
         return None
 
     range_pct = (con_high - con_low) / con_low * 100
-    if range_pct > MAX_CONSOLIDATION_PCT:
+    if range_pct > f["consol_pct"]:
         return None
 
-    # ── CHECK 2: Breakout — close ≥ conHigh × 1.02 ──
-    if cur_close < con_high * BREAKOUT_MULTIPLIER:
+    # ── CHECK 2: Breakout ──
+    if cur_close < con_high * f["breakout_mult"]:
         return None
 
     breakout_pct = (cur_close - con_high) / con_high * 100
 
-    # ── CHECK 3: Body size ≥ 5% ──
+    # ── CHECK 3: Body size ──
     if cur_open <= 0:
         return None
     body_pct = abs(cur_close - cur_open) / cur_open * 100
-    if body_pct < MIN_BODY_PCT:
+    if body_pct < f["body_pct"]:
         return None
 
-    # ── CHECK 4: Rel. Volume — 1.5× avg of prior 10 4H candles ──
-    prior_10_4h = df_4h.iloc[-(VOL_LOOKBACK_4H + 1):-1]
+    # ── CHECK 4: Rel. Volume — avg of prior 10 4H candles ──
+    prior_10_4h = df_4h.iloc[-11:-1]
     if len(prior_10_4h) < 5:
         return None
 
@@ -106,28 +97,29 @@ def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0):
         return None
 
     rel_vol = cur_volume / avg_4h_vol
-    if rel_vol < MIN_REL_VOL:
+    if rel_vol < f["rel_vol"]:
         return None
 
-    # ── CHECK 5: Liquidity — avg of last 20 daily vol ≥ 500k ──
-    if avg_vol_20d < MIN_AVG_DAILY_VOL:
+    # ── CHECK 5: Liquidity ──
+    if avg_vol_20d < f["daily_vol"]:
         return None
 
-    # ── Fetch daily data for checks 6, 7, 8 ──
+    # ── Daily data for checks 6, 7, 8 ──
     daily_close, mktcap = fetch_daily_data(symbol)
     if daily_close is None or len(daily_close) < 50:
         return None
 
-    # ── CHECK 6: Market cap ≥ 50M ──
-    if mktcap < MIN_MARKET_CAP:
+    # ── CHECK 6: Market cap ──
+    if mktcap < f["mktcap"]:
         return None
 
-    # ── CHECK 7: Price within 10% of 20d or 50d high ──
-    high_20d = max(daily_close[-20:]) if len(daily_close) >= 20 else max(daily_close)
-    high_50d = max(daily_close[-50:]) if len(daily_close) >= 50 else max(daily_close)
+    # ── CHECK 7: Price near high ──
+    near_pct = f["near_high"] / 100
+    high_20d  = max(daily_close[-20:]) if len(daily_close) >= 20 else max(daily_close)
+    high_50d  = max(daily_close[-50:]) if len(daily_close) >= 50 else max(daily_close)
 
-    near_20d = cur_close >= high_20d * NEAR_HIGH_PCT
-    near_50d = cur_close >= high_50d * NEAR_HIGH_PCT
+    near_20d = cur_close >= high_20d * (1 - near_pct)
+    near_50d = cur_close >= high_50d * (1 - near_pct)
     if not (near_20d or near_50d):
         return None
 
@@ -136,14 +128,23 @@ def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0):
         (cur_close - high_50d) / high_50d * 100,
     )
 
-    # ── CHECK 8: Trend — close > SMA20 & SMA50 ──
+    # ── CHECK 8: Trend ──
     sma20 = float(np.mean(daily_close[-20:]))
     sma50 = float(np.mean(daily_close[-50:]))
 
-    if cur_close <= sma20 or cur_close <= sma50:
-        return None
+    trend = f["trend"]
+    if trend == "both":
+        if cur_close <= sma20 or cur_close <= sma50:
+            return None
+    elif trend == "sma20":
+        if cur_close <= sma20:
+            return None
+    elif trend == "sma50":
+        if cur_close <= sma50:
+            return None
+    # "disable" = no check
 
-    # ── ALL 8 CHECKS PASSED ✅ ──
+    # ── ALL CHECKS PASSED ✅ ──
     return {
         "symbol"        : symbol,
         "price"         : round(cur_close,     2),
@@ -165,12 +166,12 @@ def run_checks(symbol, df_1h, df_4h, avg_vol_20d=0):
 # ─────────────────────────────────────────────────────────────
 # SINGLE STOCK
 # ─────────────────────────────────────────────────────────────
-def _process_single_stock(symbol, avg_vol):
+def _process_single_stock(symbol, avg_vol, filters):
     try:
         df_1h, df_4h = fetch_1h_and_4h_data(symbol)
         if df_1h is None or df_4h is None:
             return None
-        return run_checks(symbol, df_1h, df_4h, avg_vol)
+        return run_checks(symbol, df_1h, df_4h, avg_vol, filters)
     except Exception as e:
         print(f"[breakout_4h_logic] {symbol} error: {e}")
         return None
@@ -179,11 +180,7 @@ def _process_single_stock(symbol, avg_vol):
 # ─────────────────────────────────────────────────────────────
 # PARALLEL SCAN
 # ─────────────────────────────────────────────────────────────
-def run_scan(all_stocks, progress_cb=None, status_cb=None):
-    """
-    Step 1: Fetch avg volumes from Supabase (once, last 20 days)
-    Step 2: Parallel scan all stocks with 8 checks
-    """
+def run_scan(all_stocks, progress_cb=None, status_cb=None, filters=None):
     avg_volumes = fetch_avg_volumes()
 
     total     = len(all_stocks)
@@ -195,7 +192,8 @@ def run_scan(all_stocks, progress_cb=None, status_cb=None):
             executor.submit(
                 _process_single_stock,
                 symbol,
-                avg_volumes.get(symbol, 0)
+                avg_volumes.get(symbol, 0),
+                filters,
             ): symbol
             for symbol in all_stocks
         }
