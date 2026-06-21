@@ -100,7 +100,7 @@ def fetch_setup_data():
     offset = 0
     while True:
         resp = supabase.table("websocket_stock_values") \
-            .select("stock, date, ltp, open, volume") \
+            .select("stock, date, ltp, open, volume, vol_ratio") \
             .in_("date", last_4_dates) \
             .range(offset, offset + 999) \
             .execute()
@@ -160,9 +160,10 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         for _, row in stock_data.iterrows():
             date_key = str(row["date"])
             days_data[date_key] = {
-                "volume": float(row["volume"]) if row["volume"] > 0 else 0,
-                "ltp"   : float(row["ltp"])    if row["ltp"]    > 0 else 0,
-                "open"  : float(row["open"])   if row["open"]   > 0 else 0,
+                "volume"   : float(row["volume"])    if row["volume"]    > 0 else 0,
+                "ltp"      : float(row["ltp"])       if row["ltp"]       > 0 else 0,
+                "open"     : float(row["open"])      if row["open"]      > 0 else 0,
+                "vol_ratio": float(row["vol_ratio"]) if pd.notna(row.get("vol_ratio")) and row.get("vol_ratio") else 0,
             }
 
         sorted_dates = sorted(days_data.keys(), reverse=True)
@@ -188,6 +189,11 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         ltp1 = day1.get("ltp", 0)
         ltp2 = day2.get("ltp", 0)
         ltp3 = day3.get("ltp", 0)
+
+        # 5-day vol_ratio from DB (already calculated against 5-day median)
+        vr1  = day1.get("vol_ratio", 0)
+        vr2  = day2.get("vol_ratio", 0)
+        vr3  = day3.get("vol_ratio", 0)
 
         if vol1 == 0 or vol2 == 0 or ltp1 == 0 or ltp2 == 0:
             continue
@@ -258,20 +264,21 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         d3_label = fmt_date(day3_date) if day3_date else "D-2"
 
         results.append({
-            "Symbol"                       : stock,
-            f"Vol {d3_label}"              : int(vol3) if vol3 > 0 else 0,
-            f"Vol {d2_label}"              : int(vol2),
-            f"Vol {d1_label}"              : int(vol1),
-            f"Ratio {d2_label}/{d3_label}" : round(vol_ratio_yest,  2),
-            f"Ratio {d1_label}/{d2_label}" : round(vol_ratio_today, 2),
-            f"Price {d2_label}"            : round(ltp2, 2),
-            f"Price {d1_label}"            : round(ltp1, 2),
-            f"Chg% {d2_label}"             : round(price_change_yest,  2),
-            f"Chg% {d1_label}"             : round(price_change_today, 2),
-            "Setup Stage"                  : setup_stage,
-            "Readiness %"                  : readiness,
-            "Days in Setup"                : len(sorted_dates),
-            "_score"                       : setup_score,
+            "Symbol"            : stock,
+            f"Vol {d3_label}"   : int(vol3) if vol3 > 0 else 0,
+            f"VR {d3_label}"    : round(vr3, 2) if vr3 > 0 else None,
+            f"Vol {d2_label}"   : int(vol2),
+            f"VR {d2_label}"    : round(vr2, 2) if vr2 > 0 else None,
+            f"Vol {d1_label}"   : int(vol1),
+            f"VR {d1_label}"    : round(vr1, 2) if vr1 > 0 else None,
+            f"Price {d2_label}" : round(ltp2, 2),
+            f"Price {d1_label}" : round(ltp1, 2),
+            f"Chg% {d2_label}"  : round(price_change_yest,  2),
+            f"Chg% {d1_label}"  : round(price_change_today, 2),
+            "Setup Stage"       : setup_stage,
+            "Readiness %"       : readiness,
+            "Days in Setup"     : len(sorted_dates),
+            "_score"            : setup_score,
         })
 
     if not results:
@@ -322,13 +329,11 @@ def show_dataframe(df: pd.DataFrame):
 
     # Detect dynamic column groups
     vol_cols   = [c for c in display_df.columns if c.startswith("Vol ")]
-    ratio_cols = [c for c in display_df.columns if c.startswith("Ratio ")]
+    vr_cols    = [c for c in display_df.columns if c.startswith("VR ")]
     price_cols = [c for c in display_df.columns if c.startswith("Price ")]
     chg_cols   = [c for c in display_df.columns if c.startswith("Chg% ")]
 
     # ── Format volume columns → K/M strings ──────────────────
-    # (done before column_config so sorting on these is string-based
-    #  but display is clean; numeric sort still works on Ratio/Price/Chg)
     for c in vol_cols:
         display_df[c] = display_df[c].apply(fmt_vol)
 
@@ -355,7 +360,7 @@ def show_dataframe(df: pd.DataFrame):
     for c in vol_cols:
         col_cfg[c] = st.column_config.TextColumn(c, width="small")
 
-    for c in ratio_cols:
+    for c in vr_cols:
         col_cfg[c] = st.column_config.NumberColumn(
             c, format="%.2fx", width="small"
         )
