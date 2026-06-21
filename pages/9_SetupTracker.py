@@ -220,6 +220,15 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         if vol1 == 0 or vol2 == 0 or ltp1 == 0 or ltp2 == 0:
             continue
 
+        # ── TREND FILTER: Eliminate Downtrends ──────────────────
+        # Today's price must be >= price 2 days ago to ensure it's not a falling knife
+        if ltp3 > 0:
+            if ltp1 < ltp3:
+                continue
+        elif ltp2 > 0:
+            if ltp1 < ltp2:
+                continue
+
         # ── Calculate consolidation metrics ──────────────────────
         vol_ratio_today = vol1 / vol2 if vol2 > 0 else 0
         vol_ratio_yest = vol2 / vol3 if vol3 > 0 else 1.0
