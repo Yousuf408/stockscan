@@ -186,6 +186,7 @@ def main():
         scan_clicked = st.button("🔍 Scan Now", use_container_width=True)
 
     # ── Filters ──
+    apply_clicked = False
     with st.expander("🔧 Scanner Filters", expanded=False):
         fc1, fc2, fc3, fc4 = st.columns(4)
 
@@ -250,11 +251,15 @@ def main():
                 key="f_trend"
             )
 
-        if st.button("↺ Reset to Defaults", key="reset_filters"):
-            for k in ["f_consol","f_breakout","f_body","f_relvol",
-                      "f_dailyvol","f_mktcap","f_nearhigh","f_trend"]:
-                st.session_state.pop(k, None)
-            st.rerun()
+        btn_col1, btn_col2 = st.columns([1, 1])
+        with btn_col1:
+            if st.button("↺ Reset to Defaults", key="reset_filters", use_container_width=True):
+                for k in ["f_consol","f_breakout","f_body","f_relvol",
+                          "f_dailyvol","f_mktcap","f_nearhigh","f_trend"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+        with btn_col2:
+            apply_clicked = st.button("✅ Apply & Scan", key="apply_filters", use_container_width=True)
 
     st.markdown("---")
 
@@ -271,7 +276,7 @@ def main():
     }
 
     # ── Scan trigger ──
-    if scan_clicked:
+    if scan_clicked or apply_clicked:
         ensure_websocket()
         progress_bar = st.progress(0, text="Starting scan...")
         status_text  = st.empty()
