@@ -154,51 +154,81 @@ def render_watch_table(enriched):
     if not enriched:
         st.info("📭 No consolidating stocks found.")
         return
+
+    TH = "padding:8px 12px;text-align:left;font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;border-bottom:2px solid #e2e8f0;background:#f8fafc;"
+    TD = "padding:9px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;"
+
     rows_html = ""
     for s in enriched:
-        if s["status"] == "broke_out":
-            row_cls = "row-broke"
-            ltp_col = f'<span style="color:#059669;font-weight:700;">₹{s["ltp"]:,.2f}</span>'
-            ptb_str = f'<span style="color:#059669;font-weight:600;">+{s["pct_to_breakout"]:.1f}% above</span>'
-            badge   = '<span class="badge badge-broke">Broke out!</span>'
+        sym      = s["symbol"]
+        ltp      = s["ltp"]
+        con_high = s["con_high"]
+        con_low  = s["con_low"]
+        rng      = s["range_pct"]
+        ptb      = s["pct_to_breakout"]
+        prox     = s["proximity_pct"]
+        status   = s["status"]
+
+        if status == "broke_out":
+            row_bg  = "background:#f0fdf4;"
+            ltp_col = f'<span style="color:#059669;font-weight:700;">₹{ltp:,.2f}</span>'
+            ptb_col = f'<span style="color:#059669;font-weight:600;">+{ptb:.1f}% above</span>'
+            badge   = '<span style="background:#d1fae5;color:#059669;padding:2px 9px;border-radius:5px;font-size:11px;font-weight:600;">Broke out!</span>'
             bar_clr = "#059669"
-        elif s["status"] == "near_zone":
-            row_cls = "row-near"
-            ltp_col = f'<span style="color:#d97706;font-weight:700;">₹{s["ltp"]:,.2f}</span>'
-            ptb_str = f'<span style="color:#d97706;font-weight:600;">{s["pct_to_breakout"]:.1f}% to go</span>'
-            badge   = '<span class="badge badge-near">Near zone!</span>'
+        elif status == "near_zone":
+            row_bg  = "background:#fff7ed;"
+            ltp_col = f'<span style="color:#d97706;font-weight:700;">₹{ltp:,.2f}</span>'
+            ptb_col = f'<span style="color:#d97706;font-weight:600;">{ptb:.1f}% to go</span>'
+            badge   = '<span style="background:#fce7f3;color:#db2777;padding:2px 9px;border-radius:5px;font-size:11px;font-weight:600;">Near zone!</span>'
             bar_clr = "#f59e0b"
         else:
-            row_cls = ""
-            ltp_col = f'₹{s["ltp"]:,.2f}'
-            ptb_str = f'{s["pct_to_breakout"]:.1f}% to go'
-            badge   = '<span class="badge badge-tight">Tight range</span>' if s["range_pct"] <= 6 else '<span class="badge badge-watch">Watching</span>'
+            row_bg  = "background:#ffffff;"
+            ltp_col = f'₹{ltp:,.2f}'
+            ptb_col = f'{ptb:.1f}% to go'
+            if rng <= 6:
+                badge = '<span style="background:#e0f2fe;color:#0284c7;padding:2px 9px;border-radius:5px;font-size:11px;font-weight:600;">Tight range</span>'
+            else:
+                badge = '<span style="background:#fef3c7;color:#d97706;padding:2px 9px;border-radius:5px;font-size:11px;font-weight:600;">Watching</span>'
             bar_clr = "#10b981"
 
-        bar_w = int(min(100, max(5, s["proximity_pct"])))
+        bar_w = int(min(100, max(5, prox)))
         rows_html += f"""
-        <tr class="{row_cls}">
-            <td style="font-weight:600;font-size:13px;">{s["symbol"]}</td>
-            <td>{ltp_col}</td>
-            <td>₹{s["con_high"]:,.0f}</td>
-            <td>₹{s["con_low"]:,.0f}</td>
-            <td>{s["range_pct"]:.1f}%</td>
-            <td>{ptb_str}</td>
-            <td><div class="prox-bar"><div class="prox-fill" style="width:{bar_w}%;background:{bar_clr};"></div></div></td>
-            <td>{badge}</td>
+        <tr style="{row_bg}">
+            <td style="{TD}font-weight:600;">{sym}</td>
+            <td style="{TD}">{ltp_col}</td>
+            <td style="{TD}">₹{con_high:,.0f}</td>
+            <td style="{TD}">₹{con_low:,.0f}</td>
+            <td style="{TD}">{rng:.1f}%</td>
+            <td style="{TD}">{ptb_col}</td>
+            <td style="{TD}">
+                <div style="width:80px;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;display:inline-block;">
+                    <div style="width:{bar_w}%;height:100%;background:{bar_clr};border-radius:3px;"></div>
+                </div>
+            </td>
+            <td style="{TD}">{badge}</td>
         </tr>"""
 
-    html = f"""
-    <style>body{{margin:0;font-family:-apple-system,sans-serif;}}</style>
+    html = f"""<!DOCTYPE html><html><head>
+    <style>
+      body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+      table {{ width:100%; border-collapse:collapse; font-size:13px; }}
+    </style></head><body>
     <div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;">
-    <table class="watch-table">
+    <table>
         <thead><tr>
-            <th>Ticker</th><th>LTP</th><th>Zone High</th><th>Zone Low</th>
-            <th>Range %</th><th>% to Breakout</th><th>Proximity</th><th>Status</th>
+            <th style="{TH}">Ticker</th>
+            <th style="{TH}">LTP</th>
+            <th style="{TH}">Zone High</th>
+            <th style="{TH}">Zone Low</th>
+            <th style="{TH}">Range %</th>
+            <th style="{TH}">% to Breakout</th>
+            <th style="{TH}">Proximity</th>
+            <th style="{TH}">Status</th>
         </tr></thead>
         <tbody>{rows_html}</tbody>
-    </table></div>"""
-    st.components.v1.html(html, height=min(len(enriched) * 48 + 55, 550), scrolling=True)
+    </table></div>
+    </body></html>"""
+    st.components.v1.html(html, height=min(len(enriched) * 48 + 55, 600), scrolling=True)
 
 
 def main():
@@ -322,15 +352,13 @@ def main():
         st.session_state["watch_built_time"] = datetime.now().strftime("%d %b %Y, %I:%M %p")
         st.rerun()
 
-    st.markdown("---")
-
     # ══════════════════════════════════════════════════════════
     # SECTION 1 — BREAKOUT SCANNER
     # ══════════════════════════════════════════════════════════
     results = st.session_state.get("scan_results", None)
     ticks   = angel_ws.get_latest_ticks()
 
-    st.markdown('<div class="section-header"><span class="section-title">🔍 Breakout Scanner</span></div>', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 12px 0;padding-bottom:8px;border-bottom:2px solid #e2e8f0;">🔍 Breakout Scanner</p>', unsafe_allow_html=True)
 
     if results is None:
         st.markdown(f"""
@@ -382,8 +410,8 @@ def main():
     watch_count= len(watch_raw) if watch_raw else 0
     built_time = st.session_state.get("watch_built_time", "")
 
-    count_badge = f'<span class="section-count">{watch_count} stocks</span>' if watch_count else ""
-    st.markdown(f'<div class="section-header"><span class="section-title">👁️ Consolidation Watch</span>{count_badge}</div>', unsafe_allow_html=True)
+    count_badge = f'<span style="background:#fef3c7;color:#d97706;font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;margin-left:8px;">{watch_count} stocks</span>' if watch_count else ""
+    st.markdown(f'<p style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 12px 0;padding-bottom:8px;border-bottom:2px solid #e2e8f0;">👁️ Consolidation Watch{count_badge}</p>', unsafe_allow_html=True)
 
     if watch_raw is None:
         st.markdown("""
