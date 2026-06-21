@@ -62,6 +62,29 @@ def fmt_date(d):
         return str(d)
 
 # ─────────────────────────────────────────────────────────────
+# HELPER: Format volume to clean shorthand (K / M)
+# ─────────────────────────────────────────────────────────────
+def fmt_volume_val(val):
+    """Convert raw volume number to shorthand string (e.g., 3.07M, 74.4K)."""
+    try:
+        val = float(val)
+        if val >= 1_000_000:
+            formatted = f"{val / 1_000_000:.2f}"
+            if formatted.endswith(".00"):
+                return f"{int(val / 1_000_000)}M"
+            elif formatted.endswith("0"):
+                return f"{val / 1_000_000:.1f}M"
+            return f"{formatted}M"
+        elif val >= 1_000:
+            formatted = f"{val / 1_000:.1f}"
+            if formatted.endswith(".0"):
+                return f"{int(val / 1_000)}K"
+            return f"{formatted}K"
+        return str(int(val))
+    except Exception:
+        return str(val)
+
+# ─────────────────────────────────────────────────────────────
 # FETCH LAST 4 DAYS DATA FROM SUPABASE
 # ─────────────────────────────────────────────────────────────
 def fetch_setup_data():
@@ -277,13 +300,12 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
 # HTML TABLE WITH CLICK-TO-COPY
 # ─────────────────────────────────────────────────────────────
 def render_setup_table(df: pd.DataFrame, dates: list) -> str:
-    """Render HTML table with actual dates in headers instead of Day 1/Day 2."""
+    """Render HTML table with actual dates chronologically and shorthand volumes."""
 
-    # ── Format dates for column headers ──────────────────────────
-    d1 = fmt_date(dates[0]) if len(dates) > 0 else "Day 1"
+    # ── Format dates for column headers (Oldest to Newest) ──────────
+    d1 = fmt_date(dates[0]) if len(dates) > 0 else "Day 1" # Newest
     d2 = fmt_date(dates[1]) if len(dates) > 1 else "Day 2"
-    d3 = fmt_date(dates[2]) if len(dates) > 2 else "Day 3"
-    d4 = fmt_date(dates[3]) if len(dates) > 3 else "Day 4"
+    d3 = fmt_date(dates[2]) if len(dates) > 2 else "Day 3" # Oldest
 
     def stage_color(stage):
         if "READY_TO_SPIKE" in stage:
@@ -321,6 +343,20 @@ def render_setup_table(df: pd.DataFrame, dates: list) -> str:
         opacity:0; transition:opacity 0.3s; pointer-events:none;
     }}
     .toast.show {{opacity:1;}}
+    .vol-badge {{
+        background: #f1f5f9;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+        color: #334155;
+    }}
+    .ratio-badge {{
+        background: #f1f5f9;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+        color: #0f172a;
+    }}
     </style>
     <div id="toast" class="toast">✅ Copied!</div>
     <script>
@@ -340,11 +376,17 @@ def render_setup_table(df: pd.DataFrame, dates: list) -> str:
     <table class="setup-table">
     <thead><tr>
         <th>Symbol</th>
-        <th>{d1} Vol</th><th>{d2} Vol</th><th>{d3} Vol</th>
-        <th>Vol {d1}:{d2}</th><th>Vol {d2}:{d3}</th>
-        <th>Price {d1}</th><th>Price {d2}</th>
-        <th>Chg {d1} %</th><th>Chg {d2} %</th>
-        <th>Setup Stage</th><th>Readiness</th>
+        <th>{d3} Vol</th>
+        <th>{d2} Vol</th>
+        <th>{d1} Vol</th>
+        <th>Vol {d2}:{d3}</th>
+        <th>Vol {d1}:{d2}</th>
+        <th>Price {d2}</th>
+        <th>Price {d1}</th>
+        <th>Chg {d2} %</th>
+        <th>Chg {d1} %</th>
+        <th>Setup Stage</th>
+        <th>Readiness</th>
     </tr></thead><tbody>
     """
 
@@ -353,18 +395,23 @@ def render_setup_table(df: pd.DataFrame, dates: list) -> str:
         symbol = str(row["Symbol"])
         readiness = int(row["Readiness_%"])
         
+        # Format the volumes to shorthand
+        vol_d3_formatted = fmt_volume_val(row['Day_3_Vol'])
+        vol_d2_formatted = fmt_volume_val(row['Day_2_Vol'])
+        vol_d1_formatted = fmt_volume_val(row['Day_1_Vol'])
+
         html += f"""
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
-            <td>{int(row['Day_1_Vol']):,}</td>
-            <td>{int(row['Day_2_Vol']):,}</td>
-            <td>{int(row['Day_3_Vol']):,}</td>
-            <td><strong>{row['Vol_D1_D2']}</strong></td>
-            <td>{row['Vol_D2_D3']}</td>
-            <td>{row['Price_D1']}</td>
+            <td><span class="vol-badge">{vol_d3_formatted}</span></td>
+            <td><span class="vol-badge">{vol_d2_formatted}</span></td>
+            <td><span class="vol-badge">{vol_d1_formatted}</span></td>
+            <td><span class="ratio-badge">{row['Vol_D2_D3']}</span></td>
+            <td><span class="ratio-badge">{row['Vol_D1_D2']}</span></td>
             <td>{row['Price_D2']}</td>
-            <td>{row['Chg_D1_%']}</td>
+            <td>{row['Price_D1']}</td>
             <td>{row['Chg_D2_%']}</td>
+            <td>{row['Chg_D1_%']}</td>
             <td><strong>{row['Setup_Stage']}</strong></td>
             <td>
                 <div class="readiness-bar">
