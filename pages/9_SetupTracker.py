@@ -100,7 +100,7 @@ def fetch_setup_data():
     offset = 0
     while True:
         resp = supabase.table("websocket_stock_values") \
-            .select("stock, date, ltp, open, volume, vol_ratio") \
+            .select("stock, date, ltp, open, volume") \
             .in_("date", last_4_dates) \
             .range(offset, offset + 999) \
             .execute()
@@ -140,12 +140,7 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         return pd.DataFrame()
 
     for col in ["volume", "ltp", "open"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-    if "vol_ratio" in df.columns:
-        df["vol_ratio"] = pd.to_numeric(df["vol_ratio"], errors="coerce").fillna(0)
-    else:
-        df["vol_ratio"] = 0
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df_pivot = df.sort_values("date").drop_duplicates(
         subset=["stock", "date"], keep="last"
@@ -164,12 +159,10 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         days_data = {}
         for _, row in stock_data.iterrows():
             date_key = str(row["date"])
-            vr_raw   = row["vol_ratio"] if "vol_ratio" in row.index else 0
             days_data[date_key] = {
-                "volume"   : float(row["volume"])  if row["volume"]  > 0 else 0,
-                "ltp"      : float(row["ltp"])     if row["ltp"]     > 0 else 0,
-                "open"     : float(row["open"])    if row["open"]    > 0 else 0,
-                "vol_ratio": float(vr_raw)         if pd.notna(vr_raw) and float(vr_raw) > 0 else 0,
+                "volume": float(row["volume"]) if row["volume"] > 0 else 0,
+                "ltp"   : float(row["ltp"])    if row["ltp"]    > 0 else 0,
+                "open"  : float(row["open"])   if row["open"]   > 0 else 0,
             }
 
         sorted_dates = sorted(days_data.keys(), reverse=True)
@@ -195,11 +188,6 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         ltp1 = day1.get("ltp", 0)
         ltp2 = day2.get("ltp", 0)
         ltp3 = day3.get("ltp", 0)
-
-        # 5-day vol_ratio from DB (already calculated against 5-day median)
-        vr1  = day1.get("vol_ratio", 0)
-        vr2  = day2.get("vol_ratio", 0)
-        vr3  = day3.get("vol_ratio", 0)
 
         if vol1 == 0 or vol2 == 0 or ltp1 == 0 or ltp2 == 0:
             continue
@@ -270,21 +258,20 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         d3_label = fmt_date(day3_date) if day3_date else "D-2"
 
         results.append({
-            "Symbol"            : stock,
-            f"Vol {d3_label}"   : int(vol3) if vol3 > 0 else 0,
-            f"VR {d3_label}"    : round(vr3, 2) if vr3 > 0 else None,
-            f"Vol {d2_label}"   : int(vol2),
-            f"VR {d2_label}"    : round(vr2, 2) if vr2 > 0 else None,
-            f"Vol {d1_label}"   : int(vol1),
-            f"VR {d1_label}"    : round(vr1, 2) if vr1 > 0 else None,
-            f"Price {d2_label}" : round(ltp2, 2),
-            f"Price {d1_label}" : round(ltp1, 2),
-            f"Chg% {d2_label}"  : round(price_change_yest,  2),
-            f"Chg% {d1_label}"  : round(price_change_today, 2),
-            "Setup Stage"       : setup_stage,
-            "Readiness %"       : readiness,
-            "Days in Setup"     : len(sorted_dates),
-            "_score"            : setup_score,
+            "Symbol"              : stock,
+            f"Vol {d3_label}"     : int(vol3) if vol3 > 0 else None,
+            f"Vol {d2_label}"     : int(vol2),
+            f"Vol {d1_label}"     : int(vol1),
+            f"Ratio {d2_label}/{d3_label}": round(vol_ratio_yest, 2),
+            f"Ratio {d1_label}/{d2_label}": round(vol_ratio_today, 2),
+            f"Price {d2_label}"   : round(ltp2, 2),
+            f"Price {d1_label}"   : round(ltp1, 2),
+            f"Chg% {d2_label}"    : round(price_change_yest, 2),
+            f"Chg% {d1_label}"    : round(price_change_today, 2),
+            "Setup Stage"         : setup_stage,
+            "Readiness %"         : readiness,
+            "Days in Setup"       : len(sorted_dates),
+            "_score"              : setup_score,   # hidden sort key
         })
 
     if not results:
@@ -300,23 +287,6 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 # DISPLAY DATAFRAME  (st.dataframe — full Streamlit features)
 # ─────────────────────────────────────────────────────────────
-def fmt_vol(v) -> str:
-    """Convert raw volume int → K/M string. 0 → '-'."""
-    try:
-        v = int(v)
-        if v <= 0:
-            return "-"
-        if v >= 1_000_000:
-            s = f"{v / 1_000_000:.2f}"
-            return f"{s.rstrip('0').rstrip('.')}M"
-        if v >= 1_000:
-            s = f"{v / 1_000:.1f}"
-            return f"{s.rstrip('0').rstrip('.')}K"
-        return str(v)
-    except Exception:
-        return "-"
-
-
 def show_dataframe(df: pd.DataFrame):
     """
     Display using st.dataframe so users get:
@@ -326,22 +296,18 @@ def show_dataframe(df: pd.DataFrame):
     - Search             (magnifying glass icon)
     - Fullscreen         (expand icon)
     - Pin / Hide column  (right-click column header)
-
-    Volume columns are pre-formatted as K/M strings so they
-    display as  '74.4K', '1.9M', '-'  instead of raw integers.
     """
 
+    # Drop internal sort key before display
     display_df = df.drop(columns=["_score"], errors="ignore").copy()
 
-    # Detect dynamic column groups
+    # Detect dynamic column names
     vol_cols   = [c for c in display_df.columns if c.startswith("Vol ")]
-    vr_cols    = [c for c in display_df.columns if c.startswith("VR ")]
+    ratio_cols = [c for c in display_df.columns if c.startswith("Ratio ")]
     price_cols = [c for c in display_df.columns if c.startswith("Price ")]
     chg_cols   = [c for c in display_df.columns if c.startswith("Chg% ")]
 
     # ── Build column_config ───────────────────────────────────
-    # Volumes kept as integers → numeric sort works correctly
-    # Format "%,.0f" adds commas: 134700 → 134,700
     col_cfg = {
         "Symbol": st.column_config.TextColumn(
             "Symbol", width="small"
@@ -363,10 +329,10 @@ def show_dataframe(df: pd.DataFrame):
 
     for c in vol_cols:
         col_cfg[c] = st.column_config.NumberColumn(
-            c, format="%,.0f", width="small"
+            c, format="%d", width="small"
         )
 
-    for c in vr_cols:
+    for c in ratio_cols:
         col_cfg[c] = st.column_config.NumberColumn(
             c, format="%.2fx", width="small"
         )
