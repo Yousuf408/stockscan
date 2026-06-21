@@ -206,63 +206,72 @@ def main():
     st.markdown("---")
     with st.expander("🔧 Scanner Filters", expanded=False):
         fc1, fc2, fc3, fc4 = st.columns(4)
+        CONSOL_OPTS   = [5, 8, 10, 12, 15, 20]
+        BREAKOUT_OPTS = [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
+        BODY_OPTS     = [1, 2, 3, 4, 5, 7, 10]
+        RELVOL_OPTS   = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0]
+        DVOL_OPTS     = [100_000, 200_000, 300_000, 500_000, 1_000_000, 2_000_000, 5_000_000]
+        MKTCAP_OPTS   = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000, 500_000_000, 1_000_000_000]
+        NEARHIGH_OPTS = [5, 8, 10, 15, 20, 25]
+        TREND_OPTS    = ["both", "sma20", "sma50", "disable"]
+
         with fc1:
-            consol_pct = st.selectbox(
+            f_consol = st.selectbox(
                 "Consolidation Range",
-                options=[5, 8, 10, 12, 15, 20],
-                index=3,
+                options=CONSOL_OPTS,
+                index=CONSOL_OPTS.index(st.session_state.get("f_consol", 12)),
                 format_func=lambda x: f"≤ {x}%",
                 key="f_consol"
             )
-            breakout_pct_filter = st.selectbox(
+            f_breakout = st.selectbox(
                 "Breakout Above Zone",
-                options=[0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0],
-                index=4,
+                options=BREAKOUT_OPTS,
+                index=BREAKOUT_OPTS.index(st.session_state.get("f_breakout", 2.0)),
                 format_func=lambda x: f"{x}%" if x > 0 else "0% (just above)",
                 key="f_breakout"
             )
         with fc2:
-            body_pct_filter = st.selectbox(
+            f_body = st.selectbox(
                 "Min Body Size",
-                options=[1, 2, 3, 4, 5, 7, 10],
-                index=4,
+                options=BODY_OPTS,
+                index=BODY_OPTS.index(st.session_state.get("f_body", 5)),
                 format_func=lambda x: f"{x}%",
                 key="f_body"
             )
-            rel_vol_filter = st.selectbox(
+            f_relvol = st.selectbox(
                 "Relative Volume",
-                options=[1.0, 1.2, 1.5, 2.0, 2.5, 3.0],
-                index=2,
+                options=RELVOL_OPTS,
+                index=RELVOL_OPTS.index(st.session_state.get("f_relvol", 1.5)),
                 format_func=lambda x: f"{x}x",
                 key="f_relvol"
             )
         with fc3:
-            daily_vol_filter = st.selectbox(
+            f_dailyvol = st.selectbox(
                 "Min Daily Volume",
-                options=[100_000, 200_000, 300_000, 500_000, 1_000_000, 2_000_000, 5_000_000],
-                index=3,
+                options=DVOL_OPTS,
+                index=DVOL_OPTS.index(st.session_state.get("f_dailyvol", 500_000)),
                 format_func=lambda x: f"{int(x/1000)}k" if x < 1_000_000 else f"{int(x/1_000_000)}M",
                 key="f_dailyvol"
             )
-            mktcap_filter = st.selectbox(
+            f_mktcap = st.selectbox(
                 "Market Cap",
-                options=[1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000, 500_000_000, 1_000_000_000],
-                index=4,
+                options=MKTCAP_OPTS,
+                index=MKTCAP_OPTS.index(st.session_state.get("f_mktcap", 50_000_000)),
                 format_func=lambda x: f"${int(x/1_000_000)}M" if x < 1_000_000_000 else f"${int(x/1_000_000_000)}B",
                 key="f_mktcap"
             )
         with fc4:
-            near_high_filter = st.selectbox(
+            f_nearhigh = st.selectbox(
                 "Price Near High",
-                options=[5, 8, 10, 15, 20, 25],
-                index=2,
+                options=NEARHIGH_OPTS,
+                index=NEARHIGH_OPTS.index(st.session_state.get("f_nearhigh", 10)),
                 format_func=lambda x: f"Within {x}%",
                 key="f_nearhigh"
             )
-            trend_filter = st.selectbox(
+            f_trend = st.selectbox(
                 "Trend (SMA)",
-                options=["both", "sma20", "sma50", "disable"],
-                index=0,
+                options=TREND_OPTS,
+                index=TREND_OPTS.index(st.session_state.get("f_trend", "both")),
                 format_func=lambda x: {
                     "both": "SMA20 & SMA50",
                     "sma20": "Only SMA20",
@@ -282,16 +291,16 @@ def main():
 
     st.markdown("---")
 
-    # Store filters in session for run_scan
+    # Build filters from selectbox values directly
     scan_filters = {
-        "consol_pct"    : st.session_state.get("f_consol", 12),
-        "breakout_mult" : 1 + (st.session_state.get("f_breakout", 2.0) / 100),
-        "body_pct"      : st.session_state.get("f_body", 5),
-        "rel_vol"       : st.session_state.get("f_relvol", 1.5),
-        "daily_vol"     : st.session_state.get("f_dailyvol", 500_000),
-        "mktcap"        : st.session_state.get("f_mktcap", 50_000_000),
-        "near_high"     : st.session_state.get("f_nearhigh", 10),
-        "trend"         : st.session_state.get("f_trend", "both"),
+        "consol_pct"    : f_consol,
+        "breakout_mult" : 1 + (float(f_breakout) / 100),
+        "body_pct"      : float(f_body),
+        "rel_vol"       : float(f_relvol),
+        "daily_vol"     : int(f_dailyvol),
+        "mktcap"        : int(f_mktcap),
+        "near_high"     : int(f_nearhigh),
+        "trend"         : f_trend,
     }
 
     # ── Scan trigger ──
