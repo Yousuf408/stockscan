@@ -139,8 +139,8 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
     if df.empty or len(dates) < 2:
         return pd.DataFrame()
 
-    for col in ["volume", "ltp", "open"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in ["volume", "ltp", "open", "vol_ratio"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     df_pivot = df.sort_values("date").drop_duplicates(
         subset=["stock", "date"], keep="last"
@@ -159,11 +159,12 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         days_data = {}
         for _, row in stock_data.iterrows():
             date_key = str(row["date"])
+            vr_raw   = row["vol_ratio"] if "vol_ratio" in row.index else 0
             days_data[date_key] = {
-                "volume"   : float(row["volume"])    if row["volume"]    > 0 else 0,
-                "ltp"      : float(row["ltp"])       if row["ltp"]       > 0 else 0,
-                "open"     : float(row["open"])      if row["open"]      > 0 else 0,
-                "vol_ratio": float(row["vol_ratio"]) if pd.notna(row.get("vol_ratio")) and row.get("vol_ratio") else 0,
+                "volume"   : float(row["volume"])  if row["volume"]  > 0 else 0,
+                "ltp"      : float(row["ltp"])     if row["ltp"]     > 0 else 0,
+                "open"     : float(row["open"])    if row["open"]    > 0 else 0,
+                "vol_ratio": float(vr_raw)         if pd.notna(vr_raw) and float(vr_raw) > 0 else 0,
             }
 
         sorted_dates = sorted(days_data.keys(), reverse=True)
@@ -333,11 +334,9 @@ def show_dataframe(df: pd.DataFrame):
     price_cols = [c for c in display_df.columns if c.startswith("Price ")]
     chg_cols   = [c for c in display_df.columns if c.startswith("Chg% ")]
 
-    # ── Format volume columns → K/M strings ──────────────────
-    for c in vol_cols:
-        display_df[c] = display_df[c].apply(fmt_vol)
-
     # ── Build column_config ───────────────────────────────────
+    # Volumes kept as integers → numeric sort works correctly
+    # Format "%,.0f" adds commas: 134700 → 134,700
     col_cfg = {
         "Symbol": st.column_config.TextColumn(
             "Symbol", width="small"
@@ -358,7 +357,9 @@ def show_dataframe(df: pd.DataFrame):
     }
 
     for c in vol_cols:
-        col_cfg[c] = st.column_config.TextColumn(c, width="small")
+        col_cfg[c] = st.column_config.NumberColumn(
+            c, format="%,.0f", width="small"
+        )
 
     for c in vr_cols:
         col_cfg[c] = st.column_config.NumberColumn(
