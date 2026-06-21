@@ -343,20 +343,6 @@ def render_setup_table(df: pd.DataFrame, dates: list) -> str:
         opacity:0; transition:opacity 0.3s; pointer-events:none;
     }}
     .toast.show {{opacity:1;}}
-    .vol-badge {{
-        background: #f1f5f9;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-weight: bold;
-        color: #334155;
-    }}
-    .ratio-badge {{
-        background: #f1f5f9;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-weight: bold;
-        color: #0f172a;
-    }}
     </style>
     <div id="toast" class="toast">✅ Copied!</div>
     <script>
@@ -403,11 +389,11 @@ def render_setup_table(df: pd.DataFrame, dates: list) -> str:
         html += f"""
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
-            <td><span class="vol-badge">{vol_d3_formatted}</span></td>
-            <td><span class="vol-badge">{vol_d2_formatted}</span></td>
-            <td><span class="vol-badge">{vol_d1_formatted}</span></td>
-            <td><span class="ratio-badge">{row['Vol_D2_D3']}</span></td>
-            <td><span class="ratio-badge">{row['Vol_D1_D2']}</span></td>
+            <td>{vol_d3_formatted}</td>
+            <td>{vol_d2_formatted}</td>
+            <td><strong>{vol_d1_formatted}</strong></td>
+            <td>{row['Vol_D2_D3']}</td>
+            <td><strong>{row['Vol_D1_D2']}</strong></td>
             <td>{row['Price_D2']}</td>
             <td>{row['Price_D1']}</td>
             <td>{row['Chg_D2_%']}</td>
