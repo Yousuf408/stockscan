@@ -301,24 +301,83 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────
-# STYLING
+# HTML TABLE WITH CLICK-TO-COPY SYMBOL
 # ─────────────────────────────────────────────────────────────
-def style_table(df: pd.DataFrame):
-    def row_color(row):
-        m = row.get("Momentum", "")
-        if "STRONG BUILDING" in m: return ["background-color: #d4edda"] * len(row)
-        if "BUILDING"        in m: return ["background-color: #cce5ff"] * len(row)
-        if "STABLE"          in m: return ["background-color: #fff3cd"] * len(row)
-        if "COOLING"         in m: return ["background-color: #f8d7da"] * len(row)
-        return [""] * len(row)
+def render_html_table(df: pd.DataFrame) -> str:
+    def row_bg(momentum):
+        if "STRONG BUILDING" in momentum: return "#d4edda"
+        if "BUILDING"        in momentum: return "#cce5ff"
+        if "STABLE"          in momentum: return "#fff3cd"
+        if "COOLING"         in momentum: return "#f8d7da"
+        return "#ffffff"
 
-    return df.style.apply(row_color, axis=1).format({
-        "Prev Close": "₹{:.2f}",
-        "Open"      : "₹{:.2f}",
-        "LTP"       : "₹{:.2f}",
-        "Volume"    : "{:,.0f}",
-        "Score"     : "{:.2f}",
-    })
+    html = """
+    <style>
+    .mom-table {width:100%; border-collapse:collapse; font-size:13px; font-family:sans-serif;}
+    .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
+    .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
+    .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
+    .copy-btn {
+        cursor:pointer; font-weight:700; color:#0f172a;
+        background:#e2e8f0; border:none; padding:3px 8px;
+        border-radius:4px; font-size:12px; transition:background 0.2s;
+    }
+    .copy-btn:hover {background:#10b981; color:white;}
+    .copy-btn.copied {background:#10b981; color:white;}
+    .toast {
+        position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
+        background:#0f172a; color:white; padding:8px 20px;
+        border-radius:8px; font-size:13px; z-index:9999;
+        opacity:0; transition:opacity 0.3s; pointer-events:none;
+    }
+    .toast.show {opacity:1;}
+    </style>
+    <div id="toast" class="toast">✅ Copied!</div>
+    <script>
+    function copySymbol(btn, symbol) {
+        navigator.clipboard.writeText(symbol);
+        btn.classList.add('copied');
+        btn.innerText = '✓ ' + symbol;
+        var toast = document.getElementById('toast');
+        toast.classList.add('show');
+        setTimeout(function() {
+            btn.classList.remove('copied');
+            btn.innerText = symbol;
+            toast.classList.remove('show');
+        }, 1500);
+    }
+    </script>
+    <table class="mom-table">
+    <thead><tr>
+        <th>Symbol</th><th>Signal Time</th><th>Prev Close</th><th>Open</th><th>LTP</th>
+        <th>Volume</th><th>Gap %</th><th>Intraday %</th><th>Chg vs Prev %</th>
+        <th>Vol Ratio</th><th>Momentum</th><th>Action</th><th>Score</th>
+    </tr></thead><tbody>
+    """
+
+    for _, row in df.iterrows():
+        bg     = row_bg(str(row.get("Momentum", "")))
+        symbol = str(row["Symbol"])
+        signal_time = str(row.get("Signal Time", "-"))
+        html += f"""
+        <tr style="background:{bg}">
+            <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
+            <td class="signal-time-col">{signal_time}</td>
+            <td>₹{float(row['Prev Close']):.2f}</td>
+            <td>₹{float(row['Open']):.2f}</td>
+            <td>₹{float(row['LTP']):.2f}</td>
+            <td>{int(float(row['Volume'])):,}</td>
+            <td>{row['Gap %']}</td>
+            <td>{row['Intraday %']}</td>
+            <td>{row['Chg vs Prev %']}</td>
+            <td>{row['Vol Ratio']}</td>
+            <td>{row['Momentum']}</td>
+            <td>{row['Action']}</td>
+            <td>{float(row['Score']):.2f}</td>
+        </tr>"""
+
+    html += "</tbody></table>"
+    return html
 
 
 # ─────────────────────────────────────────────────────────────
@@ -339,6 +398,10 @@ if "momentum_historical" not in st.session_state:
         else:
             st.error("❌ No data found in websocket_stock_values")
             st.stop()
+
+# ── Initialize signal times tracker ────────────────────────────
+if "signal_times" not in st.session_state:
+    st.session_state["signal_times"] = {}
 
 historical = st.session_state["momentum_historical"]
 
@@ -366,12 +429,27 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    st.success(f"**{len(df)} stocks** matching momentum criteria")
-    st.dataframe(
-        style_table(df),
-        use_container_width=True,
-        hide_index=True,
-        height=600,
-    )
+    # ── Track signal times ────────────────────────────────────
+    current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
+    
+    signal_time_list = []
+    for symbol in df["Symbol"]:
+        if symbol not in st.session_state["signal_times"]:
+            st.session_state["signal_times"][symbol] = current_time_ist
+        signal_time_list.append(st.session_state["signal_times"][symbol])
+    
+    df["Signal Time"] = signal_time_list
+    
+    # ── Reorder columns with Signal Time ──────────────────────
+    display_cols = [
+        "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
+        "Gap %", "Intraday %", "Chg vs Prev %",
+        "Vol Ratio", "Momentum", "Action", "Score"
+    ]
+    
+    df_display = df[display_cols]
+
+    st.success(f"**{len(df_display)} stocks** matching momentum criteria")
+    st.components.v1.html(render_html_table(df_display), height=min(600, 60 + len(df_display) * 38), scrolling=True)
 
 scanner_table()
