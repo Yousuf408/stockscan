@@ -286,14 +286,13 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
 
     display_cols = [
         "Symbol", "Prev Close", "Open", "LTP", "Volume",
-        "Gap %", "Intraday %", "Chg vs Prev %",
-        "Vol Ratio", "vol_momentum", "momentum_detection", "live_action", "Score"
+        "Gap %", "Chg vs Prev %",
+        "Vol Ratio", "vol_momentum", "momentum_detection", "Score"
     ]
 
     df = df[display_cols].rename(columns={
         "vol_momentum"      : "Vol Momentum",
         "momentum_detection": "Momentum",
-        "live_action"       : "Action",
     })
 
     df = df.sort_values("Score", ascending=False).reset_index(drop=True)
@@ -317,6 +316,7 @@ def render_html_table(df: pd.DataFrame) -> str:
     .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
     .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
     .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
+    .highlight {background:#fbbf24; font-weight:700; padding:2px 4px; border-radius:3px;}
     .copy-btn {
         cursor:pointer; font-weight:700; color:#0f172a;
         background:#e2e8f0; border:none; padding:3px 8px;
@@ -350,8 +350,8 @@ def render_html_table(df: pd.DataFrame) -> str:
     <table class="mom-table">
     <thead><tr>
         <th>Symbol</th><th>Signal Time</th><th>Prev Close</th><th>Open</th><th>LTP</th>
-        <th>Volume</th><th>Gap %</th><th>Intraday %</th><th>Chg vs Prev %</th>
-        <th>Vol Ratio</th><th>Momentum</th><th>Action</th><th>Score</th>
+        <th>Volume</th><th>Gap %</th><th>Chg vs Prev %</th>
+        <th>Vol Ratio</th><th>Vol Momentum</th><th>Momentum</th><th>Score</th>
     </tr></thead><tbody>
     """
 
@@ -368,11 +368,10 @@ def render_html_table(df: pd.DataFrame) -> str:
             <td>₹{float(row['LTP']):.2f}</td>
             <td>{int(float(row['Volume'])):,}</td>
             <td>{row['Gap %']}</td>
-            <td>{row['Intraday %']}</td>
             <td>{row['Chg vs Prev %']}</td>
             <td>{row['Vol Ratio']}</td>
+            <td>{row['Vol Momentum']}</td>
             <td>{row['Momentum']}</td>
-            <td>{row['Action']}</td>
             <td>{float(row['Score']):.2f}</td>
         </tr>"""
 
@@ -443,8 +442,8 @@ def scanner_table():
     # ── Reorder columns with Signal Time ──────────────────────
     display_cols = [
         "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
-        "Gap %", "Intraday %", "Chg vs Prev %",
-        "Vol Ratio", "Momentum", "Action", "Score"
+        "Gap %", "Chg vs Prev %",
+        "Vol Ratio", "Vol Momentum", "Momentum", "Score"
     ]
     
     df_display = df[display_cols]
