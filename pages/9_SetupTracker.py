@@ -139,8 +139,13 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
     if df.empty or len(dates) < 2:
         return pd.DataFrame()
 
-    for col in ["volume", "ltp", "open", "vol_ratio"]:
+    for col in ["volume", "ltp", "open"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    if "vol_ratio" in df.columns:
+        df["vol_ratio"] = pd.to_numeric(df["vol_ratio"], errors="coerce").fillna(0)
+    else:
+        df["vol_ratio"] = 0
 
     df_pivot = df.sort_values("date").drop_duplicates(
         subset=["stock", "date"], keep="last"
