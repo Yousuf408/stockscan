@@ -258,20 +258,20 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
         d3_label = fmt_date(day3_date) if day3_date else "D-2"
 
         results.append({
-            "Symbol"              : stock,
-            f"Vol {d3_label}"     : int(vol3) if vol3 > 0 else None,
-            f"Vol {d2_label}"     : int(vol2),
-            f"Vol {d1_label}"     : int(vol1),
-            f"Ratio {d2_label}/{d3_label}": round(vol_ratio_yest, 2),
-            f"Ratio {d1_label}/{d2_label}": round(vol_ratio_today, 2),
-            f"Price {d2_label}"   : round(ltp2, 2),
-            f"Price {d1_label}"   : round(ltp1, 2),
-            f"Chg% {d2_label}"    : round(price_change_yest, 2),
-            f"Chg% {d1_label}"    : round(price_change_today, 2),
-            "Setup Stage"         : setup_stage,
-            "Readiness %"         : readiness,
-            "Days in Setup"       : len(sorted_dates),
-            "_score"              : setup_score,   # hidden sort key
+            "Symbol"                       : stock,
+            f"Vol {d3_label}"              : int(vol3) if vol3 > 0 else 0,
+            f"Vol {d2_label}"              : int(vol2),
+            f"Vol {d1_label}"              : int(vol1),
+            f"Ratio {d2_label}/{d3_label}" : round(vol_ratio_yest,  2),
+            f"Ratio {d1_label}/{d2_label}" : round(vol_ratio_today, 2),
+            f"Price {d2_label}"            : round(ltp2, 2),
+            f"Price {d1_label}"            : round(ltp1, 2),
+            f"Chg% {d2_label}"             : round(price_change_yest,  2),
+            f"Chg% {d1_label}"             : round(price_change_today, 2),
+            "Setup Stage"                  : setup_stage,
+            "Readiness %"                  : readiness,
+            "Days in Setup"                : len(sorted_dates),
+            "_score"                       : setup_score,
         })
 
     if not results:
@@ -287,6 +287,23 @@ def analyze_setups(historical: dict) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 # DISPLAY DATAFRAME  (st.dataframe — full Streamlit features)
 # ─────────────────────────────────────────────────────────────
+def fmt_vol(v) -> str:
+    """Convert raw volume int → K/M string. 0 → '-'."""
+    try:
+        v = int(v)
+        if v <= 0:
+            return "-"
+        if v >= 1_000_000:
+            s = f"{v / 1_000_000:.2f}"
+            return f"{s.rstrip('0').rstrip('.')}M"
+        if v >= 1_000:
+            s = f"{v / 1_000:.1f}"
+            return f"{s.rstrip('0').rstrip('.')}K"
+        return str(v)
+    except Exception:
+        return "-"
+
+
 def show_dataframe(df: pd.DataFrame):
     """
     Display using st.dataframe so users get:
@@ -296,16 +313,24 @@ def show_dataframe(df: pd.DataFrame):
     - Search             (magnifying glass icon)
     - Fullscreen         (expand icon)
     - Pin / Hide column  (right-click column header)
+
+    Volume columns are pre-formatted as K/M strings so they
+    display as  '74.4K', '1.9M', '-'  instead of raw integers.
     """
 
-    # Drop internal sort key before display
     display_df = df.drop(columns=["_score"], errors="ignore").copy()
 
-    # Detect dynamic column names
+    # Detect dynamic column groups
     vol_cols   = [c for c in display_df.columns if c.startswith("Vol ")]
     ratio_cols = [c for c in display_df.columns if c.startswith("Ratio ")]
     price_cols = [c for c in display_df.columns if c.startswith("Price ")]
     chg_cols   = [c for c in display_df.columns if c.startswith("Chg% ")]
+
+    # ── Format volume columns → K/M strings ──────────────────
+    # (done before column_config so sorting on these is string-based
+    #  but display is clean; numeric sort still works on Ratio/Price/Chg)
+    for c in vol_cols:
+        display_df[c] = display_df[c].apply(fmt_vol)
 
     # ── Build column_config ───────────────────────────────────
     col_cfg = {
@@ -328,9 +353,7 @@ def show_dataframe(df: pd.DataFrame):
     }
 
     for c in vol_cols:
-        col_cfg[c] = st.column_config.NumberColumn(
-            c, format="%d", width="small"
-        )
+        col_cfg[c] = st.column_config.TextColumn(c, width="small")
 
     for c in ratio_cols:
         col_cfg[c] = st.column_config.NumberColumn(
