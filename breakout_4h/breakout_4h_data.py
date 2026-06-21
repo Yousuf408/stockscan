@@ -68,8 +68,8 @@ def fetch_avg_volumes() -> dict:
         df = pd.DataFrame(resp.data)
         df = df.drop_duplicates(subset=["stock", "date"], keep="first")
         df_sorted = df.sort_values("date", ascending=False)
-        df_top10  = df_sorted.groupby("stock").head(10)
-        avg_vol   = df_top10.groupby("stock")["volume"].mean().to_dict()
+        df_top20  = df_sorted.groupby("stock").head(20)
+        avg_vol   = df_top20.groupby("stock")["volume"].mean().to_dict()
         return avg_vol
 
     except Exception as e:
