@@ -353,58 +353,7 @@ def main():
         st.rerun()
 
     # ══════════════════════════════════════════════════════════
-    # SECTION 1 — BREAKOUT SCANNER
-    # ══════════════════════════════════════════════════════════
-    results = st.session_state.get("scan_results", None)
-    ticks   = angel_ws.get_latest_ticks()
-
-    st.markdown('<p style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 12px 0;padding-bottom:8px;border-bottom:2px solid #e2e8f0;">🔍 Breakout Scanner</p>', unsafe_allow_html=True)
-
-    if results is None:
-        st.markdown(f"""
-        <div style="text-align:center;padding:40px 20px;color:#94a3b8;">
-            <div style="font-size:36px;margin-bottom:10px;">🔍</div>
-            <div style="font-size:14px;color:#475569;">
-                Click <b style="color:#10b981">Scan Now</b> to find 4H breakout stocks.
-                Scans all {len(ALL_STOCKS)} stocks.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        passed   = len(results)
-        avg_rvol = round(np.mean([r["rel_vol"] for r in results]), 1) if results else 0
-        top_rvol = round(max([r["rel_vol"] for r in results]), 1) if results else 0
-
-        st.markdown(f"""
-        <div class="metric-row">
-            <div class="metric-tile"><div class="metric-val">{passed}</div><div class="metric-lbl">Breakouts Found</div></div>
-            <div class="metric-tile"><div class="metric-val">{len(ALL_STOCKS)}</div><div class="metric-lbl">Stocks Scanned</div></div>
-            <div class="metric-tile"><div class="metric-val">{avg_rvol}x</div><div class="metric-lbl">Avg Rel. Volume</div></div>
-            <div class="metric-tile"><div class="metric-val">{top_rvol}x</div><div class="metric-lbl">Top Rel. Volume</div></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        render_breakout_table(results, ticks)
-
-        if results:
-            st.markdown('<h3 style="color:#0f172a;font-size:15px;font-weight:600;margin:16px 0 8px 0">📊 4H Candle Chart</h3>', unsafe_allow_html=True)
-            selected_sym = st.selectbox("Select stock", [r["symbol"] for r in results], label_visibility="collapsed", key="chart_select")
-            selected     = next((r for r in results if r["symbol"] == selected_sym), None)
-            if selected:
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Price",        f"₹{selected['price']:,.2f}")
-                c2.metric("Breakout %",   f"+{selected['breakout_pct']:.2f}%")
-                c3.metric("Rel. Volume",  f"{selected['rel_vol']:.1f}x")
-                c4.metric("Zone Range %", f"{selected['range_pct']:.2f}%")
-                st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
-                render_chart(selected)
-                st.markdown('<div style="display:flex;gap:20px;margin-top:10px;font-size:12px;color:#64748b;"><span>🟩 Breakout candle</span><span>🔴 Consolidation zone</span><span>⬜ Prior 4H candles</span></div>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ══════════════════════════════════════════════════════════
-    # SECTION 2 — CONSOLIDATION WATCH
+    # SECTION 1 — CONSOLIDATION WATCH
     # ══════════════════════════════════════════════════════════
     watch_raw  = st.session_state.get("watch_results", None)
     watch_count= len(watch_raw) if watch_raw else 0
@@ -455,6 +404,57 @@ def main():
         """, unsafe_allow_html=True)
 
         render_watch_table(enriched)
+
+    # ══════════════════════════════════════════════════════════
+    # SECTION 2 — BREAKOUT SCANNER
+    # ══════════════════════════════════════════════════════════
+    results = st.session_state.get("scan_results", None)
+    ticks   = angel_ws.get_latest_ticks()
+
+    st.markdown('<p style="font-size:15px;font-weight:600;color:#0f172a;margin:4px 0 12px 0;padding-bottom:8px;border-bottom:2px solid #e2e8f0;">🔍 Breakout Scanner</p>', unsafe_allow_html=True)
+
+    if results is None:
+        st.markdown(f"""
+        <div style="text-align:center;padding:40px 20px;color:#94a3b8;">
+            <div style="font-size:36px;margin-bottom:10px;">🔍</div>
+            <div style="font-size:14px;color:#475569;">
+                Click <b style="color:#10b981">Scan Now</b> to find 4H breakout stocks.
+                Scans all {len(ALL_STOCKS)} stocks.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        passed   = len(results)
+        avg_rvol = round(np.mean([r["rel_vol"] for r in results]), 1) if results else 0
+        top_rvol = round(max([r["rel_vol"] for r in results]), 1) if results else 0
+
+        st.markdown(f"""
+        <div class="metric-row">
+            <div class="metric-tile"><div class="metric-val">{passed}</div><div class="metric-lbl">Breakouts Found</div></div>
+            <div class="metric-tile"><div class="metric-val">{len(ALL_STOCKS)}</div><div class="metric-lbl">Stocks Scanned</div></div>
+            <div class="metric-tile"><div class="metric-val">{avg_rvol}x</div><div class="metric-lbl">Avg Rel. Volume</div></div>
+            <div class="metric-tile"><div class="metric-val">{top_rvol}x</div><div class="metric-lbl">Top Rel. Volume</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        render_breakout_table(results, ticks)
+
+        if results:
+            st.markdown('<h3 style="color:#0f172a;font-size:15px;font-weight:600;margin:16px 0 8px 0">📊 4H Candle Chart</h3>', unsafe_allow_html=True)
+            selected_sym = st.selectbox("Select stock", [r["symbol"] for r in results], label_visibility="collapsed", key="chart_select")
+            selected     = next((r for r in results if r["symbol"] == selected_sym), None)
+            if selected:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Price",        f"₹{selected['price']:,.2f}")
+                c2.metric("Breakout %",   f"+{selected['breakout_pct']:.2f}%")
+                c3.metric("Rel. Volume",  f"{selected['rel_vol']:.1f}x")
+                c4.metric("Zone Range %", f"{selected['range_pct']:.2f}%")
+                st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
+                render_chart(selected)
+                st.markdown('<div style="display:flex;gap:20px;margin-top:10px;font-size:12px;color:#64748b;"><span>🟩 Breakout candle</span><span>🔴 Consolidation zone</span><span>⬜ Prior 4H candles</span></div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
 
     st.markdown("---")
     st.markdown('<p style="text-align:center;color:#94a3b8;font-size:12px;">⚠️ For educational and research purposes only. Not financial advice.</p>', unsafe_allow_html=True)
