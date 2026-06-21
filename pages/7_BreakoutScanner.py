@@ -1,6 +1,8 @@
 """
 7_BreakoutScanner.py
-UI only — imports all logic from breakout_4h/ module
+Two tabs:
+  Tab 1: Breakout Scanner  — stocks that already broke out
+  Tab 2: Consolidation Watch — stocks consolidating, monitor live
 """
 
 import sys
@@ -18,7 +20,8 @@ from angel_auth import angel_login
 from config import STOCKS_WATCHLIST
 
 from breakout_4h.breakout_4h_logic import run_scan
-from breakout_4h.breakout_4h_chart import render_chart
+from breakout_4h.breakout_4h_chart  import render_chart
+from breakout_4h.breakout_4h_watch  import scan_consolidating, check_live_alerts
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -29,9 +32,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# ─────────────────────────────────────────────────────────────
-# TOKEN MAPS
-# ─────────────────────────────────────────────────────────────
 NAME_TO_TOKEN = {
     name: token
     for name, token, kind in STOCKS_WATCHLIST
@@ -50,16 +50,13 @@ footer { display: none !important; }
 
 div[data-testid="stButton"] > button {
     background: linear-gradient(to right, #10b981, #14b8a6) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 9999px !important;
-    padding: 10px 28px !important;
-    font-weight: 600 !important;
-    font-size: 15px !important;
-    width: 100%;
+    color: white !important; border: none !important;
+    border-radius: 9999px !important; font-weight: 600 !important;
+    font-size: 14px !important; width: 100%;
 }
 div[data-testid="stButton"] > button:hover { opacity: 0.88 !important; }
 
+/* ── Metric tiles ── */
 .metric-row { display: flex; gap: 12px; margin-bottom: 20px; }
 .metric-tile {
     background: #f0fdf4; border: 1px solid #bbf7d0;
@@ -67,20 +64,68 @@ div[data-testid="stButton"] > button:hover { opacity: 0.88 !important; }
     flex: 1; text-align: center;
 }
 .metric-val { font-size: 26px; font-weight: 700; color: #059669; }
+.metric-val-pink { font-size: 26px; font-weight: 700; color: #db2777; }
+.metric-val-amber { font-size: 26px; font-weight: 700; color: #d97706; }
 .metric-lbl { font-size: 12px; color: #64748b; margin-top: 2px; }
 
+/* ── Chart wrap ── */
 .chart-wrap {
     background: #ffffff; border: 1px solid #e2e8f0;
     border-radius: 12px; padding: 16px; margin-top: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
+/* ── WS dot ── */
 .dot-live {
     display: inline-block; width: 8px; height: 8px;
     background: #10b981; border-radius: 50%;
     margin-right: 6px; animation: pulse 1.5s infinite;
 }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Watch table ── */
+.watch-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.watch-table th {
+    text-align: left; padding: 8px 12px;
+    font-size: 11px; font-weight: 600; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    border-bottom: 2px solid #e2e8f0; background: #f8fafc;
+}
+.watch-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
+.row-broke   { background: #f0fdf4 !important; }
+.row-near    { background: #fff7ed !important; }
+.row-watch   { background: #ffffff; }
+
+.badge { display:inline-block; padding:2px 9px; border-radius:5px; font-size:11px; font-weight:600; }
+.badge-broke  { background:#d1fae5; color:#059669; }
+.badge-near   { background:#fce7f3; color:#db2777; }
+.badge-watch  { background:#fef3c7; color:#d97706; }
+.badge-tight  { background:#e0f2fe; color:#0284c7; }
+
+.prox-bar {
+    width: 80px; height: 5px; background: #e2e8f0;
+    border-radius: 3px; overflow: hidden; display:inline-block;
+}
+.prox-fill { height: 100%; border-radius: 3px; }
+
+.alert-box {
+    display: flex; align-items: center; gap: 12px;
+    background: #fff7ed; border: 1px solid #fed7aa;
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 14px;
+    font-size: 13px;
+}
+
+/* ── Tabs ── */
+.tab-row {
+    display: flex; gap: 0;
+    border-bottom: 2px solid #e2e8f0; margin-bottom: 20px;
+}
+.tab-item {
+    padding: 10px 20px; font-size: 14px; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    color: #64748b; font-weight: 500;
+}
+.tab-active { color: #059669; border-bottom-color: #10b981; }
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #f8fafc; }
@@ -90,7 +135,7 @@ div[data-testid="stButton"] > button:hover { opacity: 0.88 !important; }
 
 
 # ─────────────────────────────────────────────────────────────
-# WEBSOCKET AUTO-CONNECT
+# WEBSOCKET
 # ─────────────────────────────────────────────────────────────
 def ensure_websocket():
     if not angel_ws.is_connected():
@@ -98,20 +143,18 @@ def ensure_websocket():
             creds = angel_login()
             if creds:
                 angel_ws.start_websocket(
-                    creds["jwt_token"],
-                    creds["api_key"],
-                    creds["client_id"],
-                    creds["feed_token"]
+                    creds["jwt_token"], creds["api_key"],
+                    creds["client_id"], creds["feed_token"]
                 )
                 time.sleep(3)
             else:
-                st.error("❌ Angel One login failed. Live prices unavailable.")
+                st.error("❌ Angel One login failed.")
 
 
 # ─────────────────────────────────────────────────────────────
-# TABLE RENDER
+# TABLE RENDER — Breakout Scanner
 # ─────────────────────────────────────────────────────────────
-def render_table(results: list, ticks: dict):
+def render_breakout_table(results, ticks):
     if not results:
         st.info("📭 No breakouts found — try scanning again.")
         return
@@ -150,25 +193,108 @@ def render_table(results: list, ticks: dict):
 
 
 # ─────────────────────────────────────────────────────────────
+# TABLE RENDER — Consolidation Watch
+# ─────────────────────────────────────────────────────────────
+def render_watch_table(watchlist_enriched):
+    if not watchlist_enriched:
+        st.info("📭 No consolidating stocks found.")
+        return
+
+    rows_html = ""
+    for s in watchlist_enriched:
+        sym      = s["symbol"]
+        ltp      = s["ltp"]
+        con_high = s["con_high"]
+        con_low  = s["con_low"]
+        range_pct= s["range_pct"]
+        ptb      = s["pct_to_breakout"]
+        prox     = s["proximity_pct"]
+        status   = s["status"]
+
+        # Row class
+        if status == "broke_out":
+            row_cls  = "row-broke"
+            ltp_col  = f'<span style="color:#059669;font-weight:700;">₹{ltp:,.2f}</span>'
+            ptb_str  = f'<span style="color:#059669;font-weight:600;">+{ptb:.1f}% above</span>'
+            badge    = '<span class="badge badge-broke">Broke out!</span>'
+            bar_clr  = "#059669"
+        elif status == "near_zone":
+            row_cls  = "row-near"
+            ltp_col  = f'<span style="color:#d97706;font-weight:700;">₹{ltp:,.2f}</span>'
+            ptb_str  = f'<span style="color:#d97706;font-weight:600;">{ptb:.1f}% to go</span>'
+            badge    = '<span class="badge badge-near">Near zone!</span>'
+            bar_clr  = "#f59e0b"
+        else:
+            row_cls  = "row-watch"
+            ltp_col  = f'₹{ltp:,.2f}'
+            ptb_str  = f'{ptb:.1f}% to go'
+            if range_pct <= 6:
+                badge = '<span class="badge badge-tight">Tight range</span>'
+            else:
+                badge = '<span class="badge badge-watch">Watching</span>'
+            bar_clr  = "#10b981"
+
+        bar_width = int(min(100, max(5, prox)))
+
+        rows_html += f"""
+        <tr class="{row_cls}">
+            <td style="font-weight:600;font-size:13px;">{sym}</td>
+            <td>{ltp_col}</td>
+            <td>₹{con_high:,.0f}</td>
+            <td>₹{con_low:,.0f}</td>
+            <td>{range_pct:.1f}%</td>
+            <td>{ptb_str}</td>
+            <td>
+                <div class="prox-bar">
+                    <div class="prox-fill" style="width:{bar_width}%;background:{bar_clr};"></div>
+                </div>
+            </td>
+            <td>{badge}</td>
+        </tr>
+        """
+
+    html = f"""
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;">
+    <table class="watch-table">
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>LTP</th>
+                <th>Zone High</th>
+                <th>Zone Low</th>
+                <th>Range %</th>
+                <th>% to Breakout</th>
+                <th>Proximity</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+    </div>
+    """
+    st.components.v1.html(html, height=min(len(watchlist_enriched) * 48 + 60, 600), scrolling=True)
+
+
+# ─────────────────────────────────────────────────────────────
 # MAIN UI
 # ─────────────────────────────────────────────────────────────
 def main():
-    # ── WS Status ──
     ws_connected = angel_ws.is_connected()
     ticks        = angel_ws.get_latest_ticks()
     ticks_count  = len(ticks)
     last_scanned = st.session_state.get("last_scanned", "")
 
-    if ws_connected:
-        ws_html = f'<span class="dot-live"></span><span style="color:#059669;font-size:12px;font-weight:500">Live · {ticks_count} ticks</span>'
-    else:
-        ws_html = '<span style="color:#dc2626;font-size:12px;">⚠️ WS disconnected</span>'
+    ws_html = (
+        f'<span class="dot-live"></span><span style="color:#059669;font-size:12px;font-weight:500">Live · {ticks_count} ticks</span>'
+        if ws_connected else
+        '<span style="color:#dc2626;font-size:12px;">⚠️ WS disconnected</span>'
+    )
+    ls_html = f'<span style="color:#94a3b8;font-size:12px;">Last scan: {last_scanned}</span>' if last_scanned else ""
 
-    ls_html = f'<span style="color:#94a3b8;font-size:12px;">Last scanned: {last_scanned}</span>' if last_scanned else ""
-
-    # ── Header — single clean row ──
+    # ── Header ──
     st.markdown(f"""
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0 8px 0;border-bottom:1px solid #e2e8f0;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:4px 0 10px 0;border-bottom:1px solid #e2e8f0;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:24px;font-weight:700;color:#0f172a;">⚡ Breakout Scanner</span>
             <span style="font-size:12px;color:#94a3b8;">4H consolidation · India NSE</span>
@@ -180,219 +306,273 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Scan button ──
-    col_btn, _ = st.columns([1, 5])
-    with col_btn:
-        scan_clicked = st.button("🔍 Scan Now", use_container_width=True)
+    # ── Tabs ──
+    watch_count = len(st.session_state.get("watch_results", []))
+    tab1, tab2  = st.tabs([
+        "🔍 Breakout Scanner",
+        f"👁️ Consolidation Watch {'· ' + str(watch_count) + ' stocks' if watch_count else ''}"
+    ])
 
-    # ── Filters ──
-    apply_clicked = False
-    with st.expander("🔧 Scanner Filters", expanded=False):
-        fc1, fc2, fc3, fc4 = st.columns(4)
+    # ══════════════════════════════════════════════════════════
+    # TAB 1 — BREAKOUT SCANNER
+    # ══════════════════════════════════════════════════════════
+    with tab1:
+        col_btn, _ = st.columns([1, 5])
+        with col_btn:
+            scan_clicked = st.button("🔍 Scan Now", use_container_width=True, key="scan_btn")
 
-        CONSOL_OPTS   = [5, 8, 10, 12, 15, 20]
-        BREAKOUT_OPTS = [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
-        BODY_OPTS     = [1, 2, 3, 4, 5, 7, 10]
-        RELVOL_OPTS   = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0]
-        DVOL_OPTS     = [100_000, 200_000, 300_000, 500_000, 1_000_000, 2_000_000, 5_000_000]
-        MKTCAP_OPTS   = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000, 500_000_000, 1_000_000_000]
-        NEARHIGH_OPTS = [5, 8, 10, 15, 20, 25]
-        TREND_OPTS    = ["both", "sma20", "sma50", "disable"]
+        with st.expander("🔧 Scanner Filters", expanded=False):
+            fc1, fc2, fc3, fc4 = st.columns(4)
 
-        with fc1:
-            f_consol = st.selectbox(
-                "Consolidation Range", CONSOL_OPTS,
-                index=CONSOL_OPTS.index(st.session_state.get("f_consol", 12)),
-                format_func=lambda x: f"≤ {x}%", key="f_consol"
-            )
-            f_breakout = st.selectbox(
-                "Breakout Above Zone", BREAKOUT_OPTS,
-                index=BREAKOUT_OPTS.index(st.session_state.get("f_breakout", 2.0)),
-                format_func=lambda x: f"{x}%" if x > 0 else "0% (just above)",
-                key="f_breakout"
-            )
-        with fc2:
-            f_body = st.selectbox(
-                "Min Body Size", BODY_OPTS,
-                index=BODY_OPTS.index(st.session_state.get("f_body", 5)),
-                format_func=lambda x: f"{x}%", key="f_body"
-            )
-            f_relvol = st.selectbox(
-                "Relative Volume", RELVOL_OPTS,
-                index=RELVOL_OPTS.index(st.session_state.get("f_relvol", 1.5)),
-                format_func=lambda x: f"{x}x", key="f_relvol"
-            )
-        with fc3:
-            f_dailyvol = st.selectbox(
-                "Min Daily Volume", DVOL_OPTS,
-                index=DVOL_OPTS.index(st.session_state.get("f_dailyvol", 500_000)),
-                format_func=lambda x: f"{int(x/1000)}k" if x < 1_000_000 else f"{int(x/1_000_000)}M",
-                key="f_dailyvol"
-            )
-            f_mktcap = st.selectbox(
-                "Market Cap", MKTCAP_OPTS,
-                index=MKTCAP_OPTS.index(st.session_state.get("f_mktcap", 50_000_000)),
-                format_func=lambda x: f"${int(x/1_000_000)}M" if x < 1_000_000_000 else f"${int(x/1_000_000_000)}B",
-                key="f_mktcap"
-            )
-        with fc4:
-            f_nearhigh = st.selectbox(
-                "Price Near High", NEARHIGH_OPTS,
-                index=NEARHIGH_OPTS.index(st.session_state.get("f_nearhigh", 10)),
-                format_func=lambda x: f"Within {x}%", key="f_nearhigh"
-            )
-            f_trend = st.selectbox(
-                "Trend (SMA)", TREND_OPTS,
-                index=TREND_OPTS.index(st.session_state.get("f_trend", "both")),
-                format_func=lambda x: {
-                    "both": "SMA20 & SMA50", "sma20": "Only SMA20",
-                    "sma50": "Only SMA50", "disable": "Disabled"
-                }[x],
-                key="f_trend"
-            )
+            CONSOL_OPTS   = [5, 8, 10, 12, 15, 20]
+            BREAKOUT_OPTS = [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
+            BODY_OPTS     = [1, 2, 3, 4, 5, 7, 10]
+            RELVOL_OPTS   = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0]
+            DVOL_OPTS     = [100_000, 200_000, 300_000, 500_000, 1_000_000, 2_000_000, 5_000_000]
+            MKTCAP_OPTS   = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000, 500_000_000, 1_000_000_000]
+            NEARHIGH_OPTS = [5, 8, 10, 15, 20, 25]
+            TREND_OPTS    = ["both", "sma20", "sma50", "disable"]
 
-        btn_col1, btn_col2 = st.columns([1, 1])
-        with btn_col1:
-            if st.button("↺ Reset to Defaults", key="reset_filters", use_container_width=True):
-                for k in ["f_consol","f_breakout","f_body","f_relvol",
-                          "f_dailyvol","f_mktcap","f_nearhigh","f_trend"]:
-                    st.session_state.pop(k, None)
-                st.rerun()
-        with btn_col2:
-            apply_clicked = st.button("✅ Apply & Scan", key="apply_filters", use_container_width=True)
+            with fc1:
+                f_consol   = st.selectbox("Consolidation Range", CONSOL_OPTS,
+                    index=CONSOL_OPTS.index(st.session_state.get("f_consol", 12)),
+                    format_func=lambda x: f"≤ {x}%", key="f_consol")
+                f_breakout = st.selectbox("Breakout Above Zone", BREAKOUT_OPTS,
+                    index=BREAKOUT_OPTS.index(st.session_state.get("f_breakout", 2.0)),
+                    format_func=lambda x: f"{x}%" if x > 0 else "0% (just above)", key="f_breakout")
+            with fc2:
+                f_body   = st.selectbox("Min Body Size", BODY_OPTS,
+                    index=BODY_OPTS.index(st.session_state.get("f_body", 5)),
+                    format_func=lambda x: f"{x}%", key="f_body")
+                f_relvol = st.selectbox("Relative Volume", RELVOL_OPTS,
+                    index=RELVOL_OPTS.index(st.session_state.get("f_relvol", 1.5)),
+                    format_func=lambda x: f"{x}x", key="f_relvol")
+            with fc3:
+                f_dailyvol = st.selectbox("Min Daily Volume", DVOL_OPTS,
+                    index=DVOL_OPTS.index(st.session_state.get("f_dailyvol", 500_000)),
+                    format_func=lambda x: f"{int(x/1000)}k" if x < 1_000_000 else f"{int(x/1_000_000)}M",
+                    key="f_dailyvol")
+                f_mktcap = st.selectbox("Market Cap", MKTCAP_OPTS,
+                    index=MKTCAP_OPTS.index(st.session_state.get("f_mktcap", 50_000_000)),
+                    format_func=lambda x: f"${int(x/1_000_000)}M" if x < 1_000_000_000 else f"${int(x/1_000_000_000)}B",
+                    key="f_mktcap")
+            with fc4:
+                f_nearhigh = st.selectbox("Price Near High", NEARHIGH_OPTS,
+                    index=NEARHIGH_OPTS.index(st.session_state.get("f_nearhigh", 10)),
+                    format_func=lambda x: f"Within {x}%", key="f_nearhigh")
+                f_trend = st.selectbox("Trend (SMA)", TREND_OPTS,
+                    index=TREND_OPTS.index(st.session_state.get("f_trend", "both")),
+                    format_func=lambda x: {"both":"SMA20 & SMA50","sma20":"Only SMA20","sma50":"Only SMA50","disable":"Disabled"}[x],
+                    key="f_trend")
 
-    st.markdown("---")
+            r_col, a_col = st.columns([1, 1])
+            with r_col:
+                if st.button("↺ Reset to Defaults", key="reset_filters", use_container_width=True):
+                    for k in ["f_consol","f_breakout","f_body","f_relvol","f_dailyvol","f_mktcap","f_nearhigh","f_trend"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+            with a_col:
+                apply_clicked = st.button("✅ Apply & Scan", key="apply_filters", use_container_width=True)
 
-    # ── Build scan_filters ──
-    scan_filters = {
-        "consol_pct"    : f_consol,
-        "breakout_mult" : 1 + (float(f_breakout) / 100),
-        "body_pct"      : float(f_body),
-        "rel_vol"       : float(f_relvol),
-        "daily_vol"     : int(f_dailyvol),
-        "mktcap"        : int(f_mktcap),
-        "near_high"     : int(f_nearhigh),
-        "trend"         : f_trend,
-    }
+        scan_filters = {
+            "consol_pct"    : f_consol,
+            "breakout_mult" : 1 + (float(f_breakout) / 100),
+            "body_pct"      : float(f_body),
+            "rel_vol"       : float(f_relvol),
+            "daily_vol"     : int(f_dailyvol),
+            "mktcap"        : int(f_mktcap),
+            "near_high"     : int(f_nearhigh),
+            "trend"         : f_trend,
+        }
 
-    # ── Scan trigger ──
-    if scan_clicked or apply_clicked:
-        ensure_websocket()
-        progress_bar = st.progress(0, text="Starting scan...")
-        status_text  = st.empty()
+        if scan_clicked or apply_clicked:
+            ensure_websocket()
+            progress_bar = st.progress(0, text="Starting scan...")
+            status_text  = st.empty()
 
-        def on_progress(done, total):
-            progress_bar.progress(int(done / total * 100), text=f"Scanning... {done}/{total}")
+            def on_progress(done, total):
+                progress_bar.progress(int(done / total * 100), text=f"Scanning... {done}/{total}")
+            def on_status(symbol, done, total):
+                status_text.caption(f"⚡ Checking {symbol} ({done}/{total})")
 
-        def on_status(symbol, done, total):
-            status_text.caption(f"⚡ Checking {symbol} ({done}/{total})")
+            results = run_scan(ALL_STOCKS, on_progress, on_status, scan_filters)
+            progress_bar.empty()
+            status_text.empty()
 
-        results = run_scan(
-            all_stocks  = ALL_STOCKS,
-            progress_cb = on_progress,
-            status_cb   = on_status,
-            filters     = scan_filters,
-        )
-        progress_bar.empty()
-        status_text.empty()
+            st.session_state["scan_results"] = results
+            st.session_state["last_scanned"] = datetime.now().strftime("%d %b %Y, %I:%M %p")
+            st.rerun()
 
-        st.session_state["scan_results"] = results
-        st.session_state["last_scanned"] = datetime.now().strftime("%d %b %Y, %I:%M %p")
-        st.rerun()
+        results = st.session_state.get("scan_results", None)
+        ticks   = angel_ws.get_latest_ticks()
 
-    # ── Results ──
-    results = st.session_state.get("scan_results", None)
-    ticks   = angel_ws.get_latest_ticks()
-
-    if results is None:
-        st.markdown(f"""
-        <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
-            <div style="font-size:40px;margin-bottom:12px;">🔍</div>
-            <div style="font-size:15px;color:#475569;">
-                Click <b style="color:#10b981">Scan Now</b> to find 4H breakout stocks.<br>
-                <span style="font-size:12px;color:#94a3b8;">Scans all {len(ALL_STOCKS)} stocks from your watchlist.</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        return
-
-    # ── Metric tiles ──
-    passed   = len(results)
-    total    = len(ALL_STOCKS)
-    avg_rvol = round(np.mean([r["rel_vol"] for r in results]), 1) if results else 0
-    top_rvol = round(max([r["rel_vol"] for r in results]), 1) if results else 0
-
-    st.markdown(f"""
-    <div class="metric-row">
-        <div class="metric-tile">
-            <div class="metric-val">{passed}</div>
-            <div class="metric-lbl">Breakouts Found</div>
-        </div>
-        <div class="metric-tile">
-            <div class="metric-val">{total}</div>
-            <div class="metric-lbl">Stocks Scanned</div>
-        </div>
-        <div class="metric-tile">
-            <div class="metric-val">{avg_rvol}x</div>
-            <div class="metric-lbl">Avg Rel. Volume</div>
-        </div>
-        <div class="metric-tile">
-            <div class="metric-val">{top_rvol}x</div>
-            <div class="metric-lbl">Top Rel. Volume</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── Table ──
-    st.markdown(
-        '<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📋 Breakout Stocks</h3>',
-        unsafe_allow_html=True
-    )
-    render_table(results, ticks)
-
-    # ── Chart ──
-    if results:
-        st.markdown("---")
-        st.markdown(
-            '<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📊 4H Candle Chart</h3>',
-            unsafe_allow_html=True
-        )
-
-        symbols      = [r["symbol"] for r in results]
-        selected_sym = st.selectbox(
-            "Select stock", options=symbols, label_visibility="collapsed"
-        )
-        selected = next((r for r in results if r["symbol"] == selected_sym), None)
-
-        if selected:
-            c1, c2, c3, c4 = st.columns(4)
-            price    = selected["price"]
-            brk_pct  = selected["breakout_pct"]
-            rel_vol  = selected["rel_vol"]
-            rng_pct  = selected["range_pct"]
-            c1.metric("Price",        f"₹{price:,.2f}")
-            c2.metric("Breakout %",   f"+{brk_pct:.2f}%")
-            c3.metric("Rel. Volume",  f"{rel_vol:.1f}x")
-            c4.metric("Zone Range %", f"{rng_pct:.2f}%")
-
-            st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
-            render_chart(selected)
-            st.markdown("""
-            <div style="display:flex;gap:20px;margin-top:10px;font-size:12px;color:#64748b;">
-                <span>🟩 Breakout candle</span>
-                <span>🔴 Consolidation zone</span>
-                <span>⬜ Prior 4H candles</span>
+        if results is None:
+            st.markdown(f"""
+            <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+                <div style="font-size:40px;margin-bottom:12px;">🔍</div>
+                <div style="font-size:15px;color:#475569;">
+                    Click <b style="color:#10b981">Scan Now</b> to find 4H breakout stocks.<br>
+                    <span style="font-size:12px;">Scans all {len(ALL_STOCKS)} stocks from your watchlist.</span>
+                </div>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            passed   = len(results)
+            avg_rvol = round(np.mean([r["rel_vol"] for r in results]), 1) if results else 0
+            top_rvol = round(max([r["rel_vol"] for r in results]), 1) if results else 0
+
+            st.markdown(f"""
+            <div class="metric-row">
+                <div class="metric-tile"><div class="metric-val">{passed}</div><div class="metric-lbl">Breakouts Found</div></div>
+                <div class="metric-tile"><div class="metric-val">{len(ALL_STOCKS)}</div><div class="metric-lbl">Stocks Scanned</div></div>
+                <div class="metric-tile"><div class="metric-val">{avg_rvol}x</div><div class="metric-lbl">Avg Rel. Volume</div></div>
+                <div class="metric-tile"><div class="metric-val">{top_rvol}x</div><div class="metric-lbl">Top Rel. Volume</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown('<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📋 Breakout Stocks</h3>', unsafe_allow_html=True)
+            render_breakout_table(results, ticks)
+
+            if results:
+                st.markdown("---")
+                st.markdown('<h3 style="color:#0f172a;font-size:16px;font-weight:600;margin-bottom:10px">📊 4H Candle Chart</h3>', unsafe_allow_html=True)
+
+                selected_sym = st.selectbox("Select stock", [r["symbol"] for r in results], label_visibility="collapsed", key="chart_select")
+                selected     = next((r for r in results if r["symbol"] == selected_sym), None)
+
+                if selected:
+                    c1, c2, c3, c4 = st.columns(4)
+                    price   = selected["price"]
+                    brk_pct = selected["breakout_pct"]
+                    rel_vol = selected["rel_vol"]
+                    rng_pct = selected["range_pct"]
+                    c1.metric("Price",        f"₹{price:,.2f}")
+                    c2.metric("Breakout %",   f"+{brk_pct:.2f}%")
+                    c3.metric("Rel. Volume",  f"{rel_vol:.1f}x")
+                    c4.metric("Zone Range %", f"{rng_pct:.2f}%")
+
+                    st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
+                    render_chart(selected)
+                    st.markdown("""
+                    <div style="display:flex;gap:20px;margin-top:10px;font-size:12px;color:#64748b;">
+                        <span>🟩 Breakout candle</span>
+                        <span>🔴 Consolidation zone</span>
+                        <span>⬜ Prior 4H candles</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════
+    # TAB 2 — CONSOLIDATION WATCH
+    # ══════════════════════════════════════════════════════════
+    with tab2:
+        col_b, col_r, col_info = st.columns([1, 1, 4])
+        with col_b:
+            build_clicked = st.button("📡 Build Watchlist", use_container_width=True, key="build_watch")
+        with col_r:
+            refresh_clicked = st.button("🔄 Refresh Live", use_container_width=True, key="refresh_watch")
+        with col_info:
+            st.markdown('<p style="color:#94a3b8;font-size:12px;margin-top:10px;">Auto-refresh every 30s during market hours</p>', unsafe_allow_html=True)
+
+        # Build watchlist
+        if build_clicked:
+            ensure_websocket()
+            progress_bar = st.progress(0, text="Building watchlist...")
+            status_text  = st.empty()
+
+            def on_progress_w(done, total):
+                progress_bar.progress(int(done / total * 100), text=f"Scanning... {done}/{total}")
+            def on_status_w(symbol, done, total):
+                status_text.caption(f"⚡ Checking {symbol} ({done}/{total})")
+
+            watch_raw = scan_consolidating(ALL_STOCKS, on_progress_w, on_status_w)
+            progress_bar.empty()
+            status_text.empty()
+
+            st.session_state["watch_results"]   = watch_raw
+            st.session_state["watch_built_time"] = datetime.now().strftime("%d %b %Y, %I:%M %p")
+            st.rerun()
+
+        watch_raw = st.session_state.get("watch_results", None)
+
+        if watch_raw is None:
+            st.markdown("""
+            <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+                <div style="font-size:40px;margin-bottom:12px;">👁️</div>
+                <div style="font-size:15px;color:#475569;">
+                    Click <b style="color:#10b981">Build Watchlist</b> to find consolidating stocks.<br>
+                    <span style="font-size:12px;">Monitors live LTP vs 4H consolidation zones.</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            ticks    = angel_ws.get_latest_ticks()
+            enriched = check_live_alerts(watch_raw, ticks, NAME_TO_TOKEN)
+
+            broke_out = [s for s in enriched if s["status"] == "broke_out"]
+            near_zone = [s for s in enriched if s["status"] == "near_zone"]
+            watching  = [s for s in enriched if s["status"] == "watching"]
+            avg_range = round(np.mean([s["range_pct"] for s in enriched]), 1) if enriched else 0
+
+            built_time = st.session_state.get("watch_built_time", "")
+
+            # ── Alert banners ──
+            for s in broke_out:
+                ptb = s["pct_to_breakout"]
+                st.markdown(f"""
+                <div class="alert-box">
+                    <span style="font-size:20px;">🔔</span>
+                    <div>
+                        <strong>{s["symbol"]}</strong> ne zone toda!
+                        LTP ₹{s["ltp"]:,.2f} &gt; Zone High ₹{s["con_high"]:,.0f}
+                        &nbsp;<span style="color:#059669;font-weight:600;">+{ptb:.1f}% above zone</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── Metrics ──
+            st.markdown(f"""
+            <div class="metric-row">
+                <div class="metric-tile">
+                    <div class="metric-val">{len(enriched)}</div>
+                    <div class="metric-lbl">Consolidating</div>
+                </div>
+                <div class="metric-tile">
+                    <div class="metric-val-pink">{len(near_zone)}</div>
+                    <div class="metric-lbl">Near Breakout</div>
+                </div>
+                <div class="metric-tile">
+                    <div class="metric-val">{len(broke_out)}</div>
+                    <div class="metric-lbl">Just Broke Out</div>
+                </div>
+                <div class="metric-tile">
+                    <div class="metric-val-amber">{avg_range}%</div>
+                    <div class="metric-lbl">Avg Zone Range</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if built_time:
+                st.markdown(f'<p style="font-size:11px;color:#94a3b8;margin-bottom:8px;">Watchlist built: {built_time} · {len(enriched)} stocks · sorted by proximity to zone high</p>', unsafe_allow_html=True)
+
+            st.markdown('<h3 style="color:#0f172a;font-size:15px;font-weight:600;margin-bottom:8px;">📋 Watchlist — sorted by proximity to Zone High</h3>', unsafe_allow_html=True)
+            render_watch_table(enriched)
+
+            # Auto-refresh every 30s
+            time.sleep(0.1)
+            st_autorefresh = st.empty()
+            st_autorefresh.markdown("""
+            <script>
+            setTimeout(function() { window.location.reload(); }, 30000);
+            </script>
+            """, unsafe_allow_html=True)
 
     # ── Footer ──
     st.markdown("---")
     st.markdown(
         '<p style="text-align:center;color:#94a3b8;font-size:12px;">'
         '⚠️ For educational and research purposes only. Not financial advice.'
-        '</p>',
-        unsafe_allow_html=True
+        '</p>', unsafe_allow_html=True
     )
 
 
