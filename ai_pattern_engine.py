@@ -2,345 +2,326 @@
 ai_pattern_engine.py
 ML Pattern Recognition Engine — studies volume and price setups preceding spikes >= 5%
 Uses 20 EMA, range compression, and volume dry-ups.
+Supabase-backed: predictions, model metrics, feature importances, and model binary all stored in Supabase.
+NO SQLite. NO local joblib. Streamlit Cloud safe.
 """
 
 import os
+import io
 import sys
-import sqlite3
 import json
+import base64
 import logging
-from datetime import datetime, timedelta
+import pickle
+from datetime import datetime
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Try imports for ML
+# ── ML imports ──
 try:
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.model_selection import train_test_split
     from sklearn.metrics import accuracy_score, precision_score, recall_score
-    import joblib
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
 
+# ── yfinance ──
 try:
     import yfinance as yf
     YF_AVAILABLE = True
 except ImportError:
     YF_AVAILABLE = False
 
-# Setup logging
+# ── Supabase ──
+try:
+    from supabase import create_client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Resolve paths
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-try:
-    from config import STOCKS_WATCHLIST
-except ImportError:
-    STOCKS_WATCHLIST = []
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_memory.db")
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_pattern_model.joblib")
+FEATURE_COLS = [
+    "dist_to_ema20", "above_ema20", "ema_5_vs_20", "ema_9_vs_20",
+    "vol_ratio_1d", "vol_ratio_2d", "vol_vs_5d_avg", "vol_dry_up_3d",
+    "price_change_1d", "price_change_3d", "range_compression",
+    "range_compress_3d_avg", "body_ratio"
+]
 
 # ─────────────────────────────────────────────────────────────
-# DATABASE SETUP
+# SUPABASE HELPERS
 # ─────────────────────────────────────────────────────────────
-def init_db():
-    """Initialize SQLite database for storing model memory and predictions."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Predictions Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT,
-            symbol TEXT,
-            probability REAL,
-            stage TEXT,
-            features TEXT,
-            actual_max_return REAL,
-            outcome INTEGER, -- 1 = hit (>=5% spike), 0 = miss, NULL = pending
-            UNIQUE(date, symbol)
-        )
-    """)
-    
-    # Model Metrics Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS model_metrics (
-            date TEXT PRIMARY KEY,
-            accuracy REAL,
-            precision REAL,
-            recall REAL,
-            total_samples INTEGER,
-            trained_at TEXT
-        )
-    """)
-    
-    # Feature Importances Table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS feature_importances (
-            feature_name TEXT PRIMARY KEY,
-            importance REAL
-        )
-    """)
-    
-    conn.commit()
-    conn.close()
+
+def get_supabase_client(url: str, key: str):
+    if not SUPABASE_AVAILABLE:
+        raise RuntimeError("supabase-py not installed")
+    return create_client(url, key)
+
+
+def ensure_tables_exist(supabase):
+    """
+    Creates required Supabase tables via SQL if they don't exist.
+    Requires you to run this SQL once in Supabase SQL Editor:
+
+    CREATE TABLE IF NOT EXISTS ai_predictions (
+        id BIGSERIAL PRIMARY KEY,
+        date TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        probability REAL,
+        stage TEXT,
+        features JSONB,
+        actual_max_return REAL,
+        outcome INTEGER,
+        UNIQUE(date, symbol)
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_model_metrics (
+        date TEXT PRIMARY KEY,
+        accuracy REAL,
+        precision_score REAL,
+        recall_score REAL,
+        total_samples INTEGER,
+        trained_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_feature_importances (
+        feature_name TEXT PRIMARY KEY,
+        importance REAL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_model_store (
+        id TEXT PRIMARY KEY,
+        model_blob TEXT,
+        saved_at TEXT
+    );
+    """
+    pass  # Tables must be created manually in Supabase SQL Editor (see docstring above)
+
 
 # ─────────────────────────────────────────────────────────────
-# HISTORICAL DATA FETCHING (yfinance with ThreadPool)
+# MODEL PERSISTENCE — Supabase (base64 pickle)
 # ─────────────────────────────────────────────────────────────
-def fetch_single_stock_history(symbol, period="60d"):
-    """Fetch daily history for a single stock using yfinance."""
+
+def save_model_to_supabase(model, supabase):
+    """Serialize model to base64 string and upsert into ai_model_store."""
+    buf = io.BytesIO()
+    pickle.dump(model, buf)
+    model_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    supabase.table("ai_model_store").upsert({
+        "id": "main_model",
+        "model_blob": model_b64,
+        "saved_at": datetime.now().isoformat()
+    }).execute()
+    logging.info("Model saved to Supabase ai_model_store.")
+
+
+def load_model_from_supabase(supabase):
+    """Load model from Supabase ai_model_store. Returns None if not found."""
+    try:
+        result = supabase.table("ai_model_store").select("model_blob").eq("id", "main_model").execute()
+        if not result.data:
+            return None
+        model_b64 = result.data[0]["model_blob"]
+        model_bytes = base64.b64decode(model_b64)
+        model = pickle.loads(model_bytes)
+        logging.info("Model loaded from Supabase.")
+        return model
+    except Exception as e:
+        logging.error(f"Failed to load model from Supabase: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────
+# HISTORICAL DATA (yfinance + ThreadPool)
+# ─────────────────────────────────────────────────────────────
+
+def fetch_single_stock_history(symbol: str, period: str = "60d"):
     try:
         ticker = f"{symbol}.NS"
         df = yf.download(ticker, period=period, interval="1d", progress=False, group_by="ticker")
         if df.empty:
             return symbol, None
-        
-        # Handle multi-index column if returned by yfinance
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(1)
-            
+            df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
-        # Standardize columns to lowercase
         df.columns = [col.lower() for col in df.columns]
         df = df.rename(columns={"date": "datetime"})
         df["symbol"] = symbol
         return symbol, df
     except Exception as e:
-        logging.error(f"Error fetching {symbol}: {str(e)}")
+        logging.error(f"Error fetching {symbol}: {e}")
         return symbol, None
 
-def fetch_all_history(symbols, period="60d"):
-    """Fetch history for all stocks concurrently."""
+
+def fetch_all_history(symbols: list, period: str = "60d", progress_callback=None) -> dict:
     stock_dfs = {}
-    logging.info(f"Fetching history for {len(symbols)} stocks using ThreadPool...")
-    
+    total = len(symbols)
+    logging.info(f"Fetching history for {total} stocks...")
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {executor.submit(fetch_single_stock_history, sym, period): sym for sym in symbols}
         for idx, future in enumerate(as_completed(futures)):
             sym, df = future.result()
-            if df is not None and len(df) >= 25: # Need at least 25 trading days for 20 EMA + features
+            if df is not None and len(df) >= 25:
                 stock_dfs[sym] = df
-            if idx % 100 == 0 and idx > 0:
-                logging.info(f"Fetched {idx}/{len(symbols)} stocks...")
-                
-    logging.info(f"Successfully fetched data for {len(stock_dfs)} stocks.")
+            if progress_callback and idx % 50 == 0:
+                progress_callback(idx, total)
+    logging.info(f"Fetched data for {len(stock_dfs)} stocks.")
     return stock_dfs
 
+
 # ─────────────────────────────────────────────────────────────
-# FEATURE ENGINEERING & STUDY MODULE
+# FEATURE ENGINEERING
 # ─────────────────────────────────────────────────────────────
-def calculate_stock_features(df):
-    """
-    Calculate high-quality technical features.
-    Studies relation to 20 EMA, range compression, and volume dry-ups.
-    """
+
+def calculate_stock_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values("datetime").reset_index(drop=True)
-    
-    # Prices and Volume
+
     close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    open_px = df["open"].astype(float)
-    volume = df["volume"].astype(float)
-    
-    # ── 1. EMA Calculations ──
+    high  = df["high"].astype(float)
+    low   = df["low"].astype(float)
+    open_ = df["open"].astype(float)
+    vol   = df["volume"].astype(float)
+
+    # EMAs
     df["ema_20"] = close.ewm(span=20, adjust=False).mean()
-    df["ema_5"] = close.ewm(span=5, adjust=False).mean()
-    df["ema_9"] = close.ewm(span=9, adjust=False).mean()
-    
-    # Distance to 20 EMA & status
+    df["ema_5"]  = close.ewm(span=5,  adjust=False).mean()
+    df["ema_9"]  = close.ewm(span=9,  adjust=False).mean()
+
     df["dist_to_ema20"] = (close - df["ema_20"]) / df["ema_20"] * 100
-    df["above_ema20"] = (close > df["ema_20"]).astype(int)
-    
-    # EMA Crossovers
-    df["ema_5_vs_20"] = (df["ema_5"] > df["ema_20"]).astype(int)
-    df["ema_9_vs_20"] = (df["ema_9"] > df["ema_20"]).astype(int)
-    
-    # ── 2. Volume DNA Features ──
-    df["vol_ratio_1d"] = volume / volume.shift(1).replace(0, np.nan)
-    df["vol_ratio_2d"] = volume.shift(1) / volume.shift(2).replace(0, np.nan)
-    
-    # Volume relative to recent 5-day average
-    rolling_vol_5 = volume.rolling(window=5).mean()
-    df["vol_vs_5d_avg"] = volume / rolling_vol_5.replace(0, np.nan)
-    
-    # Volume Dry-up indicator (e.g. volume drop while price consolidates)
+    df["above_ema20"]   = (close > df["ema_20"]).astype(int)
+    df["ema_5_vs_20"]   = (df["ema_5"] > df["ema_20"]).astype(int)
+    df["ema_9_vs_20"]   = (df["ema_9"] > df["ema_20"]).astype(int)
+
+    # Volume features
+    df["vol_ratio_1d"]  = vol / vol.shift(1).replace(0, np.nan)
+    df["vol_ratio_2d"]  = vol.shift(1) / vol.shift(2).replace(0, np.nan)
+    rolling5            = vol.rolling(window=5).mean()
+    df["vol_vs_5d_avg"] = vol / rolling5.replace(0, np.nan)
     df["vol_dry_up_3d"] = ((df["vol_ratio_1d"] < 0.9) & (df["vol_ratio_2d"] < 1.0)).astype(int)
-    
-    # ── 3. Price Actions & Range Compression ──
-    df["price_change_1d"] = close.pct_change(1) * 100
-    df["price_change_3d"] = close.pct_change(3) * 100
-    
-    # Range Compression = (High - Low) / Close
-    df["range_compression"] = (high - low) / close * 100
-    df["range_compress_3d_avg"] = df["range_compression"].rolling(window=3).mean()
-    
-    # Candle Body Ratio = abs(Close - Open) / (High - Low)
-    candle_range = (high - low).replace(0, np.nan)
-    df["body_ratio"] = abs(close - open_px) / candle_range
-    
-    # ── 4. Target Labeling (For Training) ──
-    # Check if max price in next 1 to 2 days goes up >= 5% from current close
-    future_close_1 = close.shift(-1)
-    future_close_2 = close.shift(-2)
-    max_future_close = pd.concat([future_close_1, future_close_2], axis=1).max(axis=1)
-    
-    df["forward_max_return"] = (max_future_close - close) / close * 100
-    # Label is 1 if spike >= 5%, else 0
-    df["spike_label"] = (df["forward_max_return"] >= 5.0).astype(int)
-    
-    # Drop rows without labels (the latest 2 rows in history cannot be labeled)
+
+    # Price / range
+    df["price_change_1d"]      = close.pct_change(1) * 100
+    df["price_change_3d"]      = close.pct_change(3) * 100
+    df["range_compression"]    = (high - low) / close * 100
+    df["range_compress_3d_avg"]= df["range_compression"].rolling(window=3).mean()
+    candle_range               = (high - low).replace(0, np.nan)
+    df["body_ratio"]           = abs(close - open_) / candle_range
+
+    # Target label (for training only — NaN for last 2 rows)
+    future_close_1  = close.shift(-1)
+    future_close_2  = close.shift(-2)
+    max_future      = pd.concat([future_close_1, future_close_2], axis=1).max(axis=1)
+    df["forward_max_return"] = (max_future - close) / close * 100
+    df["spike_label"]        = (df["forward_max_return"] >= 5.0).astype(int)
+
     return df
 
-# ─────────────────────────────────────────────────────────────
-# MODEL TRAINING & VALIDATION
-# ─────────────────────────────────────────────────────────────
-def train_ai_model():
-    """Trains the RandomForestClassifier on historical stock patterns."""
-    if not ML_AVAILABLE or not YF_AVAILABLE:
-        logging.error("Required libraries (scikit-learn/yfinance) not installed.")
-        return False
-        
-    init_db()
-    
-    # Fetch watchlist symbols (stocks only)
-    stocks = [item[0] for item in STOCKS_WATCHLIST if item[2] == "stock"]
-    if not stocks:
-        logging.warning("No stocks found in STOCKS_WATCHLIST.")
-        return False
-        
-    # Fetch historical data
-    histories = fetch_all_history(stocks, period="60d")
-    if not histories:
-        logging.error("Failed to fetch historical data for training.")
-        return False
-        
-    # Process features for all stocks and concatenate
-    all_processed_dfs = []
-    for symbol, df in histories.items():
-        processed_df = calculate_stock_features(df)
-        all_processed_dfs.append(processed_df)
-        
-    full_df = pd.concat(all_processed_dfs, ignore_index=True)
-    
-    # Drop rows with NaN in features
-    feature_cols = [
-        "dist_to_ema20", "above_ema20", "ema_5_vs_20", "ema_9_vs_20",
-        "vol_ratio_1d", "vol_ratio_2d", "vol_vs_5d_avg", "vol_dry_up_3d",
-        "price_change_1d", "price_change_3d", "range_compression", 
-        "range_compress_3d_avg", "body_ratio"
-    ]
-    
-    # Clean data for training (remove rows where label or features are NaN)
-    train_data = full_df.dropna(subset=feature_cols + ["spike_label"])
-    
-    if len(train_data) < 100:
-        logging.error(f"Not enough clean training samples. Found {len(train_data)} rows.")
-        return False
-        
-    X = train_data[feature_cols]
-    y = train_data["spike_label"]
-    
-    logging.info(f"Training ML Model on {len(train_data)} patterns...")
-    
-    # Chronological Split: Train on 80% oldest, validate on 20% newest to prevent data leakage
-    # We will sort by datetime
-    train_data_sorted = train_data.sort_values("datetime").reset_index(drop=True)
-    split_idx = int(len(train_data_sorted) * 0.8)
-    
-    X_train = train_data_sorted.loc[:split_idx, feature_cols]
-    y_train = train_data_sorted.loc[:split_idx, "spike_label"]
-    X_test = train_data_sorted.loc[split_idx:, feature_cols]
-    y_test = train_data_sorted.loc[split_idx:, "spike_label"]
-    
-    # Train Random Forest Classifier
-    # Class weight balanced to handle minority class (spikes are relatively rare)
-    model = RandomForestClassifier(n_estimators=150, max_depth=8, class_weight="balanced", random_state=42)
-    model.fit(X_train, y_train)
-    
-    # Evaluate
-    preds = model.predict(X_test)
-    probs = model.predict_proba(X_test)[:, 1]
-    
-    accuracy = accuracy_score(y_test, preds)
-    precision = precision_score(y_test, preds, zero_division=0)
-    recall = recall_score(y_test, preds, zero_division=0)
-    
-    logging.info(f"Model Evaluation -> Accuracy: {accuracy:.2%}, Precision: {precision:.2%}, Recall: {recall:.2%}")
-    
-    # Save Model
-    joblib.dump(model, MODEL_PATH)
-    logging.info(f"Saved trained model to {MODEL_PATH}")
-    
-    # Save Feature Importances to DB
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM feature_importances")
-    for feat, imp in zip(feature_cols, model.feature_importances_):
-        cursor.execute("INSERT INTO feature_importances (feature_name, importance) VALUES (?, ?)", (feat, float(imp)))
-    
-    # Save Model Metrics to DB
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("""
-        INSERT OR REPLACE INTO model_metrics (date, accuracy, precision, recall, total_samples, trained_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (today_str, float(accuracy), float(precision), float(recall), len(train_data), datetime.now().isoformat()))
-    
-    conn.commit()
-    conn.close()
-    
-    return True
 
 # ─────────────────────────────────────────────────────────────
-# INFERENCE & REAL-TIME PREDICTION
+# TRAINING
 # ─────────────────────────────────────────────────────────────
-def run_predictions():
-    """Runs predictions on the latest market state for all stocks."""
-    if not os.path.exists(MODEL_PATH):
-        logging.warning("Model file not found. Running training first...")
-        success = train_ai_model()
-        if not success:
-            return []
-            
-    model = joblib.load(MODEL_PATH)
-    stocks = [item[0] for item in STOCKS_WATCHLIST if item[2] == "stock"]
-    
-    # Fetch last 30 days history to generate features for today
-    histories = fetch_all_history(stocks, period="30d")
+
+def train_ai_model(supabase, stocks: list, progress_callback=None) -> dict:
+    """
+    Train RandomForest on historical data.
+    Returns dict with keys: success, accuracy, precision, recall, total_samples, error
+    """
+    if not ML_AVAILABLE:
+        return {"success": False, "error": "scikit-learn not installed"}
+    if not YF_AVAILABLE:
+        return {"success": False, "error": "yfinance not installed"}
+    if not stocks:
+        return {"success": False, "error": "No stocks provided"}
+
+    histories = fetch_all_history(stocks, period="60d", progress_callback=progress_callback)
     if not histories:
-        logging.error("Failed to fetch historical data for predictions.")
+        return {"success": False, "error": "Failed to fetch historical data"}
+
+    all_dfs = []
+    for sym, df in histories.items():
+        all_dfs.append(calculate_stock_features(df))
+
+    full_df    = pd.concat(all_dfs, ignore_index=True)
+    train_data = full_df.dropna(subset=FEATURE_COLS + ["spike_label"])
+
+    if len(train_data) < 100:
+        return {"success": False, "error": f"Only {len(train_data)} clean samples — need ≥ 100"}
+
+    # Chronological split (no data leakage)
+    train_data = train_data.sort_values("datetime").reset_index(drop=True)
+    split_idx  = int(len(train_data) * 0.8)
+
+    X_train = train_data.loc[:split_idx,  FEATURE_COLS]
+    y_train = train_data.loc[:split_idx,  "spike_label"]
+    X_test  = train_data.loc[split_idx:,  FEATURE_COLS]
+    y_test  = train_data.loc[split_idx:,  "spike_label"]
+
+    model = RandomForestClassifier(
+        n_estimators=150, max_depth=8, class_weight="balanced", random_state=42
+    )
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+
+    acc  = float(accuracy_score(y_test, preds))
+    prec = float(precision_score(y_test, preds, zero_division=0))
+    rec  = float(recall_score(y_test, preds, zero_division=0))
+
+    # Persist model
+    save_model_to_supabase(model, supabase)
+
+    # Persist feature importances
+    fi_rows = [{"feature_name": f, "importance": float(i)}
+               for f, i in zip(FEATURE_COLS, model.feature_importances_)]
+    supabase.table("ai_feature_importances").upsert(fi_rows).execute()
+
+    # Persist model metrics
+    today = datetime.now().strftime("%Y-%m-%d")
+    supabase.table("ai_model_metrics").upsert({
+        "date": today,
+        "accuracy": acc,
+        "precision_score": prec,
+        "recall_score": rec,
+        "total_samples": len(train_data),
+        "trained_at": datetime.now().isoformat()
+    }).execute()
+
+    logging.info(f"Training complete — Acc: {acc:.2%}, Prec: {prec:.2%}, Rec: {rec:.2%}")
+    return {"success": True, "accuracy": acc, "precision": prec, "recall": rec,
+            "total_samples": len(train_data)}
+
+
+# ─────────────────────────────────────────────────────────────
+# PREDICTIONS
+# ─────────────────────────────────────────────────────────────
+
+def run_predictions(supabase, stocks: list, progress_callback=None) -> list:
+    """
+    Run predictions for all stocks using the stored model.
+    Returns list of prediction dicts.
+    """
+    model = load_model_from_supabase(supabase)
+    if model is None:
+        logging.warning("No model found. Train first.")
         return []
-        
-    predictions_to_save = []
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    
-    feature_cols = [
-        "dist_to_ema20", "above_ema20", "ema_5_vs_20", "ema_9_vs_20",
-        "vol_ratio_1d", "vol_ratio_2d", "vol_vs_5d_avg", "vol_dry_up_3d",
-        "price_change_1d", "price_change_3d", "range_compression", 
-        "range_compress_3d_avg", "body_ratio"
-    ]
-    
+
+    histories = fetch_all_history(stocks, period="30d", progress_callback=progress_callback)
+    if not histories:
+        return []
+
+    today_str    = datetime.now().strftime("%Y-%m-%d")
+    preds_to_save = []
+
     for symbol, df in histories.items():
-        processed_df = calculate_stock_features(df)
-        
-        # Take the absolute last row (today's market state)
-        latest_row = processed_df.iloc[-1]
-        
-        # Skip if features have NaNs
-        if latest_row[feature_cols].isna().any():
+        processed  = calculate_stock_features(df)
+        latest_row = processed.iloc[-1]
+
+        if latest_row[FEATURE_COLS].isna().any():
             continue
-            
-        # Reshape for single prediction
-        features_df = pd.DataFrame([latest_row[feature_cols]])
-        prob = model.predict_proba(features_df)[0][1] * 100 # Convert to percentage
-        
-        # Classify Setup Stage based on Probability
+
+        feat_df = pd.DataFrame([latest_row[FEATURE_COLS]])
+        prob    = float(model.predict_proba(feat_df)[0][1] * 100)
+
         if prob >= 80.0:
             stage = "🚀 PRIME_AI"
         elif prob >= 60.0:
@@ -349,128 +330,146 @@ def run_predictions():
             stage = "📈 BUILD_AI"
         else:
             stage = "📍 EARLY_AI"
-            
-        features_dict = latest_row[feature_cols].to_dict()
-        
-        predictions_to_save.append((
-            today_str,
-            symbol,
-            float(prob),
-            stage,
-            json.dumps(features_dict)
-        ))
-        
-    # Write to SQLite
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Insert or update today's predictions
-    cursor.executemany("""
-        INSERT OR REPLACE INTO predictions (date, symbol, probability, stage, features)
-        VALUES (?, ?, ?, ?, ?)
-    """, predictions_to_save)
-    
-    conn.commit()
-    conn.close()
-    
-    logging.info(f"Saved {len(predictions_to_save)} AI predictions for date {today_str}.")
-    return predictions_to_save
+
+        preds_to_save.append({
+            "date":     today_str,
+            "symbol":   symbol,
+            "probability": prob,
+            "stage":    stage,
+            "features": latest_row[FEATURE_COLS].to_dict()
+        })
+
+    if preds_to_save:
+        # Upsert in batches of 500
+        for i in range(0, len(preds_to_save), 500):
+            batch = preds_to_save[i:i+500]
+            supabase.table("ai_predictions").upsert(batch).execute()
+
+    logging.info(f"Saved {len(preds_to_save)} predictions for {today_str}.")
+    return preds_to_save
+
 
 # ─────────────────────────────────────────────────────────────
-# OUTCOME UPDATE ENGINE (Resolves past predictions accuracy)
+# OUTCOME RESOLUTION
 # ─────────────────────────────────────────────────────────────
-def update_past_outcomes():
+
+def update_past_outcomes(supabase) -> int:
     """
-    Check historical data for past pending predictions.
-    Computes if predictions actually spiked >= 5% in the following 2 days.
+    Resolve pending predictions (outcome IS NULL, date != today).
+    Returns count of resolved predictions.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Select predictions that have no outcomes resolved yet
-    # Exclude today's predictions (which need 2 future days to resolve)
     today_str = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("""
-        SELECT id, date, symbol FROM predictions 
-        WHERE outcome IS NULL AND date != ?
-    """, (today_str,))
-    
-    pending = cursor.fetchall()
+
+    # Paginate through all pending predictions
+    pending = []
+    offset  = 0
+    while True:
+        result = (supabase.table("ai_predictions")
+                  .select("id, date, symbol")
+                  .is_("outcome", "null")
+                  .neq("date", today_str)
+                  .range(offset, offset + 999)
+                  .execute())
+        if not result.data:
+            break
+        pending.extend(result.data)
+        if len(result.data) < 1000:
+            break
+        offset += 1000
+
     if not pending:
-        conn.close()
-        return
-        
-    logging.info(f"Resolving outcomes for {len(pending)} historical predictions...")
-    
-    # Group by stock to minimize yfinance downloads
-    stocks_to_check = list(set([row[2] for row in pending]))
-    histories = fetch_all_history(stocks_to_check, period="30d")
-    
-    resolved_count = 0
-    for db_id, pred_date_str, symbol in pending:
-        if symbol not in histories:
+        return 0
+
+    stocks_to_check = list({r["symbol"] for r in pending})
+    histories       = fetch_all_history(stocks_to_check, period="30d")
+
+    resolved = 0
+    updates  = []
+
+    for row in pending:
+        sym      = row["symbol"]
+        pred_id  = row["id"]
+        pred_date_str = row["date"]
+
+        if sym not in histories:
             continue
-            
-        df = histories[symbol].sort_values("datetime").reset_index(drop=True)
-        # Parse prediction date
+
+        df = histories[sym].sort_values("datetime").reset_index(drop=True)
         try:
             pred_date = datetime.strptime(pred_date_str, "%Y-%m-%d").date()
         except ValueError:
             continue
-            
-        # Find index of prediction date in stock history
-        df["date_only"] = df["datetime"].dt.date
-        matching_rows = df[df["date_only"] == pred_date]
-        
-        if matching_rows.empty:
+
+        df["date_only"] = pd.to_datetime(df["datetime"]).dt.date
+        match = df[df["date_only"] == pred_date]
+        if match.empty:
             continue
-            
-        idx = matching_rows.index[0]
-        
-        # Check if we have at least 2 future rows to resolve
+
+        idx = match.index[0]
         if idx + 2 >= len(df):
-            continue # Not enough future data yet
-            
-        close_today = float(df.loc[idx, "close"])
-        future_prices = df.loc[idx+1 : idx+2, "close"].astype(float).tolist()
-        
-        max_future_close = max(future_prices)
-        max_return = (max_future_close - close_today) / close_today * 100
-        
-        outcome = 1 if max_return >= 5.0 else 0
-        
-        cursor.execute("""
-            UPDATE predictions 
-            SET actual_max_return = ?, outcome = ?
-            WHERE id = ?
-        """, (float(max_return), outcome, db_id))
-        resolved_count += 1
-        
-    conn.commit()
-    conn.close()
-    logging.info(f"Successfully resolved {resolved_count} predictions outcomes.")
+            continue
+
+        close_today     = float(df.loc[idx, "close"])
+        future_closes   = df.loc[idx+1:idx+2, "close"].astype(float).tolist()
+        max_return      = (max(future_closes) - close_today) / close_today * 100
+        outcome         = 1 if max_return >= 5.0 else 0
+
+        updates.append({"id": pred_id, "actual_max_return": float(max_return), "outcome": outcome})
+        resolved += 1
+
+    # Upsert resolved outcomes
+    for i in range(0, len(updates), 500):
+        supabase.table("ai_predictions").upsert(updates[i:i+500]).execute()
+
+    logging.info(f"Resolved {resolved} past prediction outcomes.")
+    return resolved
+
 
 # ─────────────────────────────────────────────────────────────
-# MAIN EXECUTION
+# FETCH STORED PREDICTIONS FOR DISPLAY
 # ─────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--action", choices=["train", "predict", "update", "run-all"], default="run-all")
-    args = parser.parse_args()
-    
-    init_db()
-    
-    if args.action == "train":
-        train_ai_model()
-    elif args.action == "predict":
-        run_predictions()
-    elif args.action == "update":
-        update_past_outcomes()
-    elif args.action == "run-all":
-        logging.info("Starting complete AI cycle...")
-        update_past_outcomes()
-        train_success = train_ai_model()
-        if train_success:
-            run_predictions()
-        logging.info("Completed AI cycle.")
+
+def fetch_today_predictions(supabase) -> pd.DataFrame:
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    result    = (supabase.table("ai_predictions")
+                 .select("symbol, probability, stage, features")
+                 .eq("date", today_str)
+                 .order("probability", desc=True)
+                 .execute())
+    if not result.data:
+        return pd.DataFrame()
+    return pd.DataFrame(result.data)
+
+
+def fetch_model_metrics(supabase) -> dict:
+    result = (supabase.table("ai_model_metrics")
+              .select("*")
+              .order("date", desc=True)
+              .limit(1)
+              .execute())
+    if not result.data:
+        return {}
+    return result.data[0]
+
+
+def fetch_feature_importances(supabase) -> pd.DataFrame:
+    result = (supabase.table("ai_feature_importances")
+              .select("*")
+              .order("importance", desc=True)
+              .execute())
+    if not result.data:
+        return pd.DataFrame()
+    return pd.DataFrame(result.data)
+
+
+def fetch_prediction_history(supabase, limit: int = 200) -> pd.DataFrame:
+    """Fetch past predictions with resolved outcomes for accuracy tracking."""
+    result = (supabase.table("ai_predictions")
+              .select("date, symbol, probability, stage, actual_max_return, outcome")
+              .not_.is_("outcome", "null")
+              .order("date", desc=True)
+              .limit(limit)
+              .execute())
+    if not result.data:
+        return pd.DataFrame()
+    return pd.DataFrame(result.data)
