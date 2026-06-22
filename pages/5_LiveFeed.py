@@ -419,19 +419,32 @@ else:
     """)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 11: AUTO-CLICK "Update to Supabase" EVERY 60 SECONDS
+# SECTION 11: AUTO-UPLOAD EVERY 60 SECONDS (SERVER-SIDE)
 # ──────────────────────────────────────────────────────────────────────────────
 
-st.components.v1.html("""
-    <script>
-        setInterval(function() {
-            const buttons = document.querySelectorAll('button');
-            for (let btn of buttons) {
-                if (btn.innerText.includes('Update to Supabase')) {
-                    btn.click();
-                    break;
-                }
-            }
-        }, 60000);  // 60,000 ms = 1 minute
-    </script>
-""", height=0)
+import threading
+
+def auto_upload():
+    """Background thread to upload data every 60 seconds"""
+    while True:
+        time.sleep(60)  # Wait 60 seconds
+        
+        # Check if connected and ticks are available
+        if st.session_state.get("angel_connected", False):
+            ticks = angel_ws.latest_ticks
+            if ticks:
+                try:
+                    success, message = upload_to_supabase(ticks)
+                    if success:
+                        print(f"✅ Auto-upload successful at {datetime.now().strftime('%H:%M:%S')}")
+                    else:
+                        print(f"❌ Auto-upload failed: {message}")
+                except Exception as e:
+                    print(f"❌ Auto-upload error: {str(e)}")
+
+# Start the background thread only once
+if "auto_upload_started" not in st.session_state:
+    st.session_state.auto_upload_started = True
+    thread = threading.Thread(target=auto_upload, daemon=True)
+    thread.start()
+    st.success("🔄 Auto-upload started (every 60 seconds)")
