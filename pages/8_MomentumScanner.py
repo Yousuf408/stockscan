@@ -74,7 +74,7 @@ def fetch_signal_times_from_supabase(today_str: str) -> dict:
 
 def save_signal_time_to_supabase(stock: str, today_str: str, signal_time: str,
                                   vol_ratio: float, intraday_pct: float,
-                                  momentum: str, score: float):
+                                  vol_momentum: str, momentum: str, score: float):
     """
     Save signal time to Supabase ONLY if not already saved today.
     Uses UNIQUE(stock, signal_date) — duplicate insert will be ignored.
@@ -87,6 +87,7 @@ def save_signal_time_to_supabase(stock: str, today_str: str, signal_time: str,
             "signal_time"  : signal_time,
             "vol_ratio"    : round(float(vol_ratio), 2),
             "intraday_pct" : round(float(intraday_pct), 2),
+            "vol_momentum" : vol_momentum,
             "momentum"     : momentum,
             "score"        : round(float(score), 2),
         }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
@@ -471,6 +472,7 @@ def scanner_table():
                 signal_time  = current_time_ist,
                 vol_ratio    = row.get("vol_ratio", 0),
                 intraday_pct = row.get("intraday_pct", 0),
+                vol_momentum = str(row.get("Vol Momentum", "")),
                 momentum     = str(row.get("Momentum", "")),
                 score        = row.get("Score", 0),
             )
