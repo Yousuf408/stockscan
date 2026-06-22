@@ -262,6 +262,18 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"]  * 100).round(2)
     df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7).round(2)
 
+  # ─────────────────────────────────────────────────────────────
+    # CALCULATE METRICS (RAW VALUES - NO ROUNDING YET)
+    # ─────────────────────────────────────────────────────────────
+    df["vol_ratio"]      = df["live_volume"] / df["median_vol"]
+    df["gap_pct"]        = ((df["live_open"] - df["yesterday_close"]) / df["yesterday_close"] * 100)
+    df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"]) / df["live_open"] * 100)
+    df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"] * 100)
+    df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7)
+
+    # ─────────────────────────────────────────────────────────────
+    # FILTER USING RAW VALUES (BEFORE ROUNDING)
+    # ─────────────────────────────────────────────────────────────
     df = df[
         (df["vol_ratio"]    >= 1.5) &
         (df["intraday_pct"] >= 1.0) &
@@ -273,6 +285,9 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(), data_source
 
+    # ─────────────────────────────────────────────────────────────
+    # SIGNAL DETECTION (using RAW values for detection)
+    # ─────────────────────────────────────────────────────────────
     def vol_momentum(r):
         if r >= 3.0: return "🔥 Very Strong"
         if r >= 2.0: return "⚡ Strong"
@@ -288,6 +303,15 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
 
     df["vol_momentum"]       = df["vol_ratio"].apply(vol_momentum)
     df["momentum_detection"] = df.apply(lambda x: momentum_detection(x["vol_ratio"], x["intraday_pct"], x["gap_pct"]), axis=1)
+
+    # ─────────────────────────────────────────────────────────────
+    # NOW ROUND ALL METRICS FOR DISPLAY
+    # ─────────────────────────────────────────────────────────────
+    df["vol_ratio"]      = df["vol_ratio"].round(2)
+    df["gap_pct"]        = df["gap_pct"].round(2)
+    df["intraday_pct"]   = df["intraday_pct"].round(2)
+    df["chg_vs_prev"]    = df["chg_vs_prev"].round(2)
+    df["priority_score"] = df["priority_score"].round(2)
 
     df = df.rename(columns={
         "stock"          : "Symbol",
