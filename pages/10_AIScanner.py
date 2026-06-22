@@ -398,65 +398,113 @@ with tab_track:
 # TAB 4 — RETRAIN & STATUS
 # ══════════════════════════════════════════════════════════════
 with tab_retrain:
-    st.subheader("🔄 Train / Predict / Resolve")
 
-    # ── Check if Supabase tables exist ──
-    tables_ok = True
-    try:
-        supabase.table("ai_predictions").select("id").limit(1).execute()
-        supabase.table("ai_model_metrics").select("date").limit(1).execute()
-        supabase.table("ai_feature_importances").select("feature_name").limit(1).execute()
-        supabase.table("ai_model_store").select("id").limit(1).execute()
-    except Exception:
-        tables_ok = False
-
-    if not tables_ok:
-        st.error(
-            "❌ **Supabase tables are missing!** "
-            "Expand the **Supabase Tables Setup** section below, copy the SQL, "
-            "paste it in your **Supabase → SQL Editor**, and run it. "
-            "Then refresh this page."
-        )
-
-    # Library status
-    col_lib1, col_lib2, col_lib3 = st.columns(3)
-    col_lib1.metric("scikit-learn", "✅ Ready" if ai_pattern_engine.ML_AVAILABLE else "❌ Missing")
-    col_lib2.metric("yfinance",     "✅ Ready" if ai_pattern_engine.YF_AVAILABLE else "❌ Missing")
-    col_lib3.metric("supabase-py",  "✅ Ready" if ai_pattern_engine.SUPABASE_AVAILABLE else "❌ Missing")
-
-    if not STOCKS:
-        st.error("❌ No stocks found in config.py STOCKS_WATCHLIST. Fix config first.")
+    # ── Current Model Status (top, compact) ──
+    if metrics:
+        st.markdown("#### 📊 Current Model Status")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Accuracy",        f"{metrics.get('accuracy', 0):.1%}")
+        m2.metric("Precision",       f"{metrics.get('precision_score', 0):.1%}")
+        m3.metric("Recall",          f"{metrics.get('recall_score', 0):.1%}")
+        m4.metric("Trained On",      metrics.get("trained_at", "N/A")[:10])
+        m5.metric("Stocks in Config", f"{len(STOCKS)}")
     else:
-        st.info(f"**{len(STOCKS)} stocks** loaded from config.")
+        st.warning("⚠️ Model not trained yet. Click **Train Model** below to begin.")
 
     st.divider()
 
-    # ── Action buttons ──
+    # ── How It Works guide ──
+    st.markdown("#### 📋 How This Works — Step by Step")
+    st.markdown("""
+<style>
+.flow-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+.flow-card {
+    border-radius: 10px; padding: 16px 18px;
+    border-left: 4px solid;
+    background: rgba(255,255,255,0.03);
+}
+.flow-card.green  { border-color: #10b981; }
+.flow-card.blue   { border-color: #3b82f6; }
+.flow-card.purple { border-color: #8b5cf6; }
+.flow-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.flow-when  { font-size: 11px; color: #64748b; font-weight: 600;
+              text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.flow-desc  { font-size: 12.5px; color: #94a3b8; line-height: 1.55; }
+.flow-badge { display:inline-block; font-size:10px; font-weight:700;
+              padding: 2px 8px; border-radius:4px; margin-top:8px; }
+.badge-weekly  { background:#d1fae5; color:#065f46; }
+.badge-daily   { background:#dbeafe; color:#1e3a8a; }
+.badge-2days   { background:#ede9fe; color:#4c1d95; }
+</style>
+
+<div class="flow-grid">
+
+  <div class="flow-card green">
+    <div class="flow-when">Step 1</div>
+    <div class="flow-title">🧠 Train Model</div>
+    <div class="flow-desc">
+      Fetches 60 days of OHLCV history for all 821 stocks via yfinance.
+      Calculates 13 technical features (EMA distance, volume dry-up, range compression etc.)
+      and trains a RandomForest to predict which patterns precede a ≥5% spike.
+      Model is saved to Supabase — no local file.
+    </div>
+    <span class="flow-badge badge-weekly">Run Weekly / On-demand</span>
+  </div>
+
+  <div class="flow-card blue">
+    <div class="flow-when">Step 2</div>
+    <div class="flow-title">🎯 Run Predictions</div>
+    <div class="flow-desc">
+      Fetches last 30 days of data, generates today's features for each stock,
+      and runs the trained model. Each stock gets an AI probability score and a stage:
+      PRIME_AI ≥80%, WATCH_AI ≥60%, BUILD_AI ≥40%, EARLY_AI below that.
+      Results are saved in Supabase with <b>today's date</b> and <b>outcome = NULL</b>.
+    </div>
+    <span class="flow-badge badge-daily">Run Daily after 3:30 PM</span>
+  </div>
+
+  <div class="flow-card purple">
+    <div class="flow-when">Step 3</div>
+    <div class="flow-title">🔍 Resolve Outcomes</div>
+    <div class="flow-desc">
+      Looks up all past predictions where outcome is still NULL.
+      For each, checks if the stock's actual close rose ≥5% within the next 2 trading days.
+      Updates outcome = 1 (Hit) or 0 (Miss) in Supabase.
+      This builds the Live Hit Rate shown on the dashboard.
+    </div>
+    <span class="flow-badge badge-2days">Run Daily (resolves 2-day-old calls)</span>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Action Buttons ──
+    st.markdown("#### ⚡ Actions")
     col_btn1, col_btn2, col_btn3 = st.columns(3)
 
     # TRAIN
     with col_btn1:
+        libs_ok = ai_pattern_engine.ML_AVAILABLE and ai_pattern_engine.YF_AVAILABLE
         if st.button("🧠 Train Model", type="primary", use_container_width=True,
-                     disabled=(not ai_pattern_engine.ML_AVAILABLE or not STOCKS)):
-            with st.spinner("Fetching 60d history + training RandomForest... (1–3 min)"):
-                progress = st.progress(0, text="Fetching data...")
+                     disabled=(not libs_ok or not STOCKS)):
+            progress = st.progress(0, text="Starting...")
 
-                def prog_cb(done, total):
-                    pct = int(done / total * 60) if total else 0
-                    progress.progress(pct, text=f"Fetching... {done}/{total}")
+            def prog_cb(done, total):
+                pct = int(done / total * 60) if total else 0
+                progress.progress(pct, text=f"Fetching data... {done}/{total} stocks")
 
-                result = ai_pattern_engine.train_ai_model(supabase, STOCKS, progress_callback=prog_cb)
-                progress.progress(100, text="Done!")
+            result = ai_pattern_engine.train_ai_model(supabase, STOCKS, progress_callback=prog_cb)
+            progress.progress(100, text="Done!")
 
             if result["success"]:
                 st.success(
-                    f"✅ Model trained! "
+                    f"✅ Trained on **{result['total_samples']:,}** patterns — "
                     f"Accuracy: **{result['accuracy']:.1%}** | "
                     f"Precision: **{result['precision']:.1%}** | "
-                    f"Recall: **{result['recall']:.1%}** | "
-                    f"Samples: **{result['total_samples']:,}**"
+                    f"Recall: **{result['recall']:.1%}**"
                 )
-
                 st.rerun()
             else:
                 st.error(f"❌ Training failed: {result['error']}")
@@ -465,72 +513,26 @@ with tab_retrain:
     with col_btn2:
         if st.button("🎯 Run Predictions", type="secondary", use_container_width=True,
                      disabled=(not ai_pattern_engine.ML_AVAILABLE or not STOCKS)):
-            with st.spinner("Fetching 30d history + running predictions..."):
+            with st.spinner("Running predictions for all stocks..."):
                 preds = ai_pattern_engine.run_predictions(supabase, STOCKS)
             if preds:
-                st.success(f"✅ {len(preds)} predictions saved for today ({today_str}).")
-
+                st.success(f"✅ **{len(preds)}** predictions saved for {today_str}.")
                 st.rerun()
             else:
-                st.error("❌ Predictions failed or model not found. Train first.")
+                st.error("❌ No predictions generated. Train the model first.")
 
-    # RESOLVE OUTCOMES
+    # RESOLVE
     with col_btn3:
         if st.button("🔍 Resolve Outcomes", type="secondary", use_container_width=True):
-            with st.spinner("Checking past predictions vs actual prices..."):
+            with st.spinner("Resolving past prediction outcomes..."):
                 resolved = ai_pattern_engine.update_past_outcomes(supabase)
             st.success(f"✅ Resolved **{resolved}** past predictions.")
-            st.cache_data.clear()
             st.rerun()
 
+    # ── Library status (bottom, subtle) ──
     st.divider()
-
-    # ── Current model metrics ──
-    st.subheader("📊 Current Model Status")
-    if metrics:
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Accuracy",   f"{metrics.get('accuracy', 0):.1%}")
-        m_col2.metric("Precision",  f"{metrics.get('precision_score', 0):.1%}")
-        m_col3.metric("Recall",     f"{metrics.get('recall_score', 0):.1%}")
-        m_col4.metric("Trained On", metrics.get("trained_at", "N/A")[:10])
-    else:
-        st.warning("Model hasn't been trained yet.")
-
-    # ── Supabase tables setup instructions ──
-    with st.expander("📋 Supabase Tables Setup (run once in SQL Editor)", expanded=not tables_ok):
-        st.code("""
--- Run these 4 CREATE TABLE statements once in your Supabase SQL Editor
-
-CREATE TABLE IF NOT EXISTS ai_predictions (
-    id BIGSERIAL PRIMARY KEY,
-    date TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    probability REAL,
-    stage TEXT,
-    features JSONB,
-    actual_max_return REAL,
-    outcome INTEGER,
-    UNIQUE(date, symbol)
-);
-
-CREATE TABLE IF NOT EXISTS ai_model_metrics (
-    date TEXT PRIMARY KEY,
-    accuracy REAL,
-    precision_score REAL,
-    recall_score REAL,
-    total_samples INTEGER,
-    trained_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS ai_feature_importances (
-    feature_name TEXT PRIMARY KEY,
-    importance REAL
-);
-
-CREATE TABLE IF NOT EXISTS ai_model_store (
-    id TEXT PRIMARY KEY,
-    model_blob TEXT,
-    saved_at TEXT
-);
-        """, language="sql")
-        st.info("After creating tables, click **Train Model** above to begin.")
+    st.markdown("**System Status**")
+    s1, s2, s3 = st.columns(3)
+    s1.caption(f"{'✅' if ai_pattern_engine.ML_AVAILABLE else '❌'} scikit-learn")
+    s2.caption(f"{'✅' if ai_pattern_engine.YF_AVAILABLE else '❌'} yfinance")
+    s3.caption(f"{'✅' if ai_pattern_engine.SUPABASE_AVAILABLE else '❌'} supabase-py")
