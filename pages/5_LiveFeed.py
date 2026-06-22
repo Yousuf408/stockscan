@@ -299,7 +299,7 @@ if st.session_state.angel_connected:
         sample = dict(list(ticks_debug.items())[:10])
         st.json(sample)
 
-   # ── SECTION 9B: Live Table ──────────────────────────────────
+  # ── SECTION 9B: Live Table ──────────────────────────────────
 st.subheader(f"📊 Live Prices ({len(STOCKS_WATCHLIST)} stocks)")
 placeholder = st.empty()
 
@@ -307,9 +307,11 @@ placeholder = st.empty()
 all_volumes = get_all_volumes_batch()
 st.caption(f"✅ Loaded volume data for {len(all_volumes)} stocks")
 
-# ── Track last tick time ──
+# ── Track last tick time and reconnect cooldown ──
 if "last_tick_time" not in st.session_state:
     st.session_state.last_tick_time = datetime.now()
+if "last_reconnect_time" not in st.session_state:
+    st.session_state.last_reconnect_time = datetime.now()
 
 while True:
     ticks = angel_ws.latest_ticks
@@ -318,17 +320,25 @@ while True:
     if ticks:
         st.session_state.last_tick_time = datetime.now()
 
-    # ── If no ticks for more than 15 seconds, reconnect ──
+    # ── Check if we should attempt reconnect ──
     elapsed = (datetime.now() - st.session_state.last_tick_time).total_seconds()
-    if elapsed > 15 and st.session_state.angel_connected:
+    reconnect_cooldown = (datetime.now() - st.session_state.last_reconnect_time).total_seconds()
+
+    # Only reconnect if:
+    # 1. No ticks for 30 seconds
+    # 2. We are connected
+    # 3. We haven't reconnected in the last 10 seconds (cooldown)
+    if elapsed > 30 and st.session_state.angel_connected and reconnect_cooldown > 10:
         st.warning(f"⚠️ No data for {int(elapsed)} seconds. Reconnecting...")
         # Disconnect and reconnect
         angel_ws.stop_websocket()
         st.session_state.angel_connected = False
+        st.session_state.last_reconnect_time = datetime.now()
         time.sleep(1)
         st.rerun()
 
     rows = []
+    
     for name, token, kind in STOCKS_WATCHLIST:
         tick = ticks.get(token, {})
         ltp = tick.get('ltp', 0)
