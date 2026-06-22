@@ -198,23 +198,23 @@ if "angel_creds" not in st.session_state:
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Auto-connect only if not already connected
-#if not st.session_state.angel_connected:
- #   with st.spinner("🔄 Auto-connecting to Angel One..."):
- #       creds = angel_login()
-  #      if creds:
-   #         st.session_state.angel_creds = creds
-    #        st.session_state.angel_connected = True
-     #       angel_ws.start_websocket(
-      #          jwt_token=creds['jwt_token'],
-       #         api_key=creds['api_key'],
-        #        client_id=creds['client_id'],
-         #       feed_token=creds['feed_token'],
-          #  )
-           # st.success("✅ Auto-connected! Waiting for ticks...")
-            #time.sleep(2)
-            #st.rerun()
-        #else:
-         #   st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
+if not st.session_state.angel_connected:
+   with st.spinner("🔄 Auto-connecting to Angel One..."):
+        creds = angel_login()
+        if creds:
+            st.session_state.angel_creds = creds
+            st.session_state.angel_connected = True
+            angel_ws.start_websocket(
+                jwt_token=creds['jwt_token'],
+                api_key=creds['api_key'],
+                client_id=creds['client_id'],
+                feed_token=creds['feed_token'],
+            )
+            st.success("✅ Auto-connected! Waiting for ticks...")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error("❌ Auto-connect failed. Please click 'Connect Angel One' manually.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
