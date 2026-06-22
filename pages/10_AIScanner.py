@@ -167,23 +167,35 @@ def render_predictions_table(df: pd.DataFrame) -> str:
     return html
 
 # ─────────────────────────────────────────────────────────────
-# LOAD DATA (cached 5 min)
+# LOAD DATA — no @st.cache_data (supabase client not serializable)
+# Wrap each call in try/except so missing tables show a clean warning
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=300)
-def load_predictions():
-    return ai_pattern_engine.fetch_today_predictions(supabase)
+def load_predictions() -> pd.DataFrame:
+    try:
+        return ai_pattern_engine.fetch_today_predictions(supabase)
+    except Exception as e:
+        if "relation" in str(e).lower() or "does not exist" in str(e).lower() or "APIError" in type(e).__name__:
+            return pd.DataFrame()          # table missing — handled below
+        st.error(f"load_predictions error: {e}")
+        return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def load_metrics():
-    return ai_pattern_engine.fetch_model_metrics(supabase)
+def load_metrics() -> dict:
+    try:
+        return ai_pattern_engine.fetch_model_metrics(supabase)
+    except Exception:
+        return {}
 
-@st.cache_data(ttl=300)
-def load_feature_importances():
-    return ai_pattern_engine.fetch_feature_importances(supabase)
+def load_feature_importances() -> pd.DataFrame:
+    try:
+        return ai_pattern_engine.fetch_feature_importances(supabase)
+    except Exception:
+        return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def load_history():
-    return ai_pattern_engine.fetch_prediction_history(supabase, limit=300)
+def load_history() -> pd.DataFrame:
+    try:
+        return ai_pattern_engine.fetch_prediction_history(supabase, limit=300)
+    except Exception:
+        return pd.DataFrame()
 
 # ─────────────────────────────────────────────────────────────
 # HEADER
@@ -388,6 +400,24 @@ with tab_track:
 with tab_retrain:
     st.subheader("🔄 Train / Predict / Resolve")
 
+    # ── Check if Supabase tables exist ──
+    tables_ok = True
+    try:
+        supabase.table("ai_predictions").select("id").limit(1).execute()
+        supabase.table("ai_model_metrics").select("date").limit(1).execute()
+        supabase.table("ai_feature_importances").select("feature_name").limit(1).execute()
+        supabase.table("ai_model_store").select("id").limit(1).execute()
+    except Exception:
+        tables_ok = False
+
+    if not tables_ok:
+        st.error(
+            "❌ **Supabase tables are missing!** "
+            "Expand the **Supabase Tables Setup** section below, copy the SQL, "
+            "paste it in your **Supabase → SQL Editor**, and run it. "
+            "Then refresh this page."
+        )
+
     # Library status
     col_lib1, col_lib2, col_lib3 = st.columns(3)
     col_lib1.metric("scikit-learn", "✅ Ready" if ai_pattern_engine.ML_AVAILABLE else "❌ Missing")
@@ -426,7 +456,7 @@ with tab_retrain:
                     f"Recall: **{result['recall']:.1%}** | "
                     f"Samples: **{result['total_samples']:,}**"
                 )
-                st.cache_data.clear()
+
                 st.rerun()
             else:
                 st.error(f"❌ Training failed: {result['error']}")
@@ -439,7 +469,7 @@ with tab_retrain:
                 preds = ai_pattern_engine.run_predictions(supabase, STOCKS)
             if preds:
                 st.success(f"✅ {len(preds)} predictions saved for today ({today_str}).")
-                st.cache_data.clear()
+
                 st.rerun()
             else:
                 st.error("❌ Predictions failed or model not found. Train first.")
@@ -467,7 +497,7 @@ with tab_retrain:
         st.warning("Model hasn't been trained yet.")
 
     # ── Supabase tables setup instructions ──
-    with st.expander("📋 Supabase Tables Setup (run once in SQL Editor)", expanded=False):
+    with st.expander("📋 Supabase Tables Setup (run once in SQL Editor)", expanded=not tables_ok):
         st.code("""
 -- Run these 4 CREATE TABLE statements once in your Supabase SQL Editor
 
