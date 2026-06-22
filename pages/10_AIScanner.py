@@ -413,69 +413,97 @@ with tab_retrain:
 
     st.divider()
 
-    with st.expander("📋 How This Works — Step by Step Guide", expanded=False):
+    with st.expander("📋 How This Works — Simple Guide", expanded=False):
         st.markdown("""
 <style>
-.flow-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 10px 0 4px 0; }
-.flow-card {
-    border-radius: 10px; padding: 16px 18px;
-    border-left: 4px solid;
-    background: rgba(255,255,255,0.03);
+.guide-section { margin-bottom: 20px; }
+.guide-heading { font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 8px; }
+.guide-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
+.guide-num {
+    min-width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: white; margin-top: 1px;
 }
-.flow-card.green  { border-color: #10b981; }
-.flow-card.blue   { border-color: #3b82f6; }
-.flow-card.purple { border-color: #8b5cf6; }
-.flow-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
-.flow-when  { font-size: 11px; color: #64748b; font-weight: 600;
-              text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.flow-desc  { font-size: 12.5px; color: #94a3b8; line-height: 1.6; }
-.flow-badge { display:inline-block; font-size:10px; font-weight:700;
-              padding: 2px 8px; border-radius:4px; margin-top:10px; }
-.badge-weekly  { background:#d1fae5; color:#065f46; }
-.badge-daily   { background:#dbeafe; color:#1e3a8a; }
-.badge-2days   { background:#ede9fe; color:#4c1d95; }
+.num-green  { background: #10b981; }
+.num-blue   { background: #3b82f6; }
+.num-purple { background: #8b5cf6; }
+.guide-text { font-size: 13px; color: #475569; line-height: 1.55; }
+.guide-text b { color: #0f172a; }
+.example-box {
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 8px; padding: 12px 16px; margin: 6px 0 14px 0;
+    font-size: 12.5px; color: #334155; line-height: 1.7;
+}
+.example-box .hit { color: #10b981; font-weight: 700; }
+.freq-badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 10px; border-radius: 4px; margin-left: 8px; vertical-align: middle;
+}
+.freq-daily  { background: #dbeafe; color: #1e3a8a; }
+.freq-weekly { background: #d1fae5; color: #065f46; }
+.divider-line { border: none; border-top: 1px solid #e2e8f0; margin: 16px 0; }
 </style>
 
-<div class="flow-grid">
-
-  <div class="flow-card green">
-    <div class="flow-when">Step 1</div>
-    <div class="flow-title">🧠 Train Model</div>
-    <div class="flow-desc">
-      Fetches 60 days of OHLCV history for all 821 stocks via yfinance.
-      Calculates 13 technical features — EMA distance, volume dry-up, range compression,
-      body ratio, price change etc. — and trains a RandomForest classifier to learn
-      which patterns precede a ≥5% spike within 2 days.
-      Model is saved directly to Supabase — no local file, no disk dependency.
-    </div>
-    <span class="flow-badge badge-weekly">🔁 Run Weekly / On-demand</span>
+<!-- DAILY ROUTINE -->
+<div class="guide-section">
+  <div class="guide-heading">
+    📅 Daily Routine — Market close ke baad (3:30 PM)
+    <span class="freq-badge freq-daily">Har Din</span>
   </div>
 
-  <div class="flow-card blue">
-    <div class="flow-when">Step 2</div>
-    <div class="flow-title">🎯 Run Predictions</div>
-    <div class="flow-desc">
-      Fetches the last 30 days of data for all stocks, generates today's feature snapshot
-      for each, and scores them using the trained model. Every stock gets an AI probability
-      and a confidence stage — PRIME_AI ≥80%, WATCH_AI ≥60%, BUILD_AI ≥40%, EARLY_AI below.
-      All results are saved to Supabase with today's date and outcome = NULL (pending).
+  <div class="guide-row">
+    <div class="guide-num num-blue">1</div>
+    <div class="guide-text">
+      <b>Run Predictions</b> — Aaj ke sabhi 821 stocks ke liye AI probability score calculate hoti hai
+      aur Supabase mein save hoti hai. Har entry ka outcome = NULL hota hai (abhi pata nahi spike hoga ya nahi).
     </div>
-    <span class="flow-badge badge-daily">📅 Run Daily after 3:30 PM</span>
   </div>
 
-  <div class="flow-card purple">
-    <div class="flow-when">Step 3</div>
-    <div class="flow-title">🔍 Resolve Outcomes</div>
-    <div class="flow-desc">
-      Scans all past predictions where outcome is still NULL (pending).
-      For each, fetches the stock's actual price data and checks if the close rose
-      ≥5% within the next 2 trading days after the prediction date.
-      Updates outcome = 1 (Hit ✅) or 0 (Miss ❌) in Supabase.
-      This is what powers the Live Hit Rate on the dashboard header.
+  <div class="guide-row">
+    <div class="guide-num num-purple">2</div>
+    <div class="guide-text">
+      <b>Resolve Outcomes</b> — 2 din purani jo predictions hain (outcome = NULL),
+      unka actual price check hota hai. Agar stock 5%+ utha toh <b>Hit ✅</b>, nahi utha toh <b>Miss ❌</b>.
+      Yahi se Live Hit Rate banti hai dashboard pe.
     </div>
-    <span class="flow-badge badge-2days">📅 Run Daily (resolves 2-day-old calls)</span>
   </div>
+</div>
 
+<hr class="divider-line"/>
+
+<!-- HOW RESOLVE WORKS -->
+<div class="guide-section">
+  <div class="guide-heading">🔍 Resolve kaise kaam karta hai — Example</div>
+  <div class="example-box">
+    RELIANCE ka prediction date ka close = ₹1,450<br>
+    2 din baad ka max close = ₹1,530<br>
+    Return = (1530 − 1450) / 1450 × 100 = <b>5.5%</b><br>
+    Result → <span class="hit">✅ HIT — outcome = 1 Supabase mein save</span>
+  </div>
+  <div class="example-box">
+    TATASTEEL ka prediction date ka close = ₹150<br>
+    2 din baad ka max close = ₹153<br>
+    Return = (153 − 150) / 150 × 100 = <b>2.0%</b><br>
+    Result → ❌ MISS — outcome = 0 Supabase mein save
+  </div>
+</div>
+
+<hr class="divider-line"/>
+
+<!-- WEEKLY -->
+<div class="guide-section">
+  <div class="guide-heading">
+    🧠 Weekly Once — Model Retrain
+    <span class="freq-badge freq-weekly">Har Hafte</span>
+  </div>
+  <div class="guide-row">
+    <div class="guide-num num-green">3</div>
+    <div class="guide-text">
+      <b>Train Model</b> — Naye 60 din ka data fetch karke RandomForest dobara train hota hai.
+      Model Supabase mein save hota hai — Streamlit Cloud restart pe kuch delete nahi hoga.
+      Accuracy, Precision, Recall upar Current Model Status mein update ho jaate hain.
+    </div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
