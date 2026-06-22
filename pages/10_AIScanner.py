@@ -20,6 +20,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import AI Engine components dynamically
 import ai_pattern_engine
 
+# Ensure database tables are created at startup to avoid sqlite3.OperationalError
+ai_pattern_engine.init_db()
+
 # ─────────────────────────────────────────────────────────────
 # STREAMLIT PAGE SETUP
 # ─────────────────────────────────────────────────────────────
