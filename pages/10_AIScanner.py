@@ -1,27 +1,23 @@
 """
 10_AIScanner.py
 TradeSentry AI Pattern Scanner — Streamlit Dashboard
-Visualizes AI spike predictions, pattern insights, accuracy log, and retraining.
+Supabase-backed. No SQLite. No local joblib. Streamlit Cloud safe.
 """
 
 import sys
 import os
-import sqlite3
 import json
 from datetime import datetime
 import pandas as pd
-import numpy as np
 import streamlit as st
 import plotly.express as px
 
-# Resolve paths
+# ── Path fix so ai_pattern_engine can be found ──
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import AI Engine components dynamically
 import ai_pattern_engine
 
 # ─────────────────────────────────────────────────────────────
-# STREAMLIT PAGE SETUP
+# PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="AI Pattern Scanner",
@@ -29,518 +25,482 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom premium styling
 st.markdown("""
-    <style>
-    header {visibility: hidden;}
-    .block-container {padding-top: 1rem !important;}
-    
-    /* Modern Glassmorphic Cards */
-    .metric-card {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(226, 232, 240, 0.1);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 32px;
-        font-weight: 700;
-        color: #10b981;
-        margin-bottom: 4px;
-    }
-    .metric-label {
-        font-size: 13px;
-        color: #64748b;
-        font-weight: 500;
-    }
-    
-    /* AI Table Styling */
-    .ai-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-        font-family: 'Inter', sans-serif;
-    }
-    .ai-table th {
-        background: #0f172a;
-        color: #f8fafc;
-        font-weight: 600;
-        padding: 12px 10px;
-        text-align: left;
-        border-bottom: 2px solid #334155;
-    }
-    .ai-table td {
-        padding: 10px;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .ai-table tr:hover {
-        background: rgba(241, 245, 249, 0.6) !important;
-    }
-    
-    /* Stage Badges */
-    .badge {
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 11px;
-        display: inline-block;
-    }
-    .badge-prime { background: #dcfce7; color: #15803d; }
-    .badge-watch { background: #fef9c3; color: #a16207; }
-    .badge-build { background: #dbeafe; color: #1d4ed8; }
-    .badge-early { background: #f1f5f9; color: #475569; }
-    
-    .copy-btn {
-        cursor: pointer;
-        font-weight: 700;
-        color: #0f172a;
-        background: #e2e8f0;
-        border: none;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 11px;
-        transition: all 0.2s;
-    }
-    .copy-btn:hover { background: #10b981; color: white; }
-    
-    .toast {
-        position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-        background: #0f172a; color: white; padding: 8px 20px;
-        border-radius: 8px; font-size: 12px; z-index: 9999;
-        opacity: 0; transition: opacity 0.3s; pointer-events: none;
-    }
-    .toast.show { opacity: 1; }
-    </style>
-    <div id="toast" class="toast">✅ Symbol Copied to Clipboard!</div>
-    <script>
-    function copySymbol(btn, symbol) {
-        navigator.clipboard.writeText(symbol);
-        btn.innerText = '✓ ' + symbol;
-        btn.style.background = '#10b981';
-        btn.style.color = 'white';
-        var toast = document.getElementById('toast');
-        toast.classList.add('show');
-        setTimeout(function() {
-            btn.innerText = symbol;
-            btn.style.background = '#e2e8f0';
-            btn.style.color = '#0f172a';
-            toast.classList.remove('show');
-        }, 1200);
-    }
-    </script>
+<style>
+header {visibility: hidden;}
+.block-container {padding-top: 1rem !important;}
+
+.metric-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(226,232,240,0.1);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+}
+.metric-value { font-size: 30px; font-weight: 700; color: #10b981; margin-bottom: 4px; }
+.metric-label { font-size: 13px; color: #64748b; font-weight: 500; }
+
+.ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ai-table th {
+    background: #0f172a; color: #f8fafc; font-weight: 600;
+    padding: 12px 10px; text-align: left; border-bottom: 2px solid #334155;
+}
+.ai-table td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
+.ai-table tr:hover { background: rgba(241,245,249,0.6) !important; }
+
+.badge { padding: 4px 8px; border-radius: 6px; font-weight: 600; font-size: 11px; display: inline-block; }
+.badge-prime { background: #dcfce7; color: #15803d; }
+.badge-watch { background: #fef9c3; color: #a16207; }
+.badge-build { background: #dbeafe; color: #1d4ed8; }
+.badge-early { background: #f1f5f9; color: #475569; }
+
+.copy-btn {
+    cursor: pointer; font-weight: 700; color: #0f172a;
+    background: #e2e8f0; border: none; padding: 4px 8px;
+    border-radius: 4px; font-size: 11px;
+}
+.copy-btn:hover { background: #10b981; color: white; }
+
+.toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: #0f172a; color: white; padding: 8px 20px;
+    border-radius: 8px; font-size: 12px; z-index: 9999;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+</style>
+<div id="toast" class="toast">✅ Symbol Copied!</div>
+<script>
+function copySymbol(btn, symbol) {
+    navigator.clipboard.writeText(symbol);
+    btn.innerText = '✓ ' + symbol;
+    btn.style.background = '#10b981';
+    btn.style.color = 'white';
+    var t = document.getElementById('toast');
+    t.classList.add('show');
+    setTimeout(function() {
+        btn.innerText = symbol;
+        btn.style.background = '#e2e8f0';
+        btn.style.color = '#0f172a';
+        t.classList.remove('show');
+    }, 1200);
+}
+</script>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# DB UTILITIES
+# SUPABASE CLIENT — cached
 # ─────────────────────────────────────────────────────────────
-def get_db_connection():
-    conn = sqlite3.connect(ai_pattern_engine.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+@st.cache_resource
+def get_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return ai_pattern_engine.get_supabase_client(url, key)
 
-def load_latest_predictions():
-    conn = get_db_connection()
-    # Find latest date
-    latest_date_row = conn.execute("SELECT MAX(date) as max_date FROM predictions").fetchone()
-    if not latest_date_row or not latest_date_row["max_date"]:
-        conn.close()
-        return pd.DataFrame(), None
-        
-    latest_date = latest_date_row["max_date"]
-    
-    # Fetch rows
-    rows = conn.execute("""
-        SELECT symbol, probability, stage, features, actual_max_return, outcome 
-        FROM predictions 
-        WHERE date = ? 
-        ORDER BY probability DESC
-    """, (latest_date,)).fetchall()
-    
-    conn.close()
-    
-    df = pd.DataFrame([dict(r) for r in rows])
-    return df, latest_date
-
-def load_metrics():
-    conn = get_db_connection()
-    metrics = conn.execute("""
-        SELECT date, accuracy, precision, recall, total_samples 
-        FROM model_metrics 
-        ORDER BY date DESC LIMIT 1
-    """).fetchone()
-    
-    # Calculate overall resolved track record
-    resolved = conn.execute("""
-        SELECT COUNT(*) as total, 
-               SUM(CASE WHEN outcome = 1 THEN 1 ELSE 0 END) as hits,
-               SUM(CASE WHEN outcome = 0 THEN 1 ELSE 0 END) as misses
-        FROM predictions 
-        WHERE outcome IS NOT NULL
-    """).fetchone()
-    
-    conn.close()
-    return dict(metrics) if metrics else None, dict(resolved) if resolved else None
-
-def load_feature_importances():
-    conn = get_db_connection()
-    rows = conn.execute("SELECT feature_name, importance FROM feature_importances ORDER BY importance DESC").fetchall()
-    conn.close()
-    return pd.DataFrame([dict(r) for r in rows])
+supabase = get_supabase()
 
 # ─────────────────────────────────────────────────────────────
-# RENDER HTML TABLE FOR PREDICTIONS
+# STOCKS LIST from config
 # ─────────────────────────────────────────────────────────────
-def render_predictions_table(df):
+try:
+    from config import STOCKS_WATCHLIST
+    STOCKS = [item[0] for item in STOCKS_WATCHLIST if item[2] == "stock"]
+except Exception:
+    STOCKS = []
+
+# ─────────────────────────────────────────────────────────────
+# HTML TABLE RENDERER
+# ─────────────────────────────────────────────────────────────
+def render_predictions_table(df: pd.DataFrame) -> str:
     if df.empty:
-        return "<p style='text-align:center; color:#64748b;'>No predictions available yet.</p>"
-        
+        return "<p style='text-align:center;color:#64748b;'>No predictions available.</p>"
+
     html = """
     <table class="ai-table">
-    <thead>
-        <tr>
-            <th>Symbol</th>
-            <th>AI Probability</th>
-            <th>Stage</th>
-            <th>20 EMA Dist</th>
-            <th>Vol vs 5d Avg</th>
-            <th>1d Vol Ratio</th>
-            <th>1d Px Chg</th>
-            <th>Body Ratio</th>
-        </tr>
-    </thead>
-    <tbody>
+    <thead><tr>
+        <th>Symbol</th><th>AI Probability</th><th>Stage</th>
+        <th>20 EMA Dist</th><th>Vol vs 5d Avg</th>
+        <th>1d Vol Ratio</th><th>1d Px Chg</th><th>Body Ratio</th>
+    </tr></thead><tbody>
     """
-    
+
     for _, row in df.iterrows():
-        prob = row["probability"]
-        stage = row["stage"]
-        symbol = row["symbol"]
-        
-        # Parse features from JSON
-        features = {}
-        try:
-            features = json.loads(row["features"])
-        except Exception:
-            pass
-            
-        dist_ema20 = features.get("dist_to_ema20", 0.0)
-        vol_5d = features.get("vol_vs_5d_avg", 1.0)
-        vol_1d = features.get("vol_ratio_1d", 1.0)
-        px_chg = features.get("price_change_1d", 0.0)
-        body = features.get("body_ratio", 0.5)
-        
-        # Class styling for badge
-        badge_class = "badge-early"
-        if stage == "🚀 PRIME_AI":
-            badge_class = "badge-prime"
-        elif stage == "🔴 WATCH_AI":
-            badge_class = "badge-watch"
-        elif stage == "📈 BUILD_AI":
-            badge_class = "badge-build"
-            
-        # Color mapping for price change
+        prob   = row.get("probability", 0.0)
+        stage  = row.get("stage", "")
+        symbol = row.get("symbol", "")
+
+        # features stored as dict (already parsed by fetch_today_predictions)
+        feat = row.get("features") or {}
+        if isinstance(feat, str):
+            try:
+                feat = json.loads(feat)
+            except Exception:
+                feat = {}
+
+        dist_ema = feat.get("dist_to_ema20", 0.0)
+        vol_5d   = feat.get("vol_vs_5d_avg", 1.0)
+        vol_1d   = feat.get("vol_ratio_1d", 1.0)
+        px_chg   = feat.get("price_change_1d", 0.0)
+        body     = feat.get("body_ratio", 0.5)
+
+        badge_cls = "badge-early"
+        if "PRIME_AI"  in stage: badge_cls = "badge-prime"
+        elif "WATCH_AI" in stage: badge_cls = "badge-watch"
+        elif "BUILD_AI" in stage: badge_cls = "badge-build"
+
         px_color = "#ef4444" if px_chg < 0 else ("#10b981" if px_chg > 0 else "#64748b")
-        
+
         html += f"""
         <tr>
-            <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
+            <td><button class="copy-btn" onclick="copySymbol(this,'{symbol}')">{symbol}</button></td>
             <td><strong>{prob:.1f}%</strong></td>
-            <td><span class="badge {badge_class}">{stage}</span></td>
-            <td>{dist_ema20:+.2f}%</td>
+            <td><span class="badge {badge_cls}">{stage}</span></td>
+            <td>{dist_ema:+.2f}%</td>
             <td>{vol_5d:.2f}x</td>
             <td>{vol_1d:.2f}x</td>
-            <td style="color:{px_color}; font-weight:600;">{px_chg:+.2f}%</td>
+            <td style="color:{px_color};font-weight:600;">{px_chg:+.2f}%</td>
             <td>{body:.2f}</td>
         </tr>
         """
-        
+
     html += "</tbody></table>"
     return html
 
 # ─────────────────────────────────────────────────────────────
-# STREAMLIT UI LAYOUT
+# LOAD DATA (cached 5 min)
+# ─────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def load_predictions():
+    return ai_pattern_engine.fetch_today_predictions(supabase)
+
+@st.cache_data(ttl=300)
+def load_metrics():
+    return ai_pattern_engine.fetch_model_metrics(supabase)
+
+@st.cache_data(ttl=300)
+def load_feature_importances():
+    return ai_pattern_engine.fetch_feature_importances(supabase)
+
+@st.cache_data(ttl=300)
+def load_history():
+    return ai_pattern_engine.fetch_prediction_history(supabase, limit=300)
+
+# ─────────────────────────────────────────────────────────────
+# HEADER
 # ─────────────────────────────────────────────────────────────
 st.title("🤖 AI Pattern Scanner")
-st.caption("Self-Learning Machine Learning Engine — Predicts breakouts and spikes >= 5% using 20 EMA and Volume DNA")
+st.caption("Self-Learning ML Engine — Predicts breakout spikes ≥ 5% using 20 EMA + Volume DNA")
 
-# Load initial data
-df_preds, latest_date = load_latest_predictions()
-metrics, track_record = load_metrics()
+df_preds = load_predictions()
+metrics  = load_metrics()
+df_hist  = load_history()
 
-# Top Navigation / Stats bar
+today_str = datetime.now().strftime("%Y-%m-%d")
+
+# ── Top Stats Bar ──
 if metrics:
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{metrics['accuracy']:.1%}</div>
-                <div class="metric-label">Model Accuracy (Test Set)</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        hit_rate = 0.0
-        if track_record and track_record['total'] > 0:
-            hit_rate = track_record['hits'] / track_record['total']
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{hit_rate:.1%}</div>
-                <div class="metric-label">Live Hit Rate (Spike >= 5%)</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{latest_date if latest_date else 'N/A'}</div>
-                <div class="metric-label">Latest Data Date</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value">{metrics['total_samples']}</div>
-                <div class="metric-label">Trained Patterns Count</div>
-            </div>
-        """, unsafe_allow_html=True)
+    acc      = metrics.get("accuracy", 0.0)
+    trained  = metrics.get("trained_at", "N/A")[:10]
+    samples  = metrics.get("total_samples", 0)
+
+    hits_total  = len(df_hist)
+    hits_count  = int(df_hist["outcome"].sum()) if not df_hist.empty else 0
+    live_rate   = hits_count / hits_total if hits_total > 0 else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown(f'<div class="metric-card"><div class="metric-value">{acc:.1%}</div><div class="metric-label">Model Accuracy (Test Set)</div></div>', unsafe_allow_html=True)
+    c2.markdown(f'<div class="metric-card"><div class="metric-value">{live_rate:.1%}</div><div class="metric-label">Live Hit Rate (≥5% Spike)</div></div>', unsafe_allow_html=True)
+    c3.markdown(f'<div class="metric-card"><div class="metric-value">{trained}</div><div class="metric-label">Last Trained</div></div>', unsafe_allow_html=True)
+    c4.markdown(f'<div class="metric-card"><div class="metric-value">{samples:,}</div><div class="metric-label">Patterns Trained On</div></div>', unsafe_allow_html=True)
+else:
+    st.info("⚠️ Model not trained yet. Go to **Model Retrain** tab to train.")
 
 st.divider()
 
-# Create Tabs
-tab_preds, tab_insights, tab_track, tab_compare, tab_retrain = st.tabs([
+# ─────────────────────────────────────────────────────────────
+# TABS
+# ─────────────────────────────────────────────────────────────
+tab_preds, tab_insights, tab_track, tab_retrain = st.tabs([
     "🎯 Today's AI Predictions",
-    "📊 What AI Learned (Insights)",
-    "📈 Track Record (Accuracy)",
-    "⚖️ Compare AI vs Rules",
+    "📊 What AI Learned",
+    "📈 Track Record",
     "🔄 Model Retrain & Status"
 ])
 
-# ─────────────────────────────────────────────────────────────
-# TAB 1: TODAY'S PREDICTIONS
-# ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+# TAB 1 — TODAY'S PREDICTIONS
+# ══════════════════════════════════════════════════════════════
 with tab_preds:
     if df_preds.empty:
-        st.info("No predictions found in the database. Go to the 'Model Retrain' tab to train and run predictions.")
+        st.info("No predictions for today. Go to **Model Retrain** tab and click **Run Predictions**.")
     else:
-        st.subheader(f"Breakout Predictions for {latest_date}")
-        
-        # Sub filters
-        col_filter, col_sort = st.columns([3, 1])
-        with col_filter:
+        st.subheader(f"Breakout Predictions — {today_str}")
+
+        col_f, col_s = st.columns([3, 1])
+        with col_f:
             stage_filter = st.multiselect(
-                "Filter by AI Confidence Stage:",
+                "Filter by Stage:",
                 options=["🚀 PRIME_AI", "🔴 WATCH_AI", "📈 BUILD_AI", "📍 EARLY_AI"],
                 default=["🚀 PRIME_AI", "🔴 WATCH_AI", "📈 BUILD_AI"]
             )
-        with col_sort:
-            prob_threshold = st.slider("Min Probability %:", min_value=0.0, max_value=100.0, value=40.0)
-            
-        # Apply filters
+        with col_s:
+            min_prob = st.slider("Min Probability %", 0.0, 100.0, 40.0, step=5.0)
+
         df_filtered = df_preds[
-            df_preds["stage"].isin(stage_filter) & 
-            (df_preds["probability"] >= prob_threshold)
-        ]
-        
+            df_preds["stage"].isin(stage_filter) &
+            (df_preds["probability"] >= min_prob)
+        ].copy()
+
         if df_filtered.empty:
-            st.warning("No stocks match the selected confidence filters.")
+            st.warning("No stocks match the selected filters.")
         else:
-            st.markdown(f"Found **{len(df_filtered)} stocks** with active consolidation patterns matching your filter:")
-            
-            # Render custom HTML table
+            st.markdown(f"**{len(df_filtered)} stocks** match your filter:")
             st.components.v1.html(
                 render_predictions_table(df_filtered),
-                height=min(600, 60 + len(df_filtered) * 44),
+                height=min(650, 70 + len(df_filtered) * 44),
                 scrolling=True
             )
-            
-            # Interactive details expander
-            st.subheader("💡 Deep Dive: Stock Pattern Details")
-            selected_stock = st.selectbox("Select stock to inspect why AI predicted it:", df_filtered["symbol"].tolist())
-            
-            if selected_stock:
-                stock_row = df_filtered[df_filtered["symbol"] == selected_stock].iloc[0]
-                features_dict = json.loads(stock_row["features"])
-                
-                col_sub1, col_sub2 = st.columns(2)
-                with col_sub1:
-                    st.metric("AI Confidence of >= 5% Spike", f"{stock_row['probability']:.1f}%")
-                    st.write("**Pattern Analysis Checklist:**")
-                    
-                    # Distance to 20 EMA interpretation
-                    dist_20 = features_dict.get("dist_to_ema20", 0.0)
-                    if abs(dist_20) <= 1.5:
-                        st.success(f"✅ Price is extremely close to 20 EMA ({dist_20:+.2f}%) — Perfect Pullback Setup!")
-                    elif dist_20 > 0:
-                        st.info(f"📈 Price is hovering above 20 EMA ({dist_20:+.2f}%) — Standard Bullish Trend.")
-                    else:
-                        st.warning(f"⚠️ Price is below 20 EMA ({dist_20:+.2f}%) — Downtrend risk.")
-                        
-                    # Volume relative to 5d Average
-                    vol_5d = features_dict.get("vol_vs_5d_avg", 1.0)
-                    if vol_5d < 0.8:
-                        st.success(f"✅ Volume Dry-up confirmed ({vol_5d:.2f}x of 5d average) — Dry Consolidation!")
-                    elif vol_5d > 1.5:
-                        st.info(f"⚡ High Volume activity ({vol_5d:.2f}x of 5d average) — Buildup phase.")
-                        
-                with col_sub2:
-                    st.write("**Technical Parameters Read by AI:**")
-                    for k, v in features_dict.items():
-                        st.write(f"- `{k}`: **{v:+.4f}**" if isinstance(v, float) else f"- `{k}`: **{v}**")
 
-# ─────────────────────────────────────────────────────────────
-# TAB 2: WHAT AI LEARNED (FEATURE INSIGHTS)
-# ─────────────────────────────────────────────────────────────
+            st.subheader("💡 Deep Dive — Stock Pattern Details")
+            selected = st.selectbox("Select stock to inspect:", df_filtered["symbol"].tolist())
+
+            if selected:
+                row  = df_filtered[df_filtered["symbol"] == selected].iloc[0]
+                feat = row.get("features") or {}
+                if isinstance(feat, str):
+                    try:
+                        feat = json.loads(feat)
+                    except Exception:
+                        feat = {}
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("AI Spike Confidence", f"{row['probability']:.1f}%")
+                    st.write("**Pattern Analysis:**")
+
+                    dist_20 = feat.get("dist_to_ema20", 0.0)
+                    if abs(dist_20) <= 1.5:
+                        st.success(f"✅ Price is very close to 20 EMA ({dist_20:+.2f}%) — Perfect Pullback Setup!")
+                    elif dist_20 > 0:
+                        st.info(f"📈 Price above 20 EMA ({dist_20:+.2f}%) — Bullish trend.")
+                    else:
+                        st.warning(f"⚠️ Price below 20 EMA ({dist_20:+.2f}%) — Downtrend risk.")
+
+                    vol_5d = feat.get("vol_vs_5d_avg", 1.0)
+                    if vol_5d < 0.8:
+                        st.success(f"✅ Volume Dry-up confirmed ({vol_5d:.2f}x of 5d avg) — Consolidation!")
+                    elif vol_5d > 1.5:
+                        st.info(f"⚡ High volume ({vol_5d:.2f}x of 5d avg) — Buildup phase.")
+
+                with col_b:
+                    st.write("**All Feature Values:**")
+                    feat_df = pd.DataFrame(
+                        [{"Feature": k, "Value": f"{v:+.4f}" if isinstance(v, float) else str(v)}
+                         for k, v in feat.items()]
+                    )
+                    st.dataframe(feat_df, use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 2 — WHAT AI LEARNED
+# ══════════════════════════════════════════════════════════════
 with tab_insights:
-    st.subheader("📊 What features matter most to predict spikes?")
-    st.write("This chart shows the exact weight our AI model puts on each technical pattern to predict if a stock will spike >= 5%.")
-    
+    st.subheader("📊 Feature Importances — What the AI weights most")
+    st.write("Higher score = AI depends more on that technical feature to call a spike.")
+
     df_imp = load_feature_importances()
     if df_imp.empty:
-        st.info("No feature importances found. Retrain the model to compute insights.")
+        st.info("No feature importances found. Retrain the model first.")
     else:
-        # Plot Plotly chart
         fig = px.bar(
             df_imp,
-            x="importance",
-            y="feature_name",
+            x="importance", y="feature_name",
             orientation="h",
-            labels={"importance": "Importance Score", "feature_name": "Technical Pattern / Feature"},
+            labels={"importance": "Importance Score", "feature_name": "Feature"},
             color="importance",
             color_continuous_scale="Viridis",
-            height=400
+            height=420
         )
-        fig.update_layout(yaxis={'categoryorder':'total ascending'})
+        fig.update_layout(yaxis={"categoryorder": "total ascending"}, coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Summary Interpretation
-        top_feature = df_imp.iloc[0]["feature_name"]
+
+        top = df_imp.iloc[0]["feature_name"]
         st.markdown(f"""
-        ### 📖 Translation (Plain English Summary)
-        - The most critical pattern for predicting breakout spikes is **`{top_feature}`**.
-        - When the **20 EMA distance** is close and **Volume drops significantly (dry-up)** compared to the 5-day average, the ML model clusters these as the highest-probability entries.
+        **Key Insight:** The most important feature is **`{top}`**.
+
+        When **20 EMA distance is small** + **volume drops below 5-day average** (dry-up),
+        the model clusters these as the highest-probability pre-spike setups —
+        which matches the volume-first philosophy of the entire scanner.
         """)
 
-# ─────────────────────────────────────────────────────────────
-# TAB 3: TRACK RECORD & ACCURACY LOG
-# ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+# TAB 3 — TRACK RECORD
+# ══════════════════════════════════════════════════════════════
 with tab_track:
     st.subheader("🎯 Real-World Track Record")
-    st.write("The AI Scanner saves its predictions daily, and once the 2-day forward window passes, it calculates if the stock actually rose by 5% or more.")
-    
-    conn = get_db_connection()
-    df_resolved = pd.read_sql_query("""
-        SELECT date, symbol, probability, stage, actual_max_return, outcome 
-        FROM predictions 
-        WHERE outcome IS NOT NULL
-        ORDER BY date DESC
-    """, conn)
-    conn.close()
-    
-    if df_resolved.empty:
-        st.info("No resolved predictions found yet. Check back in 2 days once outcomes resolve!")
+    st.write("After each prediction, outcomes are resolved 2 days later — did the stock actually spike ≥5%?")
+
+    if df_hist.empty:
+        st.info("No resolved predictions yet. Come back after 2 trading days once outcomes are computed.")
     else:
-        # Metrics cards
-        total_p = len(df_resolved)
-        hits = df_resolved["outcome"].sum()
-        misses = total_p - hits
-        actual_acc = hits / total_p
-        
+        total  = len(df_hist)
+        hits   = int(df_hist["outcome"].sum())
+        misses = total - hits
+        rate   = hits / total if total > 0 else 0.0
+
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Resolved Calls", total_p)
-        c1.metric("Actual Hits (>=5% spikes)", hits)
-        c2.metric("Misses", misses)
-        c2.metric("Hit Rate Percentage", f"{actual_acc:.1%}")
-        
-        st.subheader("📋 Historical Outcomes Log")
-        st.dataframe(df_resolved, use_container_width=True)
+        c1.metric("Total Resolved Calls", total)
+        c2.metric("Hits (≥5% spike)", hits)
+        c3.metric("Misses", misses)
+        c4.metric("Live Hit Rate", f"{rate:.1%}")
 
-# ─────────────────────────────────────────────────────────────
-# TAB 4: COMPARE AI vs RULES
-# ─────────────────────────────────────────────────────────────
-with tab_compare:
-    st.subheader("⚖️ Rule-Based (9_SetupTracker) vs AI Engine")
-    st.write("Compare the static consolidation tracker stages (Rule-based) with the Dynamic AI confidence percentages.")
-    
-    # Try importing 9_SetupTracker functions to get real-time rules stages
-    try:
-        import sys
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        import importlib
-        setup_tracker = importlib.import_module("9_SetupTracker")
-        
-        if st.button("⚖️ Generate Comparison Table", type="secondary"):
-            with st.spinner("Analyzing rules & merging with AI..."):
-                hist = setup_tracker.fetch_setup_data()
-                if hist:
-                    df_rules = setup_tracker.analyze_setups(hist)
-                    if not df_rules.empty and not df_preds.empty:
-                        # Merge on symbol
-                        df_compare = pd.merge(
-                            df_rules[["Symbol", "Setup_Stage", "Readiness_%"]],
-                            df_preds[["symbol", "probability", "stage"]],
-                            left_on="Symbol", right_on="symbol", how="inner"
-                        )
-                        
-                        # Find disagreements
-                        st.success("Analysis Complete!")
-                        st.dataframe(
-                            df_compare.rename(columns={
-                                "Setup_Stage": "Rule-Based Stage",
-                                "Readiness_%": "Rule-Based Readiness",
-                                "probability": "AI Probability %",
-                                "stage": "AI Stage"
-                            }).drop(columns=["symbol"]),
-                            use_container_width=True
-                        )
-                    else:
-                        st.warning("No overlapping stocks or empty data.")
-                else:
-                    st.error("Failed to load historical data for rules scanner.")
-    except Exception as e:
-        st.warning(f"Unable to run automatic comparison side-by-side: {str(e)}")
+        # By stage breakdown
+        st.subheader("Hit Rate by AI Stage")
+        stage_grp = (df_hist.groupby("stage")
+                     .agg(total=("outcome", "count"), hits=("outcome", "sum"))
+                     .reset_index())
+        stage_grp["hit_rate"] = stage_grp["hits"] / stage_grp["total"]
+        stage_grp["hit_rate_pct"] = (stage_grp["hit_rate"] * 100).round(1)
 
-# ─────────────────────────────────────────────────────────────
-# TAB 5: RETRAIN MODEL
-# ─────────────────────────────────────────────────────────────
+        fig2 = px.bar(
+            stage_grp, x="stage", y="hit_rate_pct",
+            text="hit_rate_pct",
+            labels={"hit_rate_pct": "Hit Rate %", "stage": "AI Stage"},
+            color="hit_rate_pct",
+            color_continuous_scale="RdYlGn",
+            height=350
+        )
+        fig2.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig2.update_layout(coloraxis_showscale=False)
+        st.plotly_chart(fig2, use_container_width=True)
+
+        st.subheader("📋 Full Outcomes Log")
+        display_df = df_hist.copy()
+        display_df["outcome"] = display_df["outcome"].map({1: "✅ Hit", 0: "❌ Miss"})
+        display_df["actual_max_return"] = display_df["actual_max_return"].apply(
+            lambda x: f"{x:+.2f}%" if pd.notna(x) else "—"
+        )
+        display_df["probability"] = display_df["probability"].apply(lambda x: f"{x:.1f}%")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 4 — RETRAIN & STATUS
+# ══════════════════════════════════════════════════════════════
 with tab_retrain:
-    st.subheader("🔄 Train and Predict AI Model")
-    st.write("Retrain the ML brain with the latest market data to adjust for fresh volume spikes and trend changes.")
-    
-    # Check library availability
-    if not ai_pattern_engine.ML_AVAILABLE:
-        st.error("❌ `scikit-learn` or `joblib` is not installed. Run `pip install scikit-learn joblib` on your machine.")
-    if not ai_pattern_engine.YF_AVAILABLE:
-        st.error("❌ `yfinance` is not installed. Run `pip install yfinance` on your machine.")
-        
-    st.write(f"**Current model file:** `{ai_pattern_engine.MODEL_PATH}`")
-    
-    if st.button("🔄 Retrain AI Model Now", type="primary", use_container_width=True):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        try:
-            status_text.text("1. Fetching historical daily candles for 840+ watchlist stocks (takes ~1-2 mins)...")
-            progress_bar.progress(20)
-            
-            # Execute backend training
-            success = ai_pattern_engine.train_ai_model()
-            
-            if success:
-                status_text.text("2. Model training completed successfully! Running today's predictions...")
-                progress_bar.progress(70)
-                
-                # Predict
-                ai_pattern_engine.run_predictions()
-                
-                # Resolve outcomes
-                ai_pattern_engine.update_past_outcomes()
-                
-                status_text.text("3. AI Scan execution complete! Updating dashboard...")
-                progress_bar.progress(100)
-                
-                st.success("✅ AI Scanner successfully retrained and predicted. Refreshing page...")
+    st.subheader("🔄 Train / Predict / Resolve")
+
+    # Library status
+    col_lib1, col_lib2, col_lib3 = st.columns(3)
+    col_lib1.metric("scikit-learn", "✅ Ready" if ai_pattern_engine.ML_AVAILABLE else "❌ Missing")
+    col_lib2.metric("yfinance",     "✅ Ready" if ai_pattern_engine.YF_AVAILABLE else "❌ Missing")
+    col_lib3.metric("supabase-py",  "✅ Ready" if ai_pattern_engine.SUPABASE_AVAILABLE else "❌ Missing")
+
+    if not STOCKS:
+        st.error("❌ No stocks found in config.py STOCKS_WATCHLIST. Fix config first.")
+    else:
+        st.info(f"**{len(STOCKS)} stocks** loaded from config.")
+
+    st.divider()
+
+    # ── Action buttons ──
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+
+    # TRAIN
+    with col_btn1:
+        if st.button("🧠 Train Model", type="primary", use_container_width=True,
+                     disabled=(not ai_pattern_engine.ML_AVAILABLE or not STOCKS)):
+            with st.spinner("Fetching 60d history + training RandomForest... (1–3 min)"):
+                progress = st.progress(0, text="Fetching data...")
+
+                def prog_cb(done, total):
+                    pct = int(done / total * 60) if total else 0
+                    progress.progress(pct, text=f"Fetching... {done}/{total}")
+
+                result = ai_pattern_engine.train_ai_model(supabase, STOCKS, progress_callback=prog_cb)
+                progress.progress(100, text="Done!")
+
+            if result["success"]:
+                st.success(
+                    f"✅ Model trained! "
+                    f"Accuracy: **{result['accuracy']:.1%}** | "
+                    f"Precision: **{result['precision']:.1%}** | "
+                    f"Recall: **{result['recall']:.1%}** | "
+                    f"Samples: **{result['total_samples']:,}**"
+                )
+                st.cache_data.clear()
                 st.rerun()
             else:
-                st.error("❌ Training failed. See terminal/logs for details.")
-        except Exception as ex:
-            st.error(f"Error during training cycle: {str(ex)}")
+                st.error(f"❌ Training failed: {result['error']}")
+
+    # PREDICT
+    with col_btn2:
+        if st.button("🎯 Run Predictions", type="secondary", use_container_width=True,
+                     disabled=(not ai_pattern_engine.ML_AVAILABLE or not STOCKS)):
+            with st.spinner("Fetching 30d history + running predictions..."):
+                preds = ai_pattern_engine.run_predictions(supabase, STOCKS)
+            if preds:
+                st.success(f"✅ {len(preds)} predictions saved for today ({today_str}).")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("❌ Predictions failed or model not found. Train first.")
+
+    # RESOLVE OUTCOMES
+    with col_btn3:
+        if st.button("🔍 Resolve Outcomes", type="secondary", use_container_width=True):
+            with st.spinner("Checking past predictions vs actual prices..."):
+                resolved = ai_pattern_engine.update_past_outcomes(supabase)
+            st.success(f"✅ Resolved **{resolved}** past predictions.")
+            st.cache_data.clear()
+            st.rerun()
+
+    st.divider()
+
+    # ── Current model metrics ──
+    st.subheader("📊 Current Model Status")
+    if metrics:
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Accuracy",   f"{metrics.get('accuracy', 0):.1%}")
+        m_col2.metric("Precision",  f"{metrics.get('precision_score', 0):.1%}")
+        m_col3.metric("Recall",     f"{metrics.get('recall_score', 0):.1%}")
+        m_col4.metric("Trained On", metrics.get("trained_at", "N/A")[:10])
+    else:
+        st.warning("Model hasn't been trained yet.")
+
+    # ── Supabase tables setup instructions ──
+    with st.expander("📋 Supabase Tables Setup (run once in SQL Editor)", expanded=False):
+        st.code("""
+-- Run these 4 CREATE TABLE statements once in your Supabase SQL Editor
+
+CREATE TABLE IF NOT EXISTS ai_predictions (
+    id BIGSERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    probability REAL,
+    stage TEXT,
+    features JSONB,
+    actual_max_return REAL,
+    outcome INTEGER,
+    UNIQUE(date, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS ai_model_metrics (
+    date TEXT PRIMARY KEY,
+    accuracy REAL,
+    precision_score REAL,
+    recall_score REAL,
+    total_samples INTEGER,
+    trained_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ai_feature_importances (
+    feature_name TEXT PRIMARY KEY,
+    importance REAL
+);
+
+CREATE TABLE IF NOT EXISTS ai_model_store (
+    id TEXT PRIMARY KEY,
+    model_blob TEXT,
+    saved_at TEXT
+);
+        """, language="sql")
+        st.info("After creating tables, click **Train Model** above to begin.")
