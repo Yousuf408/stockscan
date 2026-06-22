@@ -51,6 +51,49 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ─────────────────────────────────────────────────────────────
+# SIGNAL TIME — SUPABASE SAVE & FETCH
+# ─────────────────────────────────────────────────────────────
+def fetch_signal_times_from_supabase(today_str: str) -> dict:
+    """
+    Fetch all signal times for today from momentum_signal_times table.
+    Returns dict: {stock: signal_time}
+    """
+    try:
+        supabase = get_supabase()
+        resp = supabase.table("momentum_signal_times") \
+            .select("stock, signal_time") \
+            .eq("signal_date", today_str) \
+            .execute()
+        result = {}
+        for row in resp.data:
+            result[row["stock"]] = row["signal_time"]
+        return result
+    except Exception as e:
+        return {}
+
+
+def save_signal_time_to_supabase(stock: str, today_str: str, signal_time: str,
+                                  vol_ratio: float, intraday_pct: float,
+                                  momentum: str, score: float):
+    """
+    Save signal time to Supabase ONLY if not already saved today.
+    Uses UNIQUE(stock, signal_date) — duplicate insert will be ignored.
+    """
+    try:
+        supabase = get_supabase()
+        supabase.table("momentum_signal_times").upsert({
+            "stock"        : stock,
+            "signal_date"  : today_str,
+            "signal_time"  : signal_time,
+            "vol_ratio"    : round(float(vol_ratio), 2),
+            "intraday_pct" : round(float(intraday_pct), 2),
+            "momentum"     : momentum,
+            "score"        : round(float(score), 2),
+        }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
+    except Exception as e:
+        pass  # Silent fail — don't break scanner if save fails
+
+# ─────────────────────────────────────────────────────────────
 # FETCH HISTORICAL DATA FROM SUPABASE (runs ONCE, cached)
 # ─────────────────────────────────────────────────────────────
 def fetch_historical_data():
@@ -64,7 +107,6 @@ def fetch_historical_data():
     supabase = get_supabase()
 
     # ── Step 1: Find all distinct trading dates ──────────────
-    # Paginate to get all dates
     all_dates = set()
     offset = 0
     while True:
@@ -86,9 +128,9 @@ def fetch_historical_data():
         return None
 
     sorted_dates = sorted(all_dates, reverse=True)
-    target_date   = sorted_dates[0]           # Latest trading day
+    target_date   = sorted_dates[0]
     prev_date     = sorted_dates[1] if len(sorted_dates) > 1 else None
-    last_5_dates  = sorted_dates[1:6]         # 5 days BEFORE target_date
+    last_5_dates  = sorted_dates[1:6]
 
     # ── Step 2: Fetch target_date data (fallback for closed market) ──
     target_rows = []
@@ -108,7 +150,6 @@ def fetch_historical_data():
             break
         offset += 1000
 
-    # Keep last (most recent) row per stock
     df_target = pd.DataFrame(target_rows)
     if not df_target.empty:
         df_target = df_target.drop_duplicates(subset="stock", keep="first")
@@ -174,22 +215,16 @@ def fetch_historical_data():
     }
 
 # ─────────────────────────────────────────────────────────────
-# CORE SCAN LOGIC (pure Python — mirrors SQL query)
+# CORE SCAN LOGIC
 # ─────────────────────────────────────────────────────────────
 def run_momentum_scan(historical: dict) -> pd.DataFrame:
-    """
-    Merge live ticks (or Supabase fallback) with historical cache.
-    Apply all SQL filters and labels. Return final DataFrame.
-    """
     df_target  = historical["df_target"]
     df_prev    = historical["df_prev"]
     df_median  = historical["df_median"]
 
-    # ── Decide data source: live WS or Supabase fallback ────
-    live_ticks = angel_ws.latest_ticks  # {token: {ltp, open, volume, ...}}
+    live_ticks = angel_ws.latest_ticks
 
     if live_ticks:
-        # Build live DataFrame from WebSocket ticks
         rows = []
         for token, tick in live_ticks.items():
             name = TOKEN_TO_NAME.get(token)
@@ -204,48 +239,39 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
         df_live = pd.DataFrame(rows)
         data_source = "🟢 Live WebSocket"
     else:
-        # Fallback: use Supabase target_date data
         df_live = df_target.copy() if not df_target.empty else pd.DataFrame()
         data_source = "🟡 Supabase (Market Closed)"
 
     if df_live.empty or df_prev.empty or df_median.empty:
         return pd.DataFrame(), data_source
 
-    # ── Merge all three ──────────────────────────────────────
     df = df_live.merge(df_prev,   on="stock", how="inner")
     df = df.merge(df_median,      on="stock", how="inner")
 
-    # Convert to numeric
     for col in ["live_ltp", "live_open", "live_volume", "yesterday_close", "median_vol"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Drop nulls / zeros
     df = df.dropna(subset=["live_ltp", "live_open", "live_volume", "yesterday_close", "median_vol"])
     df = df[df["median_vol"] > 0]
     df = df[df["yesterday_close"] > 0]
 
-    # ── Calculate metrics ────────────────────────────────────
     df["vol_ratio"]      = (df["live_volume"] / df["median_vol"]).round(2)
     df["gap_pct"]        = ((df["live_open"] - df["yesterday_close"]) / df["yesterday_close"] * 100).round(2)
     df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"])       / df["live_open"]        * 100).round(2)
     df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"]  * 100).round(2)
-
-    # ── Priority score ───────────────────────────────────────
     df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7).round(2)
 
-    # ── FILTERS (mirrors SQL WHERE clause) ───────────────────
     df = df[
         (df["vol_ratio"]    >= 1.5) &
         (df["intraday_pct"] >= 1.0) &
-        (df["live_ltp"]     >  df["live_open"]) &          # Green candle
-        (df["live_ltp"]     >  df["yesterday_close"]) &    # Above prev close
-        (df["live_open"]    <= df["yesterday_close"] * 1.01)  # Max 1% gap-up
+        (df["live_ltp"]     >  df["live_open"]) &
+        (df["live_ltp"]     >  df["yesterday_close"]) &
+        (df["live_open"]    <= df["yesterday_close"] * 1.01)
     ]
 
     if df.empty:
         return pd.DataFrame(), data_source
 
-    # ── Labels ───────────────────────────────────────────────
     def vol_momentum(r):
         if r >= 3.0: return "🔥 Very Strong"
         if r >= 2.0: return "⚡ Strong"
@@ -259,35 +285,28 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
         if v >= 1.5 and i < 0:                  return "⚠️ COOLING"
         return "❌ WEAK"
 
-    def live_action(r):
-        if r >= 3.0: return "🚀 STRONG BLAST"
-        if r >= 2.0: return "⚡ BLASTING"
-        if r >= 1.5: return "👀 PRE-BLAST"
-        return ""
-
     df["vol_momentum"]       = df["vol_ratio"].apply(vol_momentum)
     df["momentum_detection"] = df.apply(lambda x: momentum_detection(x["vol_ratio"], x["intraday_pct"], x["gap_pct"]), axis=1)
-    df["live_action"]        = df["vol_ratio"].apply(live_action)
 
-    # ── Final display columns ────────────────────────────────
     df = df.rename(columns={
-        "stock"         : "Symbol",
+        "stock"          : "Symbol",
         "yesterday_close": "Prev Close",
-        "live_open"     : "Open",
-        "live_ltp"      : "LTP",
-        "live_volume"   : "Volume",
+        "live_open"      : "Open",
+        "live_ltp"       : "LTP",
+        "live_volume"    : "Volume",
     })
 
-    df["Gap %"]          = df["gap_pct"].apply(lambda x: f"{x:+.2f}%")
-    df["Intraday %"]     = df["intraday_pct"].apply(lambda x: f"{x:+.2f}%")
-    df["Chg vs Prev %"]  = df["chg_vs_prev"].apply(lambda x: f"{x:+.2f}%")
-    df["Vol Ratio"]      = df["vol_ratio"].apply(lambda x: f"{x:.2f}x")
-    df["Score"]          = df["priority_score"]
+    df["Gap %"]         = df["gap_pct"].apply(lambda x: f"{x:+.2f}%")
+    df["Chg vs Prev %"] = df["chg_vs_prev"].apply(lambda x: f"{x:+.2f}%")
+    df["Vol Ratio"]     = df["vol_ratio"].apply(lambda x: f"{x:.2f}x")
+    df["Score"]         = df["priority_score"]
 
     display_cols = [
         "Symbol", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Chg vs Prev %",
-        "Vol Ratio", "vol_momentum", "momentum_detection", "Score"
+        "Vol Ratio", "vol_momentum", "momentum_detection", "Score",
+        # Keep raw values for signal time saving
+        "vol_ratio", "intraday_pct", "priority_score"
     ]
 
     df = df[display_cols].rename(columns={
@@ -316,7 +335,6 @@ def render_html_table(df: pd.DataFrame) -> str:
     .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
     .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
     .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
-    .highlight {background:#fbbf24; font-weight:700; padding:2px 4px; border-radius:3px;}
     .copy-btn {
         cursor:pointer; font-weight:700; color:#0f172a;
         background:#e2e8f0; border:none; padding:3px 8px;
@@ -356,8 +374,8 @@ def render_html_table(df: pd.DataFrame) -> str:
     """
 
     for _, row in df.iterrows():
-        bg     = row_bg(str(row.get("Momentum", "")))
-        symbol = str(row["Symbol"])
+        bg          = row_bg(str(row.get("Momentum", "")))
+        symbol      = str(row["Symbol"])
         signal_time = str(row.get("Signal Time", "-"))
         html += f"""
         <tr style="background:{bg}">
@@ -398,11 +416,19 @@ if "momentum_historical" not in st.session_state:
             st.error("❌ No data found in websocket_stock_values")
             st.stop()
 
-# ── Initialize signal times tracker ────────────────────────────
-if "signal_times" not in st.session_state:
-    st.session_state["signal_times"] = {}
-
 historical = st.session_state["momentum_historical"]
+
+# ── Today's date string (IST) ────────────────────────────────
+today_str = datetime.now(IST).strftime("%Y-%m-%d")
+
+# ── Load signal times from Supabase ONCE per day ────────────
+# Reload only if date changed (new trading day)
+if (
+    "signal_times" not in st.session_state or
+    st.session_state.get("signal_times_date") != today_str
+):
+    st.session_state["signal_times"] = fetch_signal_times_from_supabase(today_str)
+    st.session_state["signal_times_date"] = today_str
 
 # ── Compact top bar ──────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
@@ -416,7 +442,7 @@ with col2:
 
 st.divider()
 
-# ── Auto-refresh fragment (tick-to-tick table update) ────────
+# ── Auto-refresh fragment ─────────────────────────────────────
 @st.fragment(run_every=5)
 def scanner_table():
     df, data_source = run_momentum_scan(st.session_state["momentum_historical"])
@@ -428,24 +454,39 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Track signal times ────────────────────────────────────
     current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
-    
+    today            = datetime.now(IST).strftime("%Y-%m-%d")
+
     signal_time_list = []
-    for symbol in df["Symbol"]:
+
+    for _, row in df.iterrows():
+        symbol = row["Symbol"]
+
         if symbol not in st.session_state["signal_times"]:
+            # ── First time this stock qualifies today ────────
+            # Save to Supabase
+            save_signal_time_to_supabase(
+                stock        = symbol,
+                today_str    = today,
+                signal_time  = current_time_ist,
+                vol_ratio    = row.get("vol_ratio", 0),
+                intraday_pct = row.get("intraday_pct", 0),
+                momentum     = str(row.get("Momentum", "")),
+                score        = row.get("Score", 0),
+            )
+            # Save to session_state cache
             st.session_state["signal_times"][symbol] = current_time_ist
+
         signal_time_list.append(st.session_state["signal_times"][symbol])
-    
+
     df["Signal Time"] = signal_time_list
-    
-    # ── Reorder columns with Signal Time ──────────────────────
+
+    # ── Display columns ──────────────────────────────────────
     display_cols = [
         "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Chg vs Prev %",
         "Vol Ratio", "Vol Momentum", "Momentum", "Score"
     ]
-    
     df_display = df[display_cols]
 
     st.success(f"**{len(df_display)} stocks** matching momentum criteria")
