@@ -139,16 +139,50 @@ def load_model_from_supabase(supabase):
 def fetch_single_stock_history(symbol: str, period: str = "60d"):
     try:
         ticker = f"{symbol}.NS"
-        df = yf.download(ticker, period=period, interval="1d", progress=False, group_by="ticker")
-        if df.empty:
+        df = yf.download(
+            ticker, period=period, interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker"
+        )
+        if df is None or df.empty:
             return symbol, None
+
+        # ── Flatten MultiIndex columns (yfinance >= 0.2.x) ──
+        # MultiIndex: level-0 = Price field, level-1 = Ticker
+        # Single-ticker download sometimes gives (field, ticker) or (ticker, field)
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+            # Detect which level holds OHLCV names
+            lvl0 = [str(c).lower() for c in df.columns.get_level_values(0)]
+            lvl1 = [str(c).lower() for c in df.columns.get_level_values(1)]
+            ohlcv = {"open", "high", "low", "close", "volume"}
+            if ohlcv.issubset(set(lvl0)):
+                df.columns = df.columns.get_level_values(0)
+            elif ohlcv.issubset(set(lvl1)):
+                df.columns = df.columns.get_level_values(1)
+            else:
+                # Fallback: just take level 0
+                df.columns = df.columns.get_level_values(0)
+
         df = df.reset_index()
-        df.columns = [col.lower() for col in df.columns]
-        df = df.rename(columns={"date": "datetime"})
+        # Normalize all column names to lowercase, strip spaces
+        df.columns = [str(col).strip().lower() for col in df.columns]
+
+        # yfinance may return "date" or "datetime" or "timestamp"
+        for possible in ["date", "datetime", "timestamp", "index"]:
+            if possible in df.columns:
+                df = df.rename(columns={possible: "datetime"})
+                break
+
+        # Must have all required OHLCV columns
+        required = {"open", "high", "low", "close", "volume", "datetime"}
+        if not required.issubset(set(df.columns)):
+            logging.warning(f"{symbol}: missing columns after parse. Got: {list(df.columns)}")
+            return symbol, None
+
+        # Drop rows with NaN in critical columns
+        df = df.dropna(subset=["open", "high", "low", "close", "volume"])
         df["symbol"] = symbol
         return symbol, df
+
     except Exception as e:
         logging.error(f"Error fetching {symbol}: {e}")
         return symbol, None
