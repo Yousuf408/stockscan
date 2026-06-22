@@ -36,19 +36,19 @@ header { visibility: hidden; }
 .page-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 20px; border-radius: 12px;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-    margin-bottom: 14px;
+    background: #ffffff; border: 1px solid #e2e8f0;
+    border-left: 4px solid #10b981; margin-bottom: 14px;
 }
 .page-header-left { display: flex; align-items: center; gap: 12px; }
-.page-header-title { font-size: 18px; font-weight: 700; color: #f8fafc; letter-spacing: -0.3px; }
-.page-header-sub   { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-.page-header-stats { display: flex; gap: 6px; }
+.page-header-title { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: -0.3px; }
+.page-header-sub   { font-size: 12px; color: #64748b; margin-top: 2px; }
+.page-header-stats { display: flex; gap: 8px; }
 .hstat {
-    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px; padding: 6px 14px; text-align: center; min-width: 90px;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 8px; padding: 8px 16px; text-align: center; min-width: 90px;
 }
-.hstat-val  { font-size: 16px; font-weight: 700; color: #10b981; line-height: 1.2; }
-.hstat-lbl  { font-size: 10px; color: #94a3b8; margin-top: 1px; letter-spacing: 0.3px; }
+.hstat-val  { font-size: 17px; font-weight: 700; color: #10b981; line-height: 1.2; }
+.hstat-lbl  { font-size: 10px; color: #94a3b8; margin-top: 2px; letter-spacing: 0.3px; text-transform: uppercase; }
 
 /* ── Section title ── */
 .sec-title {
@@ -74,14 +74,26 @@ header { visibility: hidden; }
 .stat-box.blue  .stat-box-val { color: #3b82f6; }
 
 /* ── AI Table ── */
+.ai-table-wrap { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
 .ai-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-family: 'Inter', sans-serif; }
+.ai-table thead tr { background: #f8fafc; }
 .ai-table th {
-    background: #f1f5f9; color: #475569; font-weight: 600; font-size: 11px;
-    padding: 9px 10px; text-align: left;
-    border-bottom: 1px solid #e2e8f0; text-transform: uppercase; letter-spacing: 0.5px;
+    color: #64748b; font-weight: 600; font-size: 10.5px;
+    padding: 10px 14px; text-align: left;
+    border-bottom: 2px solid #e2e8f0;
+    text-transform: uppercase; letter-spacing: 0.6px; white-space: nowrap;
 }
-.ai-table td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
-.ai-table tr:hover td { background: #f8fafc; }
+.ai-table th:first-child { border-radius: 0; }
+.ai-table td {
+    padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+    color: #334155; vertical-align: middle; white-space: nowrap;
+}
+.ai-table tbody tr:last-child td { border-bottom: none; }
+.ai-table tbody tr:hover td { background: #f0fdf4; }
+.ai-table .col-sym  { width: 110px; }
+.ai-table .col-prob { width: 150px; }
+.ai-table .col-stage{ width: 90px; }
+.ai-table .col-num  { width: 100px; text-align: right; }
 
 /* ── Badges ── */
 .badge { padding: 3px 8px; border-radius: 5px; font-weight: 600; font-size: 10.5px; display: inline-block; letter-spacing: 0.3px; }
@@ -246,10 +258,10 @@ with tab1:
 
     def render_table(df):
         if df.empty:
-            return "<div style='text-align:center;padding:40px;color:#94a3b8;font-size:13px;'>No predictions for today. Run predictions from the Model & Controls tab.</div>"
+            return "<div style='text-align:center;padding:48px;color:#94a3b8;font-size:13px;border:1px solid #e2e8f0;border-radius:10px;'>No predictions for today. Run predictions from the Model &amp; Controls tab.</div>"
 
         rows = ""
-        for _, row in df.iterrows():
+        for i, (_, row) in enumerate(df.iterrows()):
             prob   = row.get("probability", 0.0)
             stage  = row.get("stage", "")
             symbol = row.get("symbol", "")
@@ -269,35 +281,62 @@ with tab1:
             elif "WATCH_AI" in stage: bcls = "badge-watch"
             elif "BUILD_AI" in stage: bcls = "badge-build"
 
-            pxcol = "#ef4444" if px < 0 else ("#10b981" if px > 0 else "#64748b")
+            stage_label = stage.split()[-1] if stage else "—"
+            pxcol     = "#ef4444" if px < 0 else ("#10b981" if px > 0 else "#64748b")
             bar_color = "#10b981" if prob >= 60 else ("#f59e0b" if prob >= 40 else "#94a3b8")
+            dist_col  = "#10b981" if abs(dist) <= 2 else "#334155"
+            dist_wt   = "600"     if abs(dist) <= 2 else "400"
+            v5_col    = "#10b981" if v5 < 0.8 else ("#f59e0b" if v5 < 1.2 else "#334155")
+            row_bg    = "#ffffff" if i % 2 == 0 else "#fafafa"
+            rank_col  = "#10b981" if i < 3 else "#94a3b8"
 
             rows += f"""
-            <tr>
-              <td><button class="copy-btn" onclick="copySymbol(this,'{symbol}')">{symbol}</button></td>
-              <td>
-                <div class="prob-wrap">
-                  <span style="font-size:13px;font-weight:700;color:#0f172a;min-width:38px;">{prob:.1f}%</span>
-                  <div class="prob-bar-bg"><div class="prob-bar-fill" style="width:{min(prob,100):.0f}%;background:{bar_color};"></div></div>
+            <tr style="background:{row_bg};">
+              <td class="col-sym">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="font-size:10px;font-weight:700;color:{rank_col};min-width:16px;">#{i+1}</span>
+                  <button class="copy-btn" onclick="copySymbol(this,'{symbol}')">{symbol}</button>
                 </div>
               </td>
-              <td><span class="badge {bcls}">{stage.split()[-1]}</span></td>
-              <td style="color:{'#10b981' if abs(dist)<=2 else '#334155'};font-weight:{'600' if abs(dist)<=2 else '400'};">{dist:+.2f}%</td>
-              <td style="color:{'#10b981' if v5<0.8 else '#334155'};">{v5:.2f}x</td>
-              <td>{v1:.2f}x</td>
-              <td style="color:{pxcol};font-weight:600;">{px:+.2f}%</td>
-              <td style="color:#64748b;">{body:.2f}</td>
+              <td class="col-prob">
+                <div class="prob-wrap">
+                  <span style="font-size:13px;font-weight:700;color:#0f172a;min-width:42px;">{prob:.1f}%</span>
+                  <div class="prob-bar-bg" style="min-width:60px;">
+                    <div class="prob-bar-fill" style="width:{min(prob,100):.0f}%;background:{bar_color};"></div>
+                  </div>
+                </div>
+              </td>
+              <td class="col-stage"><span class="badge {bcls}">{stage_label}</span></td>
+              <td class="col-num" style="color:{dist_col};font-weight:{dist_wt};">{dist:+.2f}%</td>
+              <td class="col-num" style="color:{v5_col};">{v5:.2f}x</td>
+              <td class="col-num" style="color:#475569;">{v1:.2f}x</td>
+              <td class="col-num" style="color:{pxcol};font-weight:600;">{px:+.2f}%</td>
+              <td class="col-num" style="color:#94a3b8;">{body:.2f}</td>
             </tr>"""
 
         return f"""
+        <div class="ai-table-wrap">
         <table class="ai-table">
-          <thead><tr>
-            <th>Symbol</th><th>AI Probability</th><th>Stage</th>
-            <th>EMA20 Dist</th><th>Vol/5d Avg</th>
-            <th>Vol 1d Ratio</th><th>Price Chg 1d</th><th>Body Ratio</th>
-          </tr></thead>
+          <colgroup>
+            <col class="col-sym"><col class="col-prob"><col class="col-stage">
+            <col class="col-num"><col class="col-num"><col class="col-num">
+            <col class="col-num"><col class="col-num">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>AI Probability</th>
+              <th>Stage</th>
+              <th style="text-align:right;">EMA20 Dist</th>
+              <th style="text-align:right;">Vol/5d Avg</th>
+              <th style="text-align:right;">Vol 1d</th>
+              <th style="text-align:right;">Price Chg</th>
+              <th style="text-align:right;">Body</th>
+            </tr>
+          </thead>
           <tbody>{rows}</tbody>
-        </table>"""
+        </table>
+        </div>"""
 
     # ── Filters row ──
     f1, f2, f3 = st.columns([3, 2, 1])
