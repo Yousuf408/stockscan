@@ -28,17 +28,21 @@ st.set_page_config(
 st.markdown("""
 <style>
 header {visibility: hidden;}
-.block-container {padding-top: 1rem !important;}
+.block-container {padding-top: 0.3rem !important; padding-bottom: 0.5rem !important;}
+
+/* Shrink default st.title margin */
+h1 { margin-bottom: 0 !important; padding-bottom: 0 !important; font-size: 1.5rem !important; }
+.stCaption { margin-top: 0 !important; margin-bottom: 0.3rem !important; }
 
 .metric-card {
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(226,232,240,0.1);
-    border-radius: 12px;
-    padding: 20px;
+    border-radius: 8px;
+    padding: 8px 12px;
     text-align: center;
 }
-.metric-value { font-size: 30px; font-weight: 700; color: #10b981; margin-bottom: 4px; }
-.metric-label { font-size: 13px; color: #64748b; font-weight: 500; }
+.metric-value { font-size: 20px; font-weight: 700; color: #10b981; margin-bottom: 1px; }
+.metric-label { font-size: 11px; color: #64748b; font-weight: 500; }
 
 .ai-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ai-table th {
@@ -198,36 +202,53 @@ def load_history() -> pd.DataFrame:
         return pd.DataFrame()
 
 # ─────────────────────────────────────────────────────────────
-# HEADER
+# HEADER — compact
 # ─────────────────────────────────────────────────────────────
-st.title("🤖 AI Pattern Scanner")
-st.caption("Self-Learning ML Engine — Predicts breakout spikes ≥ 5% using 20 EMA + Volume DNA")
-
 df_preds = load_predictions()
 metrics  = load_metrics()
 df_hist  = load_history()
 
 today_str = datetime.now().strftime("%Y-%m-%d")
 
-# ── Top Stats Bar ──
-if metrics:
-    acc      = metrics.get("accuracy", 0.0)
-    trained  = metrics.get("trained_at", "N/A")[:10]
-    samples  = metrics.get("total_samples", 0)
+acc        = metrics.get("accuracy", 0.0)       if metrics else 0.0
+trained    = metrics.get("trained_at", "N/A")[:10] if metrics else "N/A"
+samples    = metrics.get("total_samples", 0)    if metrics else 0
+hits_total = len(df_hist)
+hits_count = int(df_hist["outcome"].sum()) if not df_hist.empty else 0
+live_rate  = hits_count / hits_total if hits_total > 0 else 0.0
 
-    hits_total  = len(df_hist)
-    hits_count  = int(df_hist["outcome"].sum()) if not df_hist.empty else 0
-    live_rate   = hits_count / hits_total if hits_total > 0 else 0.0
+st.markdown(f"""
+<div style="display:flex; align-items:center; justify-content:space-between;
+            flex-wrap:wrap; gap:8px; margin-bottom:6px;">
+  <div>
+    <span style="font-size:1.35rem; font-weight:700;">🤖 AI Pattern Scanner</span>
+    <span style="font-size:12px; color:#64748b; margin-left:10px;">
+      Self-Learning ML · Breakout spikes ≥5% · 20 EMA + Volume DNA
+    </span>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <div class="metric-card">
+      <div class="metric-value">{acc:.1%}</div>
+      <div class="metric-label">Model Accuracy</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">{live_rate:.1%}</div>
+      <div class="metric-label">Live Hit Rate</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">{trained}</div>
+      <div class="metric-label">Last Trained</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">{samples:,}</div>
+      <div class="metric-label">Patterns</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(f'<div class="metric-card"><div class="metric-value">{acc:.1%}</div><div class="metric-label">Model Accuracy (Test Set)</div></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="metric-card"><div class="metric-value">{live_rate:.1%}</div><div class="metric-label">Live Hit Rate (≥5% Spike)</div></div>', unsafe_allow_html=True)
-    c3.markdown(f'<div class="metric-card"><div class="metric-value">{trained}</div><div class="metric-label">Last Trained</div></div>', unsafe_allow_html=True)
-    c4.markdown(f'<div class="metric-card"><div class="metric-value">{samples:,}</div><div class="metric-label">Patterns Trained On</div></div>', unsafe_allow_html=True)
-else:
+if not metrics:
     st.info("⚠️ Model not trained yet. Go to **Model Retrain** tab to train.")
-
-st.divider()
 
 # ─────────────────────────────────────────────────────────────
 # TABS
