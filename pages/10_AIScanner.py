@@ -413,11 +413,10 @@ with tab_retrain:
 
     st.divider()
 
-    # ── How It Works guide ──
-    st.markdown("#### 📋 How This Works — Step by Step")
-    st.markdown("""
+    with st.expander("📋 How This Works — Step by Step Guide", expanded=False):
+        st.markdown("""
 <style>
-.flow-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+.flow-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 10px 0 4px 0; }
 .flow-card {
     border-radius: 10px; padding: 16px 18px;
     border-left: 4px solid;
@@ -429,9 +428,9 @@ with tab_retrain:
 .flow-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
 .flow-when  { font-size: 11px; color: #64748b; font-weight: 600;
               text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.flow-desc  { font-size: 12.5px; color: #94a3b8; line-height: 1.55; }
+.flow-desc  { font-size: 12.5px; color: #94a3b8; line-height: 1.6; }
 .flow-badge { display:inline-block; font-size:10px; font-weight:700;
-              padding: 2px 8px; border-radius:4px; margin-top:8px; }
+              padding: 2px 8px; border-radius:4px; margin-top:10px; }
 .badge-weekly  { background:#d1fae5; color:#065f46; }
 .badge-daily   { background:#dbeafe; color:#1e3a8a; }
 .badge-2days   { background:#ede9fe; color:#4c1d95; }
@@ -444,35 +443,37 @@ with tab_retrain:
     <div class="flow-title">🧠 Train Model</div>
     <div class="flow-desc">
       Fetches 60 days of OHLCV history for all 821 stocks via yfinance.
-      Calculates 13 technical features (EMA distance, volume dry-up, range compression etc.)
-      and trains a RandomForest to predict which patterns precede a ≥5% spike.
-      Model is saved to Supabase — no local file.
+      Calculates 13 technical features — EMA distance, volume dry-up, range compression,
+      body ratio, price change etc. — and trains a RandomForest classifier to learn
+      which patterns precede a ≥5% spike within 2 days.
+      Model is saved directly to Supabase — no local file, no disk dependency.
     </div>
-    <span class="flow-badge badge-weekly">Run Weekly / On-demand</span>
+    <span class="flow-badge badge-weekly">🔁 Run Weekly / On-demand</span>
   </div>
 
   <div class="flow-card blue">
     <div class="flow-when">Step 2</div>
     <div class="flow-title">🎯 Run Predictions</div>
     <div class="flow-desc">
-      Fetches last 30 days of data, generates today's features for each stock,
-      and runs the trained model. Each stock gets an AI probability score and a stage:
-      PRIME_AI ≥80%, WATCH_AI ≥60%, BUILD_AI ≥40%, EARLY_AI below that.
-      Results are saved in Supabase with <b>today's date</b> and <b>outcome = NULL</b>.
+      Fetches the last 30 days of data for all stocks, generates today's feature snapshot
+      for each, and scores them using the trained model. Every stock gets an AI probability
+      and a confidence stage — PRIME_AI ≥80%, WATCH_AI ≥60%, BUILD_AI ≥40%, EARLY_AI below.
+      All results are saved to Supabase with today's date and outcome = NULL (pending).
     </div>
-    <span class="flow-badge badge-daily">Run Daily after 3:30 PM</span>
+    <span class="flow-badge badge-daily">📅 Run Daily after 3:30 PM</span>
   </div>
 
   <div class="flow-card purple">
     <div class="flow-when">Step 3</div>
     <div class="flow-title">🔍 Resolve Outcomes</div>
     <div class="flow-desc">
-      Looks up all past predictions where outcome is still NULL.
-      For each, checks if the stock's actual close rose ≥5% within the next 2 trading days.
-      Updates outcome = 1 (Hit) or 0 (Miss) in Supabase.
-      This builds the Live Hit Rate shown on the dashboard.
+      Scans all past predictions where outcome is still NULL (pending).
+      For each, fetches the stock's actual price data and checks if the close rose
+      ≥5% within the next 2 trading days after the prediction date.
+      Updates outcome = 1 (Hit ✅) or 0 (Miss ❌) in Supabase.
+      This is what powers the Live Hit Rate on the dashboard header.
     </div>
-    <span class="flow-badge badge-2days">Run Daily (resolves 2-day-old calls)</span>
+    <span class="flow-badge badge-2days">📅 Run Daily (resolves 2-day-old calls)</span>
   </div>
 
 </div>
