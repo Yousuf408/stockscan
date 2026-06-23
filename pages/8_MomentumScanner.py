@@ -69,30 +69,35 @@ def get_supabase():
 # ─────────────────────────────────────────────────────────────
 # SIGNAL TIME — SUPABASE SAVE & FETCH
 # ─────────────────────────────────────────────────────────────
-def fetch_signal_times_from_supabase(today_str: str) -> dict:
+def fetch_signal_data_from_supabase(today_str: str) -> dict:
     """
-    Fetch all signal times for today from momentum_signal_times table.
-    Returns dict: {stock: signal_time}
+    Fetch all signal data for today from momentum_signal_times table.
+    Returns dict: {stock: {signal_time, signal_price, peak_ltp}}
     """
     try:
         supabase = get_supabase()
         resp = supabase.table("momentum_signal_times") \
-            .select("stock, signal_time") \
+            .select("stock, signal_time, signal_price, peak_ltp") \
             .eq("signal_date", today_str) \
             .execute()
         result = {}
         for row in resp.data:
-            result[row["stock"]] = row["signal_time"]
+            result[row["stock"]] = {
+                "signal_time"  : row.get("signal_time", ""),
+                "signal_price" : row.get("signal_price", None),
+                "peak_ltp"     : row.get("peak_ltp", None),
+            }
         return result
     except Exception as e:
         return {}
 
 
-def save_signal_time_to_supabase(stock: str, today_str: str, signal_time: str,
-                                  vol_ratio: float, intraday_pct: float,
-                                  vol_momentum: str, momentum: str, score: float):
+def save_signal_to_supabase(stock: str, today_str: str, signal_time: str,
+                             vol_ratio: float, intraday_pct: float,
+                             vol_momentum: str, momentum: str, score: float,
+                             signal_price: float):
     """
-    Save signal time to Supabase ONLY if not already saved today.
+    Save signal data to Supabase ONLY if not already saved today.
     Uses UNIQUE(stock, signal_date) — duplicate insert will be ignored.
     """
     try:
@@ -106,9 +111,27 @@ def save_signal_time_to_supabase(stock: str, today_str: str, signal_time: str,
             "vol_momentum" : vol_momentum,
             "momentum"     : momentum,
             "score"        : round(float(score), 2),
+            "signal_price" : round(float(signal_price), 2),
+            "peak_ltp"     : round(float(signal_price), 2),  # init peak = signal price
         }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
     except Exception as e:
         pass  # Silent fail — don't break scanner if save fails
+
+
+def update_peak_ltp_in_supabase(stock: str, today_str: str, new_peak_ltp: float):
+    """
+    Update peak_ltp in Supabase when a new high is reached.
+    """
+    try:
+        supabase = get_supabase()
+        supabase.table("momentum_signal_times") \
+            .update({"peak_ltp": round(float(new_peak_ltp), 2)}) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
+    except Exception as e:
+        pass  # Silent fail
+
 
 # ─────────────────────────────────────────────────────────────
 # FETCH HISTORICAL DATA FROM SUPABASE (runs ONCE, cached)
@@ -232,7 +255,7 @@ def fetch_historical_data():
     }
 
 # ─────────────────────────────────────────────────────────────
-# CORE SCAN LOGIC
+# CORE SCAN LOGIC — UNCHANGED
 # ─────────────────────────────────────────────────────────────
 def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df_target  = historical["df_target"]
@@ -272,24 +295,18 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df = df[df["median_vol"] > 0]
     df = df[df["yesterday_close"] > 0]
 
-    df["vol_ratio"]      = (df["live_volume"] / df["median_vol"]).round(2)
-    df["gap_pct"]        = ((df["live_open"] - df["yesterday_close"]) / df["yesterday_close"] * 100).round(2)
-    df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"])       / df["live_open"]        * 100).round(2)
-    df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"]  * 100).round(2)
-    df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7).round(2)
-
-  # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     # CALCULATE METRICS (RAW VALUES - NO ROUNDING YET)
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     df["vol_ratio"]      = df["live_volume"] / df["median_vol"]
     df["gap_pct"]        = ((df["live_open"] - df["yesterday_close"]) / df["yesterday_close"] * 100)
     df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"]) / df["live_open"] * 100)
     df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"] * 100)
     df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7)
 
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     # FILTER USING RAW VALUES (BEFORE ROUNDING)
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     df = df[
         (df["vol_ratio"]    >= 1.5) &
         (df["intraday_pct"] >= 1.0) &
@@ -301,9 +318,9 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(), data_source
 
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     # SIGNAL DETECTION (using RAW values for detection)
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     def vol_momentum(r):
         if r >= 3.0: return "🔥 Very Strong"
         if r >= 2.0: return "⚡ Strong"
@@ -320,9 +337,9 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df["vol_momentum"]       = df["vol_ratio"].apply(vol_momentum)
     df["momentum_detection"] = df.apply(lambda x: momentum_detection(x["vol_ratio"], x["intraday_pct"], x["gap_pct"]), axis=1)
 
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     # NOW ROUND ALL METRICS FOR DISPLAY
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
     df["vol_ratio"]      = df["vol_ratio"].round(2)
     df["gap_pct"]        = df["gap_pct"].round(2)
     df["intraday_pct"]   = df["intraday_pct"].round(2)
@@ -346,7 +363,6 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
         "Symbol", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Chg vs Prev %",
         "Vol Ratio", "vol_momentum", "momentum_detection", "Score",
-        # Keep raw values for signal time saving
         "vol_ratio", "intraday_pct", "priority_score"
     ]
 
@@ -360,7 +376,7 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────
-# HTML TABLE WITH CLICK-TO-COPY SYMBOL
+# HTML TABLE
 # ─────────────────────────────────────────────────────────────
 def render_html_table(df: pd.DataFrame) -> str:
     def row_bg(momentum):
@@ -370,12 +386,25 @@ def render_html_table(df: pd.DataFrame) -> str:
         if "COOLING"         in momentum: return "#f8d7da"
         return "#ffffff"
 
+    def move_color(pct_str):
+        """Return color based on move % value"""
+        try:
+            val = float(pct_str.replace("%", "").replace("+", ""))
+            if val >= 5.0:  return "#16a34a"  # strong green
+            if val >= 2.0:  return "#ca8a04"  # amber
+            if val >= 0:    return "#64748b"  # grey
+            return "#dc2626"                   # red for negative
+        except:
+            return "#64748b"
+
     html = """
     <style>
     .mom-table {width:100%; border-collapse:collapse; font-size:13px; font-family:sans-serif;}
     .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
+    .mom-table th.th-new {background:#ede9fe; color:#5b21b6;}
     .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
     .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
+    .peak-val {color:#7c3aed; font-weight:600;}
     .copy-btn {
         cursor:pointer; font-weight:700; color:#0f172a;
         background:#e2e8f0; border:none; padding:3px 8px;
@@ -408,30 +437,68 @@ def render_html_table(df: pd.DataFrame) -> str:
     </script>
     <table class="mom-table">
     <thead><tr>
-        <th>Symbol</th><th>Signal Time</th><th>Prev Close</th><th>Open</th><th>LTP</th>
-        <th>Volume</th><th>Gap %</th><th>Chg vs Prev %</th>
-        <th>Vol Ratio</th><th>Vol Momentum</th><th>Momentum</th><th>Score</th>
+        <th>Symbol</th>
+        <th>Signal Time</th>
+        <th>Gap %</th>
+        <th>Chg vs Prev %</th>
+        <th>Vol Ratio</th>
+        <th>Vol Momentum</th>
+        <th>Momentum</th>
+        <th class="th-new">Signal Price</th>
+        <th class="th-new">Move Since Signal %</th>
+        <th>LTP</th>
+        <th class="th-new">High Since Signal</th>
+        <th class="th-new">Peak Move %</th>
+        <th>Volume</th>
+        <th>Open</th>
+        <th>Prev Close</th>
     </tr></thead><tbody>
     """
 
     for _, row in df.iterrows():
-        bg          = row_bg(str(row.get("Momentum", "")))
-        symbol      = str(row["Symbol"])
-        signal_time = str(row.get("Signal Time", "-"))
+        bg           = row_bg(str(row.get("Momentum", "")))
+        symbol       = str(row["Symbol"])
+        signal_time  = str(row.get("Signal Time", "-"))
+        signal_price = row.get("Signal Price", None)
+        ltp          = float(row["LTP"])
+        peak_ltp     = row.get("High Since Signal", None)
+
+        # ── Move Since Signal % ──────────────────────────────
+        if signal_price and float(signal_price) > 0:
+            move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100
+            move_since_str = f"{move_since:+.2f}%"
+            move_c = move_color(move_since_str)
+        else:
+            move_since_str = "-"
+            move_c = "#64748b"
+
+        # ── Peak Move % ──────────────────────────────────────
+        if signal_price and peak_ltp and float(signal_price) > 0:
+            peak_move = ((float(peak_ltp) - float(signal_price)) / float(signal_price)) * 100
+            peak_move_str = f"{peak_move:+.2f}%"
+        else:
+            peak_move_str = "-"
+
+        signal_price_str = f"₹{float(signal_price):.2f}" if signal_price else "-"
+        peak_ltp_str     = f"₹{float(peak_ltp):.2f}"    if peak_ltp     else "-"
+
         html += f"""
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
             <td class="signal-time-col">{signal_time}</td>
-            <td>₹{float(row['Prev Close']):.2f}</td>
-            <td>₹{float(row['Open']):.2f}</td>
-            <td>₹{float(row['LTP']):.2f}</td>
-            <td>{int(float(row['Volume'])):,}</td>
             <td>{row['Gap %']}</td>
             <td>{row['Chg vs Prev %']}</td>
             <td>{row['Vol Ratio']}</td>
             <td>{row['Vol Momentum']}</td>
             <td>{row['Momentum']}</td>
-            <td>{float(row['Score']):.2f}</td>
+            <td>{signal_price_str}</td>
+            <td><span style="font-weight:700;color:{move_c}">{move_since_str}</span></td>
+            <td>₹{ltp:.2f}</td>
+            <td class="peak-val">{peak_ltp_str}</td>
+            <td class="peak-val">{peak_move_str}</td>
+            <td>{int(float(row['Volume'])):,}</td>
+            <td>₹{float(row['Open']):.2f}</td>
+            <td>₹{float(row['Prev Close']):.2f}</td>
         </tr>"""
 
     html += "</tbody></table>"
@@ -462,14 +529,13 @@ historical = st.session_state["momentum_historical"]
 # ── Today's date string (IST) ────────────────────────────────
 today_str = datetime.now(IST).strftime("%Y-%m-%d")
 
-# ── Load signal times from Supabase ONCE per day ────────────
-# Reload only if date changed (new trading day)
+# ── Load signal data from Supabase ONCE per day ──────────────
 if (
-    "signal_times" not in st.session_state or
-    st.session_state.get("signal_times_date") != today_str
+    "signal_data" not in st.session_state or
+    st.session_state.get("signal_data_date") != today_str
 ):
-    st.session_state["signal_times"] = fetch_signal_times_from_supabase(today_str)
-    st.session_state["signal_times_date"] = today_str
+    st.session_state["signal_data"] = fetch_signal_data_from_supabase(today_str)
+    st.session_state["signal_data_date"] = today_str
 
 # ── Compact top bar ──────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
@@ -483,7 +549,9 @@ with col2:
 
 st.divider()
 
-# ── Auto-refresh fragment ─────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# AUTO-REFRESH FRAGMENT
+# ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=5)
 def scanner_table():
     df, data_source = run_momentum_scan(st.session_state["momentum_historical"])
@@ -498,15 +566,15 @@ def scanner_table():
     current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
     today            = datetime.now(IST).strftime("%Y-%m-%d")
 
-    signal_time_list = []
+    signal_data = st.session_state["signal_data"]
 
     for _, row in df.iterrows():
         symbol = row["Symbol"]
+        ltp    = float(row["LTP"])
 
-        if symbol not in st.session_state["signal_times"]:
-            # ── First time this stock qualifies today ────────
-            # Save to Supabase
-            save_signal_time_to_supabase(
+        if symbol not in signal_data:
+            # ── First time — save signal price + init peak ───
+            save_signal_to_supabase(
                 stock        = symbol,
                 today_str    = today,
                 signal_time  = current_time_ist,
@@ -515,23 +583,37 @@ def scanner_table():
                 vol_momentum = str(row.get("Vol Momentum", "")),
                 momentum     = str(row.get("Momentum", "")),
                 score        = row.get("Score", 0),
+                signal_price = ltp,
             )
-            # Save to session_state cache
-            st.session_state["signal_times"][symbol] = current_time_ist
+            signal_data[symbol] = {
+                "signal_time"  : current_time_ist,
+                "signal_price" : ltp,
+                "peak_ltp"     : ltp,
+            }
 
-        signal_time_list.append(st.session_state["signal_times"][symbol])
+        else:
+            # ── Already seen — check if new peak ─────────────
+            current_peak = signal_data[symbol].get("peak_ltp") or ltp
+            if ltp > current_peak:
+                update_peak_ltp_in_supabase(symbol, today, ltp)
+                signal_data[symbol]["peak_ltp"] = ltp
 
-    df["Signal Time"] = signal_time_list
+    # ── Assign columns safely ────────────────────────────────
+    df["Signal Time"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_time", "-"))
+    df["Signal Price"]     = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
+    df["High Since Signal"]= df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp", None))
 
     # ── Display columns ──────────────────────────────────────
     display_cols = [
-        "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
-        "Gap %", "Chg vs Prev %",
-        "Vol Ratio", "Vol Momentum", "Momentum", "Score"
+        "Symbol", "Signal Time", "Gap %", "Chg vs Prev %",
+        "Vol Ratio", "Vol Momentum", "Momentum",
+        "Signal Price", "LTP", "High Since Signal",
+        "Volume", "Open", "Prev Close",
     ]
     df_display = df[display_cols]
 
     st.success(f"**{len(df_display)} stocks** matching momentum criteria")
     st.components.v1.html(render_html_table(df_display), height=min(600, 60 + len(df_display) * 38), scrolling=True)
+
 
 scanner_table()
