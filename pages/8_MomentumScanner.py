@@ -468,6 +468,11 @@ with col2:
 st.divider()
 
 # ── Auto-refresh fragment ─────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# PASTE THIS BLOCK: replaces the existing scanner_table() function
+# Everything else in 8_MomentumScanner.py stays EXACTLY the same
+# ─────────────────────────────────────────────────────────────
+
 @st.fragment(run_every=5)
 def scanner_table():
     df, data_source = run_momentum_scan(st.session_state["momentum_historical"])
@@ -482,32 +487,119 @@ def scanner_table():
     current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
     today            = datetime.now(IST).strftime("%Y-%m-%d")
 
+    # ── Init notification state in session ───────────────────
+    # Structure: { stock: { vol_momentum, momentum, chg_vs_prev, vol_ratio } }
+    if "notif_state" not in st.session_state:
+        st.session_state["notif_state"] = {}
+
     signal_time_list = []
+    notifications_to_fire = []  # list of dicts — will be passed to JS
 
     for _, row in df.iterrows():
-        symbol = row["Symbol"]
+        symbol      = row["Symbol"]
+        momentum    = str(row.get("Momentum", ""))
+        vol_mom     = str(row.get("Vol Momentum", ""))
+        chg_vs_prev = str(row.get("Chg vs Prev %", ""))
+        vol_ratio   = str(row.get("Vol Ratio", ""))
 
+        # ── Skip WEAK entirely ───────────────────────────────
+        if "WEAK" in momentum:
+            # Still handle signal time for table display
+            if symbol not in st.session_state["signal_times"]:
+                save_signal_time_to_supabase(
+                    stock        = symbol,
+                    today_str    = today,
+                    signal_time  = current_time_ist,
+                    vol_ratio    = row.get("vol_ratio", 0),
+                    intraday_pct = row.get("intraday_pct", 0),
+                    vol_momentum = vol_mom,
+                    momentum     = momentum,
+                    score        = row.get("Score", 0),
+                )
+                st.session_state["signal_times"][symbol] = current_time_ist
+            signal_time_list.append(st.session_state["signal_times"].get(symbol, current_time_ist))
+            continue
+
+        prev = st.session_state["notif_state"].get(symbol)
+
+        if prev is None:
+            # ── First time this stock qualifies — New Signal ─
+            notifications_to_fire.append({
+                "type"        : "new",
+                "symbol"      : symbol,
+                "time"        : current_time_ist,
+                "chg_vs_prev" : chg_vs_prev,
+                "vol_ratio"   : vol_ratio,
+                "vol_momentum": vol_mom,
+                "momentum"    : momentum,
+                "old_vol_mom" : "",
+                "old_momentum": "",
+                "old_chg"     : "",
+                "old_vol"     : "",
+            })
+        else:
+            vol_mom_changed = prev["vol_momentum"] != vol_mom
+            momentum_changed = prev["momentum"] != momentum
+
+            if vol_mom_changed:
+                # ── Vol Momentum changed ─────────────────────
+                notifications_to_fire.append({
+                    "type"        : "vol_update",
+                    "symbol"      : symbol,
+                    "time"        : current_time_ist,
+                    "chg_vs_prev" : chg_vs_prev,
+                    "vol_ratio"   : vol_ratio,
+                    "vol_momentum": vol_mom,
+                    "momentum"    : momentum,
+                    "old_vol_mom" : prev["vol_momentum"],
+                    "old_momentum": prev["momentum"],
+                    "old_chg"     : prev["chg_vs_prev"],
+                    "old_vol"     : prev["vol_ratio"],
+                })
+
+            if momentum_changed:
+                # ── Momentum changed ─────────────────────────
+                notifications_to_fire.append({
+                    "type"        : "mom_update",
+                    "symbol"      : symbol,
+                    "time"        : current_time_ist,
+                    "chg_vs_prev" : chg_vs_prev,
+                    "vol_ratio"   : vol_ratio,
+                    "vol_momentum": vol_mom,
+                    "momentum"    : momentum,
+                    "old_vol_mom" : prev["vol_momentum"],
+                    "old_momentum": prev["momentum"],
+                    "old_chg"     : prev["chg_vs_prev"],
+                    "old_vol"     : prev["vol_ratio"],
+                })
+
+        # ── Update notif_state with latest values ────────────
+        st.session_state["notif_state"][symbol] = {
+            "vol_momentum": vol_mom,
+            "momentum"    : momentum,
+            "chg_vs_prev" : chg_vs_prev,
+            "vol_ratio"   : vol_ratio,
+        }
+
+        # ── Signal time (existing logic untouched) ───────────
         if symbol not in st.session_state["signal_times"]:
-            # ── First time this stock qualifies today ────────
-            # Save to Supabase
             save_signal_time_to_supabase(
                 stock        = symbol,
                 today_str    = today,
                 signal_time  = current_time_ist,
                 vol_ratio    = row.get("vol_ratio", 0),
                 intraday_pct = row.get("intraday_pct", 0),
-                vol_momentum = str(row.get("Vol Momentum", "")),
-                momentum     = str(row.get("Momentum", "")),
+                vol_momentum = vol_mom,
+                momentum     = momentum,
                 score        = row.get("Score", 0),
             )
-            # Save to session_state cache
             st.session_state["signal_times"][symbol] = current_time_ist
 
         signal_time_list.append(st.session_state["signal_times"][symbol])
 
     df["Signal Time"] = signal_time_list
 
-    # ── Display columns ──────────────────────────────────────
+    # ── Display columns (UNCHANGED) ──────────────────────────
     display_cols = [
         "Symbol", "Signal Time", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Chg vs Prev %",
@@ -517,5 +609,96 @@ def scanner_table():
 
     st.success(f"**{len(df_display)} stocks** matching momentum criteria")
     st.components.v1.html(render_html_table(df_display), height=min(600, 60 + len(df_display) * 38), scrolling=True)
+
+    # ── Fire notifications via JS ─────────────────────────────
+    if notifications_to_fire:
+        import json
+        notif_json = json.dumps(notifications_to_fire)
+
+        notif_js = f"""
+        <script>
+        (function() {{
+            var notifications = {notif_json};
+
+            function cleanMomentum(text) {{
+                // Strip emojis for cleaner notification text
+                return text.replace(/[^\\w\\s%+\\-.x]/g, '').trim();
+            }}
+
+            function fireNotification(n) {{
+                var title, body, icon;
+
+                if (n.type === 'new') {{
+                    title = n.symbol + ' — New Signal';
+                    body  = [
+                        'Momentum: ' + cleanMomentum(n.momentum),
+                        'Chg vs Prev: ' + n.chg_vs_prev,
+                        'Vol Ratio: '   + n.vol_ratio,
+                        'Vol Momentum: '+ cleanMomentum(n.vol_momentum)
+                    ].join('\\n');
+                }}
+                else if (n.type === 'vol_update') {{
+                    title = n.symbol + ' — Vol Momentum Updated';
+                    body  = [
+                        'Vol Momentum: ' + cleanMomentum(n.old_vol_mom) + ' → ' + cleanMomentum(n.vol_momentum),
+                        'Momentum: '     + cleanMomentum(n.momentum),
+                        'Chg vs Prev: '  + n.old_chg + ' → ' + n.chg_vs_prev,
+                        'Vol Ratio: '    + n.old_vol + ' → ' + n.vol_ratio
+                    ].join('\\n');
+                }}
+                else if (n.type === 'mom_update') {{
+                    title = n.symbol + ' — Momentum Updated';
+                    body  = [
+                        'Momentum: '     + cleanMomentum(n.old_momentum) + ' → ' + cleanMomentum(n.momentum),
+                        'Vol Momentum: ' + cleanMomentum(n.vol_momentum),
+                        'Chg vs Prev: '  + n.old_chg + ' → ' + n.chg_vs_prev,
+                        'Vol Ratio: '    + n.old_vol + ' → ' + n.vol_ratio
+                    ].join('\\n');
+                }}
+
+                if (Notification.permission === 'granted') {{
+                    new Notification(title, {{
+                        body: body,
+                        icon: 'https://cdn-icons-png.flaticon.com/512/2103/2103633.png',
+                        tag:  n.symbol + '_' + n.type + '_' + n.time,
+                        requireInteraction: false
+                    }});
+                }}
+                else if (Notification.permission !== 'denied') {{
+                    Notification.requestPermission().then(function(perm) {{
+                        if (perm === 'granted') {{
+                            new Notification(title, {{
+                                body: body,
+                                icon: 'https://cdn-icons-png.flaticon.com/512/2103/2103633.png',
+                                tag:  n.symbol + '_' + n.type + '_' + n.time,
+                                requireInteraction: false
+                            }});
+                        }}
+                    }});
+                }}
+            }}
+
+            notifications.forEach(function(n) {{
+                setTimeout(function() {{ fireNotification(n); }}, 300);
+            }});
+        }})();
+        </script>
+        """
+        st.components.v1.html(notif_js, height=0)
+
+
+# ─────────────────────────────────────────────────────────────
+# ALSO ADD THIS — one-time permission request on page load
+# Paste this BEFORE scanner_table() call at the bottom of the file
+# ─────────────────────────────────────────────────────────────
+
+permission_js = """
+<script>
+if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
+</script>
+"""
+st.components.v1.html(permission_js, height=0)
 
 scanner_table()
