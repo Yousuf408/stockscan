@@ -16,6 +16,22 @@ from supabase import create_client
 import angel_ws
 from config import STOCKS_WATCHLIST
 
+# ── Auto-connect WebSocket ───────────────────────────────────
+if not angel_ws.is_connected():
+    if "ws_init" not in st.session_state:
+        st.session_state["ws_init"] = True
+        if "angel_auth" not in st.session_state:
+            from angel_auth import angel_login
+            st.session_state["angel_auth"] = angel_login()
+        auth = st.session_state["angel_auth"]
+        if auth:
+            angel_ws.start_websocket(
+                jwt_token  = auth["jwt_token"],
+                api_key    = auth["api_key"],
+                client_id  = auth["client_id"],
+                feed_token = auth["feed_token"],
+            )
+
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
