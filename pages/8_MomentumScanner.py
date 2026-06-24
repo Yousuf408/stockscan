@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import pandas as pd
 import numpy as np
+import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from supabase import create_client
 
@@ -53,7 +54,8 @@ st.markdown("""
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
-IST = timezone(timedelta(hours=5, minutes=30))
+IST               = timezone(timedelta(hours=5, minutes=30))
+EMA_DISTANCE_LIMIT = 8.0  # max % above EMA20 to pass
 
 # Token → Name lookup from config
 TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
@@ -67,13 +69,96 @@ def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ─────────────────────────────────────────────────────────────
+# EMA20 — FETCH ONLY FOR RESULT STOCKS, CACHE IN SESSION STATE
+# ─────────────────────────────────────────────────────────────
+def fetch_ema20_for_stocks(stock_names: list) -> dict:
+    """
+    Fetch EMA20 for a small list of stocks via yfinance.
+    Returns dict: {stock: {"ema20": val, "gap": val, "status": str}}
+    """
+    result = {}
+    if not stock_names:
+        return result
+
+    tickers = [f"{s}.NS" for s in stock_names]
+    try:
+        raw = yf.download(
+            tickers,
+            period="60d",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+            group_by="ticker" if len(tickers) > 1 else None,
+        )
+    except Exception:
+        return result
+
+    # Handle single vs multiple ticker structure
+    if len(tickers) == 1:
+        close_data = {tickers[0]: raw["Close"] if "Close" in raw else pd.Series()}
+    else:
+        close_data = {}
+        if "Close" in raw:
+            for ticker in tickers:
+                if ticker in raw["Close"].columns:
+                    close_data[ticker] = raw["Close"][ticker]
+
+    for stock in stock_names:
+        ticker = f"{stock}.NS"
+        if ticker not in close_data:
+            result[stock] = {"ema20": None, "gap": None, "status": "⚠️ N/A"}
+            continue
+
+        series = close_data[ticker].dropna()
+        if len(series) < 21:
+            result[stock] = {"ema20": None, "gap": None, "status": "⚠️ N/A"}
+            continue
+
+        ema_series      = series.ewm(span=20, adjust=False).mean()
+        yesterday_close = round(float(series.iloc[-2]), 2)
+        ema20_yesterday = round(float(ema_series.iloc[-2]), 2)
+        gap             = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 2)
+
+        if yesterday_close < ema20_yesterday:
+            status = "❌ Below"
+        elif gap > EMA_DISTANCE_LIMIT:
+            status = f"🔼 +{gap:.1f}%"
+        else:
+            status = f"✅ +{gap:.1f}%"
+
+        result[stock] = {"ema20": ema20_yesterday, "gap": gap, "status": status}
+
+    return result
+
+
+def get_ema20_status(df: pd.DataFrame) -> dict:
+    """
+    For stocks in scan result:
+    - Check session_state cache first
+    - Fetch only NEW stocks not yet cached
+    - Returns full cache dict
+    """
+    if "ema20_cache" not in st.session_state:
+        st.session_state["ema20_cache"] = {}
+
+    cache        = st.session_state["ema20_cache"]
+    result_stocks = df["Symbol"].tolist()
+
+    # Only fetch stocks not already in cache
+    new_stocks = [s for s in result_stocks if s not in cache]
+
+    if new_stocks:
+        fetched = fetch_ema20_for_stocks(new_stocks)
+        cache.update(fetched)
+        st.session_state["ema20_cache"] = cache
+
+    return cache
+
+
+# ─────────────────────────────────────────────────────────────
 # SIGNAL TIME — SUPABASE SAVE & FETCH
 # ─────────────────────────────────────────────────────────────
 def fetch_signal_data_from_supabase(today_str: str) -> dict:
-    """
-    Fetch all signal data for today from momentum_signal_times table.
-    Returns dict: {stock: {signal_time, signal_price, peak_ltp}}
-    """
     try:
         supabase = get_supabase()
         resp = supabase.table("momentum_signal_times") \
@@ -88,18 +173,12 @@ def fetch_signal_data_from_supabase(today_str: str) -> dict:
                 "peak_ltp"     : row.get("peak_ltp", None),
             }
         return result
-    except Exception as e:
+    except Exception:
         return {}
 
 
-def save_signal_to_supabase(stock: str, today_str: str, signal_time: str,
-                             vol_ratio: float, intraday_pct: float,
-                             vol_momentum: str, momentum: str, score: float,
-                             signal_price: float):
-    """
-    Save signal data to Supabase ONLY if not already saved today.
-    Uses UNIQUE(stock, signal_date) — duplicate insert will be ignored.
-    """
+def save_signal_to_supabase(stock, today_str, signal_time, vol_ratio,
+                             intraday_pct, vol_momentum, momentum, score, signal_price):
     try:
         supabase = get_supabase()
         supabase.table("momentum_signal_times").upsert({
@@ -112,16 +191,13 @@ def save_signal_to_supabase(stock: str, today_str: str, signal_time: str,
             "momentum"     : momentum,
             "score"        : round(float(score), 2),
             "signal_price" : round(float(signal_price), 2),
-            "peak_ltp"     : round(float(signal_price), 2),  # init peak = signal price
+            "peak_ltp"     : round(float(signal_price), 2),
         }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
-    except Exception as e:
-        pass  # Silent fail — don't break scanner if save fails
+    except Exception:
+        pass
 
 
-def update_peak_ltp_in_supabase(stock: str, today_str: str, new_peak_ltp: float):
-    """
-    Update peak_ltp in Supabase when a new high is reached.
-    """
+def update_peak_ltp_in_supabase(stock, today_str, new_peak_ltp):
     try:
         supabase = get_supabase()
         supabase.table("momentum_signal_times") \
@@ -129,24 +205,16 @@ def update_peak_ltp_in_supabase(stock: str, today_str: str, new_peak_ltp: float)
             .eq("stock", stock) \
             .eq("signal_date", today_str) \
             .execute()
-    except Exception as e:
-        pass  # Silent fail
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────
-# FETCH HISTORICAL DATA FROM SUPABASE (runs ONCE, cached)
+# FETCH HISTORICAL DATA FROM SUPABASE
 # ─────────────────────────────────────────────────────────────
 def fetch_historical_data():
-    """
-    Fetch from websocket_stock_values:
-    1. target_date      → latest trading day's ltp/open/volume (fallback when WS off)
-    2. yesterday_close  → prev trading day's last ltp per stock
-    3. median_vol_5d    → median volume of last 5 trading days per stock
-    Returns dict with all three DataFrames.
-    """
     supabase = get_supabase()
 
-    # ── Step 1: Find all distinct trading dates ──────────────
     all_dates = set()
     offset = 0
     while True:
@@ -168,11 +236,10 @@ def fetch_historical_data():
         return None
 
     sorted_dates = sorted(all_dates, reverse=True)
-    target_date   = sorted_dates[0]
-    prev_date     = sorted_dates[1] if len(sorted_dates) > 1 else None
-    last_5_dates  = sorted_dates[1:6]
+    target_date  = sorted_dates[0]
+    prev_date    = sorted_dates[1] if len(sorted_dates) > 1 else None
+    last_5_dates = sorted_dates[1:6]
 
-    # ── Step 2: Fetch target_date data (fallback for closed market) ──
     target_rows = []
     offset = 0
     while True:
@@ -195,7 +262,6 @@ def fetch_historical_data():
         df_target = df_target.drop_duplicates(subset="stock", keep="first")
         df_target = df_target.rename(columns={"ltp": "live_ltp", "open": "live_open", "volume": "live_volume"})
 
-    # ── Step 3: Fetch yesterday's close ──────────────────────
     df_prev = pd.DataFrame()
     if prev_date:
         prev_rows = []
@@ -220,7 +286,6 @@ def fetch_historical_data():
             df_prev = df_prev.drop_duplicates(subset="stock", keep="first")
             df_prev = df_prev.rename(columns={"ltp": "yesterday_close"})
 
-    # ── Step 4: Fetch last 5 days volume for median ──────────
     df_median = pd.DataFrame()
     if last_5_dates:
         vol_rows = []
@@ -247,20 +312,21 @@ def fetch_historical_data():
             df_median = df_median.rename(columns={"volume": "median_vol"})
 
     return {
-        "target_date"  : target_date,
-        "prev_date"    : prev_date,
-        "df_target"    : df_target,
-        "df_prev"      : df_prev,
-        "df_median"    : df_median,
+        "target_date": target_date,
+        "prev_date"  : prev_date,
+        "df_target"  : df_target,
+        "df_prev"    : df_prev,
+        "df_median"  : df_median,
     }
 
+
 # ─────────────────────────────────────────────────────────────
-# CORE SCAN LOGIC — UNCHANGED
+# CORE SCAN LOGIC
 # ─────────────────────────────────────────────────────────────
 def run_momentum_scan(historical: dict) -> pd.DataFrame:
-    df_target  = historical["df_target"]
-    df_prev    = historical["df_prev"]
-    df_median  = historical["df_median"]
+    df_target = historical["df_target"]
+    df_prev   = historical["df_prev"]
+    df_median = historical["df_median"]
 
     live_ticks = angel_ws.latest_ticks
 
@@ -276,17 +342,17 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
                 "live_open"  : tick.get("open", 0),
                 "live_volume": tick.get("volume", 0),
             })
-        df_live = pd.DataFrame(rows)
+        df_live     = pd.DataFrame(rows)
         data_source = "🟢 Live WebSocket"
     else:
-        df_live = df_target.copy() if not df_target.empty else pd.DataFrame()
+        df_live     = df_target.copy() if not df_target.empty else pd.DataFrame()
         data_source = "🟡 Supabase (Market Closed)"
 
     if df_live.empty or df_prev.empty or df_median.empty:
         return pd.DataFrame(), data_source
 
-    df = df_live.merge(df_prev,   on="stock", how="inner")
-    df = df.merge(df_median,      on="stock", how="inner")
+    df = df_live.merge(df_prev,  on="stock", how="inner")
+    df = df.merge(df_median,     on="stock", how="inner")
 
     for col in ["live_ltp", "live_open", "live_volume", "yesterday_close", "median_vol"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -295,18 +361,12 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df = df[df["median_vol"] > 0]
     df = df[df["yesterday_close"] > 0]
 
-    # ─────────────────────────────────────────────────────────
-    # CALCULATE METRICS (RAW VALUES - NO ROUNDING YET)
-    # ─────────────────────────────────────────────────────────
     df["vol_ratio"]      = df["live_volume"] / df["median_vol"]
     df["gap_pct"]        = ((df["live_open"] - df["yesterday_close"]) / df["yesterday_close"] * 100)
     df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"]) / df["live_open"] * 100)
     df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"] * 100)
     df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7)
 
-    # ─────────────────────────────────────────────────────────
-    # FILTER USING RAW VALUES (BEFORE ROUNDING)
-    # ─────────────────────────────────────────────────────────
     df = df[
         (df["vol_ratio"]    >= 1.5) &
         (df["intraday_pct"] >= 1.0) &
@@ -318,9 +378,6 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(), data_source
 
-    # ─────────────────────────────────────────────────────────
-    # SIGNAL DETECTION (using RAW values for detection)
-    # ─────────────────────────────────────────────────────────
     def vol_momentum(r):
         if r >= 3.0: return "🔥 Very Strong"
         if r >= 2.0: return "⚡ Strong"
@@ -337,9 +394,6 @@ def run_momentum_scan(historical: dict) -> pd.DataFrame:
     df["vol_momentum"]       = df["vol_ratio"].apply(vol_momentum)
     df["momentum_detection"] = df.apply(lambda x: momentum_detection(x["vol_ratio"], x["intraday_pct"], x["gap_pct"]), axis=1)
 
-    # ─────────────────────────────────────────────────────────
-    # NOW ROUND ALL METRICS FOR DISPLAY
-    # ─────────────────────────────────────────────────────────
     df["vol_ratio"]      = df["vol_ratio"].round(2)
     df["gap_pct"]        = df["gap_pct"].round(2)
     df["intraday_pct"]   = df["intraday_pct"].round(2)
@@ -387,21 +441,32 @@ def render_html_table(df: pd.DataFrame) -> str:
         return "#ffffff"
 
     def move_color(pct_str):
-        """Return color based on move % value"""
         try:
             val = float(pct_str.replace("%", "").replace("+", ""))
-            if val >= 5.0:  return "#16a34a"  # strong green
-            if val >= 2.0:  return "#ca8a04"  # amber
-            if val >= 0:    return "#64748b"  # grey
-            return "#dc2626"                   # red for negative
+            if val >= 5.0:  return "#16a34a"
+            if val >= 2.0:  return "#ca8a04"
+            if val >= 0:    return "#64748b"
+            return "#dc2626"
         except:
             return "#64748b"
+
+    def ema_cell(status):
+        if status is None:
+            return '<span style="color:#94a3b8">⏳</span>'
+        if status.startswith("✅"):
+            return f'<span style="color:#16a34a;font-weight:700">{status}</span>'
+        if status.startswith("🔼"):
+            return f'<span style="color:#ca8a04;font-weight:700">{status}</span>'
+        if status.startswith("❌"):
+            return f'<span style="color:#dc2626;font-weight:700">{status}</span>'
+        return f'<span style="color:#94a3b8">{status}</span>'
 
     html = """
     <style>
     .mom-table {width:100%; border-collapse:collapse; font-size:13px; font-family:sans-serif;}
     .mom-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
     .mom-table th.th-new {background:#ede9fe; color:#5b21b6;}
+    .mom-table th.th-ema {background:#dcfce7; color:#166534;}
     .mom-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
     .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
     .peak-val {color:#7c3aed; font-weight:600;}
@@ -439,6 +504,7 @@ def render_html_table(df: pd.DataFrame) -> str:
     <thead><tr>
         <th>Symbol</th>
         <th>Signal Time</th>
+        <th class="th-ema">EMA20 Status</th>
         <th>Gap %</th>
         <th>Chg vs Prev %</th>
         <th>Vol Ratio</th>
@@ -462,19 +528,18 @@ def render_html_table(df: pd.DataFrame) -> str:
         signal_price = row.get("Signal Price", None)
         ltp          = float(row["LTP"])
         peak_ltp     = row.get("High Since Signal", None)
+        ema_status   = row.get("EMA20 Status", None)
 
-        # ── Move Since Signal % ──────────────────────────────
         if signal_price and float(signal_price) > 0:
-            move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100
+            move_since     = ((ltp - float(signal_price)) / float(signal_price)) * 100
             move_since_str = f"{move_since:+.2f}%"
-            move_c = move_color(move_since_str)
+            move_c         = move_color(move_since_str)
         else:
             move_since_str = "-"
-            move_c = "#64748b"
+            move_c         = "#64748b"
 
-        # ── Peak Move % ──────────────────────────────────────
         if signal_price and peak_ltp and float(signal_price) > 0:
-            peak_move = ((float(peak_ltp) - float(signal_price)) / float(signal_price)) * 100
+            peak_move     = ((float(peak_ltp) - float(signal_price)) / float(signal_price)) * 100
             peak_move_str = f"{peak_move:+.2f}%"
         else:
             peak_move_str = "-"
@@ -486,6 +551,7 @@ def render_html_table(df: pd.DataFrame) -> str:
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
             <td class="signal-time-col">{signal_time}</td>
+            <td>{ema_cell(ema_status)}</td>
             <td>{row['Gap %']}</td>
             <td>{row['Chg vs Prev %']}</td>
             <td>{row['Vol Ratio']}</td>
@@ -514,7 +580,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ── Load historical once into session_state ──────────────────
 if "momentum_historical" not in st.session_state:
     with st.spinner("Loading historical data..."):
         hist = fetch_historical_data()
@@ -525,19 +590,15 @@ if "momentum_historical" not in st.session_state:
             st.stop()
 
 historical = st.session_state["momentum_historical"]
+today_str  = datetime.now(IST).strftime("%Y-%m-%d")
 
-# ── Today's date string (IST) ────────────────────────────────
-today_str = datetime.now(IST).strftime("%Y-%m-%d")
-
-# ── Load signal data from Supabase ONCE per day ──────────────
 if (
     "signal_data" not in st.session_state or
     st.session_state.get("signal_data_date") != today_str
 ):
-    st.session_state["signal_data"] = fetch_signal_data_from_supabase(today_str)
+    st.session_state["signal_data"]      = fetch_signal_data_from_supabase(today_str)
     st.session_state["signal_data_date"] = today_str
 
-# ── Compact top bar ──────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
 with col1:
     ws_status = "🟢 Live" if angel_ws.is_connected() else "🔴 Disconnected"
@@ -545,6 +606,7 @@ with col1:
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
+        st.session_state.pop("ema20_cache", None)
         st.rerun()
 
 st.divider()
@@ -565,15 +627,13 @@ def scanner_table():
 
     current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
     today            = datetime.now(IST).strftime("%Y-%m-%d")
-
-    signal_data = st.session_state["signal_data"]
+    signal_data      = st.session_state["signal_data"]
 
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
-            # ── First time — save signal price + init peak ───
             save_signal_to_supabase(
                 stock        = symbol,
                 today_str    = today,
@@ -590,22 +650,24 @@ def scanner_table():
                 "signal_price" : ltp,
                 "peak_ltp"     : ltp,
             }
-
         else:
-            # ── Already seen — check if new peak ─────────────
             current_peak = signal_data[symbol].get("peak_ltp") or ltp
             if ltp > current_peak:
                 update_peak_ltp_in_supabase(symbol, today, ltp)
                 signal_data[symbol]["peak_ltp"] = ltp
 
-    # ── Assign columns safely ────────────────────────────────
-    df["Signal Time"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_time", "-"))
-    df["Signal Price"]     = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
-    df["High Since Signal"]= df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp", None))
+    # ── EMA20 — fetch only new stocks, rest from cache ───────
+    ema_cache = get_ema20_status(df)
 
-    # ── Display columns ──────────────────────────────────────
+    # ── Assign all columns ───────────────────────────────────
+    df["Signal Time"]       = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_time", "-"))
+    df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
+    df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp", None))
+    df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status", "⏳"))
+
     display_cols = [
-        "Symbol", "Signal Time", "Gap %", "Chg vs Prev %",
+        "Symbol", "Signal Time", "EMA20 Status",
+        "Gap %", "Chg vs Prev %",
         "Vol Ratio", "Vol Momentum", "Momentum",
         "Signal Price", "LTP", "High Since Signal",
         "Volume", "Open", "Prev Close",
