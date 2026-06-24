@@ -128,7 +128,7 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
         if yesterday_close < ema20_yesterday:
             status = "❌ Below"
         elif gap > EMA_DISTANCE_LIMIT:
-            status = f"🔼 +{gap:.1f}%"
+            status = f"❌ +{gap:.1f}%"
         else:
             status = f"✅ +{gap:.1f}%"
 
@@ -461,10 +461,11 @@ def render_html_table(df: pd.DataFrame) -> str:
             return '<span style="color:#94a3b8">⏳</span>'
         if status.startswith("✅"):
             return f'<span style="color:#16a34a;font-weight:700">{status}</span>'
-        if status.startswith("🔼"):
-            return f'<span style="color:#ca8a04;font-weight:700">{status}</span>'
-        if status.startswith("❌"):
+        if "Below" in str(status):
             return f'<span style="color:#dc2626;font-weight:700">{status}</span>'
+        if status.startswith("❌"):
+            # extended — orange ❌
+            return f'<span style="color:#ea580c;font-weight:700">{status}</span>'
         return f'<span style="color:#94a3b8">{status}</span>'
 
     html = """
@@ -510,12 +511,12 @@ def render_html_table(df: pd.DataFrame) -> str:
     <thead><tr>
         <th>Symbol</th>
         <th>Signal Time</th>
-        <th class="th-ema">EMA20 Status</th>
         <th>Gap %</th>
         <th>Chg vs Prev %</th>
         <th>Vol Ratio</th>
         <th>Vol Momentum</th>
         <th>Momentum</th>
+        <th class="th-ema">EMA20 Status</th>
         <th class="th-new">Signal Price</th>
         <th class="th-new">Move Since Signal %</th>
         <th>LTP</th>
@@ -557,12 +558,12 @@ def render_html_table(df: pd.DataFrame) -> str:
         <tr style="background:{bg}">
             <td><button class="copy-btn" onclick="copySymbol(this, '{symbol}')">{symbol}</button></td>
             <td class="signal-time-col">{signal_time}</td>
-            <td>{ema_cell(ema_status)}</td>
             <td>{row['Gap %']}</td>
             <td>{row['Chg vs Prev %']}</td>
             <td>{row['Vol Ratio']}</td>
             <td>{row['Vol Momentum']}</td>
             <td>{row['Momentum']}</td>
+            <td>{ema_cell(ema_status)}</td>
             <td>{signal_price_str}</td>
             <td><span style="font-weight:700;color:{move_c}">{move_since_str}</span></td>
             <td>₹{ltp:.2f}</td>
