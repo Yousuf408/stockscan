@@ -103,19 +103,38 @@ def fetch_all_stock_data() -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 def is_consolidating(closes: list) -> bool:
     """
-    Check if stock is consolidating:
-    Each consecutive day change ≤ 2%
-    All 4 pairs must pass.
+    Check if stock is consolidating (sideways):
+
+    Check 1: Consecutive change ≤ 2% per day
+    Check 2: First vs Last close ≤ 3% (no trend up or down)
+    Check 3: Total range ≤ 6% (max high - min low of closes)
     """
     if len(closes) < LOOKBACK_DAYS:
         return False
 
+    # CHECK 1: Consecutive change ≤ 2%
     for i in range(1, len(closes)):
         if closes[i-1] <= 0:
             return False
         day_change = abs(closes[i] - closes[i-1]) / closes[i-1] * 100
         if day_change > MAX_DAY_CHANGE:
             return False
+
+    # CHECK 2: First vs Last ≤ 3% (no uptrend or downtrend)
+    first = closes[0]
+    last  = closes[-1]
+    if first <= 0:
+        return False
+    trend_pct = abs(last - first) / first * 100
+    if trend_pct > 2.0:
+        return False
+
+    # CHECK 3: Total range ≤ 6%
+    high_c     = max(closes)
+    low_c      = min(closes)
+    range_pct  = (high_c - low_c) / low_c * 100 if low_c > 0 else 0
+    if range_pct > 6.0:
+        return False
 
     return True
 
