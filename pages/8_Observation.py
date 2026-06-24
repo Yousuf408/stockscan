@@ -139,13 +139,41 @@ def fetch_daily_candles(symbol: str) -> pd.DataFrame | None:
 def find_zone(df: pd.DataFrame) -> dict | None:
     """
     Find consolidation zone from daily candles.
-    Zone High = max of body highs  (max of open/close per candle)
-    Zone Low  = min of body lows   (min of open/close per candle)
-    Only body used — wicks ignored.
+    3 checks for REAL consolidation (not trending):
+
+    Check 1: Range% ≤ 12%
+             Zone High = max body high
+             Zone Low  = min body low
+
+    Check 2: First vs Last close ≤ 3%
+             Trending stocks filter
+
+    Check 3: Consecutive close change ≤ 2%
+             Day to day movement tight
     """
     if df is None or len(df) < DAILY_LOOKBACK:
         return None
 
+    closes = df["close"].values
+
+    # ── CHECK 2: First vs Last close ≤ 3% ──
+    first_close = closes[0]
+    last_close  = closes[-1]
+    if first_close <= 0:
+        return None
+    trend_pct = abs(last_close - first_close) / first_close * 100
+    if trend_pct > 3.0:
+        return None
+
+    # ── CHECK 3: Consecutive close change ≤ 2% ──
+    for i in range(1, len(closes)):
+        if closes[i-1] <= 0:
+            return None
+        day_change = abs(closes[i] - closes[i-1]) / closes[i-1] * 100
+        if day_change > 2.0:
+            return None
+
+    # ── CHECK 1: Zone Range% ≤ 12% ──
     con_high = df.apply(lambda r: max(r["open"], r["close"]), axis=1).max()
     con_low  = df.apply(lambda r: min(r["open"], r["close"]), axis=1).min()
 
@@ -153,7 +181,6 @@ def find_zone(df: pd.DataFrame) -> dict | None:
         return None
 
     range_pct = (con_high - con_low) / con_low * 100
-
     if range_pct > MAX_RANGE_PCT:
         return None
 
