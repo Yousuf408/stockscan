@@ -227,7 +227,9 @@ with col1:
     if not st.session_state.angel_connected:
         if st.button("🔌 Connect Angel One", use_container_width=True):
             with st.spinner("Logging in to Angel One..."):
-                creds = angel_login()
+                if "angel_auth" not in st.session_state:
+                    st.session_state["angel_auth"] = angel_login()
+                creds = st.session_state["angel_auth"]  # ← reuse
                 if creds:
                     st.session_state.angel_creds = creds
                     st.session_state.angel_connected = True
@@ -244,7 +246,7 @@ with col1:
                     st.error("Login failed! Check credentials in angel_auth.py")
     else:
         st.success("🟢 Angel One Connected")
-
+        
 with col2:
     if st.session_state.angel_connected:
         if st.button("⛔ Disconnect", use_container_width=True):
