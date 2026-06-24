@@ -1,11 +1,17 @@
 """
 test_ema20.py
-Standalone test — checks EMA20 for today's momentum scan stocks
-Run: python test_ema20.py
+Streamlit page — EMA20 test for today's momentum scan stocks
 """
 
+import streamlit as st
 import yfinance as yf
 import pandas as pd
+
+st.set_page_config(page_title="EMA20 Test", page_icon="📊", layout="wide")
+st.markdown("<style>header {visibility: hidden;}</style>", unsafe_allow_html=True)
+
+st.title("📊 EMA20 Test — Momentum Scan Stocks")
+st.caption("Checks if each stock's signal price is above/below its 20 EMA")
 
 # ── All stocks from today's momentum scan ────────────────────
 STOCKS = [
@@ -26,8 +32,6 @@ STOCKS = [
     "ICICIBANK", "AXISBANK", "MBAPL", "CHOLAFIN", "EVERESTIND"
 ]
 
-# ── Prev close from your Supabase data (signal_price ≈ prev close approx) ──
-# Using signal_price as reference — just to cross-check direction
 SIGNAL_PRICES = {
     "DPABHUSHAN": 963.9,  "SUNDROP": 659.05,   "RAMCOSYS": 592.75,
     "JLHL": 1384.7,       "TSFINV": 406.05,    "SHAKTIPUMP": 586.3,
@@ -56,86 +60,108 @@ SIGNAL_PRICES = {
     "MBAPL": 572.0,       "CHOLAFIN": 1793.7,  "EVERESTIND": 415.25,
 }
 
-def fetch_ema20(stocks):
-    tickers = [f"{s}.NS" for s in stocks]
-    print(f"Fetching 60d daily data for {len(tickers)} stocks from yfinance...")
+# ── Fetch button ─────────────────────────────────────────────
+if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="primary"):
+    with st.spinner(f"Fetching 60d daily data for {len(STOCKS)} stocks from yfinance..."):
+        tickers = [f"{s}.NS" for s in STOCKS]
+        try:
+            raw = yf.download(
+                tickers,
+                period="60d",
+                auto_adjust=True,
+                progress=False,
+                threads=True,
+            )
+        except Exception as e:
+            st.error(f"yfinance download failed: {e}")
+            st.stop()
 
-    try:
-        raw = yf.download(
-            tickers,
-            period="60d",
-            auto_adjust=True,
-            progress=False,
-            threads=True,
-        )
-    except Exception as e:
-        print(f"yfinance download failed: {e}")
-        return []
+        if "Close" not in raw:
+            st.error("No Close data returned from yfinance.")
+            st.stop()
 
-    if "Close" not in raw:
-        print("No Close data returned.")
-        return []
+        close = raw["Close"]
+        results = []
 
-    close = raw["Close"]
-    results = []
+        for stock in STOCKS:
+            ticker = f"{stock}.NS"
+            signal_price = SIGNAL_PRICES.get(stock, 0)
 
-    for stock in stocks:
-        ticker = f"{stock}.NS"
-        if ticker not in close.columns:
+            if ticker not in close.columns:
+                results.append({
+                    "Stock"        : stock,
+                    "Signal Price" : signal_price,
+                    "EMA20"        : None,
+                    "Gap to EMA"   : None,
+                    "Status"       : "⚠️ No Data",
+                })
+                continue
+
+            series = close[ticker].dropna()
+            if len(series) < 20:
+                results.append({
+                    "Stock"        : stock,
+                    "Signal Price" : signal_price,
+                    "EMA20"        : None,
+                    "Gap to EMA"   : None,
+                    "Status"       : "⚠️ < 20 candles",
+                })
+                continue
+
+            ema20       = round(series.ewm(span=20, adjust=False).mean().iloc[-1], 2)
+            gap         = round(((signal_price - ema20) / ema20) * 100, 2) if ema20 else None
+            above_below = "✅ ABOVE" if signal_price >= ema20 else "❌ BELOW"
+
             results.append({
                 "Stock"        : stock,
-                "Signal Price" : SIGNAL_PRICES.get(stock, "-"),
-                "EMA20"        : "NOT FOUND",
-                "Status"       : "❌ No Data",
+                "Signal Price" : signal_price,
+                "EMA20"        : ema20,
+                "Gap to EMA %": f"{gap:+.2f}%" if gap is not None else "-",
+                "Status"       : above_below,
             })
-            continue
 
-        series = close[ticker].dropna()
-        if len(series) < 20:
-            results.append({
-                "Stock"        : stock,
-                "Signal Price" : SIGNAL_PRICES.get(stock, "-"),
-                "EMA20"        : "INSUFFICIENT",
-                "Status"       : "⚠️ < 20 candles",
-            })
-            continue
-
-        ema20       = round(series.ewm(span=20, adjust=False).mean().iloc[-1], 2)
-        prev_close  = SIGNAL_PRICES.get(stock, 0)
-        above_below = "✅ ABOVE" if prev_close >= ema20 else "❌ BELOW"
-
-        results.append({
-            "Stock"        : stock,
-            "Signal Price" : prev_close,
-            "EMA20"        : ema20,
-            "Status"       : above_below,
-        })
-
-    return results
-
-
-if __name__ == "__main__":
-    results = fetch_ema20(STOCKS)
-
-    if not results:
-        print("No results.")
-    else:
         df = pd.DataFrame(results)
-        df["EMA20"] = pd.to_numeric(df["EMA20"], errors="coerce")
 
-        print("\n" + "="*65)
-        print(f"{'Stock':<15} {'Signal Price':>13} {'EMA20':>10} {'Status':>15}")
-        print("="*65)
-        for _, row in df.iterrows():
-            ema_str = f"{row['EMA20']:.2f}" if pd.notna(row["EMA20"]) else str(row["EMA20"])
-            print(f"{row['Stock']:<15} {str(row['Signal Price']):>13} {ema_str:>10} {row['Status']:>15}")
-
-        print("="*65)
-
-        # ── Summary ──────────────────────────────────────────
-        above = df[df["Status"] == "✅ ABOVE"].shape[0]
-        below = df[df["Status"] == "❌ BELOW"].shape[0]
+        # ── Summary metrics ───────────────────────────────────
+        above  = df[df["Status"] == "✅ ABOVE"].shape[0]
+        below  = df[df["Status"] == "❌ BELOW"].shape[0]
         nodata = df[~df["Status"].isin(["✅ ABOVE", "❌ BELOW"])].shape[0]
 
-        print(f"\nSummary: ✅ Above EMA20: {above} | ❌ Below: {below} | ⚠️ No Data: {nodata}")
-        print(f"Total stocks checked: {len(results)}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Stocks", len(df))
+        c2.metric("✅ Above EMA20", above)
+        c3.metric("❌ Below EMA20", below)
+        c4.metric("⚠️ No Data", nodata)
+
+        st.divider()
+
+        # ── Filter tabs ───────────────────────────────────────
+        tab1, tab2, tab3 = st.tabs(["All", "✅ Above Only", "❌ Below Only"])
+
+        def color_status(val):
+            if "ABOVE" in str(val):   return "background-color: #d4edda; color: #155724;"
+            if "BELOW" in str(val):   return "background-color: #f8d7da; color: #721c24;"
+            return "background-color: #fff3cd; color: #856404;"
+
+        with tab1:
+            st.dataframe(
+                df.style.applymap(color_status, subset=["Status"]),
+                use_container_width=True,
+                height=600,
+            )
+        with tab2:
+            df_above = df[df["Status"] == "✅ ABOVE"]
+            st.dataframe(
+                df_above.style.applymap(color_status, subset=["Status"]),
+                use_container_width=True,
+                height=min(600, 40 + len(df_above) * 35),
+            )
+        with tab3:
+            df_below = df[df["Status"] == "❌ BELOW"]
+            st.dataframe(
+                df_below.style.applymap(color_status, subset=["Status"]),
+                use_container_width=True,
+                height=min(600, 40 + len(df_below) * 35),
+            )
+else:
+    st.info("👆 Click the button above to fetch EMA20 values for all stocks.")
