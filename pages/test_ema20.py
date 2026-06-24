@@ -1,6 +1,7 @@
 """
 test_ema20.py
 Streamlit page — EMA20 test for today's momentum scan stocks
+Checks: yesterday's close vs EMA20 as of yesterday
 """
 
 import streamlit as st
@@ -11,7 +12,7 @@ st.set_page_config(page_title="EMA20 Test", page_icon="📊", layout="wide")
 st.markdown("<style>header {visibility: hidden;}</style>", unsafe_allow_html=True)
 
 st.title("📊 EMA20 Test — Momentum Scan Stocks")
-st.caption("Checks if each stock's signal price is above/below its 20 EMA")
+st.caption("Checks if yesterday's close was above/below 20 EMA (as of yesterday)")
 
 # ── All stocks from today's momentum scan ────────────────────
 STOCKS = [
@@ -31,34 +32,6 @@ STOCKS = [
     "ACC", "DENORA", "SMARTWORKS", "BUTTERFLY", "UNITDSPR",
     "ICICIBANK", "AXISBANK", "MBAPL", "CHOLAFIN", "EVERESTIND"
 ]
-
-SIGNAL_PRICES = {
-    "DPABHUSHAN": 963.9,  "SUNDROP": 659.05,   "RAMCOSYS": 592.75,
-    "JLHL": 1384.7,       "TSFINV": 406.05,    "SHAKTIPUMP": 586.3,
-    "BAJAJST": 433.5,     "SAKAR": 842.0,      "KRISHANA": 684.75,
-    "AETHER": 1322.9,     "AMBIKCO": 1775.0,   "ENTERO": 1188.6,
-    "JYOTICNC": 761.1,    "NITTAGELA": 1713.4, "OSWALPUMPS": 434.6,
-    "POLYPLEX": 1001.05,  "SANGAMIND": 559.0,  "TCIEXP": 571.0,
-    "CORONA": 1950.0,     "PGIL": 2048.9,      "FAIRCHEMOR": 625.0,
-    "KDDL": 3209.2,       "AUBANK": 1061.0,    "DICIND": 530.0,
-    "DRREDDY": 1335.5,    "EMAMILTD": 406.5,   "HNDFDS": 558.85,
-    "MANGLMCEM": 913.0,   "NOVARTIND": 1498.7, "SEDEMAC": 2941.4,
-    "WHEELS": 1623.3,     "RAMCOCEM": 908.0,   "AARTISURF": 377.1,
-    "AKCAPIT": 1781.1,    "ARMANFIN": 1653.3,  "BIL": 788.0,
-    "BLUESTONE": 531.9,   "CHOLAHLDNG": 1646.0,"CREDITACC": 1446.4,
-    "EIMCOELECO": 1799.9, "GOKEX": 858.7,      "HOMEFIRST": 1162.0,
-    "INDIGO": 5177.5,     "NITINSPIN": 568.85, "OBEROIRLTY": 1760.0,
-    "PRICOLLTD": 588.6,   "PSPPROJECT": 1006.9,"RUBICON": 1417.0,
-    "SAATVIKGL": 475.9,   "SHARDAMOTR": 856.0, "SHRIRAMFIN": 1015.4,
-    "SIYSIL": 638.0,      "SKYGOLD": 501.8,    "SPAL": 1088.85,
-    "SUMICHEM": 440.9,    "TMCV": 412.8,       "VIMTALABS": 582.5,
-    "DELHIVERY": 481.35,  "CAPLIPOINT": 2511.0,"ONESOURCE": 1574.7,
-    "NILE": 1772.6,       "PRECWIRE": 439.55,  "LGBBROSLTD": 1590.8,
-    "VIJAYA": 1320.0,     "KKCL": 510.0,       "ACC": 1346.8,
-    "DENORA": 943.95,     "SMARTWORKS": 478.5, "BUTTERFLY": 677.0,
-    "UNITDSPR": 1359.4,   "ICICIBANK": 1374.9, "AXISBANK": 1385.0,
-    "MBAPL": 572.0,       "CHOLAFIN": 1793.7,  "EVERESTIND": 415.25,
-}
 
 # ── Fetch button ─────────────────────────────────────────────
 if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="primary"):
@@ -85,39 +58,44 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
 
         for stock in STOCKS:
             ticker = f"{stock}.NS"
-            signal_price = SIGNAL_PRICES.get(stock, 0)
 
+            # ── No data at all ────────────────────────────────
             if ticker not in close.columns:
                 results.append({
-                    "Stock"        : stock,
-                    "Signal Price" : signal_price,
-                    "EMA20"        : None,
-                    "Gap to EMA"   : None,
-                    "Status"       : "⚠️ No Data",
+                    "Stock"          : stock,
+                    "Yesterday Close": None,
+                    "EMA20 Yesterday": None,
+                    "Gap to EMA %"   : "-",
+                    "Status"         : "⚠️ No Data",
                 })
                 continue
 
             series = close[ticker].dropna()
-            if len(series) < 20:
+
+            # ── Need at least 21 rows (20 for EMA + 1 for iloc[-2]) ──
+            if len(series) < 21:
                 results.append({
-                    "Stock"        : stock,
-                    "Signal Price" : signal_price,
-                    "EMA20"        : None,
-                    "Gap to EMA"   : None,
-                    "Status"       : "⚠️ < 20 candles",
+                    "Stock"          : stock,
+                    "Yesterday Close": None,
+                    "EMA20 Yesterday": None,
+                    "Gap to EMA %"   : "-",
+                    "Status"         : "⚠️ < 21 candles",
                 })
                 continue
 
-            ema20       = round(series.ewm(span=20, adjust=False).mean().iloc[-1], 2)
-            gap         = round(((signal_price - ema20) / ema20) * 100, 2) if ema20 else None
-            above_below = "✅ ABOVE" if signal_price >= ema20 else "❌ BELOW"
+            # ── Use iloc[-2] = yesterday ──────────────────────
+            ema_series       = series.ewm(span=20, adjust=False).mean()
+            yesterday_close  = round(float(series.iloc[-2]), 2)
+            ema20_yesterday  = round(float(ema_series.iloc[-2]), 2)
+            gap              = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 2)
+            above_below      = "✅ ABOVE" if yesterday_close >= ema20_yesterday else "❌ BELOW"
 
             results.append({
-                "Stock"        : stock,
-                "Signal Price" : signal_price,
-                "EMA20"        : ema20,
-                "Gap to EMA %": f"{gap:+.2f}%" if gap is not None else "-",
-                "Status"       : above_below,
+                "Stock"          : stock,
+                "Yesterday Close": yesterday_close,
+                "EMA20 Yesterday": ema20_yesterday,
+                "Gap to EMA %"   : f"{gap:+.2f}%",
+                "Status"         : above_below,
             })
 
         df = pd.DataFrame(results)
@@ -128,10 +106,10 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
         nodata = df[~df["Status"].isin(["✅ ABOVE", "❌ BELOW"])].shape[0]
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Stocks", len(df))
-        c2.metric("✅ Above EMA20", above)
-        c3.metric("❌ Below EMA20", below)
-        c4.metric("⚠️ No Data", nodata)
+        c1.metric("Total Stocks",    len(df))
+        c2.metric("✅ Above EMA20",  above)
+        c3.metric("❌ Below EMA20",  below)
+        c4.metric("⚠️ No Data",      nodata)
 
         st.divider()
 
@@ -139,8 +117,8 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
         tab1, tab2, tab3 = st.tabs(["All", "✅ Above Only", "❌ Below Only"])
 
         def color_status(val):
-            if "ABOVE" in str(val):   return "background-color: #d4edda; color: #155724;"
-            if "BELOW" in str(val):   return "background-color: #f8d7da; color: #721c24;"
+            if "ABOVE" in str(val): return "background-color: #d4edda; color: #155724;"
+            if "BELOW" in str(val): return "background-color: #f8d7da; color: #721c24;"
             return "background-color: #fff3cd; color: #856404;"
 
         with tab1:
