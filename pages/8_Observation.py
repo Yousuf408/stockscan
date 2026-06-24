@@ -237,12 +237,12 @@ def render_table(enriched: list):
     for s in enriched:
         sym        = s["symbol"]
         ltp        = s["ltp"]
-        high_close = s["high_close"]
-        low_close  = s["low_close"]
-        rng        = s["range_pct"]
-        pth        = s["pct_to_high"]
-        prox       = s["proximity_pct"]
-        status     = s["status"]
+        high_close = s.get("high_close", s.get("con_high", 0))
+        low_close  = s.get("low_close",  s.get("con_low",  0))
+        rng        = s.get("range_pct",  0)
+        pth        = s.get("pct_to_high", s.get("pct_to_breakout", None))
+        prox       = s.get("proximity_pct", 0)
+        status     = s.get("status", "watching")
         closes     = s.get("closes", [])
 
         # Closes sparkline text
