@@ -40,7 +40,7 @@ SUPABASE_URL     = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY     = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 TABLE_NAME       = "websocket_stock_values"
 LOOKBACK_DAYS    = 5      # last 5 days
-MAX_DAY_CHANGE   = 2.0    # max 2% consecutive day change
+MAX_DAY_CHANGE   = 3.0    # max 3% consecutive day change
 NEAR_HIGH_PCT    = 0.98   # within 2% of highest close = near high
 BROKE_HIGH_PCT   = 1.006  # 0.6% above highest close = broke out
 
@@ -133,7 +133,7 @@ def is_consolidating(closes: list) -> bool:
     high_c     = max(closes)
     low_c      = min(closes)
     range_pct  = (high_c - low_c) / low_c * 100 if low_c > 0 else 0
-    if range_pct > 6.0:
+    if range_pct > 8.0:
         return False
 
     return True
