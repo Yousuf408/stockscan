@@ -175,8 +175,8 @@ def enrich_with_ltp(watchlist: list, ticks: dict) -> list:
     for stock in watchlist:
         symbol     = stock["symbol"]
         token      = NAME_TO_TOKEN.get(symbol)
-        high_close = stock["high_close"]
-        low_close  = stock["low_close"]
+        high_close = stock.get("high_close", stock.get("con_high", 0))
+        low_close  = stock.get("low_close",  stock.get("con_low",  0))
 
         live_data  = ticks.get(token, {}) if token else {}
         ltp        = live_data.get("ltp", None)
@@ -407,6 +407,8 @@ def main():
             return
         with st.spinner("Scanning for consolidating stocks..."):
             results = scan_consolidating_stocks(df_all)
+        # Clear old cached results before saving new ones
+        st.session_state.pop("obs_results", None)
         st.session_state["obs_results"]    = results
         st.session_state["obs_built_time"] = datetime.now().strftime("%d %b %Y, %I:%M %p")
         st.rerun()
