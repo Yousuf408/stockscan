@@ -2,6 +2,7 @@
 test_ema20.py
 Streamlit page — EMA20 test for today's momentum scan stocks
 Checks: yesterday's close vs EMA20 as of yesterday
+Condition: above EMA20 AND within 8% distance
 """
 
 import streamlit as st
@@ -12,7 +13,7 @@ st.set_page_config(page_title="EMA20 Test", page_icon="📊", layout="wide")
 st.markdown("<style>header {visibility: hidden;}</style>", unsafe_allow_html=True)
 
 st.title("📊 EMA20 Test — Momentum Scan Stocks")
-st.caption("Checks if yesterday's close was above/below 20 EMA (as of yesterday)")
+st.caption("Condition: Yesterday close must be ABOVE EMA20 AND within 8% distance")
 
 # ── All stocks from today's momentum scan ────────────────────
 STOCKS = [
@@ -32,6 +33,8 @@ STOCKS = [
     "ACC", "DENORA", "SMARTWORKS", "BUTTERFLY", "UNITDSPR",
     "ICICIBANK", "AXISBANK", "MBAPL", "CHOLAFIN", "EVERESTIND"
 ]
+
+EMA_DISTANCE_LIMIT = 8.0  # max % above EMA20
 
 # ── Fetch button ─────────────────────────────────────────────
 if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="primary"):
@@ -59,7 +62,6 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
         for stock in STOCKS:
             ticker = f"{stock}.NS"
 
-            # ── No data at all ────────────────────────────────
             if ticker not in close.columns:
                 results.append({
                     "Stock"          : stock,
@@ -72,7 +74,6 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
 
             series = close[ticker].dropna()
 
-            # ── Need at least 21 rows (20 for EMA + 1 for iloc[-2]) ──
             if len(series) < 21:
                 results.append({
                     "Stock"          : stock,
@@ -84,42 +85,54 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
                 continue
 
             # ── Use iloc[-2] = yesterday ──────────────────────
-            ema_series       = series.ewm(span=20, adjust=False).mean()
-            yesterday_close  = round(float(series.iloc[-2]), 2)
-            ema20_yesterday  = round(float(ema_series.iloc[-2]), 2)
-            gap              = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 2)
-            above_below      = "✅ ABOVE" if yesterday_close >= ema20_yesterday else "❌ BELOW"
+            ema_series      = series.ewm(span=20, adjust=False).mean()
+            yesterday_close = round(float(series.iloc[-2]), 2)
+            ema20_yesterday = round(float(ema_series.iloc[-2]), 2)
+            gap             = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 2)
+
+            # ── 3-way status ──────────────────────────────────
+            if yesterday_close < ema20_yesterday:
+                status = "❌ BELOW EMA"
+            elif gap > EMA_DISTANCE_LIMIT:
+                status = "🔼 TOO EXTENDED"
+            else:
+                status = "✅ PASS"
 
             results.append({
                 "Stock"          : stock,
                 "Yesterday Close": yesterday_close,
                 "EMA20 Yesterday": ema20_yesterday,
                 "Gap to EMA %"   : f"{gap:+.2f}%",
-                "Status"         : above_below,
+                "Status"         : status,
             })
 
         df = pd.DataFrame(results)
 
         # ── Summary metrics ───────────────────────────────────
-        above  = df[df["Status"] == "✅ ABOVE"].shape[0]
-        below  = df[df["Status"] == "❌ BELOW"].shape[0]
-        nodata = df[~df["Status"].isin(["✅ ABOVE", "❌ BELOW"])].shape[0]
+        passed   = df[df["Status"] == "✅ PASS"].shape[0]
+        extended = df[df["Status"] == "🔼 TOO EXTENDED"].shape[0]
+        below    = df[df["Status"] == "❌ BELOW EMA"].shape[0]
+        nodata   = df[~df["Status"].isin(["✅ PASS", "🔼 TOO EXTENDED", "❌ BELOW EMA"])].shape[0]
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Stocks",    len(df))
-        c2.metric("✅ Above EMA20",  above)
-        c3.metric("❌ Below EMA20",  below)
-        c4.metric("⚠️ No Data",      nodata)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total",          len(df))
+        c2.metric("✅ Pass",         passed)
+        c3.metric("🔼 Too Extended", extended)
+        c4.metric("❌ Below EMA",    below)
+        c5.metric("⚠️ No Data",      nodata)
 
         st.divider()
 
         # ── Filter tabs ───────────────────────────────────────
-        tab1, tab2, tab3 = st.tabs(["All", "✅ Above Only", "❌ Below Only"])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "All", "✅ Pass", "🔼 Too Extended", "❌ Below EMA"
+        ])
 
         def color_status(val):
-            if "ABOVE" in str(val): return "background-color: #d4edda; color: #155724;"
-            if "BELOW" in str(val): return "background-color: #f8d7da; color: #721c24;"
-            return "background-color: #fff3cd; color: #856404;"
+            if "PASS"     in str(val): return "background-color: #d4edda; color: #155724;"
+            if "EXTENDED" in str(val): return "background-color: #fff3cd; color: #856404;"
+            if "BELOW"    in str(val): return "background-color: #f8d7da; color: #721c24;"
+            return "background-color: #e2e8f0; color: #475569;"
 
         with tab1:
             st.dataframe(
@@ -128,14 +141,21 @@ if st.button("🚀 Fetch EMA20 for All Stocks", use_container_width=True, type="
                 height=600,
             )
         with tab2:
-            df_above = df[df["Status"] == "✅ ABOVE"]
+            df_pass = df[df["Status"] == "✅ PASS"]
             st.dataframe(
-                df_above.style.applymap(color_status, subset=["Status"]),
+                df_pass.style.applymap(color_status, subset=["Status"]),
                 use_container_width=True,
-                height=min(600, 40 + len(df_above) * 35),
+                height=min(600, 40 + len(df_pass) * 35),
             )
         with tab3:
-            df_below = df[df["Status"] == "❌ BELOW"]
+            df_ext = df[df["Status"] == "🔼 TOO EXTENDED"]
+            st.dataframe(
+                df_ext.style.applymap(color_status, subset=["Status"]),
+                use_container_width=True,
+                height=min(600, 40 + len(df_ext) * 35),
+            )
+        with tab4:
+            df_below = df[df["Status"] == "❌ BELOW EMA"]
             st.dataframe(
                 df_below.style.applymap(color_status, subset=["Status"]),
                 use_container_width=True,
