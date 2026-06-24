@@ -82,26 +82,32 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
 
     tickers = [f"{s}.NS" for s in stock_names]
     try:
+        # No group_by — always use standard raw["Close"] structure
         raw = yf.download(
             tickers,
             period="60d",
             auto_adjust=True,
             progress=False,
             threads=True,
-            group_by="ticker" if len(tickers) > 1 else None,
         )
     except Exception:
         return result
 
-    # Handle single vs multiple ticker structure
-    if len(tickers) == 1:
-        close_data = {tickers[0]: raw["Close"] if "Close" in raw else pd.Series()}
+    if "Close" not in raw.columns and not isinstance(raw.columns, pd.MultiIndex):
+        return result
+
+    close_col = raw["Close"]
+
+    # Build close_data: {ticker: Series}
+    close_data = {}
+    if isinstance(close_col, pd.Series):
+        # Single ticker returned as Series
+        close_data[tickers[0]] = close_col
     else:
-        close_data = {}
-        if "Close" in raw:
-            for ticker in tickers:
-                if ticker in raw["Close"].columns:
-                    close_data[ticker] = raw["Close"][ticker]
+        # Multiple tickers — close_col is a DataFrame
+        for ticker in tickers:
+            if ticker in close_col.columns:
+                close_data[ticker] = close_col[ticker]
 
     for stock in stock_names:
         ticker = f"{stock}.NS"
