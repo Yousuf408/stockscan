@@ -106,7 +106,7 @@ def fetch_orb_historical_data():
     offset = 0
     while True:
         resp = supabase.table("websocket_stock_values") \
-            .select("stock, high, close") \
+            .select("stock, high, ltp") \
             .eq("date", prev_date) \
             .range(offset, offset + 999) \
             .execute()
@@ -125,7 +125,7 @@ def fetch_orb_historical_data():
         df_prev["close"] = pd.to_numeric(df_prev["close"], errors="coerce")
         df_prev = df_prev.rename(columns={
             "high" : "yesterday_high",
-            "close": "yesterday_close",
+            "ltp"  : "yesterday_close",
         })
 
     # ── Fetch 5-day median volume ─────────────────────────────
