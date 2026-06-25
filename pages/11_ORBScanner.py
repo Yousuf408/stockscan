@@ -469,9 +469,9 @@ def orb_scanner_table():
             if yest_high <= 0 or yest_close <= 0:
                 continue
 
-            # ── Condition 3: Gap < 1% ─────────────────────────
+            # ── Condition 3: Gap up OR gap down > 1% → ignore ───
             gap_pct = ((today_open - yest_close) / yest_close) * 100
-            if gap_pct >= MAX_GAP_PCT:
+            if abs(gap_pct) >= MAX_GAP_PCT:
                 continue
 
             # ── Condition 2: open > yest_high OR ltp > yest_high
@@ -484,7 +484,13 @@ def orb_scanner_table():
             if median_vol <= 0:
                 continue
 
-            # ── Passes all conditions → add to tracked ────────
+            # ── Condition 1: Yesterday close > EMA20 ─────────
+            ema_data = get_ema20_cache([symbol])
+            ema_status = ema_data.get(symbol, {}).get("status", "")
+            if not ema_status.startswith("✅"):
+                continue  # below EMA or too extended → skip
+
+            # ── All conditions pass → add to tracked ──────────
             orb_tracked[symbol] = {
                 "signal_time"   : now_str,
                 "signal_price"  : live_ltp,
