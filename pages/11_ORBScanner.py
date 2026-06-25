@@ -22,19 +22,17 @@ from config import STOCKS_WATCHLIST
 
 # ── Auto-connect WebSocket ───────────────────────────────────
 if not angel_ws.is_connected():
-    if "orb_ws_init" not in st.session_state:
-        st.session_state["orb_ws_init"] = True
-        if "angel_auth" not in st.session_state:
-            from angel_auth import angel_login
-            st.session_state["angel_auth"] = angel_login()
-        auth = st.session_state["angel_auth"]
-        if auth:
-            angel_ws.start_websocket(
-                jwt_token  = auth["jwt_token"],
-                api_key    = auth["api_key"],
-                client_id  = auth["client_id"],
-                feed_token = auth["feed_token"],
-            )
+    if "angel_auth" not in st.session_state:
+        from angel_auth import angel_login
+        st.session_state["angel_auth"] = angel_login()
+    auth = st.session_state["angel_auth"]
+    if auth:
+        angel_ws.start_websocket(
+            jwt_token  = auth["jwt_token"],
+            api_key    = auth["api_key"],
+            client_id  = auth["client_id"],
+            feed_token = auth["feed_token"],
+        )
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -446,8 +444,8 @@ def orb_scanner_table():
         f"Tracked: {len(orb_tracked)} stocks"
     )
 
-    # ── Only scan for new stocks during 9:15–9:30 ────────────
-    if in_window and live_ticks:
+    # ── Scan for new stocks (time restriction removed for testing) ──
+    if live_ticks:
         for token, tick in live_ticks.items():
             symbol = TOKEN_TO_NAME.get(token)
             if not symbol or symbol in orb_tracked:
