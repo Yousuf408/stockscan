@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
+from collections import deque
 from supabase import create_client
 
 import angel_ws
@@ -159,6 +160,76 @@ def get_ema20_status(df: pd.DataFrame) -> dict:
         st.session_state["ema20_cache"] = cache
 
     return cache
+
+# ─────────────────────────────────────────────────────────────
+# TICK HISTORY — STORE LTP + VOLUME WITH TIMESTAMP
+# ─────────────────────────────────────────────────────────────
+def update_tick_history(symbol: str, ltp: float, volume: float):
+    """
+    Store each tick with timestamp for status detection.
+    Keeps max 2 minutes of data (24 ticks at 5s refresh).
+    Only called for stocks currently in scan results.
+    """
+    if "tick_history" not in st.session_state:
+        st.session_state["tick_history"] = {}
+
+    if symbol not in st.session_state["tick_history"]:
+        st.session_state["tick_history"][symbol] = deque(maxlen=24)
+
+    st.session_state["tick_history"][symbol].append({
+        "ltp"   : ltp,
+        "volume": volume,
+        "ts"    : datetime.now(IST),
+    })
+
+
+def get_stock_status(symbol: str) -> str:
+    """
+    Compare current tick vs avg of last 12 ticks (60 seconds).
+    Price: current_ltp vs avg_ltp
+    Volume: current_vol_rate vs avg_vol_rate
+    Needs 13 stored ticks to compute 12 vol_rate intervals.
+    """
+    history = st.session_state.get("tick_history", {}).get(symbol)
+
+    if not history or len(history) < 13:
+        return ""  # blank until enough data
+
+    ticks = list(history)[-13:]  # last 13 ticks → 12 intervals
+
+    # ── Vol rate per interval ─────────────────────────────────
+    vol_rates = []
+    for i in range(1, len(ticks)):
+        time_diff = max((ticks[i]["ts"] - ticks[i-1]["ts"]).total_seconds(), 1)
+        vol_diff  = max(ticks[i]["volume"] - ticks[i-1]["volume"], 0)
+        vol_rates.append(vol_diff / time_diff)
+
+    # ── Current values ────────────────────────────────────────
+    current_ltp      = ticks[-1]["ltp"]
+    current_vol_rate = vol_rates[-1]
+
+    # ── Averages ──────────────────────────────────────────────
+    avg_ltp      = sum(t["ltp"] for t in ticks) / len(ticks)
+    avg_vol_rate = sum(vol_rates) / len(vol_rates) if vol_rates else 0
+
+    # ── Conditions ────────────────────────────────────────────
+    price_up   = current_ltp > avg_ltp
+    price_down = current_ltp < avg_ltp
+
+    vol_above = current_vol_rate > avg_vol_rate
+    vol_below = current_vol_rate < avg_vol_rate
+    vol_panic = current_vol_rate > avg_vol_rate * 2  # Gemini: 2x avg = panic
+
+    # ── Status mapping — specific first ───────────────────────
+    if price_down and vol_panic:   return "💥 Panic Selling"
+    if price_down and vol_above:   return "🔴 Reversal"
+    if price_down and vol_below:   return "🟡 Pullback"
+    if price_up   and vol_above:   return "🚀 Accelerating"
+    if price_up   and vol_below:   return "⚠️ Exhaustion"
+    if price_up:                   return "🟢 Holding"
+    return "⏸️ Stalling"
+
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -456,6 +527,19 @@ def render_html_table(df: pd.DataFrame) -> str:
         except:
             return "#64748b"
 
+    def status_cell(status):
+        colors = {
+            "🚀 Accelerating": "#16a34a",
+            "🟢 Holding"     : "#15803d",
+            "⚠️ Exhaustion"  : "#f97316",
+            "🟡 Pullback"    : "#ca8a04",
+            "🔴 Reversal"    : "#dc2626",
+            "💥 Panic Selling": "#7c3aed",
+            "⏸️ Stalling"    : "#94a3b8",
+        }
+        color = colors.get(status, "#94a3b8")
+        return f'<span style="font-weight:700;color:{color}">{status}</span>'
+
     def ema_cell(status):
         if status is None:
             return '<span style="color:#94a3b8">⏳</span>'
@@ -517,6 +601,7 @@ def render_html_table(df: pd.DataFrame) -> str:
         <th>Vol Momentum</th>
         <th>Momentum</th>
         <th class="th-ema">EMA20 Status</th>
+        <th>Status</th>
         <th class="th-new">Signal Price</th>
         <th class="th-new">Move Since Signal %</th>
         <th>LTP</th>
@@ -564,6 +649,7 @@ def render_html_table(df: pd.DataFrame) -> str:
             <td>{row['Vol Momentum']}</td>
             <td>{row['Momentum']}</td>
             <td>{ema_cell(ema_status)}</td>
+            <td>{status_cell(row.get("Status", ""))}</td>
             <td>{signal_price_str}</td>
             <td><span style="font-weight:700;color:{move_c}">{move_since_str}</span></td>
             <td>₹{ltp:.2f}</td>
@@ -614,6 +700,7 @@ with col2:
     if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
         st.session_state.pop("ema20_cache", None)
+        st.session_state.pop("tick_history", None)
         st.rerun()
 
 st.divider()
@@ -663,6 +750,14 @@ def scanner_table():
                 update_peak_ltp_in_supabase(symbol, today, ltp)
                 signal_data[symbol]["peak_ltp"] = ltp
 
+    # ── Tick history — update for every stock in results ────
+    for _, row in df.iterrows():
+        update_tick_history(
+            symbol = row["Symbol"],
+            ltp    = float(row["LTP"]),
+            volume = float(row["Volume"]),
+        )
+
     # ── EMA20 — fetch only new stocks, rest from cache ───────
     ema_cache = get_ema20_status(df)
 
@@ -671,9 +766,10 @@ def scanner_table():
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp", None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status", "⏳"))
+    df["Status"]            = df["Symbol"].apply(lambda s: get_stock_status(s))
 
     display_cols = [
-        "Symbol", "Signal Time", "EMA20 Status",
+        "Symbol", "Signal Time", "EMA20 Status", "Status",
         "Gap %", "Chg vs Prev %",
         "Vol Ratio", "Vol Momentum", "Momentum",
         "Signal Price", "LTP", "High Since Signal",
