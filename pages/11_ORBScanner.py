@@ -20,19 +20,9 @@ from supabase import create_client
 import angel_ws
 from config import STOCKS_WATCHLIST
 
-# ── Auto-connect WebSocket ───────────────────────────────────
-if not angel_ws.is_connected():
-    if "angel_auth" not in st.session_state:
-        from angel_auth import angel_login
-        st.session_state["angel_auth"] = angel_login()
-    auth = st.session_state["angel_auth"]
-    if auth:
-        angel_ws.start_websocket(
-            jwt_token  = auth["jwt_token"],
-            api_key    = auth["api_key"],
-            client_id  = auth["client_id"],
-            feed_token = auth["feed_token"],
-        )
+# ── WebSocket — handled by Momentum Scanner tab ─────────────
+# ORB Scanner reads from angel_ws.latest_ticks directly
+# Keep Momentum Scanner tab open for live ticks
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
