@@ -117,20 +117,20 @@ table {
 }
 
 /* ── HEADER ── */
-thead tr { background: #1e3a5f; }
+thead tr { background: #fef9f0; }
 th {
-  padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 600;
-  color: #bfdbfe; border-bottom: 2px solid #60a5fa; white-space: nowrap;
+  padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 700;
+  color: #78350f; border-bottom: 2px solid #fcd34d; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid #2d5282;
+  border-right: 1px solid #fde68a;
 }
 th:last-child { border-right: none; }
-th:hover { background: #2d5282; color: #fff; }
-th.active-col { background: #1d4ed8 !important; color: #fff !important; }
+th:hover { background: #fef3c7; color: #92400e; }
+th.active-col { background: #fde68a !important; color: #78350f !important; }
 th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
 th.active-col .sort-arrow { opacity: 1; }
-th.th-ema { background: #1e3a5f; color: #86efac; }
-th.th-sig { background: #1e3a5f; color: #c4b5fd; }
+th.th-ema { background: #fef9f0; color: #166534; }
+th.th-sig { background: #fef9f0; color: #5b21b6; }
 
 /* ── ROWS ── */
 tbody tr.main-row {
