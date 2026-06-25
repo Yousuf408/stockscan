@@ -171,7 +171,7 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
-.signal-time { font-size: 10px; color: #94a3b8; margin-top: 1px; }
+.signal-time { font-size: 12px; font-weight: 700; color: #1a202c; margin-top: 2px; }
 
 /* ── BADGES ── */
 .badge {
@@ -362,7 +362,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                     </div>
                 </div>
             </td>
-            <td style="font-weight:600;color:#0f172a;background:#fef3c7">{signal_time}</td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
             <td><span style="font-weight:800;font-size:13px;color:{vr_color}">{row['Vol Ratio']}</span></td>
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
@@ -381,7 +380,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>₹{float(row['Prev Close']):,.2f}</td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="15">
+            <td colspan="14">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -463,17 +462,16 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         <thead>
             <tr>
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(1)">Signal Time <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(3)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(4)">Vol Momentum <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(7)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(8)">Move Since Signal % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(9)">LTP <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(10)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(11)">Peak Move % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(1)">Gap % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(2)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(3)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(4)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(5)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(6)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(7)">Move Since Signal % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(8)">LTP <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">Peak Move % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(13)">Open <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(14)">Prev Close <span class="sort-arrow">↕</span></th>
