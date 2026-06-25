@@ -515,6 +515,12 @@ def orb_scanner_table():
         f"Tracked: {len(orb_tracked)} stocks"
     )
 
+    # ── Batch fetch EMA for pending stocks ───────────────────
+    pending = st.session_state.get("orb_ema_pending", set())
+    if pending:
+        get_ema20_cache(list(pending))
+        st.session_state["orb_ema_pending"] = set()
+
     # ── Scan for new stocks (time restriction removed for testing) ──
     if live_ticks:
         for token, tick in live_ticks.items():
@@ -556,10 +562,18 @@ def orb_scanner_table():
                 continue
 
             # ── Condition 1: Yesterday close > EMA20 ─────────
-            ema_data = get_ema20_cache([symbol])
-            ema_status = ema_data.get(symbol, {}).get("status", "")
-            if not ema_status.startswith("✅"):
-                continue  # below EMA or too extended → skip
+            # Check cache first — avoid yfinance call inside tick loop
+            ema_cache_check = st.session_state.get("orb_ema20_cache", {})
+            if symbol in ema_cache_check:
+                ema_status = ema_cache_check[symbol].get("status", "")
+                if not ema_status.startswith("✅"):
+                    continue
+            else:
+                # Not in cache yet — add to pending, will check next cycle
+                if "orb_ema_pending" not in st.session_state:
+                    st.session_state["orb_ema_pending"] = set()
+                st.session_state["orb_ema_pending"].add(symbol)
+                continue
 
             # ── All conditions pass → save to Supabase + track ──
             today_date = datetime.now(IST).strftime("%Y-%m-%d")
@@ -644,11 +658,11 @@ def orb_scanner_table():
         lambda s: ema_cache.get(s, {}).get("status", "⏳")
     )
 
-    # ── Sort: EMA pass stocks first, fail stocks last ─────────
-    df_display["ema_sort"] = df_display["EMA20 Status"].apply(
-        lambda s: 0 if str(s).startswith("✅") else 1
+    # ── Sort: by Vol Ratio descending ────────────────────────
+    df_display["vol_ratio_num"] = df_display["Vol Ratio"].apply(
+        lambda x: float(str(x).replace("x","")) if x else 0
     )
-    df_display = df_display.sort_values("ema_sort").drop(columns=["ema_sort"]).reset_index(drop=True)
+    df_display = df_display.sort_values("vol_ratio_num", ascending=False)                            .drop(columns=["vol_ratio_num"])                            .reset_index(drop=True)
 
     st.success(f"**{len(df_display)} stocks** tracked in ORB window")
     st.components.v1.html(
