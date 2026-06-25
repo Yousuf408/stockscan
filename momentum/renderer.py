@@ -117,20 +117,20 @@ table {
 }
 
 /* ── HEADER ── */
-thead tr { background: #f8fafc; }
+thead tr { background: #1e3a5f; }
 th {
-  padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700;
-  color: #64748b; border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+  padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 600;
+  color: #bfdbfe; border-bottom: 2px solid #60a5fa; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid #e2e8f0;
+  border-right: 1px solid #2d5282;
 }
 th:last-child { border-right: none; }
-th:hover { background: #f1f5f9; color: #334155; }
-th.active-col { background: #eff6ff !important; color: #2563eb !important; }
+th:hover { background: #2d5282; color: #fff; }
+th.active-col { background: #1d4ed8 !important; color: #fff !important; }
 th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
 th.active-col .sort-arrow { opacity: 1; }
-th.th-ema { background: #f0fdf4; color: #166534; }
-th.th-sig { background: #ede9fe; color: #5b21b6; }
+th.th-ema { background: #1e3a5f; color: #86efac; }
+th.th-sig { background: #1e3a5f; color: #c4b5fd; }
 
 /* ── ROWS ── */
 tbody tr.main-row {
@@ -140,7 +140,7 @@ tbody tr.main-row:hover { background: #f8fafc; }
 tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
 td {
   padding: 9px 10px; vertical-align: middle; white-space: nowrap;
-  border-right: 1px solid #f1f5f9;
+  border-right: 1px solid #f1f5f9; font-size: 12px;
 }
 td:last-child { border-right: none; }
 td.active-col { background: #eff6ff; }
@@ -176,7 +176,7 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 /* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; white-space: nowrap;
+  padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; white-space: nowrap;
 }
 .badge-bull  { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
 .badge-bear  { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
@@ -185,7 +185,7 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .badge-accel { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
 
 /* ── VOL BADGE ── */
-.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
 .vol-high  { background: #fef3c7; color: #92400e; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
@@ -198,13 +198,13 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .fill-red   { background: #ef4444; }
 
 /* ── TEXT COLORS ── */
-.chg-pos  { color: #16a34a; font-weight: 600; font-size: 11px; }
-.chg-neg  { color: #dc2626; font-weight: 600; font-size: 11px; }
+.chg-pos  { color: #16a34a; font-weight: 600; font-size: 12px; }
+.chg-neg  { color: #dc2626; font-weight: 600; font-size: 12px; }
 .ltp-val  { font-weight: 700; font-size: 13px; }
-.ema-pass { color: #16a34a; font-weight: 700; font-size: 11px; }
-.ema-fail { color: #dc2626; font-weight: 700; font-size: 11px; }
-.ema-ext  { color: #ea580c; font-weight: 700; font-size: 11px; }
-.peak-val { color: #7c3aed; font-weight: 700; }
+.ema-pass { color: #16a34a; font-weight: 700; font-size: 12px; }
+.ema-fail { color: #dc2626; font-weight: 700; font-size: 12px; }
+.ema-ext  { color: #ea580c; font-weight: 700; font-size: 12px; }
+.peak-val { color: #7c3aed; font-weight: 700; font-size: 12px; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
