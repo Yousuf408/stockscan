@@ -235,6 +235,65 @@ def get_ema20_cache(stock_names: list) -> dict:
     return cache
 
 # ─────────────────────────────────────────────────────────────
+# ORB SUPABASE — SAVE & FETCH
+# ─────────────────────────────────────────────────────────────
+def fetch_orb_signals_from_supabase(today_str: str) -> dict:
+    """
+    Fetch today's saved ORB signals.
+    Returns dict: {stock: {signal_time, yesterday_high, today_open,
+                           gap_pct, signal_price, peak_ltp, ema20_status}}
+    """
+    try:
+        supabase = get_supabase()
+        resp = supabase.table("orb")             .select("stock, signal_time, yesterday_high, today_open, gap_pct, signal_price, peak_ltp, ema20_status")             .eq("signal_date", today_str)             .execute()
+        result = {}
+        for row in resp.data:
+            result[row["stock"]] = {
+                "signal_time"   : row.get("signal_time", ""),
+                "yesterday_high": row.get("yesterday_high", 0),
+                "today_open"    : row.get("today_open", 0),
+                "gap_pct"       : row.get("gap_pct", 0),
+                "signal_price"  : row.get("signal_price", 0),
+                "peak_ltp"      : row.get("peak_ltp", 0),
+                "ema20_status"  : row.get("ema20_status", ""),
+            }
+        return result
+    except Exception:
+        return {}
+
+
+def save_orb_signal_to_supabase(stock: str, today_str: str, signal_time: str,
+                                  yesterday_high: float, today_open: float,
+                                  gap_pct: float, signal_price: float,
+                                  ema20_status: str):
+    """Save ORB signal — ignored if already exists for today."""
+    try:
+        supabase = get_supabase()
+        supabase.table("orb").upsert({
+            "stock"         : stock,
+            "signal_date"   : today_str,
+            "signal_time"   : signal_time,
+            "yesterday_high": round(float(yesterday_high), 2),
+            "today_open"    : round(float(today_open), 2),
+            "gap_pct"       : round(float(gap_pct), 2),
+            "signal_price"  : round(float(signal_price), 2),
+            "peak_ltp"      : round(float(signal_price), 2),
+            "ema20_status"  : ema20_status,
+        }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
+    except Exception:
+        pass
+
+
+def update_orb_peak_ltp(stock: str, today_str: str, new_peak: float):
+    """Update peak_ltp when new high is reached."""
+    try:
+        supabase = get_supabase()
+        supabase.table("orb")             .update({"peak_ltp": round(float(new_peak), 2)})             .eq("stock", stock)             .eq("signal_date", today_str)             .execute()
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────
 # HTML TABLE
 # ─────────────────────────────────────────────────────────────
 def render_orb_table(df: pd.DataFrame) -> str:
@@ -406,10 +465,15 @@ if "orb_historical" not in st.session_state:
 
 historical = st.session_state["orb_historical"]
 
-# ── Tracked stocks — persist across reruns ───────────────────
-if "orb_tracked" not in st.session_state:
-    st.session_state["orb_tracked"] = {}
-# orb_tracked = {symbol: {signal_time, signal_price, peak_ltp, yesterday_high, today_open, gap_pct}}
+# ── Tracked stocks — load from Supabase on page load ─────────
+today_str = datetime.now(IST).strftime("%Y-%m-%d")
+if (
+    "orb_tracked" not in st.session_state or
+    st.session_state.get("orb_tracked_date") != today_str
+):
+    loaded = fetch_orb_signals_from_supabase(today_str)
+    st.session_state["orb_tracked"]      = loaded
+    st.session_state["orb_tracked_date"] = today_str
 
 # ── Top bar ───────────────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
@@ -434,7 +498,7 @@ with col1:
     )
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
-        for key in ["orb_historical", "orb_tracked", "orb_ema20_cache"]:
+        for key in ["orb_historical", "orb_tracked", "orb_tracked_date", "orb_ema20_cache"]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -507,7 +571,18 @@ def orb_scanner_table():
             if not ema_status.startswith("✅"):
                 continue  # below EMA or too extended → skip
 
-            # ── All conditions pass → add to tracked ──────────
+            # ── All conditions pass → save to Supabase + track ──
+            today_date = datetime.now(IST).strftime("%Y-%m-%d")
+            save_orb_signal_to_supabase(
+                stock          = symbol,
+                today_str      = today_date,
+                signal_time    = now_str,
+                yesterday_high = yest_high,
+                today_open     = today_open,
+                gap_pct        = gap_pct,
+                signal_price   = live_ltp,
+                ema20_status   = ema_status,
+            )
             orb_tracked[symbol] = {
                 "signal_time"   : now_str,
                 "signal_price"  : live_ltp,
@@ -536,6 +611,7 @@ def orb_scanner_table():
                 continue
             ltp = float(tick.get("ltp", 0))
             if ltp > orb_tracked[symbol].get("peak_ltp", 0):
+                update_orb_peak_ltp(symbol, datetime.now(IST).strftime("%Y-%m-%d"), ltp)
                 orb_tracked[symbol]["peak_ltp"] = ltp
         st.session_state["orb_tracked"] = orb_tracked
 
@@ -550,7 +626,12 @@ def orb_scanner_table():
 
         live_ltp    = float(live_ticks.get(token, {}).get("ltp",    data["signal_price"])) if token else data["signal_price"]
         live_volume = float(live_ticks.get(token, {}).get("volume", 0)) if token else 0
-        vol_ratio   = round(live_volume / data["median_vol"], 2) if data["median_vol"] > 0 else 0
+        # median_vol — from session data or df_median fallback
+        median_vol  = data.get("median_vol", 0)
+        if median_vol == 0:
+            med_row    = df_median[df_median["stock"] == symbol]
+            median_vol = float(med_row["median_vol"].values[0]) if not med_row.empty else 0
+        vol_ratio   = round(live_volume / median_vol, 2) if median_vol > 0 else 0
 
         rows.append({
             "Symbol"        : symbol,
