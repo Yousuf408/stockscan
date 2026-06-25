@@ -96,8 +96,10 @@ def fetch_orb_historical_data():
         return None
 
     sorted_dates = sorted(all_dates, reverse=True)
-    prev_date    = sorted_dates[0]   # most recent trading day
-    last_5_dates = sorted_dates[:5]  # last 5 days for median vol
+    # sorted_dates[0] = today (LiveFeed already uploaded today's data)
+    # sorted_dates[1] = actual yesterday → use for high/close
+    prev_date    = sorted_dates[1] if len(sorted_dates) > 1 else sorted_dates[0]
+    last_5_dates = sorted_dates[1:6]  # last 5 days excluding today
 
     # ── Fetch yesterday's high + close ───────────────────────
     prev_rows = []
