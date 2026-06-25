@@ -121,8 +121,8 @@ def fetch_orb_historical_data():
     df_prev = pd.DataFrame(prev_rows)
     if not df_prev.empty:
         df_prev = df_prev.drop_duplicates(subset="stock", keep="first")
-        df_prev["high"]  = pd.to_numeric(df_prev["high"],  errors="coerce")
-        df_prev["close"] = pd.to_numeric(df_prev["close"], errors="coerce")
+        df_prev["high"] = pd.to_numeric(df_prev["high"], errors="coerce")
+        df_prev["ltp"]  = pd.to_numeric(df_prev["ltp"],  errors="coerce")
         df_prev = df_prev.rename(columns={
             "high" : "yesterday_high",
             "ltp"  : "yesterday_close",
