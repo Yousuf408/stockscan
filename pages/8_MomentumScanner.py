@@ -186,10 +186,22 @@ def update_tick_history(symbol: str, ltp: float, volume: float):
 def get_stock_status(symbol: str) -> str:
     """
     Compare current tick vs avg of last 12 ticks (60 seconds).
-    Price: current_ltp vs avg_ltp
-    Volume: current_vol_rate vs avg_vol_rate
-    Needs 13 stored ticks to compute 12 vol_rate intervals.
+    Status updates every 60 seconds per stock — not every tick.
     """
+    now = datetime.now(IST)
+
+    # ── 1 minute cache per stock ──────────────────────────────
+    if "status_cache" not in st.session_state:
+        st.session_state["status_cache"] = {}
+
+    cache = st.session_state["status_cache"]
+
+    if symbol in cache:
+        last_time   = cache[symbol]["time"]
+        last_status = cache[symbol]["status"]
+        if (now - last_time).total_seconds() < 60:
+            return last_status  # return previous, 60s not passed yet
+
     history = st.session_state.get("tick_history", {}).get(symbol)
 
     if not history or len(history) < 13:
@@ -221,13 +233,18 @@ def get_stock_status(symbol: str) -> str:
     vol_panic = current_vol_rate > avg_vol_rate * 2  # Gemini: 2x avg = panic
 
     # ── Status mapping — specific first ───────────────────────
-    if price_down and vol_panic:   return "💥 Panic Selling"
-    if price_down and vol_above:   return "🔴 Reversal"
-    if price_down and vol_below:   return "🟡 Pullback"
-    if price_up   and vol_above:   return "🚀 Accelerating"
-    if price_up   and vol_below:   return "⚠️ Exhaustion"
-    if price_up:                   return "🟢 Holding"
-    return "⏸️ Stalling"
+    # ── Determine status ─────────────────────────────────────
+    if   price_down and vol_panic:  status = "💥 Panic Selling"
+    elif price_down and vol_above:  status = "🔴 Reversal"
+    elif price_down and vol_below:  status = "🟡 Pullback"
+    elif price_up   and vol_above:  status = "🚀 Accelerating"
+    elif price_up   and vol_below:  status = "⚠️ Exhaustion"
+    elif price_up:                  status = "🟢 Holding"
+    else:                           status = "⏸️ Stalling"
+
+    # ── Save to 1 min cache ───────────────────────────────────
+    cache[symbol] = {"status": status, "time": now}
+    st.session_state["status_cache"] = cache
 
 
 
@@ -701,6 +718,7 @@ with col2:
         del st.session_state["momentum_historical"]
         st.session_state.pop("ema20_cache", None)
         st.session_state.pop("tick_history", None)
+        st.session_state.pop("status_cache", None)
         st.rerun()
 
 st.divider()
