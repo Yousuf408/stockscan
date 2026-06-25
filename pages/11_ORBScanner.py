@@ -288,6 +288,20 @@ def render_orb_table(df: pd.DataFrame) -> str:
     </style>
     <div id="orb-toast" class="toast">✅ Copied!</div>
     <script>
+    // ── Scroll position preservation ──────────────────────────
+    var SCROLL_KEY = 'orb_scroll_pos';
+    function saveScroll() {
+        var el = document.getElementById('orb-scroll-wrap');
+        if (el) sessionStorage.setItem(SCROLL_KEY, el.scrollTop);
+    }
+    function restoreScroll() {
+        var el = document.getElementById('orb-scroll-wrap');
+        var pos = sessionStorage.getItem(SCROLL_KEY);
+        if (el && pos) el.scrollTop = parseInt(pos);
+    }
+    document.addEventListener('DOMContentLoaded', restoreScroll);
+    setTimeout(restoreScroll, 100);
+
     function copyORB(btn, symbol) {
         navigator.clipboard.writeText(symbol);
         btn.classList.add('copied');
@@ -301,6 +315,7 @@ def render_orb_table(df: pd.DataFrame) -> str:
         }, 1500);
     }
     </script>
+    <div id="orb-scroll-wrap" style="overflow-y:auto; max-height:520px;" onscroll="saveScroll()">
     <table class="orb-table">
     <thead><tr>
         <th>Symbol</th>
@@ -369,7 +384,7 @@ def render_orb_table(df: pd.DataFrame) -> str:
             <td>{int(float(row.get("Volume", 0))):,}</td>
         </tr>"""
 
-    html += "</tbody></table>"
+    html += "</tbody></table></div>"
     return html
 
 # ─────────────────────────────────────────────────────────────
@@ -568,7 +583,7 @@ def orb_scanner_table():
     st.components.v1.html(
         render_orb_table(df_display),
         height=min(600, 60 + len(df_display) * 38),
-        scrolling=True
+        scrolling=False
     )
 
 
