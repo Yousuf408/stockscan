@@ -81,9 +81,11 @@ def _progress_html(val: float) -> str:
 _STYLES = """
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body {
+html, body {
+  margin: 0 !important; padding: 0 !important;
+  background: #f5f7fa !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-  background: #f5f7fa; color: #1a202c; font-size: 13px;
+  color: #1a202c; font-size: 13px;
 }
 
 /* ── FILTER BAR ── */
@@ -120,7 +122,9 @@ th {
   padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700;
   color: #64748b; border-bottom: 1px solid #e2e8f0; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
+  border-right: 1px solid #e2e8f0;
 }
+th:last-child { border-right: none; }
 th:hover { background: #f1f5f9; color: #334155; }
 th.active-col { background: #eff6ff !important; color: #2563eb !important; }
 th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
@@ -134,7 +138,11 @@ tbody tr.main-row {
 }
 tbody tr.main-row:hover { background: #f8fafc; }
 tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
-td { padding: 9px 10px; vertical-align: middle; white-space: nowrap; }
+td {
+  padding: 9px 10px; vertical-align: middle; white-space: nowrap;
+  border-right: 1px solid #f1f5f9;
+}
+td:last-child { border-right: none; }
 td.active-col { background: #eff6ff; }
 
 /* ── EXPAND ROW ── */
@@ -356,7 +364,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             </td>
             <td style="font-weight:600;color:#0f172a;background:#fef3c7">{signal_time}</td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
-            <td>{_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}</td>
             <td><span style="font-weight:800;font-size:13px;color:{vr_color}">{row['Vol Ratio']}</span></td>
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
@@ -374,7 +381,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>₹{float(row['Prev Close']):,.2f}</td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="16">
+            <td colspan="15">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -458,19 +465,18 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(1)">Signal Time <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(3)">Chg vs Prev % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(4)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Vol Momentum <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(6)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(7)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(8)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(9)">Move Since Signal % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(10)">LTP <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(11)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(12)">Peak Move % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(13)">Volume <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(14)">Open <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(15)">Prev Close <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(3)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(4)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(7)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(8)">Move Since Signal % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(9)">LTP <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(11)">Peak Move % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(13)">Open <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(14)">Prev Close <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
