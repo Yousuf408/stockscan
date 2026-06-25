@@ -171,7 +171,7 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
-.signal-time { font-size: 12px; font-weight: 700; color: #1a202c; margin-top: 2px; }
+.signal-time { font-size: 12px; font-weight: 700; color: #5b21b6; background: #ede9fe; padding: 2px 7px; border-radius: 4px; margin-top: 4px; display: inline-block; }
 
 /* ── BADGES ── */
 .badge {
@@ -358,7 +358,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                             <button class="copy-btn"
                                 onclick="event.stopPropagation();copySymbol(this,'{symbol}')">{symbol}</button>
                         </div>
-                        <div class="signal-time">Signal: {signal_time}</div>
+                        <div class="signal-time">⏰ {signal_time}</div>
                     </div>
                 </div>
             </td>
