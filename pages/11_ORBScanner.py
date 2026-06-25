@@ -284,6 +284,17 @@ def update_orb_peak_ltp(stock: str, today_str: str, new_peak: float):
 
 
 # ─────────────────────────────────────────────────────────────
+# VOL MOMENTUM HELPER
+# ─────────────────────────────────────────────────────────────
+def get_vol_momentum(ratio: float) -> str:
+    if ratio >= 3.0: return "🔥 Very Strong"
+    if ratio >= 2.0: return "⚡ Strong"
+    if ratio >= 1.5: return "👀 Building"
+    if ratio >= 1.0: return "😐 Weak"
+    return ""
+
+
+# ─────────────────────────────────────────────────────────────
 # HTML TABLE
 # ─────────────────────────────────────────────────────────────
 def render_orb_table(df: pd.DataFrame) -> str:
@@ -374,7 +385,10 @@ def render_orb_table(df: pd.DataFrame) -> str:
         <th class="th-orb">Today Open</th>
         <th>Gap %</th>
         <th>Vol Ratio</th>
+        <th>Vol Momentum</th>
         <th class="th-new">Signal Price</th>
+        <th style="background:#fee2e2;color:#991b1b;">SL</th>
+        <th style="background:#dcfce7;color:#166534;">Target</th>
         <th class="th-new">Move Since Signal %</th>
         <th>LTP</th>
         <th class="th-new">High Since Signal</th>
@@ -392,8 +406,21 @@ def render_orb_table(df: pd.DataFrame) -> str:
         gap_pct      = row.get("Gap %", "-")
         vol_ratio    = row.get("Vol Ratio", "-")
         ltp          = float(row.get("LTP", 0))
-        signal_price = row.get("Signal Price", None)
-        peak_ltp     = row.get("High Since Signal", None)
+        signal_price  = row.get("Signal Price", None)
+        peak_ltp      = row.get("High Since Signal", None)
+        yest_high_val = row.get("Yesterday High", 0)
+        vol_mom       = row.get("Vol Momentum", "")
+
+        # SL = Yesterday High
+        sl_str = f"₹{float(yest_high_val):.2f}" if yest_high_val else "-"
+
+        # Target = Signal Price + (Signal Price - SL) × 2
+        if signal_price and yest_high_val and float(signal_price) > 0:
+            risk   = float(signal_price) - float(yest_high_val)
+            target = float(signal_price) + (risk * 2)
+            target_str = f"₹{target:.2f}" if risk > 0 else "-"
+        else:
+            target_str = "-"
 
         # Move since signal
         if signal_price and float(signal_price) > 0:
@@ -425,7 +452,10 @@ def render_orb_table(df: pd.DataFrame) -> str:
             <td>₹{float(today_open):.2f}</td>
             <td>{gap_pct}</td>
             <td>{vol_ratio}</td>
+            <td>{vol_mom}</td>
             <td>{signal_price_str}</td>
+            <td style="color:#dc2626;font-weight:700">{sl_str}</td>
+            <td style="color:#16a34a;font-weight:700">{target_str}</td>
             <td><span style="font-weight:700;color:{move_c}">{move_since_str}</span></td>
             <td>₹{ltp:.2f}</td>
             <td class="peak-val">{peak_ltp_str}</td>
@@ -555,11 +585,14 @@ def orb_scanner_table():
             if not (today_open > yest_high or live_ltp > yest_high):
                 continue
 
-            # ── Get median vol ────────────────────────────────
-            med_row = df_median[df_median["stock"] == symbol]
+            # ── Get median vol + vol ratio check ─────────────────
+            med_row    = df_median[df_median["stock"] == symbol]
             median_vol = float(med_row["median_vol"].values[0]) if not med_row.empty else 0
             if median_vol <= 0:
                 continue
+            vol_ratio_val = live_volume / median_vol
+            if vol_ratio_val < 1.0:
+                continue  # vol ratio < 1x → skip
 
             # ── Condition 1: Yesterday close > EMA20 ─────────
             # Check cache first — avoid yfinance call inside tick loop
@@ -637,13 +670,15 @@ def orb_scanner_table():
             median_vol = float(med_row["median_vol"].values[0]) if not med_row.empty else 0
         vol_ratio   = round(live_volume / median_vol, 2) if median_vol > 0 else 0
 
+        vol_ratio_num = round(live_volume / median_vol, 2) if median_vol > 0 else 0
         rows.append({
             "Symbol"        : symbol,
             "Signal Time"   : data["signal_time"],
             "Yesterday High": data["yesterday_high"],
             "Today Open"    : data["today_open"],
             "Gap %"         : f"{data['gap_pct']:+.2f}%",
-            "Vol Ratio"     : f"{vol_ratio:.2f}x",
+            "Vol Ratio"     : f"{vol_ratio_num:.2f}x",
+            "Vol Momentum"  : get_vol_momentum(vol_ratio_num),
             "Signal Price"  : data["signal_price"],
             "LTP"           : live_ltp,
             "High Since Signal": data["peak_ltp"],
