@@ -15,6 +15,14 @@ Replaces old render_html_table() with the approved SEMrush-style design:
 # INTERNAL HELPERS  (same logic as original, just CSS classes)
 # ─────────────────────────────────────────────────────────────
 
+def _short_vol(vol: float) -> str:
+    if vol >= 1_000_000:
+        return f"{vol/1_000_000:.2f}M"
+    if vol >= 1_000:
+        return f"{vol/1_000:.1f}K"
+    return str(int(vol))
+
+
 def _move_color(val: float) -> str:
     if val >= 5.0: return "#16a34a"
     if val >= 2.0: return "#ca8a04"
@@ -140,7 +148,8 @@ tbody tr.main-row:hover { background: #f8fafc; }
 tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
 td {
   padding: 9px 10px; vertical-align: middle; white-space: nowrap;
-  border-right: 1px solid #f1f5f9; font-size: 12px;
+  border-right: 1px solid #e2e8f0; font-size: 12px;
+  border-bottom: 1px solid #e2e8f0;
 }
 td:last-child { border-right: none; }
 td.active-col { background: #eff6ff; }
@@ -336,11 +345,11 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
         signal_price_str = f"₹{float(signal_price):,.2f}" if signal_price else "-"
         peak_ltp_str     = f"₹{float(peak_ltp):,.2f}"    if peak_ltp     else "-"
-        vol_fmt          = f"{int(float(row['Volume'])):,}"
+        vol_fmt          = _short_vol(float(row['Volume']))
 
         # median_vol is a raw numeric col present in df from backend
         median_vol_raw = row.get("median_vol", None)
-        median_vol_str = f"{int(float(median_vol_raw)):,}" if median_vol_raw else "-"
+        median_vol_str = _short_vol(float(median_vol_raw)) if median_vol_raw else "-"
 
         vr_color = "#7c3aed" if vol_ratio_raw >= 5 else "#d97706" if vol_ratio_raw >= 3 else "#374151"
 
@@ -374,11 +383,10 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
             <td class="peak-val">{peak_ltp_str}</td>
-            <td><span class="peak-val">🏆 {peak_move_str}</span></td>
             <td style="color:#64748b">{vol_fmt}</td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="12">
+            <td colspan="11">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -469,8 +477,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(7)">Move Since Signal % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(8)">LTP <span class="sort-arrow">↕</span></th>
                 <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(10)">Peak Move % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(10)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
