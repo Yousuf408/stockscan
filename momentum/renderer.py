@@ -133,13 +133,14 @@ html, body {
 .filter-count b { color: #1a202c; }
 select.filter-select {
   border: 1px solid #e2e8f0; background: #fff;
-  padding: 4px 28px 4px 10px; border-radius: 6px;
-  font-size: 12px; color: #374151; cursor: pointer; outline: none; appearance: none;
+  padding: 6px 28px 6px 10px; border-radius: 6px;
+  font-size: 13px; color: #374151; cursor: pointer; outline: none; appearance: none;
+  height: 36px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 8px center;
 }
 .filter-sep { width: 1px; height: 20px; background: #e2e8f0; }
-.meta-info { margin-left: auto; font-size: 13px; font-weight: 700; color: #0f172a; }
+.meta-info { margin-left: auto; font-size: 15px; font-weight: 700; color: #0f172a; }
 
 /* ── TABLE ── */
 .table-wrap { padding: 12px 16px; overflow-x: auto; }
