@@ -206,7 +206,7 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
   font-size: 11px; font-weight: 700; flex-shrink: 0; transition: all 0.15s;
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
-.stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
+.stock-name  { font-weight: 700; font-size: 14px; color: #1e3a5f; }
 
 /* ── LEFT BORDER — momentum color per row ── */
 tbody tr.main-row { border-left: 4px solid #e2e8f0; }
