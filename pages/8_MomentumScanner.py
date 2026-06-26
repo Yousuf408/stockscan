@@ -179,7 +179,7 @@ def scanner_table():
     with col_info:
         st.markdown(
             f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;'
-            f'padding:8px 14px;font-size:14px;color:#166534;">'
+            f'padding:8px 14px;font-size:15px;color:#166534;">'
             f'<b>{len(df)} stocks</b> matching momentum criteria &nbsp;|&nbsp; Last updated: {now_ist}'
             f'</div>',
             unsafe_allow_html=True
