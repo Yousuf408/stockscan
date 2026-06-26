@@ -230,7 +230,8 @@ def scanner_table():
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION START — assign display column       ║
     # ╚═══════════════════════════════════════════════════════════╝
-    df["EMA9 5min"]         = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("status",         "⏳"))
+    df["EMA9 5min"]  = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("status",  "⏳"))
+    df["EMA9 Value"] = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("ema9",    None))
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
     # ╚═══════════════════════════════════════════════════════════╝
