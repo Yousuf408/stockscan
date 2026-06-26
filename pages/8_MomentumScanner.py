@@ -9,13 +9,12 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from supabase import create_client
 
 import angel_ws
 from config import STOCKS_WATCHLIST
 
-# momentum package imports
 from momentum.backend import (
     fetch_historical_data,
     run_momentum_scan,
@@ -60,12 +59,12 @@ st.set_page_config(
 st.markdown("""
     <style>
     header { visibility: hidden; }
-    .block-container { padding-top: 1rem !important; }
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 0 !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# SUPABASE CLIENT  (cached here in frontend)
+# SUPABASE CLIENT
 # ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_supabase():
@@ -73,26 +72,18 @@ def get_supabase():
 
 
 # ─────────────────────────────────────────────────────────────
-# EMA20 SESSION-STATE CACHE  (lives in frontend — needs session_state)
+# EMA20 SESSION-STATE CACHE
 # ─────────────────────────────────────────────────────────────
 def get_ema20_status(df) -> dict:
-    """
-    Checks session_state cache first.
-    Fetches only new stocks via backend.fetch_ema20_for_stocks().
-    Exact same logic as original get_ema20_status().
-    """
     if "ema20_cache" not in st.session_state:
         st.session_state["ema20_cache"] = {}
-
     cache         = st.session_state["ema20_cache"]
     result_stocks = df["Symbol"].tolist()
     new_stocks    = [s for s in result_stocks if s not in cache]
-
     if new_stocks:
         fetched = fetch_ema20_for_stocks(new_stocks)
         cache.update(fetched)
         st.session_state["ema20_cache"] = cache
-
     return cache
 
 
@@ -120,33 +111,6 @@ if (
     st.session_state["signal_data"]      = fetch_signal_data_from_supabase(get_supabase(), today_str)
     st.session_state["signal_data_date"] = today_str
 
-# ─────────────────────────────────────────────────────────────
-# RELOAD BUTTON — minimal top space
-# ─────────────────────────────────────────────────────────────
-st.markdown("""
-    <style>
-    header[data-testid="stHeader"] { display: none !important; }
-    .block-container { padding-top: 0.2rem !important; padding-bottom: 0 !important; }
-    #root > div:nth-child(1) > div > div > div > div > section > div { padding-top: 0 !important; }
-    div[data-testid="stToolbar"] { display: none !important; }
-    div[data-testid="stDecoration"] { display: none !important; }
-    div[data-testid="stStatusWidget"] { display: none !important; }
-    div[data-testid="stHorizontalBlock"] { gap: 0 !important; margin: 0 !important; padding: 0 !important; }
-    div[data-testid="stButton"] > button {
-        padding: 2px 10px !important;
-        font-size: 12px !important;
-        height: 26px !important;
-        line-height: 1 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-col1, col2 = st.columns([9, 1])
-with col2:
-    if st.button("🔄 Reload", use_container_width=True):
-        del st.session_state["momentum_historical"]
-        st.session_state.pop("ema20_cache", None)
-        st.rerun()
 
 # ─────────────────────────────────────────────────────────────
 # AUTO-REFRESH FRAGMENT
@@ -158,7 +122,6 @@ def scanner_table():
     signal_data = st.session_state["signal_data"]
     today       = datetime.now(IST).strftime("%Y-%m-%d")
 
-    # ── Run scan ──────────────────────────────────────────────
     df, data_source = run_momentum_scan(
         historical    = historical,
         live_ticks    = angel_ws.latest_ticks,
@@ -178,7 +141,6 @@ def scanner_table():
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
-            # Fresh IST time per stock — avoids bulk same-timestamp issue
             signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
@@ -203,7 +165,7 @@ def scanner_table():
                 update_peak_ltp_in_supabase(supabase, symbol, today, ltp)
                 signal_data[symbol]["peak_ltp"] = ltp
 
-    # ── EMA20 (session_state cache stays in frontend) ─────────
+    # ── EMA20 ─────────────────────────────────────────────────
     ema_cache = get_ema20_status(df)
 
     # ── Assign display columns ────────────────────────────────
@@ -212,9 +174,23 @@ def scanner_table():
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
 
-    # ── Render ────────────────────────────────────────────────
-    st.success(f"**{len(df)} stocks** matching momentum criteria &nbsp;|&nbsp; Last updated: {now_ist}")
+    # ── Status bar + Reload button in one row ─────────────────
+    col_info, col_btn = st.columns([5, 1])
+    with col_info:
+        st.markdown(
+            f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;'
+            f'padding:8px 14px;font-size:14px;color:#166534;">'
+            f'<b>{len(df)} stocks</b> matching momentum criteria &nbsp;|&nbsp; Last updated: {now_ist}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    with col_btn:
+        if st.button("🔄 Reload", use_container_width=True):
+            del st.session_state["momentum_historical"]
+            st.session_state.pop("ema20_cache", None)
+            st.rerun()
 
+    # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
         df          = df,
         data_source = data_source,
