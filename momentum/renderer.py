@@ -139,7 +139,7 @@ select.filter-select {
   background-repeat: no-repeat; background-position: right 8px center;
 }
 .filter-sep { width: 1px; height: 20px; background: #e2e8f0; }
-.meta-info { margin-left: auto; font-size: 11px; color: #64748b; }
+.meta-info { margin-left: auto; font-size: 13px; font-weight: 700; color: #0f172a; }
 
 /* ── TABLE ── */
 .table-wrap { padding: 12px 16px; overflow-x: auto; }
