@@ -376,11 +376,9 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td class="peak-val">{peak_ltp_str}</td>
             <td><span class="peak-val">🏆 {peak_move_str}</span></td>
             <td style="color:#64748b">{vol_fmt}</td>
-            <td>₹{float(row['Open']):,.2f}</td>
-            <td>₹{float(row['Prev Close']):,.2f}</td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="14">
+            <td colspan="12">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -473,8 +471,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
                 <th class="th-sig" onclick="toggleColExpand(10)">Peak Move % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(13)">Open <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(14)">Prev Close <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
