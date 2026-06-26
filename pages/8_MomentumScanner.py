@@ -25,6 +25,13 @@ from momentum.backend import (
     SUPABASE_URL,
     SUPABASE_KEY,
     IST,
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION START — import                     ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    fetch_ema9_5min,
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION END                                ║
+    # ╚═══════════════════════════════════════════════════════════╝
 )
 from momentum.renderer import render_html_table
 
@@ -85,6 +92,45 @@ def get_ema20_status(df) -> dict:
         cache.update(fetched)
         st.session_state["ema20_cache"] = cache
     return cache
+
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  9 EMA (5MIN) SECTION START — SESSION STATE CACHE             ║
+# ║  - Cache clears every 5 min (new candle formed)               ║
+# ║  - Only NEW stocks fetched — existing cache reused            ║
+# ║  - Same safe pattern as EMA20 cache                           ║
+# ╚═══════════════════════════════════════════════════════════════╝
+def get_ema9_status(df) -> dict:
+    from datetime import datetime as dt
+    now_min      = dt.now(IST).minute
+    current_slot = (now_min // 5) * 5   # 0,5,10,15... aligned to 5min boundary
+
+    # Init cache if not present
+    if "ema9_cache" not in st.session_state:
+        st.session_state["ema9_cache"]      = {}
+        st.session_state["ema9_cache_slot"] = -1
+
+    # New 5min candle formed → clear cache so fresh values load
+    if st.session_state["ema9_cache_slot"] != current_slot:
+        st.session_state["ema9_cache"]      = {}
+        st.session_state["ema9_cache_slot"] = current_slot
+
+    cache      = st.session_state["ema9_cache"]
+    new_stocks = [s for s in df["Symbol"].tolist() if s not in cache]
+
+    # Only fetch stocks not already in cache — safe, no spam
+    if new_stocks:
+        try:
+            fetched = fetch_ema9_5min(new_stocks)
+            cache.update(fetched)
+            st.session_state["ema9_cache"] = cache
+        except Exception:
+            pass   # Silent fail — show ⏳, never crash main scanner
+
+    return cache
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  9 EMA (5MIN) SECTION END                                     ║
+# ╚═══════════════════════════════════════════════════════════════╝
 
 
 # ─────────────────────────────────────────────────────────────
@@ -168,11 +214,26 @@ def scanner_table():
     # ── EMA20 ─────────────────────────────────────────────────
     ema_cache = get_ema20_status(df)
 
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION START — fetch & assign column       ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    ema9_cache = get_ema9_status(df)
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION END                                ║
+    # ╚═══════════════════════════════════════════════════════════╝
+
     # ── Assign display columns ────────────────────────────────
     df["Signal Time"]       = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_time",  "-"))
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION START — assign display column       ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    df["EMA9 5min"]         = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("status",         "⏳"))
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  9 EMA (5MIN) SECTION END                                ║
+    # ╚═══════════════════════════════════════════════════════════╝
 
     # ── Status bar + Reload button in one row ─────────────────
     col_info, col_btn = st.columns([5, 1])
