@@ -420,8 +420,8 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 </div>
             </td>
             <td>
-                <span style="font-size:13px;font-weight:700;color:#5b21b6;white-space:nowrap;">
-                    ⏰ {signal_time[:5]}
+                <span style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;">
+                    {signal_time[:5]}
                 </span>
             </td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
