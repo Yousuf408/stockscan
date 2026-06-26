@@ -142,14 +142,16 @@ th.th-sig { background: #fef9f0; color: #5b21b6; }
 
 /* ── ROWS ── */
 tbody tr.main-row {
-  border-bottom: 1px solid #e2e8f0; cursor: pointer; transition: background 0.1s;
+  border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: background 0.1s;
 }
-tbody tr.main-row:hover { background: #f8fafc; }
+tbody tr.main-row:hover { background: #f0f9ff; }
 tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
+tbody tr.main-row:nth-child(even) { background: #f8fafc; }
+tbody tr.main-row:nth-child(even):hover { background: #f0f9ff; }
 td {
   padding: 9px 10px; vertical-align: middle; white-space: nowrap;
-  border-right: 1px solid #e2e8f0; font-size: 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #cbd5e1; font-size: 12px; color: #374151;
+  border-bottom: 1px solid #cbd5e1;
 }
 td:last-child { border-right: none; }
 td.active-col { background: #eff6ff; }
@@ -209,11 +211,13 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 /* ── TEXT COLORS ── */
 .chg-pos  { color: #16a34a; font-weight: 600; font-size: 12px; }
 .chg-neg  { color: #dc2626; font-weight: 600; font-size: 12px; }
-.ltp-val  { font-weight: 700; font-size: 13px; }
-.ema-pass { color: #16a34a; font-weight: 700; font-size: 12px; }
-.ema-fail { color: #dc2626; font-weight: 700; font-size: 12px; }
-.ema-ext  { color: #ea580c; font-weight: 700; font-size: 12px; }
-.peak-val { color: #7c3aed; font-weight: 700; font-size: 12px; }
+.ltp-val  { font-weight: 700; font-size: 13px; color: #0f172a; }
+.sig-val  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
+.ema-pass { color: #16a34a; font-weight: 600; font-size: 12px; }
+.ema-fail { color: #dc2626; font-weight: 600; font-size: 12px; }
+.ema-ext  { color: #ea580c; font-weight: 600; font-size: 12px; }
+.peak-val { color: #7c3aed; font-weight: 600; font-size: 12px; }
+.vol-num  { font-size: 12px; font-weight: 600; color: #374151; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
@@ -376,17 +380,19 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
-            <td style="font-weight:700;color:#1e3a5f">{signal_price_str}</td>
-            <td>{_progress_html(move_since)}</td>
+            <td>
+                <div class="sig-val">{signal_price_str}</div>
+                {_progress_html(move_since)}
+            </td>
             <td>
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
             <td class="peak-val">{peak_ltp_str}</td>
-            <td style="color:#64748b">{vol_fmt}</td>
+            <td class="vol-num">{vol_fmt}</td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="11">
+            <td colspan="10">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -474,10 +480,9 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(4)">Momentum <span class="sort-arrow">↕</span></th>
                 <th class="th-ema" onclick="toggleColExpand(5)">EMA20 Status <span class="sort-arrow">↕</span></th>
                 <th class="th-sig" onclick="toggleColExpand(6)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(7)">Move Since Signal % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(8)">LTP <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(10)">Volume <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(7)">LTP <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(8)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(9)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
