@@ -240,21 +240,21 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .progress-fill  { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
-.bar-pct    { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.bar-pct    { font-size: 14px; font-weight: 600; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
-.num-primary { font-size: 13px; font-weight: 700; color: #0f172a; }
+.num-primary { font-size: 14px; font-weight: 700; color: #0f172a; }
 
 /* ── GROUP 2: Percentages — Gap%, Chg%, EMA20 ── */
-.chg-pos  { color: #16a34a; font-weight: 600; font-size: 12px; }
-.chg-neg  { color: #dc2626; font-weight: 600; font-size: 12px; }
-.ema-pass { color: #16a34a; font-weight: 600; font-size: 12px; }
-.ema-fail { color: #dc2626; font-weight: 600; font-size: 12px; }
-.ema-ext  { color: #ea580c; font-weight: 600; font-size: 12px; }
+.chg-pos  { color: #16a34a; font-weight: 600; font-size: 14px; }
+.chg-neg  { color: #dc2626; font-weight: 600; font-size: 14px; }
+.ema-pass { color: #16a34a; font-weight: 600; font-size: 14px; }
+.ema-fail { color: #dc2626; font-weight: 600; font-size: 14px; }
+.ema-ext  { color: #ea580c; font-weight: 600; font-size: 14px; }
 
 /* ── LTP cell layout ── */
-.ltp-val  { font-size: 13px; font-weight: 700; color: #0f172a; }
-.peak-val { color: #0f172a; font-weight: 700; font-size: 13px; }
+.ltp-val  { font-size: 14px; font-weight: 700; color: #0f172a; }
+.peak-val { color: #0f172a; font-weight: 700; font-size: 14px; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
