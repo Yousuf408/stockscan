@@ -198,7 +198,8 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
 .expand-card .ec-sub   { font-size: 10px; color: #94a3b8; margin-top: 1px; }
 
 /* ── STOCK CELL ── */
-.stock-cell { display: flex; align-items: center; gap: 8px; }
+.stock-cell { display: flex; align-items: center; gap: 8px; width: 100%; }
+.stock-info  { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 6px; }
 .expand-icon {
   width: 18px; height: 18px; border-radius: 4px;
   background: #e2e8f0; color: #64748b;
@@ -206,8 +207,8 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
   font-size: 11px; font-weight: 700; flex-shrink: 0; transition: all 0.15s;
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
-.stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
-.signal-time { font-size: 12px; font-weight: 700; color: #5b21b6; background: #ede9fe; padding: 2px 7px; border-radius: 4px; margin-top: 4px; display: inline-block; }
+.stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; white-space: nowrap; }
+.signal-time { font-size: 11px; font-weight: 700; color: #5b21b6; background: #ede9fe; padding: 2px 8px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
 
 /* ── LEFT BORDER — momentum color per row ── */
 tbody tr.main-row { border-left: 4px solid #e2e8f0; }
@@ -412,7 +413,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>
                 <div class="stock-cell">
                     <div class="expand-icon">+</div>
-                    <div>
+                    <div class="stock-info">
                         <div class="stock-name">
                             <button class="copy-btn"
                                 onclick="event.stopPropagation();copySymbol(this,'{symbol}')">{symbol}</button>
