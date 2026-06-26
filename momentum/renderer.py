@@ -39,20 +39,40 @@ def _ema_cell(status) -> str:
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION START — renderer helper                 ║
 # ╚═══════════════════════════════════════════════════════════════╝
-def _ema9_cell(status: str) -> str:
-    """Render 9 EMA 5min status with color coding."""
+def _ema9_cell(status: str, ema9_value) -> str:
+    """
+    Render 9 EMA 5min cell with value + % on two lines:
+    ₹1,769.50
+    📉 -1.0%
+    """
     if not status or status == "⏳":
         return '<span style="color:#94a3b8">⏳</span>'
+
     s = str(status)
+
+    # Color based on status prefix
     if s.startswith("✅"):
-        return f'<span style="color:#16a34a;font-weight:700;font-size:14px;">{s}</span>'
-    if s.startswith("⚠️"):
-        return f'<span style="color:#d97706;font-weight:700;font-size:14px;">{s}</span>'
-    if s.startswith("❌"):
-        return f'<span style="color:#dc2626;font-weight:700;font-size:14px;">{s}</span>'
-    if s.startswith("📉"):
-        return f'<span style="color:#7c3aed;font-weight:700;font-size:14px;">{s}</span>'
-    return f'<span style="color:#94a3b8">{s}</span>'
+        color = "#16a34a"
+    elif s.startswith("⚠️"):
+        color = "#d97706"
+    elif s.startswith("❌"):
+        color = "#dc2626"
+    elif s.startswith("📉"):
+        color = "#7c3aed"
+    else:
+        color = "#94a3b8"
+
+    # EMA9 value line
+    val_html = ""
+    if ema9_value is not None:
+        try:
+            val_html = f'<div class="num-primary">₹{float(ema9_value):,.2f}</div>'
+        except Exception:
+            pass
+
+    pct_html = f'<div style="color:{color};font-weight:700;font-size:14px;">{s}</div>'
+
+    return f'{val_html}{pct_html}'
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION END                                     ║
 # ╚═══════════════════════════════════════════════════════════════╝
@@ -471,7 +491,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
-            <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')))}</td>
+            <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
