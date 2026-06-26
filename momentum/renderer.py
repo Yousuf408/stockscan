@@ -405,15 +405,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 </div>
             </td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
+            <td>
+                <div class="ltp-val">₹{ltp:,.2f}</div>
+                {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
+            </td>
             <td><span class="num-primary">{row['Vol Ratio']}</span></td>
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
-            <td>
-                <div class="ltp-val">₹{ltp:,.2f}</div>
-                {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
-            </td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
@@ -501,12 +501,12 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <tr>
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(1)">Gap % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(2)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(3)">Vol Momentum <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(4)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(5)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(6)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(7)">LTP <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(2)">LTP <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(3)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(4)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(7)">Signal Price <span class="sort-arrow">↕</span></th>
                 <th class="th-sig" onclick="toggleColExpand(8)">High Since Signal <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(9)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
