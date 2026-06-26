@@ -206,7 +206,7 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
   font-size: 11px; font-weight: 700; flex-shrink: 0; transition: all 0.15s;
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
-.stock-name  { font-weight: 700; font-size: 14px; color: #1e3a5f; }
+.stock-name  { font-weight: 700; font-size: 16px; color: #1e3a5f; }
 
 /* ── LEFT BORDER — momentum color per row ── */
 tbody tr.main-row { border-left: 4px solid #e2e8f0; }
@@ -258,12 +258,12 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
-  cursor: pointer; font-weight: 700; color: #0f172a;
-  background: #e2e8f0; border: none; padding: 3px 8px;
-  border-radius: 4px; font-size: 12px; transition: background 0.2s;
+  cursor: pointer; font-weight: 700; color: #1e3a5f;
+  background: transparent; border: none; padding: 0;
+  font-size: 16px; transition: color 0.2s;
 }
-.copy-btn:hover  { background: #10b981; color: white; }
-.copy-btn.copied { background: #10b981; color: white; }
+.copy-btn:hover  { color: #10b981; }
+.copy-btn.copied { color: #10b981; }
 
 /* ── TOAST ── */
 .toast {
