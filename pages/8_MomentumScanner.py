@@ -121,9 +121,22 @@ if (
     st.session_state["signal_data_date"] = today_str
 
 # ─────────────────────────────────────────────────────────────
-# RELOAD BUTTON ONLY — top bar removed, info moved to filter bar
+# RELOAD BUTTON — minimal top space
 # ─────────────────────────────────────────────────────────────
-col1, col2 = st.columns([6, 1])
+st.markdown("""
+    <style>
+    /* Remove all padding/margin above the button */
+    .block-container { padding-top: 0.3rem !important; }
+    div[data-testid="stHorizontalBlock"] { margin-bottom: 0 !important; }
+    div[data-testid="stButton"] button {
+        padding: 2px 12px !important;
+        font-size: 12px !important;
+        height: 28px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+col1, col2 = st.columns([8, 1])
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
