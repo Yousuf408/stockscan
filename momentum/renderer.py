@@ -175,7 +175,7 @@ tbody tr.main-row:nth-child(even) { background: #f8fafc; }
 tbody tr.main-row:nth-child(even):hover { background: #f0f9ff; }
 td {
   padding: 9px 10px; vertical-align: middle; white-space: nowrap;
-  border-right: 1px solid #cbd5e1; font-size: 12px; color: #374151;
+  border-right: 1px solid #cbd5e1; font-size: 16px; color: #374151;
   border-bottom: 1px solid #cbd5e1;
 }
 td:last-child { border-right: none; }
@@ -219,7 +219,7 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 /* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; white-space: nowrap;
+  padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; white-space: nowrap;
 }
 .badge-bull  { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
 .badge-bear  { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
@@ -228,7 +228,7 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .badge-accel { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
 
 /* ── VOL BADGE ── */
-.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; }
 .vol-high  { background: #fef3c7; color: #92400e; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
@@ -240,21 +240,21 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .progress-fill  { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
-.bar-pct    { font-size: 14px; font-weight: 600; white-space: nowrap; }
+.bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
-.num-primary { font-size: 14px; font-weight: 700; color: #0f172a; }
+.num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
 
 /* ── GROUP 2: Percentages — Gap%, Chg%, EMA20 ── */
-.chg-pos  { color: #16a34a; font-weight: 600; font-size: 14px; }
-.chg-neg  { color: #dc2626; font-weight: 600; font-size: 14px; }
-.ema-pass { color: #16a34a; font-weight: 600; font-size: 14px; }
-.ema-fail { color: #dc2626; font-weight: 600; font-size: 14px; }
-.ema-ext  { color: #ea580c; font-weight: 600; font-size: 14px; }
+.chg-pos  { color: #16a34a; font-weight: 600; font-size: 16px; }
+.chg-neg  { color: #dc2626; font-weight: 600; font-size: 16px; }
+.ema-pass { color: #16a34a; font-weight: 600; font-size: 16px; }
+.ema-fail { color: #dc2626; font-weight: 600; font-size: 16px; }
+.ema-ext  { color: #ea580c; font-weight: 600; font-size: 16px; }
 
 /* ── LTP cell layout ── */
-.ltp-val  { font-size: 14px; font-weight: 700; color: #0f172a; }
-.peak-val { color: #0f172a; font-weight: 700; font-size: 14px; }
+.ltp-val  { font-size: 16px; font-weight: 700; color: #0f172a; }
+.peak-val { color: #0f172a; font-weight: 700; font-size: 16px; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
