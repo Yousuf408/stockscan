@@ -23,6 +23,41 @@ def _short_vol(vol: float) -> str:
     return str(int(vol))
 
 
+def _ema_cell(status) -> str:
+    if status is None or status == "⏳":
+        return '<span style="color:#94a3b8">⏳</span>'
+    s = str(status)
+    if s.startswith("✅"):
+        return f'<span class="ema-pass">{s}</span>'
+    if "Below" in s:
+        return f'<span class="ema-fail">{s}</span>'
+    if s.startswith("❌"):
+        return f'<span class="ema-ext">{s}</span>'
+    return f'<span style="color:#94a3b8">{s}</span>'
+
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  9 EMA (5MIN) SECTION START — renderer helper                 ║
+# ╚═══════════════════════════════════════════════════════════════╝
+def _ema9_cell(status: str) -> str:
+    """Render 9 EMA 5min status with color coding."""
+    if not status or status == "⏳":
+        return '<span style="color:#94a3b8">⏳</span>'
+    s = str(status)
+    if s.startswith("✅"):
+        return f'<span style="color:#16a34a;font-weight:700;font-size:14px;">{s}</span>'
+    if s.startswith("⚠️"):
+        return f'<span style="color:#d97706;font-weight:700;font-size:14px;">{s}</span>'
+    if s.startswith("❌"):
+        return f'<span style="color:#dc2626;font-weight:700;font-size:14px;">{s}</span>'
+    if s.startswith("📉"):
+        return f'<span style="color:#7c3aed;font-weight:700;font-size:14px;">{s}</span>'
+    return f'<span style="color:#94a3b8">{s}</span>'
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  9 EMA (5MIN) SECTION END                                     ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+
 def _move_color(val: float) -> str:
     if val >= 5.0: return "#16a34a"
     if val >= 2.0: return "#ca8a04"
@@ -164,6 +199,9 @@ th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
 th.active-col .sort-arrow { opacity: 1; }
 th.th-ema { background: #fef9f0; color: #0f172a; }
 th.th-sig { background: #fef9f0; color: #0f172a; }
+/* 9 EMA (5MIN) SECTION START */
+th.th-ema9 { background: #e0f2fe; color: #0369a1; }
+/* 9 EMA (5MIN) SECTION END */
 
 /* ── ROWS ── */
 tbody tr.main-row {
@@ -433,12 +471,13 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
+            <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')))}</td>
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="11">
+            <td colspan="12">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -527,9 +566,12 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(5)">Vol Momentum <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(6)">Momentum <span class="sort-arrow">↕</span></th>
                 <th class="th-ema" onclick="toggleColExpand(7)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(8)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(10)">Volume <span class="sort-arrow">↕</span></th>
+                <!-- 9 EMA (5MIN) SECTION START -->
+                <th class="th-ema9" onclick="toggleColExpand(8)">9 EMA 5min <span class="sort-arrow">↕</span></th>
+                <!-- 9 EMA (5MIN) SECTION END -->
+                <th class="th-sig" onclick="toggleColExpand(9)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(11)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
