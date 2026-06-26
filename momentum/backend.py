@@ -320,7 +320,8 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
         (df["intraday_pct"] >= 1.0) &
         (df["live_ltp"]     >  df["live_open"]) &
         (df["live_ltp"]     >  df["yesterday_close"]) &
-        (df["live_open"]    <= df["yesterday_close"] * 1.01)
+        (df["live_open"]    >= df["yesterday_close"] * 0.99) &   # max gap down 1%
+        (df["live_open"]    <= df["yesterday_close"] * 1.01)     # max gap up 1%
     ]
 
     if df.empty:
