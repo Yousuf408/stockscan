@@ -420,8 +420,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 </div>
             </td>
             <td>
-                <span style="font-size:13px;font-weight:700;color:#5b21b6;background:#ede9fe;
-                      padding:3px 10px;border-radius:6px;white-space:nowrap;">
+                <span style="font-size:13px;font-weight:700;color:#5b21b6;white-space:nowrap;">
                     ⏰ {signal_time[:5]}
                 </span>
             </td>
