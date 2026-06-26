@@ -70,15 +70,16 @@ def _chg_html(val: float) -> str:
 
 
 def _progress_html(val: float) -> str:
+    """Bar layout: ████░░ +1.45%  (bar first, % after, on same line below price)"""
     positive  = val >= 0
-    w         = min(abs(val) * 10, 100)          # 10% move = full bar
+    w         = min(abs(val) * 10, 100)
     fill_cls  = "fill-green" if positive else "fill-red"
     color     = _move_color(val)
     sign      = "+" if positive else ""
     return (
-        f'<div class="progress-wrap">'
-        f'<span style="font-weight:700;font-size:12px;color:{color}">{sign}{val:.2f}%</span>'
+        f'<div class="bar-row">'
         f'<div class="progress-bar"><div class="progress-fill {fill_cls}" style="width:{w:.0f}%"></div></div>'
+        f'<span class="bar-pct" style="color:{color}">{sign}{val:.2f}%</span>'
         f'</div>'
     )
 
@@ -127,10 +128,10 @@ table {
 /* ── HEADER ── */
 thead tr { background: #fef9f0; }
 th {
-  padding: 9px 10px; text-align: left; font-size: 11px; font-weight: 700;
+  padding: 10px 10px; text-align: left; font-size: 12px; font-weight: 800;
   color: #78350f; border-bottom: 2px solid #fcd34d; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid #fde68a;
+  border-right: 1px solid #fde68a; text-transform: uppercase; letter-spacing: 0.4px;
 }
 th:last-child { border-right: none; }
 th:hover { background: #fef3c7; color: #92400e; }
@@ -202,22 +203,26 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
 
 /* ── PROGRESS BAR ── */
-.progress-wrap { display: flex; align-items: center; gap: 6px; }
-.progress-bar  { width: 55px; height: 5px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.bar-row  { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.progress-bar  { width: 70px; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
+.bar-pct    { font-size: 12px; font-weight: 600; }
 
-/* ── TEXT COLORS ── */
+/* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
+.num-primary { font-size: 13px; font-weight: 700; color: #0f172a; }
+
+/* ── GROUP 2: Percentages — Gap%, Chg%, EMA20 ── */
 .chg-pos  { color: #16a34a; font-weight: 600; font-size: 12px; }
 .chg-neg  { color: #dc2626; font-weight: 600; font-size: 12px; }
-.ltp-val  { font-weight: 700; font-size: 13px; color: #0f172a; }
-.sig-val  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
 .ema-pass { color: #16a34a; font-weight: 600; font-size: 12px; }
 .ema-fail { color: #dc2626; font-weight: 600; font-size: 12px; }
 .ema-ext  { color: #ea580c; font-weight: 600; font-size: 12px; }
-.peak-val { color: #7c3aed; font-weight: 600; font-size: 12px; }
-.vol-num  { font-size: 12px; font-weight: 600; color: #374151; }
+
+/* ── LTP cell layout ── */
+.ltp-val  { font-size: 13px; font-weight: 700; color: #0f172a; }
+.peak-val { color: #7c3aed; font-weight: 700; font-size: 13px; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
@@ -376,20 +381,20 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 </div>
             </td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
-            <td><span style="font-weight:800;font-size:13px;color:{vr_color}">{row['Vol Ratio']}</span></td>
+            <td><span class="num-primary">{row['Vol Ratio']}</span></td>
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
             <td>
-                <div class="sig-val">{signal_price_str}</div>
+                <div class="num-primary">{signal_price_str}</div>
                 {_progress_html(move_since)}
             </td>
             <td>
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
-            <td class="peak-val">{peak_ltp_str}</td>
-            <td class="vol-num">{vol_fmt}</td>
+            <td><span class="peak-val">{peak_ltp_str}</span></td>
+            <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
             <td colspan="10">
