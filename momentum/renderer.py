@@ -209,6 +209,14 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .stock-name  { font-weight: 700; font-size: 13px; color: #1e3a5f; }
 .signal-time { font-size: 12px; font-weight: 700; color: #5b21b6; background: #ede9fe; padding: 2px 7px; border-radius: 4px; margin-top: 4px; display: inline-block; }
 
+/* ── LEFT BORDER — momentum color per row ── */
+tbody tr.main-row { border-left: 4px solid #e2e8f0; }
+tbody tr.main-row.mom-strong  { border-left: 4px solid #7c3aed; }
+tbody tr.main-row.mom-build   { border-left: 4px solid #22c55e; }
+tbody tr.main-row.mom-stable  { border-left: 4px solid #3b82f6; }
+tbody tr.main-row.mom-cooling { border-left: 4px solid #f59e0b; }
+tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
+
 /* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
@@ -387,8 +395,16 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
         vr_color = "#7c3aed" if vol_ratio_raw >= 5 else "#d97706" if vol_ratio_raw >= 3 else "#374151"
 
+        # Left border class based on momentum
+        if "STRONG BUILDING" in momentum_str:   mom_cls = "mom-strong"
+        elif "BUILDING"      in momentum_str:   mom_cls = "mom-build"
+        elif "STABLE"        in momentum_str:   mom_cls = "mom-stable"
+        elif "COOLING"       in momentum_str:   mom_cls = "mom-cooling"
+        elif "WEAK"          in momentum_str:   mom_cls = "mom-weak"
+        else:                                   mom_cls = ""
+
         rows_html += f"""
-        <tr class="main-row" id="main-{symbol}"
+        <tr class="main-row {mom_cls}" id="main-{symbol}"
             data-sym="{symbol}"
             data-mom="{momentum_str.lower()}"
             data-ema="{ema_status or ''}"
