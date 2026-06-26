@@ -164,19 +164,19 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    current_time_ist = datetime.now(IST).strftime("%H:%M:%S")
-
     # ── Save / update signals ─────────────────────────────────
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
+            # Fresh IST time per stock — avoids bulk same-timestamp issue
+            signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
                 stock        = symbol,
                 today_str    = today,
-                signal_time  = current_time_ist,
+                signal_time  = signal_time_ist,
                 vol_ratio    = row.get("vol_ratio", 0),
                 intraday_pct = row.get("intraday_pct", 0),
                 vol_momentum = str(row.get("Vol Momentum", "")),
@@ -185,7 +185,7 @@ def scanner_table():
                 signal_price = ltp,
             )
             signal_data[symbol] = {
-                "signal_time"  : current_time_ist,
+                "signal_time"  : signal_time_ist,
                 "signal_price" : ltp,
                 "peak_ltp"     : ltp,
             }
