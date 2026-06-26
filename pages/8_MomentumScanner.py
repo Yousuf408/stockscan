@@ -121,24 +121,14 @@ if (
     st.session_state["signal_data_date"] = today_str
 
 # ─────────────────────────────────────────────────────────────
-# TOP BAR
+# RELOAD BUTTON ONLY — top bar removed, info moved to filter bar
 # ─────────────────────────────────────────────────────────────
-col1, col2 = st.columns([5, 1])
-with col1:
-    ws_status = "🟢 Live" if angel_ws.is_connected() else "🔴 Disconnected"
-    st.markdown(
-        f"🚀 **Momentum Scanner** &nbsp;|&nbsp; "
-        f"📅 {historical['target_date']} vs {historical['prev_date']} &nbsp;|&nbsp; "
-        f"WS: {ws_status}",
-        unsafe_allow_html=True
-    )
+col1, col2 = st.columns([6, 1])
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
         st.session_state.pop("ema20_cache", None)
         st.rerun()
-
-st.divider()
 
 # ─────────────────────────────────────────────────────────────
 # AUTO-REFRESH FRAGMENT
