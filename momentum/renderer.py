@@ -69,8 +69,31 @@ def _chg_html(val: float) -> str:
     return f'<span class="{cls}">{sign} {abs(val):.2f}%</span>'
 
 
+def _signal_price_html(signal_price_str: str, move_since: float) -> str:
+    """
+    Layout:
+    ₹1,796.10        -1.45%
+    ████████░░░░░░░░
+    """
+    positive  = move_since >= 0
+    w         = min(abs(move_since) * 10, 100)
+    fill_cls  = "fill-green" if positive else "fill-red"
+    color     = _move_color(move_since)
+    sign      = "+" if positive else ""
+    pct_str   = f"{sign}{move_since:.2f}%"
+    return (
+        f'<div class="sig-price-wrap">'
+        f'  <div class="sig-top-row">'
+        f'    <span class="num-primary">{signal_price_str}</span>'
+        f'    <span class="bar-pct" style="color:{color}">{pct_str}</span>'
+        f'  </div>'
+        f'  <div class="progress-bar"><div class="progress-fill {fill_cls}" style="width:{w:.0f}%"></div></div>'
+        f'</div>'
+    )
+
+
 def _progress_html(val: float) -> str:
-    """Bar layout: ████░░ +1.45%  (bar first, % after, on same line below price)"""
+    """Kept for backward compat — not used in main render anymore."""
     positive  = val >= 0
     w         = min(abs(val) * 10, 100)
     fill_cls  = "fill-green" if positive else "fill-red"
@@ -129,17 +152,17 @@ table {
 thead tr { background: #fef9f0; }
 th {
   padding: 10px 10px; text-align: left; font-size: 12px; font-weight: 800;
-  color: #78350f; border-bottom: 2px solid #fcd34d; white-space: nowrap;
+  color: #0f172a; border-bottom: 2px solid #fcd34d; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
   border-right: 1px solid #fde68a; text-transform: uppercase; letter-spacing: 0.4px;
 }
 th:last-child { border-right: none; }
-th:hover { background: #fef3c7; color: #92400e; }
-th.active-col { background: #fde68a !important; color: #78350f !important; }
+th:hover { background: #fef3c7; color: #0f172a; }
+th.active-col { background: #fde68a !important; color: #0f172a !important; }
 th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
 th.active-col .sort-arrow { opacity: 1; }
-th.th-ema { background: #fef9f0; color: #166534; }
-th.th-sig { background: #fef9f0; color: #5b21b6; }
+th.th-ema { background: #fef9f0; color: #0f172a; }
+th.th-sig { background: #fef9f0; color: #0f172a; }
 
 /* ── ROWS ── */
 tbody tr.main-row {
@@ -203,12 +226,13 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
 
 /* ── PROGRESS BAR ── */
-.bar-row  { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
-.progress-bar  { width: 70px; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
-.progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
+.sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
-.bar-pct    { font-size: 12px; font-weight: 600; }
+.bar-pct    { font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
 .num-primary { font-size: 13px; font-weight: 700; color: #0f172a; }
@@ -222,7 +246,7 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 
 /* ── LTP cell layout ── */
 .ltp-val  { font-size: 13px; font-weight: 700; color: #0f172a; }
-.peak-val { color: #7c3aed; font-weight: 700; font-size: 13px; }
+.peak-val { color: #0f172a; font-weight: 700; font-size: 13px; }
 
 /* ── COPY BUTTON ── */
 .copy-btn {
@@ -385,10 +409,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
-            <td>
-                <div class="num-primary">{signal_price_str}</div>
-                {_progress_html(move_since)}
-            </td>
+            <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td>
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
