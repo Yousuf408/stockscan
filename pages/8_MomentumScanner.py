@@ -125,18 +125,23 @@ if (
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
     <style>
-    /* Remove all padding/margin above the button */
-    .block-container { padding-top: 0.3rem !important; }
-    div[data-testid="stHorizontalBlock"] { margin-bottom: 0 !important; }
-    div[data-testid="stButton"] button {
-        padding: 2px 12px !important;
+    header[data-testid="stHeader"] { display: none !important; }
+    .block-container { padding-top: 0.2rem !important; padding-bottom: 0 !important; }
+    #root > div:nth-child(1) > div > div > div > div > section > div { padding-top: 0 !important; }
+    div[data-testid="stToolbar"] { display: none !important; }
+    div[data-testid="stDecoration"] { display: none !important; }
+    div[data-testid="stStatusWidget"] { display: none !important; }
+    div[data-testid="stHorizontalBlock"] { gap: 0 !important; margin: 0 !important; padding: 0 !important; }
+    div[data-testid="stButton"] > button {
+        padding: 2px 10px !important;
         font-size: 12px !important;
-        height: 28px !important;
+        height: 26px !important;
+        line-height: 1 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-col1, col2 = st.columns([8, 1])
+col1, col2 = st.columns([9, 1])
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         del st.session_state["momentum_historical"]
