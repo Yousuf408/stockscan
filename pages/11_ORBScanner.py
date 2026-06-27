@@ -410,7 +410,7 @@ def fetch_candles_for_stocks(stock_names: list, interval: str = "5m") -> dict:
 
 
 def get_candle_cache(stock_names: list, interval: str) -> dict:
-    key        = f"orb_candle_cache_{interval}"
+    key        = f"orb_candle_cache_{interval.replace('m','m')}"  # e.g. orb_candle_cache_5m
     if key not in st.session_state:
         st.session_state[key] = {}
     cache      = st.session_state[key]
@@ -1328,6 +1328,12 @@ if (
     st.session_state["orb_tracked"]      = loaded
     st.session_state["orb_tracked_date"] = today_str
 
+# ── Candle cache — fetch once outside fragment (not every 5s) ──
+if "orb_tracked" in st.session_state and st.session_state["orb_tracked"]:
+    _tracked_syms = list(st.session_state["orb_tracked"].keys())
+    get_candle_cache(_tracked_syms, "5m")
+    get_candle_cache(_tracked_syms, "15m")
+
 # ── Top bar ───────────────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
 with col1:
@@ -1352,7 +1358,8 @@ with col1:
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         for key in ["orb_historical", "orb_tracked", "orb_tracked_date",
-                    "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated"]:
+                    "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated",
+                    "orb_candle_cache_5m", "orb_candle_cache_15m"]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -1571,19 +1578,14 @@ def orb_scanner_table():
     else:
         win_label = "🔒 ORB Closed"
 
-    # ── Candle data for Lightweight Charts — 5m + 15m ─────────
-    tracked_symbols = list(orb_tracked.keys())
-    candle_5m  = get_candle_cache(tracked_symbols, "5m")
-    candle_15m = get_candle_cache(tracked_symbols, "15m")
-
-    # ── Render ────────────────────────────────────────────────
+    # ── Render — candle cache already loaded outside fragment ───
     html = render_orb_table(
         df               = df_display,
         window_status    = win_label,
         prev_date        = st.session_state["orb_historical"]["prev_date"],
         tick_count       = len(live_ticks),
-        candle_cache_5m  = candle_5m,
-        candle_cache_15m = candle_15m,
+        candle_cache_5m  = st.session_state.get("orb_candle_cache_5m", {}),
+        candle_cache_15m = st.session_state.get("orb_candle_cache_15m", {}),
     )
 
     st.components.v1.html(
