@@ -8,6 +8,7 @@ ORB (Opening Range Breakout) Scanner
 
 import sys
 import os
+import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
