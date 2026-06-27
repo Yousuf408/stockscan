@@ -91,37 +91,24 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
 
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION START — YAHOO FINANCE                   ║
-# ║  NOTE: Yahoo Finance has 15-20 min delay on intraday data     ║
-# ║  TODO: Replace yf.download with Angel One getCandleData        ║
-# ║        for live market accuracy (no delay)                     ║
+# ║  9 EMA (5MIN) SECTION START — HYBRID: Yahoo(8) + WS(1)        ║
+# ║  8 closed candles from Yahoo Finance (accurate, no delay)      ║
+# ║  9th candle = live LTP from Angel One WebSocket (real-time)    ║
+# ║  Result: Real-time 9 EMA with no delay                        ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 EMA9_ENTRY_ZONE = 2.0   # % — safe entry zone
 EMA9_WAIT_ZONE  = 4.0   # % — wait for pullback
 
 
-def fetch_ema9_5min(stock_names: list) -> dict:
+def fetch_ema9_candles(stock_names: list) -> dict:
     """
-    Fetch 9 EMA on 5min timeframe via yfinance.
+    Step 1 of hybrid approach:
+    Fetch last 8 closed 5min candles from Yahoo Finance.
+    These are historical closed candles — accurate, no distortion.
 
-    Accuracy notes:
-    - auto_adjust=False → raw prices, no corporate action distortion
-    - adjust=False in ewm → standard EMA formula (same as TradingView)
-    - period="5d" → enough 5min candles even after weekends/holidays
-    - current_price = last closed candle close (not live LTP)
-    - Minimum 15 candles required for reliable 9 EMA
-
-    Returns:
-    { stock: { "ema9": float, "distance": float,
-               "status": str, "signal": str } }
-
-    Status values:
-      ✅ +X.X%  Entry Zone   (distance <= 2%)
-      ⚠️ +X.X%  Wait         (distance 2-4%)
-      ❌ +X.X%  Extended     (distance > 4%)
-      📉 -X.X%  Below EMA9   (price below EMA9)
-      ⚠️ N/A    Data missing
+    Returns: { stock: [c1, c2, c3, c4, c5, c6, c7, c8] }
+    — list of 8 close prices (oldest → newest)
     """
     result = {}
     if not stock_names:
@@ -132,9 +119,9 @@ def fetch_ema9_5min(stock_names: list) -> dict:
     try:
         raw = yf.download(
             tickers,
-            period      = "5d",       # 5 days = ~500 candles of 5min — more than enough
+            period      = "1d",        # Today only — faster, less data
             interval    = "5m",
-            auto_adjust = False,       # Raw prices — no corporate action distortion
+            auto_adjust = False,        # Raw prices — no corporate action distortion
             progress    = False,
             threads     = True,
         )
@@ -144,8 +131,7 @@ def fetch_ema9_5min(stock_names: list) -> dict:
     if raw.empty:
         return result
 
-    # ── Handle Close column — single vs multi ticker ──────────
-    # auto_adjust=False gives "Close" (not "Adj Close") for 5min
+    # ── Handle Close column ───────────────────────────────────
     if isinstance(raw.columns, pd.MultiIndex):
         if "Close" not in raw.columns.get_level_values(0):
             return result
@@ -166,62 +152,71 @@ def fetch_ema9_5min(stock_names: list) -> dict:
     for stock in stock_names:
         ticker = f"{stock}.NS"
         if ticker not in close_data:
-            result[stock] = {
-                "ema9": None, "distance": None,
-                "status": "⚠️ N/A", "signal": ""
-            }
+            result[stock] = None
             continue
 
         series = close_data[ticker].dropna()
 
-        # Need at least 15 candles for reliable 9 EMA
-        if len(series) < 15:
-            result[stock] = {
-                "ema9": None, "distance": None,
-                "status": "⚠️ N/A", "signal": ""
-            }
+        # Need at least 8 closed candles
+        if len(series) < 8:
+            result[stock] = None
             continue
 
-        # ── Calculate 9 EMA ───────────────────────────────────
-        # adjust=False = standard recursive EMA (same as TradingView)
-        ema9_series = series.ewm(span=9, adjust=False).mean()
+        # Last 8 CLOSED candles — iloc[-9:-1] skips current forming candle
+        # iloc[-1] = current forming (incomplete) — skip it
+        # iloc[-9:-1] = last 8 fully closed candles
+        last_8 = list(series.iloc[-9:-1].values)
+        if len(last_8) < 8:
+            # Fallback — use whatever closed candles available
+            last_8 = list(series.iloc[:-1].tail(8).values)
 
-        # iloc[-1] = current forming candle (live price)
-        # When replaced with Angel One — this will be real-time accurate
-        current_price = round(float(series.iloc[-1]), 2)
-        ema9_value    = round(float(ema9_series.iloc[-1]), 2)
-
-        if ema9_value == 0:
-            result[stock] = {
-                "ema9": None, "distance": None,
-                "status": "⚠️ N/A", "signal": ""
-            }
-            continue
-
-        distance = round(((current_price - ema9_value) / ema9_value) * 100, 2)
-
-        # ── Status & signal ───────────────────────────────────
-        if current_price < ema9_value:
-            status = f"📉 {distance:.1f}%"
-            signal = "Below EMA9"
-        elif distance <= EMA9_ENTRY_ZONE:
-            status = f"✅ +{distance:.1f}%"
-            signal = "Entry Zone"
-        elif distance <= EMA9_WAIT_ZONE:
-            status = f"⚠️ +{distance:.1f}%"
-            signal = "Wait - Pullback"
-        else:
-            status = f"❌ +{distance:.1f}%"
-            signal = "Extended - Avoid"
-
-        result[stock] = {
-            "ema9"    : ema9_value,
-            "distance": distance,
-            "status"  : status,
-            "signal"  : signal,
-        }
+        result[stock] = last_8
 
     return result
+
+
+def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
+    """
+    Step 2 of hybrid approach:
+    Combine 8 Yahoo candles + 1 live WS LTP → calculate 9 EMA.
+
+    adjust=False = standard recursive EMA (same as TradingView)
+    Returns: { "ema9": float, "distance": float, "status": str, "signal": str }
+    """
+    if not candles_8 or len(candles_8) < 8 or live_ltp <= 0:
+        return None
+
+    # 8 closed candles + current live LTP = 9 values
+    series_9 = pd.Series(candles_8 + [live_ltp])
+
+    ema9_series = series_9.ewm(span=9, adjust=False).mean()
+    ema9_value  = round(float(ema9_series.iloc[-1]), 2)
+
+    if ema9_value == 0:
+        return None
+
+    distance = round(((live_ltp - ema9_value) / ema9_value) * 100, 2)
+
+    # ── Status & signal ───────────────────────────────────────
+    if live_ltp < ema9_value:
+        status = f"📉 {distance:.1f}%"
+        signal = "Below EMA9"
+    elif distance <= EMA9_ENTRY_ZONE:
+        status = f"✅ +{distance:.1f}%"
+        signal = "Entry Zone"
+    elif distance <= EMA9_WAIT_ZONE:
+        status = f"⚠️ +{distance:.1f}%"
+        signal = "Wait - Pullback"
+    else:
+        status = f"❌ +{distance:.1f}%"
+        signal = "Extended - Avoid"
+
+    return {
+        "ema9"    : ema9_value,
+        "distance": distance,
+        "status"  : status,
+        "signal"  : signal,
+    }
 
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION END                                     ║
