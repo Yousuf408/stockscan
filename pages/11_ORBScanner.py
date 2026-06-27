@@ -679,17 +679,21 @@ function toggleColExpand(col) {
 }
 
 function applyFilter() {
-    var volVal = document.getElementById('orbVolFilter').value.toLowerCase();
-    var emaVal = document.getElementById('orbEmaFilter').value;
-    var rows   = document.querySelectorAll('tbody tr.main-row');
-    var count  = 0;
+    var volVal  = document.getElementById('orbVolFilter').value.toLowerCase();
+    var emaVal  = document.getElementById('orbEmaFilter').value;
+    var ema200Val = document.getElementById('orbEma200Filter').value;
+    var rows    = document.querySelectorAll('tbody tr.main-row');
+    var count   = 0;
     rows.forEach(function(row) {
-        var vol = (row.dataset.vol || '').toLowerCase();
-        var ema = (row.dataset.ema || '');
-        var show = true;
+        var vol    = (row.dataset.vol    || '').toLowerCase();
+        var ema    = (row.dataset.ema    || '');
+        var ema200 = (row.dataset.ema200 || '');
+        var show   = true;
         if (volVal && !vol.includes(volVal)) show = false;
         if (emaVal === 'pass' && !ema.includes('✅')) show = false;
         if (emaVal === 'fail' && !ema.includes('❌')) show = false;
+        if (ema200Val === 'above' && ema200 !== 'above') show = false;
+        if (ema200Val === 'below' && ema200 !== 'below') show = false;
         row.style.display = show ? '' : 'none';
         var expRow = document.getElementById('orb-exp-' + row.dataset.sym);
         if (expRow) expRow.style.display = 'none';
@@ -777,11 +781,15 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
         else:
             vol_cls = ""
 
+        # ema200 above/below for filter
+        ema200_filter_val = "above" if (ema200_val is not None and float(today_open) > float(ema200_val)) else "below"
+
         rows_html += f"""
         <tr class="main-row {vol_cls}" id="orb-main-{symbol}"
             data-sym="{symbol}"
             data-vol="{vol_mom.lower()}"
             data-ema="{ema_status}"
+            data-ema200="{ema200_filter_val}"
             onclick="toggleRow('{symbol}')">
             <td>
                 <div class="stock-cell">
@@ -885,9 +893,14 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
             <option value="building">👀 Building</option>
         </select>
         <select class="filter-select" id="orbEmaFilter" onchange="applyFilter()">
-            <option value="">All EMA</option>
-            <option value="pass">✅ EMA Pass</option>
-            <option value="fail">❌ EMA Fail / Below</option>
+            <option value="">All EMA20</option>
+            <option value="pass">✅ EMA20 Pass</option>
+            <option value="fail">❌ EMA20 Fail / Below</option>
+        </select>
+        <select class="filter-select" id="orbEma200Filter" onchange="applyFilter()">
+            <option value="">All EMA200</option>
+            <option value="above">🟢 Above EMA200</option>
+            <option value="below">❌ Below EMA200</option>
         </select>
         <span class="meta-info">{meta}</span>
     </div>
