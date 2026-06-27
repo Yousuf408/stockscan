@@ -643,6 +643,12 @@ function applyFilter() {
     var volVal    = document.getElementById('orbVolFilter').value.toLowerCase();
     var emaVal    = document.getElementById('orbEmaFilter').value;
     var ema200Val = document.getElementById('orbEma200Filter').value;
+    // persist filter state across re-renders
+    try {
+        sessionStorage.setItem('orb_vol_filter',    volVal);
+        sessionStorage.setItem('orb_ema_filter',    emaVal);
+        sessionStorage.setItem('orb_ema200_filter', ema200Val);
+    } catch(e) {}
     var count = 0;
     document.querySelectorAll('tbody tr.main-row').forEach(function(row){
         var show = true;
@@ -658,6 +664,24 @@ function applyFilter() {
     });
     document.getElementById('orbMatchCount').textContent = count;
 }
+
+// Restore filter state on every render
+(function restoreFilters() {
+    try {
+        var v   = sessionStorage.getItem('orb_vol_filter');
+        var e   = sessionStorage.getItem('orb_ema_filter');
+        var e2  = sessionStorage.getItem('orb_ema200_filter');
+        var vEl  = document.getElementById('orbVolFilter');
+        var eEl  = document.getElementById('orbEmaFilter');
+        var e2El = document.getElementById('orbEma200Filter');
+        if (v  && vEl)  vEl.value  = v;
+        if (e  && eEl)  eEl.value  = e;
+        if (e2 && e2El) e2El.value = e2;
+        if ((v && v !== '') || (e && e !== '') || (e2 && e2 !== '')) {
+            applyFilter();
+        }
+    } catch(err) {}
+})();
 </script>
 """
 
