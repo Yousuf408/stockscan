@@ -315,6 +315,113 @@ def get_ema5m_cache(stock_names: list, today_opens: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# CANDLE DATA FOR CHART — 5min + 15min
+# ─────────────────────────────────────────────────────────────
+def fetch_candles_for_stocks(stock_names: list, interval: str = "5m") -> dict:
+    """
+    Fetch OHLCV candles for Lightweight Charts.
+    interval: "5m" or "15m"
+    Returns: {symbol: {"candles": [...], "ema9": [...], "ema200": [...]}}
+    Each candle: {"time": unix_ts, "open": f, "high": f, "low": f, "close": f, "volume": f}
+    """
+    import json
+    result = {}
+    if not stock_names:
+        return result
+
+    period   = "5d"  if interval == "5m"  else "30d"
+    tickers  = [f"{s}.NS" for s in stock_names]
+
+    try:
+        raw = yf.download(
+            tickers,
+            period      = period,
+            interval    = interval,
+            auto_adjust = True,
+            progress    = False,
+            threads     = True,
+        )
+    except Exception:
+        return result
+
+    # Normalize columns
+    needed = ["Open", "High", "Low", "Close", "Volume"]
+    if not all(c in raw.columns for c in needed) and not isinstance(raw.columns, pd.MultiIndex):
+        return result
+
+    for stock in stock_names:
+        ticker = f"{stock}.NS"
+        try:
+            if isinstance(raw.columns, pd.MultiIndex):
+                df_s = raw.xs(ticker, axis=1, level=1)[needed].dropna()
+            else:
+                if len(stock_names) == 1:
+                    df_s = raw[needed].dropna()
+                else:
+                    continue
+        except Exception:
+            result[stock] = None
+            continue
+
+        if df_s.empty:
+            result[stock] = None
+            continue
+
+        # Unix timestamps (seconds) — JS needs seconds
+        candles  = []
+        closes   = []
+        for ts, row_c in df_s.iterrows():
+            try:
+                unix = int(ts.timestamp())
+            except Exception:
+                continue
+            candles.append({
+                "time"  : unix,
+                "open"  : round(float(row_c["Open"]),   2),
+                "high"  : round(float(row_c["High"]),   2),
+                "low"   : round(float(row_c["Low"]),    2),
+                "close" : round(float(row_c["Close"]),  2),
+                "volume": round(float(row_c["Volume"]), 0),
+            })
+            closes.append(float(row_c["Close"]))
+
+        if len(closes) < 9:
+            result[stock] = None
+            continue
+
+        # EMA calculation
+        closes_s  = pd.Series(closes)
+        ema9_s    = closes_s.ewm(span=9,   adjust=False).mean().round(2).tolist()
+        ema200_s  = closes_s.ewm(span=200, adjust=False).mean().round(2).tolist() if len(closes) >= 20 else []
+
+        # Pair EMA values with timestamps
+        times    = [c["time"] for c in candles]
+        ema9_pts  = [{"time": t, "value": v} for t, v in zip(times, ema9_s)]
+        ema200_pts= [{"time": t, "value": v} for t, v in zip(times, ema200_s)] if ema200_s else []
+
+        result[stock] = {
+            "candles": candles,
+            "ema9"   : ema9_pts,
+            "ema200" : ema200_pts,
+        }
+
+    return result
+
+
+def get_candle_cache(stock_names: list, interval: str) -> dict:
+    key        = f"orb_candle_cache_{interval}"
+    if key not in st.session_state:
+        st.session_state[key] = {}
+    cache      = st.session_state[key]
+    new_stocks = [s for s in stock_names if s not in cache]
+    if new_stocks:
+        fetched = fetch_candles_for_stocks(new_stocks, interval)
+        cache.update(fetched)
+        st.session_state[key] = cache
+    return cache
+
+
+# ─────────────────────────────────────────────────────────────
 # ORB SUPABASE — SAVE & FETCH
 # ─────────────────────────────────────────────────────────────
 def fetch_orb_signals_from_supabase(today_str: str) -> dict:
@@ -677,34 +784,118 @@ function toggleRow(sym) {
     var icon = mainRow.querySelector('.expand-icon');
     if (icon) icon.textContent = isOpen ? '+' : '−';
 
-    // ── TradingView chart — iframe approach (NSE supported) ─────
+    // ── Lightweight Chart — load on first open ───────────────
     if (!isOpen && !mainRow.dataset.chartLoaded) {
         mainRow.dataset.chartLoaded = 'true';
-        var chartDiv = document.getElementById('tv-chart-' + sym);
-        if (chartDiv) {
-            var src = 'https://s.tradingview.com/widgetembed/?'
-                + 'symbol='    + encodeURIComponent('NSE:' + sym)
-                + '&interval=5'
-                + '&timezone=' + encodeURIComponent('Asia/Kolkata')
-                + '&theme=light'
-                + '&style=1'
-                + '&locale=en'
-                + '&hide_top_toolbar=0'
-                + '&hide_legend=0'
-                + '&studies='  + encodeURIComponent('MAExp@tv-basicstudies,MAExp@tv-basicstudies,Volume@tv-basicstudies');
-            var iframe = document.createElement('iframe');
-            iframe.src               = src;
-            iframe.width             = '100%';
-            iframe.height            = '420';
-            iframe.frameBorder       = '0';
-            iframe.allowTransparency = 'true';
-            iframe.scrolling         = 'no';
-            iframe.style.borderRadius = '8px';
-            iframe.style.display     = 'block';
-            iframe.style.border      = '1px solid #e2e8f0';
-            chartDiv.appendChild(iframe);
-        }
+        loadLWC(sym, '5m');
     }
+}
+
+// ── Chart registry — one chart instance per symbol ───────────
+var lwcCharts = {};
+
+function loadLWC(sym, tf) {
+    var container = document.getElementById('lwc-' + sym);
+    if (!container) return;
+
+    // Get data injected by Python
+    var dataKey5m  = 'lwcData5m_'  + sym;
+    var dataKey15m = 'lwcData15m_' + sym;
+    var data       = tf === '15m' ? window[dataKey15m] : window[dataKey5m];
+
+    if (!data || !data.candles || data.candles.length === 0) {
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:13px;">⏳ No data available</div>';
+        return;
+    }
+
+    // Clear previous chart
+    container.innerHTML = '';
+    if (lwcCharts[sym]) {
+        try { lwcCharts[sym].remove(); } catch(e) {}
+        delete lwcCharts[sym];
+    }
+
+    var doRender = function() {
+        var chart = LightweightCharts.createChart(container, {
+            width          : container.clientWidth || 900,
+            height         : 400,
+            layout         : { background: { color: '#ffffff' }, textColor: '#374151' },
+            grid           : { vertLines: { color: '#f1f5f9' }, horzLines: { color: '#f1f5f9' } },
+            crosshair      : { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: { borderColor: '#e2e8f0' },
+            timeScale      : { borderColor: '#e2e8f0', timeVisible: true, secondsVisible: false },
+        });
+        lwcCharts[sym] = chart;
+
+        // Candlestick series
+        var candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+            upColor        : '#16a34a', downColor      : '#dc2626',
+            borderUpColor  : '#16a34a', borderDownColor: '#dc2626',
+            wickUpColor    : '#16a34a', wickDownColor  : '#dc2626',
+        });
+        candleSeries.setData(data.candles);
+
+        // Volume series
+        var volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+            color      : '#e2e8f0',
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume',
+        });
+        chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        var volData = data.candles.map(function(c) {
+            return { time: c.time, value: c.volume, color: c.close >= c.open ? '#bbf7d0' : '#fecaca' };
+        });
+        volSeries.setData(volData);
+
+        // EMA9 line
+        if (data.ema9 && data.ema9.length > 0) {
+            var ema9Series = chart.addSeries(LightweightCharts.LineSeries, {
+                color: '#f59e0b', lineWidth: 1, title: 'EMA9',
+                priceLineVisible: false, lastValueVisible: true,
+            });
+            ema9Series.setData(data.ema9);
+        }
+
+        // EMA200 line
+        if (data.ema200 && data.ema200.length > 0) {
+            var ema200Series = chart.addSeries(LightweightCharts.LineSeries, {
+                color: '#7c3aed', lineWidth: 1, title: 'EMA200',
+                priceLineVisible: false, lastValueVisible: true,
+            });
+            ema200Series.setData(data.ema200);
+        }
+
+        chart.timeScale().fitContent();
+
+        // Resize observer
+        var ro = new ResizeObserver(function() {
+            chart.applyOptions({ width: container.clientWidth });
+        });
+        ro.observe(container);
+    };
+
+    // Load LWC from CDN if not already loaded
+    if (typeof LightweightCharts !== 'undefined') {
+        doRender();
+    } else {
+        var script = document.createElement('script');
+        script.src = 'https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js';
+        script.onload = doRender;
+        document.head.appendChild(script);
+    }
+}
+
+function switchTF(sym, tf) {
+    // Update button styles
+    var btn5  = document.getElementById('btn-5m-'  + sym);
+    var btn15 = document.getElementById('btn-15m-' + sym);
+    if (btn5 && btn15) {
+        var active   = 'background:#3b82f6;color:white;border-color:#3b82f6;';
+        var inactive = 'background:white;color:#374151;border-color:#e2e8f0;';
+        btn5.style.cssText  += tf === '5m'  ? active : inactive;
+        btn15.style.cssText += tf === '15m' ? active : inactive;
+    }
+    loadLWC(sym, tf);
 }
 
 function toggleColExpand(col) {
@@ -746,7 +937,7 @@ function applyFilter() {
 """
 
 
-def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str = "", tick_count: int = 0) -> str:
+def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str = "", tick_count: int = 0, candle_cache_5m: dict = None, candle_cache_15m: dict = None) -> str:
     rows_html = ""
     total     = len(df)
 
@@ -917,16 +1108,33 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
                         <div class="ec-sub">Current intraday</div>
                     </div>
                 </div>
-                <!-- TradingView Chart -->
-                <div id="tv-{symbol}" style="padding:12px 16px 16px 16px; background:#f0f9ff;">
-                    <div style="font-size:11px;font-weight:700;color:#64748b;
-                                text-transform:uppercase;letter-spacing:0.5px;
-                                margin-bottom:8px;">
-                        📈 NSE:{symbol} — 5min Chart
+                <!-- Lightweight Chart -->
+                <div id="lwc-wrap-{symbol}" style="padding:12px 16px 16px 16px; background:#f0f9ff;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <span style="font-size:11px;font-weight:700;color:#64748b;
+                                     text-transform:uppercase;letter-spacing:0.5px;">
+                            📈 NSE:{symbol}
+                        </span>
+                        <div style="display:flex;gap:4px;margin-left:8px;">
+                            <button onclick="switchTF('{symbol}','5m')"
+                                id="btn-5m-{symbol}"
+                                style="padding:3px 10px;border-radius:4px;border:1px solid #3b82f6;
+                                       background:#3b82f6;color:white;font-size:11px;font-weight:700;
+                                       cursor:pointer;">5m</button>
+                            <button onclick="switchTF('{symbol}','15m')"
+                                id="btn-15m-{symbol}"
+                                style="padding:3px 10px;border-radius:4px;border:1px solid #e2e8f0;
+                                       background:white;color:#374151;font-size:11px;font-weight:700;
+                                       cursor:pointer;">15m</button>
+                        </div>
+                        <span style="font-size:10px;color:#94a3b8;margin-left:4px;">
+                            EMA9 <span style="color:#f59e0b">■</span>
+                            EMA200 <span style="color:#7c3aed">■</span>
+                        </span>
                     </div>
-                    <div id="tv-chart-{symbol}"
-                         style="width:100%;height:420px;border-radius:8px;overflow:hidden;
-                                border:1px solid #e2e8f0;">
+                    <div id="lwc-{symbol}"
+                         style="width:100%;height:400px;border-radius:8px;overflow:hidden;
+                                border:1px solid #e2e8f0;background:#fff;">
                     </div>
                 </div>
             </td>
@@ -934,7 +1142,19 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
 
     meta = f"📅 {prev_date} &nbsp;|&nbsp; Ticks: {tick_count} &nbsp;|&nbsp; {window_status}"
 
-    html = _ORB_STYLES + f"""
+    # ── Build JS data injection for all symbols ───────────────
+    candle_js = ""
+    if candle_cache_5m or candle_cache_15m:
+        for _, row in df.iterrows():
+            sym = str(row["Symbol"])
+            d5  = (candle_cache_5m  or {}).get(sym)
+            d15 = (candle_cache_15m or {}).get(sym)
+            if d5:
+                candle_js += f"window.lwcData5m_{sym}  = {json.dumps(d5)};\n"
+            if d15:
+                candle_js += f"window.lwcData15m_{sym} = {json.dumps(d15)};\n"
+
+    html = _ORB_STYLES + f"""\n    <script>\n{candle_js}\n    </script>\n""" + f"""
     <div class="filterbar">
         <span class="filter-label">ORB Scanner</span>
         <span class="filter-count"><b id="orbMatchCount">{total}</b> stocks</span>
@@ -1262,12 +1482,19 @@ def orb_scanner_table():
     else:
         win_label = "🔒 ORB Closed"
 
+    # ── Candle data for Lightweight Charts — 5m + 15m ─────────
+    tracked_symbols = list(orb_tracked.keys())
+    candle_5m  = get_candle_cache(tracked_symbols, "5m")
+    candle_15m = get_candle_cache(tracked_symbols, "15m")
+
     # ── Render ────────────────────────────────────────────────
     html = render_orb_table(
-        df             = df_display,
-        window_status  = win_label,
-        prev_date      = st.session_state["orb_historical"]["prev_date"],
-        tick_count     = len(live_ticks),
+        df               = df_display,
+        window_status    = win_label,
+        prev_date        = st.session_state["orb_historical"]["prev_date"],
+        tick_count       = len(live_ticks),
+        candle_cache_5m  = candle_5m,
+        candle_cache_15m = candle_15m,
     )
 
     st.components.v1.html(
