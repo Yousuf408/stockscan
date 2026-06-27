@@ -506,6 +506,33 @@ tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 ::-webkit-scrollbar { height: 5px; width: 5px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+/* ── CUSTOM DROPDOWN ── */
+.cdd-wrap  { position: relative; display: inline-block; }
+.cdd-btn   {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 6px; border: 1px solid #e2e8f0;
+  background: #fff; color: #374151; font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; min-width: 120px;
+  justify-content: space-between;
+}
+.cdd-btn:hover  { background: #f8fafc; border-color: #cbd5e1; }
+.cdd-btn.active { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+.cdd-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; }
+.cdd-btn.open .cdd-arrow { transform: rotate(180deg); }
+.cdd-menu {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 9999;
+  min-width: 170px; padding: 4px 0;
+}
+.cdd-menu.open { display: block; }
+.cdd-item {
+  padding: 8px 14px; font-size: 13px; color: #374151;
+  cursor: pointer; white-space: nowrap; transition: background 0.1s;
+}
+.cdd-item:hover    { background: #f0f9ff; color: #0369a1; }
+.cdd-item.selected { background: #eff6ff; color: #1d4ed8; font-weight: 700; }
 </style>
 <div id="orb-toast" class="toast">✅ Copied!</div>
 <script>
@@ -639,6 +666,69 @@ function toggleColExpand(col) {
     });
 }
 
+function toggleCDD(id) {
+    var menu = document.getElementById('cdd-' + id + '-menu');
+    var btn  = document.getElementById('cdd-' + id + '-btn');
+    // Close all other menus first
+    ['vol','ema','ema200'].forEach(function(k) {
+        if (k !== id) {
+            var m = document.getElementById('cdd-' + k + '-menu');
+            var b = document.getElementById('cdd-' + k + '-btn');
+            if (m) m.classList.remove('open');
+            if (b) b.classList.remove('open');
+        }
+    });
+    if (menu) menu.classList.toggle('open');
+    if (btn)  btn.classList.toggle('open');
+}
+
+function setCDD(id, value, label) {
+    // Set hidden input value
+    var input = document.getElementById(
+        id === 'vol' ? 'orbVolFilter' :
+        id === 'ema' ? 'orbEmaFilter' : 'orbEma200Filter'
+    );
+    if (input) input.value = value;
+
+    // Update button label
+    var btn = document.getElementById('cdd-' + id + '-btn');
+    if (btn) {
+        btn.innerHTML = label + ' <span class="cdd-arrow">▾</span>';
+        if (value !== '') btn.classList.add('active');
+        else              btn.classList.remove('active');
+        btn.classList.remove('open');
+    }
+
+    // Mark selected item
+    var menu = document.getElementById('cdd-' + id + '-menu');
+    if (menu) {
+        menu.querySelectorAll('.cdd-item').forEach(function(item) {
+            item.classList.toggle('selected', item.textContent.trim() === label.trim());
+        });
+        menu.classList.remove('open');
+    }
+
+    applyFilter();
+
+    // Persist
+    try {
+        sessionStorage.setItem('orb_cdd_' + id + '_val',   value);
+        sessionStorage.setItem('orb_cdd_' + id + '_label', label);
+    } catch(e) {}
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.cdd-wrap')) {
+        ['vol','ema','ema200'].forEach(function(k) {
+            var m = document.getElementById('cdd-' + k + '-menu');
+            var b = document.getElementById('cdd-' + k + '-btn');
+            if (m) m.classList.remove('open');
+            if (b) b.classList.remove('open');
+        });
+    }
+});
+
 function applyFilter() {
     var volVal    = document.getElementById('orbVolFilter').value.toLowerCase();
     var emaVal    = document.getElementById('orbEmaFilter').value;
@@ -668,18 +758,14 @@ function applyFilter() {
 // Restore filter state on every render
 (function restoreFilters() {
     try {
-        var v   = sessionStorage.getItem('orb_vol_filter');
-        var e   = sessionStorage.getItem('orb_ema_filter');
-        var e2  = sessionStorage.getItem('orb_ema200_filter');
-        var vEl  = document.getElementById('orbVolFilter');
-        var eEl  = document.getElementById('orbEmaFilter');
-        var e2El = document.getElementById('orbEma200Filter');
-        if (v  && vEl)  vEl.value  = v;
-        if (e  && eEl)  eEl.value  = e;
-        if (e2 && e2El) e2El.value = e2;
-        if ((v && v !== '') || (e && e !== '') || (e2 && e2 !== '')) {
-            applyFilter();
-        }
+        [['vol','orbVolFilter'],['ema','orbEmaFilter'],['ema200','orbEma200Filter']].forEach(function(pair) {
+            var id    = pair[0], inputId = pair[1];
+            var val   = sessionStorage.getItem('orb_cdd_' + id + '_val');
+            var label = sessionStorage.getItem('orb_cdd_' + id + '_label');
+            if (val !== null && label !== null && val !== '') {
+                setCDD(id, val, label);
+            }
+        });
     } catch(err) {}
 })();
 </script>
@@ -821,22 +907,47 @@ def render_orb_table(df, window_status="", prev_date="", tick_count=0,
       <span class="filter-label">ORB Scanner</span>
       <span class="filter-count"><b id="orbMatchCount">{total}</b> stocks</span>
       <div class="filter-sep"></div>
-      <select class="filter-select" id="orbVolFilter" onchange="applyFilter()">
-        <option value="">All Volume</option>
-        <option value="very strong">🔥 Very Strong</option>
-        <option value="strong">⚡ Strong</option>
-        <option value="building">👀 Building</option>
-      </select>
-      <select class="filter-select" id="orbEmaFilter" onchange="applyFilter()">
-        <option value="">All EMA20</option>
-        <option value="pass">✅ EMA20 Pass</option>
-        <option value="fail">❌ EMA20 Fail / Below</option>
-      </select>
-      <select class="filter-select" id="orbEma200Filter" onchange="applyFilter()">
-        <option value="">All EMA200</option>
-        <option value="above">🟢 Above EMA200</option>
-        <option value="below">❌ Below EMA200</option>
-      </select>
+
+      <!-- Vol Filter -->
+      <div class="cdd-wrap" id="cdd-vol">
+        <button class="cdd-btn" onclick="toggleCDD('vol')" id="cdd-vol-btn">
+          All Volume <span class="cdd-arrow">▾</span>
+        </button>
+        <div class="cdd-menu" id="cdd-vol-menu">
+          <div class="cdd-item" onclick="setCDD('vol','','All Volume')">All Volume</div>
+          <div class="cdd-item" onclick="setCDD('vol','very strong','🔥 Very Strong')">🔥 Very Strong</div>
+          <div class="cdd-item" onclick="setCDD('vol','strong','⚡ Strong')">⚡ Strong</div>
+          <div class="cdd-item" onclick="setCDD('vol','building','👀 Building')">👀 Building</div>
+        </div>
+        <input type="hidden" id="orbVolFilter" value="">
+      </div>
+
+      <!-- EMA20 Filter -->
+      <div class="cdd-wrap" id="cdd-ema">
+        <button class="cdd-btn" onclick="toggleCDD('ema')" id="cdd-ema-btn">
+          All EMA20 <span class="cdd-arrow">▾</span>
+        </button>
+        <div class="cdd-menu" id="cdd-ema-menu">
+          <div class="cdd-item" onclick="setCDD('ema','','All EMA20')">All EMA20</div>
+          <div class="cdd-item" onclick="setCDD('ema','pass','✅ EMA20 Pass')">✅ EMA20 Pass</div>
+          <div class="cdd-item" onclick="setCDD('ema','fail','❌ EMA20 Fail')">❌ EMA20 Fail</div>
+        </div>
+        <input type="hidden" id="orbEmaFilter" value="">
+      </div>
+
+      <!-- EMA200 Filter -->
+      <div class="cdd-wrap" id="cdd-ema200">
+        <button class="cdd-btn" onclick="toggleCDD('ema200')" id="cdd-ema200-btn">
+          All EMA200 <span class="cdd-arrow">▾</span>
+        </button>
+        <div class="cdd-menu" id="cdd-ema200-menu">
+          <div class="cdd-item" onclick="setCDD('ema200','','All EMA200')">All EMA200</div>
+          <div class="cdd-item" onclick="setCDD('ema200','above','🟢 Above EMA200')">🟢 Above EMA200</div>
+          <div class="cdd-item" onclick="setCDD('ema200','below','❌ Below EMA200')">❌ Below EMA200</div>
+        </div>
+        <input type="hidden" id="orbEma200Filter" value="">
+      </div>
+
       <span class="meta-info">{meta}</span>
     </div>
     <div class="table-wrap"><table>
