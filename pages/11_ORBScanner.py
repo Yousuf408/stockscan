@@ -677,41 +677,32 @@ function toggleRow(sym) {
     var icon = mainRow.querySelector('.expand-icon');
     if (icon) icon.textContent = isOpen ? '+' : '−';
 
-    // ── TradingView chart — lazy load on first open ───────────
+    // ── TradingView chart — iframe approach (NSE supported) ─────
     if (!isOpen && !mainRow.dataset.chartLoaded) {
         mainRow.dataset.chartLoaded = 'true';
-        var container = document.getElementById('tv-' + sym);
-        if (container) {
-            var doLoad = function() {
-                new TradingView.widget({
-                    "width"              : "100%",
-                    "height"             : 420,
-                    "symbol"             : "NSE:" + sym,
-                    "interval"           : "5",
-                    "timezone"           : "Asia/Kolkata",
-                    "theme"              : "light",
-                    "style"              : "1",
-                    "locale"             : "en",
-                    "toolbar_bg"         : "#f8fafc",
-                    "enable_publishing"  : false,
-                    "allow_symbol_change": false,
-                    "save_image"         : false,
-                    "container_id"       : "tv-chart-" + sym,
-                    "studies"            : [
-                        {"id": "MAExp@tv-basicstudies", "inputs": {"length": 9}},
-                        {"id": "MAExp@tv-basicstudies", "inputs": {"length": 200}},
-                        "Volume@tv-basicstudies"
-                    ]
-                });
-            };
-            if (typeof TradingView !== 'undefined') {
-                doLoad();
-            } else {
-                var script = document.createElement('script');
-                script.src = 'https://s3.tradingview.com/tv.js';
-                script.onload = doLoad;
-                document.head.appendChild(script);
-            }
+        var chartDiv = document.getElementById('tv-chart-' + sym);
+        if (chartDiv) {
+            var src = 'https://s.tradingview.com/widgetembed/?'
+                + 'symbol='    + encodeURIComponent('NSE:' + sym)
+                + '&interval=5'
+                + '&timezone=' + encodeURIComponent('Asia/Kolkata')
+                + '&theme=light'
+                + '&style=1'
+                + '&locale=en'
+                + '&hide_top_toolbar=0'
+                + '&hide_legend=0'
+                + '&studies='  + encodeURIComponent('MAExp@tv-basicstudies,MAExp@tv-basicstudies,Volume@tv-basicstudies');
+            var iframe = document.createElement('iframe');
+            iframe.src               = src;
+            iframe.width             = '100%';
+            iframe.height            = '420';
+            iframe.frameBorder       = '0';
+            iframe.allowTransparency = 'true';
+            iframe.scrolling         = 'no';
+            iframe.style.borderRadius = '8px';
+            iframe.style.display     = 'block';
+            iframe.style.border      = '1px solid #e2e8f0';
+            chartDiv.appendChild(iframe);
         }
     }
 }
