@@ -410,7 +410,7 @@ def fetch_candles_for_stocks(stock_names: list, interval: str = "5m") -> dict:
 
 
 def get_candle_cache(stock_names: list, interval: str) -> dict:
-    key        = f"orb_candle_cache_{interval.replace('m','m')}"  # e.g. orb_candle_cache_5m
+    key        = f"orb_candle_cache_{interval}"
     if key not in st.session_state:
         st.session_state[key] = {}
     cache      = st.session_state[key]
@@ -819,115 +819,54 @@ function loadLWC(sym, tf) {
     var doRender = function() {
         var chart = LightweightCharts.createChart(container, {
             width          : container.clientWidth || 900,
-            height         : 480,
-            layout         : {
-                background : { type: 'solid', color: '#131722' },
-                textColor  : '#d1d4dc',
-                fontSize   : 12,
-                fontFamily : "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
-            },
-            grid: {
-                vertLines: { color: '#1e222d', style: 1 },
-                horzLines: { color: '#1e222d', style: 1 },
-            },
-            crosshair: {
-                mode            : LightweightCharts.CrosshairMode.Normal,
-                vertLine        : { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
-                horzLine        : { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
-            },
-            rightPriceScale: {
-                borderColor     : '#2a2e39',
-                borderVisible   : true,
-                scaleMargins    : { top: 0.1, bottom: 0.25 },
-                textColor       : '#d1d4dc',
-            },
-            timeScale: {
-                borderColor     : '#2a2e39',
-                timeVisible     : true,
-                secondsVisible  : false,
-                rightOffset     : 5,
-                barSpacing      : 8,
-                fixLeftEdge     : false,
-                lockVisibleTimeRangeOnResize: true,
-                tickMarkFormatter: function(time) {
-                    var d = new Date(time * 1000);
-                    var h = d.getHours().toString().padStart(2,'0');
-                    var m = d.getMinutes().toString().padStart(2,'0');
-                    return h + ':' + m;
-                },
-            },
-            handleScroll : { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
-            handleScale  : { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+            height         : 400,
+            layout         : { background: { color: '#ffffff' }, textColor: '#374151' },
+            grid           : { vertLines: { color: '#f1f5f9' }, horzLines: { color: '#f1f5f9' } },
+            crosshair      : { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: { borderColor: '#e2e8f0' },
+            timeScale      : { borderColor: '#e2e8f0', timeVisible: true, secondsVisible: false },
         });
         lwcCharts[sym] = chart;
 
         // Candlestick series
         var candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
-            upColor        : '#26a69a', downColor      : '#ef5350',
-            borderUpColor  : '#26a69a', borderDownColor: '#ef5350',
-            wickUpColor    : '#26a69a', wickDownColor  : '#ef5350',
+            upColor        : '#16a34a', downColor      : '#dc2626',
+            borderUpColor  : '#16a34a', borderDownColor: '#dc2626',
+            wickUpColor    : '#16a34a', wickDownColor  : '#dc2626',
         });
         candleSeries.setData(data.candles);
 
         // Volume series
         var volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
-            priceFormat  : { type: 'volume' },
-            priceScaleId : 'volume',
+            color      : '#e2e8f0',
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume',
         });
-        chart.priceScale('volume').applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 },
-        });
+        chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
         var volData = data.candles.map(function(c) {
-            return {
-                time : c.time,
-                value: c.volume,
-                color: c.close >= c.open ? 'rgba(38,166,154,0.5)' : 'rgba(239,83,80,0.5)',
-            };
+            return { time: c.time, value: c.volume, color: c.close >= c.open ? '#bbf7d0' : '#fecaca' };
         });
         volSeries.setData(volData);
 
-        // EMA9 — orange line
+        // EMA9 line
         if (data.ema9 && data.ema9.length > 0) {
             var ema9Series = chart.addSeries(LightweightCharts.LineSeries, {
-                color           : '#ff9800',
-                lineWidth       : 2,
-                title           : 'EMA9',
-                priceLineVisible: false,
-                lastValueVisible: true,
-                crosshairMarkerVisible: false,
+                color: '#f59e0b', lineWidth: 1, title: 'EMA9',
+                priceLineVisible: false, lastValueVisible: true,
             });
             ema9Series.setData(data.ema9);
         }
 
-        // EMA200 — blue line
+        // EMA200 line
         if (data.ema200 && data.ema200.length > 0) {
             var ema200Series = chart.addSeries(LightweightCharts.LineSeries, {
-                color           : '#2962ff',
-                lineWidth       : 2,
-                title           : 'EMA200',
-                priceLineVisible: false,
-                lastValueVisible: true,
-                crosshairMarkerVisible: false,
+                color: '#7c3aed', lineWidth: 1, title: 'EMA200',
+                priceLineVisible: false, lastValueVisible: true,
             });
             ema200Series.setData(data.ema200);
         }
 
         chart.timeScale().fitContent();
-
-        // ── Zoom buttons ──────────────────────────────────────
-        var wrap = document.getElementById('lwc-wrap-' + sym);
-        if (wrap && !wrap.dataset.zoomAdded) {
-            wrap.dataset.zoomAdded = 'true';
-            var zoomBar = document.createElement('div');
-            zoomBar.style.cssText = 'display:flex;gap:4px;margin-top:6px;justify-content:flex-end;';
-            zoomBar.innerHTML =
-                '<button onclick="lwcZoom(\''+sym+'\',0.5)"  style="'+zoomBtnStyle+'">−</button>' +
-                '<button onclick="lwcZoom(\''+sym+'\',2)"    style="'+zoomBtnStyle+'">+</button>' +
-                '<button onclick="lwcFit(\''+sym+'\')"       style="'+zoomBtnStyle+'">⊞ Fit</button>' +
-                '<button onclick="lwcScroll(\''+sym+'\',-5)" style="'+zoomBtnStyle+'">‹</button>' +
-                '<button onclick="lwcScroll(\''+sym+'\',5)"  style="'+zoomBtnStyle+'">›</button>';
-            wrap.appendChild(zoomBar);
-        }
 
         // Resize observer
         var ro = new ResizeObserver(function() {
@@ -935,9 +874,6 @@ function loadLWC(sym, tf) {
         });
         ro.observe(container);
     };
-
-    var zoomBtnStyle = 'padding:4px 10px;border-radius:4px;border:1px solid #2a2e39;' +
-        'background:#1e222d;color:#d1d4dc;font-size:12px;cursor:pointer;font-weight:600;';
 
     // Load LWC from CDN if not already loaded
     if (typeof LightweightCharts !== 'undefined') {
@@ -961,27 +897,6 @@ function switchTF(sym, tf) {
         btn15.style.cssText += tf === '15m' ? active : inactive;
     }
     loadLWC(sym, tf);
-}
-
-function lwcZoom(sym, factor) {
-    var chart = lwcCharts[sym];
-    if (!chart) return;
-    var ts    = chart.timeScale();
-    var range = ts.getVisibleRange();
-    if (!range) return;
-    var mid  = (range.from + range.to) / 2;
-    var half = (range.to - range.from) / 2 / factor;
-    ts.setVisibleRange({ from: mid - half, to: mid + half });
-}
-function lwcFit(sym) {
-    var chart = lwcCharts[sym];
-    if (chart) chart.timeScale().fitContent();
-}
-function lwcScroll(sym, bars) {
-    var chart = lwcCharts[sym];
-    if (chart) chart.timeScale().scrollToPosition(
-        chart.timeScale().scrollPosition() + bars, false
-    );
 }
 
 function toggleColExpand(col) {
@@ -1195,35 +1110,32 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
                     </div>
                 </div>
                 <!-- Lightweight Chart -->
-                <div id="lwc-wrap-{symbol}"
-                     style="padding:12px 16px 16px 16px;background:#131722;border-radius:0 0 8px 8px;">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                        <span style="font-size:12px;font-weight:700;color:#d1d4dc;
-                                     letter-spacing:0.5px;">
-                            NSE:{symbol}
+                <div id="lwc-wrap-{symbol}" style="padding:12px 16px 16px 16px; background:#f0f9ff;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <span style="font-size:11px;font-weight:700;color:#64748b;
+                                     text-transform:uppercase;letter-spacing:0.5px;">
+                            📈 NSE:{symbol}
                         </span>
-                        <div style="display:flex;gap:4px;margin-left:4px;">
+                        <div style="display:flex;gap:4px;margin-left:8px;">
                             <button onclick="switchTF('{symbol}','5m')"
                                 id="btn-5m-{symbol}"
-                                style="padding:3px 10px;border-radius:4px;
-                                       border:1px solid #2962ff;
-                                       background:#2962ff;color:white;
-                                       font-size:11px;font-weight:700;cursor:pointer;">5m</button>
+                                style="padding:3px 10px;border-radius:4px;border:1px solid #3b82f6;
+                                       background:#3b82f6;color:white;font-size:11px;font-weight:700;
+                                       cursor:pointer;">5m</button>
                             <button onclick="switchTF('{symbol}','15m')"
                                 id="btn-15m-{symbol}"
-                                style="padding:3px 10px;border-radius:4px;
-                                       border:1px solid #2a2e39;
-                                       background:#1e222d;color:#d1d4dc;
-                                       font-size:11px;font-weight:700;cursor:pointer;">15m</button>
+                                style="padding:3px 10px;border-radius:4px;border:1px solid #e2e8f0;
+                                       background:white;color:#374151;font-size:11px;font-weight:700;
+                                       cursor:pointer;">15m</button>
                         </div>
-                        <span style="font-size:11px;color:#758696;margin-left:8px;">
-                            EMA9 <span style="color:#ff9800;font-weight:700;">━</span>
-                            &nbsp;EMA200 <span style="color:#2962ff;font-weight:700;">━</span>
+                        <span style="font-size:10px;color:#94a3b8;margin-left:4px;">
+                            EMA9 <span style="color:#f59e0b">■</span>
+                            EMA200 <span style="color:#7c3aed">■</span>
                         </span>
                     </div>
                     <div id="lwc-{symbol}"
-                         style="width:100%;height:480px;border-radius:6px;overflow:hidden;
-                                border:1px solid #2a2e39;background:#131722;">
+                         style="width:100%;height:400px;border-radius:8px;overflow:hidden;
+                                border:1px solid #e2e8f0;background:#fff;">
                     </div>
                 </div>
             </td>
@@ -1328,12 +1240,6 @@ if (
     st.session_state["orb_tracked"]      = loaded
     st.session_state["orb_tracked_date"] = today_str
 
-# ── Candle cache — fetch once outside fragment (not every 5s) ──
-if "orb_tracked" in st.session_state and st.session_state["orb_tracked"]:
-    _tracked_syms = list(st.session_state["orb_tracked"].keys())
-    get_candle_cache(_tracked_syms, "5m")
-    get_candle_cache(_tracked_syms, "15m")
-
 # ── Top bar ───────────────────────────────────────────────────
 col1, col2 = st.columns([5, 1])
 with col1:
@@ -1358,8 +1264,7 @@ with col1:
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
         for key in ["orb_historical", "orb_tracked", "orb_tracked_date",
-                    "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated",
-                    "orb_candle_cache_5m", "orb_candle_cache_15m"]:
+                    "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated"]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -1578,14 +1483,19 @@ def orb_scanner_table():
     else:
         win_label = "🔒 ORB Closed"
 
-    # ── Render — candle cache already loaded outside fragment ───
+    # ── Candle data for Lightweight Charts — 5m + 15m ─────────
+    tracked_symbols = list(orb_tracked.keys())
+    candle_5m  = get_candle_cache(tracked_symbols, "5m")
+    candle_15m = get_candle_cache(tracked_symbols, "15m")
+
+    # ── Render ────────────────────────────────────────────────
     html = render_orb_table(
         df               = df_display,
         window_status    = win_label,
         prev_date        = st.session_state["orb_historical"]["prev_date"],
         tick_count       = len(live_ticks),
-        candle_cache_5m  = st.session_state.get("orb_candle_cache_5m", {}),
-        candle_cache_15m = st.session_state.get("orb_candle_cache_15m", {}),
+        candle_cache_5m  = candle_5m,
+        candle_cache_15m = candle_15m,
     )
 
     st.components.v1.html(
