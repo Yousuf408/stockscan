@@ -225,6 +225,106 @@ def get_ema20_cache(stock_names: list) -> dict:
     return cache
 
 # ─────────────────────────────────────────────────────────────
+# EMA9 + EMA200 ON 5-MIN — HYBRID (yfinance + WebSocket open)
+# ─────────────────────────────────────────────────────────────
+def fetch_ema5m_for_stocks(stock_names: list, today_opens: dict) -> dict:
+    """
+    Fetch 5-min data from yfinance.
+    EMA9   = 8 candles (yfinance) + today open (WS) = 9 candles
+    EMA200 = 199 candles (yfinance) + today open (WS) = 200 candles
+    today_opens = {symbol: open_price}
+    Returns: {symbol: {ema9, ema200, ema9_pct, ema200_pct}}
+    """
+    result = {}
+    if not stock_names:
+        return result
+
+    tickers = [f"{s}.NS" for s in stock_names]
+    try:
+        raw = yf.download(
+            tickers,
+            period="5d",
+            interval="5m",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception:
+        return result
+
+    if "Close" not in raw.columns and not isinstance(raw.columns, pd.MultiIndex):
+        return result
+
+    close_col  = raw["Close"]
+    close_data = {}
+
+    if isinstance(close_col, pd.Series):
+        close_data[tickers[0]] = close_col
+    else:
+        for ticker in tickers:
+            if ticker in close_col.columns:
+                close_data[ticker] = close_col[ticker]
+
+    for stock in stock_names:
+        ticker     = f"{stock}.NS"
+        today_open = today_opens.get(stock, 0)
+
+        if ticker not in close_data or today_open <= 0:
+            result[stock] = None
+            continue
+
+        series = close_data[ticker].dropna()
+        if len(series) < 9:
+            result[stock] = None
+            continue
+
+        # ── Hybrid: append today's open as latest candle ─────
+        series_with_open = pd.concat([
+            series,
+            pd.Series([today_open])
+        ], ignore_index=True)
+
+        # ── EMA9 — last 9 candles ─────────────────────────────
+        ema9_series = series_with_open.ewm(span=9, adjust=False).mean()
+        ema9_val    = round(float(ema9_series.iloc[-1]), 2)
+        ema9_pct    = round(((today_open - ema9_val) / ema9_val) * 100, 2)
+
+        # ── EMA200 — need at least 200 candles ───────────────
+        if len(series_with_open) >= 200:
+            ema200_series = series_with_open.ewm(span=200, adjust=False).mean()
+            ema200_val    = round(float(ema200_series.iloc[-1]), 2)
+            ema200_pct    = round(((today_open - ema200_val) / ema200_val) * 100, 2)
+        else:
+            ema200_val = None
+            ema200_pct = None
+
+        result[stock] = {
+            "ema9"      : ema9_val,
+            "ema9_pct"  : ema9_pct,
+            "ema200"    : ema200_val,
+            "ema200_pct": ema200_pct,
+        }
+
+    return result
+
+
+def get_ema5m_cache(stock_names: list, today_opens: dict) -> dict:
+    """Cache EMA5m per stock — fetch only new stocks."""
+    if "orb_ema5m_cache" not in st.session_state:
+        st.session_state["orb_ema5m_cache"] = {}
+
+    cache      = st.session_state["orb_ema5m_cache"]
+    new_stocks = [s for s in stock_names if s not in cache]
+
+    if new_stocks:
+        fetched = fetch_ema5m_for_stocks(new_stocks, today_opens)
+        cache.update(fetched)
+        st.session_state["orb_ema5m_cache"] = cache
+
+    return cache
+
+
+# ─────────────────────────────────────────────────────────────
 # ORB SUPABASE — SAVE & FETCH
 # ─────────────────────────────────────────────────────────────
 def fetch_orb_signals_from_supabase(today_str: str) -> dict:
@@ -255,11 +355,12 @@ def fetch_orb_signals_from_supabase(today_str: str) -> dict:
 def save_orb_signal_to_supabase(stock: str, today_str: str, signal_time: str,
                                   yesterday_high: float, today_open: float,
                                   gap_pct: float, signal_price: float,
-                                  ema20_status: str):
+                                  ema20_status: str, vol_ratio: float = 0,
+                                  ema200_5m: float = None, ema200_pct: float = None):
     """Save ORB signal — ignored if already exists for today."""
     try:
         supabase = get_supabase()
-        supabase.table("orb").upsert({
+        row = {
             "stock"         : stock,
             "signal_date"   : today_str,
             "signal_time"   : signal_time,
@@ -269,7 +370,11 @@ def save_orb_signal_to_supabase(stock: str, today_str: str, signal_time: str,
             "signal_price"  : round(float(signal_price), 2),
             "peak_ltp"      : round(float(signal_price), 2),
             "ema20_status"  : ema20_status,
-        }, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
+            "vol_ratio"     : round(float(vol_ratio), 2),
+        }
+        if ema200_5m  is not None: row["ema200_5m"]  = round(float(ema200_5m), 2)
+        if ema200_pct is not None: row["ema200_pct"] = round(float(ema200_pct), 2)
+        supabase.table("orb").upsert(row, on_conflict="stock,signal_date", ignore_duplicates=True).execute()
     except Exception:
         pass
 
@@ -279,6 +384,18 @@ def update_orb_peak_ltp(stock: str, today_str: str, new_peak: float):
     try:
         supabase = get_supabase()
         supabase.table("orb")             .update({"peak_ltp": round(float(new_peak), 2)})             .eq("stock", stock)             .eq("signal_date", today_str)             .execute()
+    except Exception:
+        pass
+
+
+def update_orb_ema200(stock: str, today_str: str, ema200_5m: float, ema200_pct: float):
+    """Update EMA200 values — called once when cache is populated."""
+    try:
+        supabase = get_supabase()
+        supabase.table("orb")             .update({
+                "ema200_5m" : round(float(ema200_5m),  2),
+                "ema200_pct": round(float(ema200_pct), 2),
+            })             .eq("stock", stock)             .eq("signal_date", today_str)             .execute()
     except Exception:
         pass
 
@@ -308,6 +425,14 @@ def render_orb_table(df: pd.DataFrame) -> str:
             return "#dc2626"
         except:
             return "#64748b"
+
+    def ema5m_cell(val, pct):
+        if val is None or pct is None:
+            return '<span style="color:#94a3b8">⏳</span>'
+        color  = "#16a34a" if pct >= 0 else "#dc2626"
+        icon   = "🟢" if pct >= 0 else "❌"
+        sign   = "+" if pct >= 0 else ""
+        return f'<span style="color:{color};font-weight:700">{icon} ₹{val:.2f} ({sign}{pct:.1f}%)</span>'
 
     def ema_cell(status):
         if not status:
@@ -386,6 +511,8 @@ def render_orb_table(df: pd.DataFrame) -> str:
         <th>Gap %</th>
         <th>Vol Ratio</th>
         <th>Vol Momentum</th>
+        <th style="background:#e0f2fe;color:#0369a1;">EMA9 (5m)</th>
+        <th style="background:#fef9c3;color:#854d0e;">EMA200 (5m)</th>
         <th class="th-new">Signal Price</th>
         <th style="background:#fee2e2;color:#991b1b;">SL</th>
         <th style="background:#dcfce7;color:#166534;">Target</th>
@@ -410,6 +537,10 @@ def render_orb_table(df: pd.DataFrame) -> str:
         peak_ltp      = row.get("High Since Signal", None)
         yest_high_val = row.get("Yesterday High", 0)
         vol_mom       = row.get("Vol Momentum", "")
+        ema9_val      = row.get("EMA9", None)
+        ema9_pct      = row.get("EMA9 Pct", None)
+        ema200_val    = row.get("EMA200", None)
+        ema200_pct    = row.get("EMA200 Pct", None)
 
         # SL = Yesterday High
         sl_str = f"₹{float(yest_high_val):.2f}" if yest_high_val else "-"
@@ -453,6 +584,8 @@ def render_orb_table(df: pd.DataFrame) -> str:
             <td>{gap_pct}</td>
             <td>{vol_ratio}</td>
             <td>{vol_mom}</td>
+            <td>{ema5m_cell(ema9_val, ema9_pct)}</td>
+            <td>{ema5m_cell(ema200_val, ema200_pct)}</td>
             <td>{signal_price_str}</td>
             <td style="color:#dc2626;font-weight:700">{sl_str}</td>
             <td style="color:#16a34a;font-weight:700">{target_str}</td>
@@ -518,7 +651,7 @@ with col1:
     )
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
-        for key in ["orb_historical", "orb_tracked", "orb_tracked_date", "orb_ema20_cache"]:
+        for key in ["orb_historical", "orb_tracked", "orb_tracked_date", "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated"]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -610,6 +743,11 @@ def orb_scanner_table():
 
             # ── All conditions pass → save to Supabase + track ──
             today_date = datetime.now(IST).strftime("%Y-%m-%d")
+            # ── Get EMA200 from cache if available ───────────────
+            ema5m_data   = st.session_state.get("orb_ema5m_cache", {}).get(symbol)
+            ema200_val   = ema5m_data.get("ema200",     None) if ema5m_data else None
+            ema200_pct_v = ema5m_data.get("ema200_pct", None) if ema5m_data else None
+
             save_orb_signal_to_supabase(
                 stock          = symbol,
                 today_str      = today_date,
@@ -619,6 +757,9 @@ def orb_scanner_table():
                 gap_pct        = gap_pct,
                 signal_price   = live_ltp,
                 ema20_status   = ema_status,
+                vol_ratio      = vol_ratio_val,
+                ema200_5m      = ema200_val,
+                ema200_pct     = ema200_pct_v,
             )
             orb_tracked[symbol] = {
                 "signal_time"   : now_str,
@@ -692,6 +833,34 @@ def orb_scanner_table():
     df_display["EMA20 Status"] = df_display["Symbol"].apply(
         lambda s: ema_cache.get(s, {}).get("status", "⏳")
     )
+
+    # ── EMA9 + EMA200 (5-min) ────────────────────────────────
+    today_opens = {
+        s: float(data.get("today_open", 0))
+        for s, data in orb_tracked.items()
+    }
+    ema5m_cache = get_ema5m_cache(list(orb_tracked.keys()), today_opens)
+
+    # ── Update Supabase with EMA200 — only once per stock ────
+    if "orb_ema200_updated" not in st.session_state:
+        st.session_state["orb_ema200_updated"] = set()
+    today_date = datetime.now(IST).strftime("%Y-%m-%d")
+
+    for symbol, data in ema5m_cache.items():
+        if symbol in st.session_state["orb_ema200_updated"]:
+            continue  # already updated
+        if not data:
+            continue
+        ema200_v = data.get("ema200")
+        ema200_p = data.get("ema200_pct")
+        if ema200_v is not None and ema200_p is not None:
+            update_orb_ema200(symbol, today_date, ema200_v, ema200_p)
+            st.session_state["orb_ema200_updated"].add(symbol)
+
+    df_display["EMA9"]      = df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema9",       None) if ema5m_cache.get(s) else None)
+    df_display["EMA9 Pct"]  = df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema9_pct",  None) if ema5m_cache.get(s) else None)
+    df_display["EMA200"]    = df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema200",     None) if ema5m_cache.get(s) else None)
+    df_display["EMA200 Pct"]= df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema200_pct", None) if ema5m_cache.get(s) else None)
 
     # ── Sort: by Vol Ratio descending ────────────────────────
     df_display["vol_ratio_num"] = df_display["Vol Ratio"].apply(
