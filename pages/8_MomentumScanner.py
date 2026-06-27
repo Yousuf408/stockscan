@@ -26,9 +26,10 @@ from momentum.backend import (
     SUPABASE_KEY,
     IST,
     # ╔═══════════════════════════════════════════════════════════╗
-    # ║  9 EMA (5MIN) SECTION START — import                     ║
+    # ║  9 EMA (5MIN) SECTION START — imports                    ║
     # ╚═══════════════════════════════════════════════════════════╝
-    fetch_ema9_5min,
+    fetch_ema9_candles,
+    calculate_ema9_with_live,
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
     # ╚═══════════════════════════════════════════════════════════╝
@@ -96,38 +97,71 @@ def get_ema20_status(df) -> dict:
 
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION START — SESSION STATE CACHE             ║
-# ║  - Cache clears every 5 min (new candle formed)               ║
-# ║  - Only NEW stocks fetched — existing cache reused            ║
-# ║  - Same safe pattern as EMA20 cache                           ║
+# ║  2-level cache:                                               ║
+# ║  Level 1 — Yahoo 8 candles → cached every 5 min              ║
+# ║  Level 2 — EMA9 value → recalculated every 5 sec with WS LTP ║
 # ╚═══════════════════════════════════════════════════════════════╝
-def get_ema9_status(df) -> dict:
+def get_ema9_status(df, live_ticks: dict, token_to_name: dict) -> dict:
     from datetime import datetime as dt
+
     now_min      = dt.now(IST).minute
     current_slot = (now_min // 5) * 5   # 0,5,10,15... aligned to 5min boundary
 
-    # Init cache if not present
-    if "ema9_cache" not in st.session_state:
-        st.session_state["ema9_cache"]      = {}
-        st.session_state["ema9_cache_slot"] = -1
+    # ── Level 1: Yahoo candles cache (refresh every 5 min) ────
+    if "ema9_candles_cache" not in st.session_state:
+        st.session_state["ema9_candles_cache"]      = {}
+        st.session_state["ema9_candles_cache_slot"] = -1
 
-    # New 5min candle formed → clear cache so fresh values load
-    if st.session_state["ema9_cache_slot"] != current_slot:
-        st.session_state["ema9_cache"]      = {}
-        st.session_state["ema9_cache_slot"] = current_slot
+    # New 5min slot → clear candles cache so fresh candles load
+    if st.session_state["ema9_candles_cache_slot"] != current_slot:
+        st.session_state["ema9_candles_cache"]      = {}
+        st.session_state["ema9_candles_cache_slot"] = current_slot
 
-    cache      = st.session_state["ema9_cache"]
-    new_stocks = [s for s in df["Symbol"].tolist() if s not in cache]
+    candles_cache = st.session_state["ema9_candles_cache"]
+    new_stocks    = [s for s in df["Symbol"].tolist() if s not in candles_cache]
 
-    # Only fetch stocks not already in cache — safe, no spam
+    # Fetch Yahoo candles only for new stocks
     if new_stocks:
         try:
-            fetched = fetch_ema9_5min(new_stocks)
-            cache.update(fetched)
-            st.session_state["ema9_cache"] = cache
+            fetched = fetch_ema9_candles(new_stocks)
+            candles_cache.update(fetched)
+            st.session_state["ema9_candles_cache"] = candles_cache
         except Exception:
             pass   # Silent fail — show ⏳, never crash main scanner
 
-    return cache
+    # ── Level 2: Calculate live EMA9 using WS LTP (every 5 sec) ──
+    # Build name_to_token for reverse lookup
+    name_to_token = {v: k for k, v in token_to_name.items()}
+    result        = {}
+
+    for symbol in df["Symbol"].tolist():
+        candles_8 = candles_cache.get(symbol, None)
+
+        if not candles_8:
+            result[symbol] = {"ema9": None, "distance": None,
+                              "status": "⚠️ N/A", "signal": ""}
+            continue
+
+        # Get live LTP from WS ticks
+        token    = name_to_token.get(symbol)
+        live_ltp = 0.0
+        if token and token in live_ticks:
+            live_ltp = float(live_ticks[token].get("ltp", 0))
+
+        if live_ltp <= 0:
+            result[symbol] = {"ema9": None, "distance": None,
+                              "status": "⏳", "signal": ""}
+            continue
+
+        # Calculate EMA9 with 8 Yahoo candles + 1 live LTP
+        ema9_data = calculate_ema9_with_live(candles_8, live_ltp)
+        if ema9_data:
+            result[symbol] = ema9_data
+        else:
+            result[symbol] = {"ema9": None, "distance": None,
+                              "status": "⚠️ N/A", "signal": ""}
+
+    return result
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION END                                     ║
 # ╚═══════════════════════════════════════════════════════════════╝
@@ -215,9 +249,9 @@ def scanner_table():
     ema_cache = get_ema20_status(df)
 
     # ╔═══════════════════════════════════════════════════════════╗
-    # ║  9 EMA (5MIN) SECTION START — fetch & assign column       ║
+    # ║  9 EMA (5MIN) SECTION START — fetch with live WS ticks    ║
     # ╚═══════════════════════════════════════════════════════════╝
-    ema9_cache = get_ema9_status(df)
+    ema9_cache = get_ema9_status(df, angel_ws.latest_ticks, TOKEN_TO_NAME)
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
     # ╚═══════════════════════════════════════════════════════════╝
