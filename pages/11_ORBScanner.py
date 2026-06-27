@@ -893,13 +893,13 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
                 </div>
             </td>
             <td><span style="font-weight:700;color:#0f172a;">{signal_time}</span></td>
-            <td>{_ema_cell(ema_status)}</td>
             <td><span class="peak-val">{yh_str}</span></td>
             <td><span class="num-primary">{to_str}</span></td>
             <td>{_chg_html(gap_float)}</td>
             <td>{_ltp_cell(ltp, float(prev_close) if prev_close else 0)}</td>
             <td><span class="num-primary">{vol_ratio_str}</span></td>
             <td>{_vol_badge(vol_mom)}</td>
+            <td>{_ema_cell(ema_status)}</td>
             <td>{_ema5m_cell(ema9_val, ema9_pct)}</td>
             <td>{_ema5m_cell(ema200_val, ema200_pct)}</td>
             <td>{_signal_price_html(sp_str, move_since)}</td>
@@ -1019,13 +1019,13 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
             <tr>
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(1)">Signal Time <span class="sort-arrow">↕</span></th>
-                <th class="th-ema"  onclick="toggleColExpand(2)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-orb"  onclick="toggleColExpand(3)">Yesterday High <span class="sort-arrow">↕</span></th>
-                <th class="th-orb"  onclick="toggleColExpand(4)">Today Open <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Gap % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(6)">LTP <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(7)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(8)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-orb"  onclick="toggleColExpand(2)">Yesterday High <span class="sort-arrow">↕</span></th>
+                <th class="th-orb"  onclick="toggleColExpand(3)">Today Open <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(4)">Gap % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">LTP <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(6)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(7)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema"  onclick="toggleColExpand(8)">EMA20 Status <span class="sort-arrow">↕</span></th>
                 <th class="th-ema9"   onclick="toggleColExpand(9)">EMA9 (5m) <span class="sort-arrow">↕</span></th>
                 <th class="th-ema200" onclick="toggleColExpand(10)">EMA200 (5m) <span class="sort-arrow">↕</span></th>
                 <th class="th-sig"  onclick="toggleColExpand(11)">Signal Price <span class="sort-arrow">↕</span></th>
