@@ -56,15 +56,8 @@ def get_supabase():
 # FETCH HISTORICAL DATA — YESTERDAY HIGH, CLOSE, MEDIAN VOL
 # ─────────────────────────────────────────────────────────────
 def fetch_orb_historical_data():
-    """
-    Fetch from websocket_stock_values:
-    1. yesterday_high  → prev day's high per stock
-    2. yesterday_close → prev day's close per stock
-    3. median_vol_5d   → median volume of last 5 days
-    """
     supabase = get_supabase()
 
-    # ── Get distinct trading dates ────────────────────────────
     all_dates = set()
     offset = 0
     while True:
@@ -86,12 +79,9 @@ def fetch_orb_historical_data():
         return None
 
     sorted_dates = sorted(all_dates, reverse=True)
-    # sorted_dates[0] = today (LiveFeed already uploaded today's data)
-    # sorted_dates[1] = actual yesterday → use for high/close
     prev_date    = sorted_dates[1] if len(sorted_dates) > 1 else sorted_dates[0]
-    last_5_dates = sorted_dates[1:6]  # last 5 days excluding today
+    last_5_dates = sorted_dates[1:6]
 
-    # ── Fetch yesterday's high + close ───────────────────────
     prev_rows = []
     offset = 0
     while True:
@@ -118,7 +108,6 @@ def fetch_orb_historical_data():
             "ltp"  : "yesterday_close",
         })
 
-    # ── Fetch 5-day median volume ─────────────────────────────
     vol_rows = []
     offset = 0
     while True:
@@ -150,7 +139,7 @@ def fetch_orb_historical_data():
     }
 
 # ─────────────────────────────────────────────────────────────
-# EMA20 — SAME AS MOMENTUM SCANNER
+# EMA20
 # ─────────────────────────────────────────────────────────────
 def fetch_ema20_for_stocks(stock_names: list) -> dict:
     result = {}
@@ -228,13 +217,6 @@ def get_ema20_cache(stock_names: list) -> dict:
 # EMA9 + EMA200 ON 5-MIN — HYBRID (yfinance + WebSocket open)
 # ─────────────────────────────────────────────────────────────
 def fetch_ema5m_for_stocks(stock_names: list, today_opens: dict) -> dict:
-    """
-    Fetch 5-min data from yfinance.
-    EMA9   = 8 candles (yfinance) + today open (WS) = 9 candles
-    EMA200 = 199 candles (yfinance) + today open (WS) = 200 candles
-    today_opens = {symbol: open_price}
-    Returns: {symbol: {ema9, ema200, ema9_pct, ema200_pct}}
-    """
     result = {}
     if not stock_names:
         return result
@@ -278,18 +260,15 @@ def fetch_ema5m_for_stocks(stock_names: list, today_opens: dict) -> dict:
             result[stock] = None
             continue
 
-        # ── Hybrid: append today's open as latest candle ─────
         series_with_open = pd.concat([
             series,
             pd.Series([today_open])
         ], ignore_index=True)
 
-        # ── EMA9 — last 9 candles ─────────────────────────────
         ema9_series = series_with_open.ewm(span=9, adjust=False).mean()
         ema9_val    = round(float(ema9_series.iloc[-1]), 2)
         ema9_pct    = round(((today_open - ema9_val) / ema9_val) * 100, 2)
 
-        # ── EMA200 — need at least 200 candles ───────────────
         if len(series_with_open) >= 200:
             ema200_series = series_with_open.ewm(span=200, adjust=False).mean()
             ema200_val    = round(float(ema200_series.iloc[-1]), 2)
@@ -309,7 +288,6 @@ def fetch_ema5m_for_stocks(stock_names: list, today_opens: dict) -> dict:
 
 
 def get_ema5m_cache(stock_names: list, today_opens: dict) -> dict:
-    """Cache EMA5m per stock — fetch only new stocks."""
     if "orb_ema5m_cache" not in st.session_state:
         st.session_state["orb_ema5m_cache"] = {}
 
@@ -328,14 +306,12 @@ def get_ema5m_cache(stock_names: list, today_opens: dict) -> dict:
 # ORB SUPABASE — SAVE & FETCH
 # ─────────────────────────────────────────────────────────────
 def fetch_orb_signals_from_supabase(today_str: str) -> dict:
-    """
-    Fetch today's saved ORB signals.
-    Returns dict: {stock: {signal_time, yesterday_high, today_open,
-                           gap_pct, signal_price, peak_ltp, ema20_status}}
-    """
     try:
         supabase = get_supabase()
-        resp = supabase.table("orb")             .select("stock, signal_time, yesterday_high, today_open, gap_pct, signal_price, peak_ltp, ema20_status")             .eq("signal_date", today_str)             .execute()
+        resp = supabase.table("orb") \
+            .select("stock, signal_time, yesterday_high, today_open, gap_pct, signal_price, peak_ltp, ema20_status") \
+            .eq("signal_date", today_str) \
+            .execute()
         result = {}
         for row in resp.data:
             result[row["stock"]] = {
@@ -357,7 +333,6 @@ def save_orb_signal_to_supabase(stock: str, today_str: str, signal_time: str,
                                   gap_pct: float, signal_price: float,
                                   ema20_status: str, vol_ratio: float = 0,
                                   ema200_5m: float = None, ema200_pct: float = None):
-    """Save ORB signal — ignored if already exists for today."""
     try:
         supabase = get_supabase()
         row = {
@@ -380,22 +355,28 @@ def save_orb_signal_to_supabase(stock: str, today_str: str, signal_time: str,
 
 
 def update_orb_peak_ltp(stock: str, today_str: str, new_peak: float):
-    """Update peak_ltp when new high is reached."""
     try:
         supabase = get_supabase()
-        supabase.table("orb")             .update({"peak_ltp": round(float(new_peak), 2)})             .eq("stock", stock)             .eq("signal_date", today_str)             .execute()
+        supabase.table("orb") \
+            .update({"peak_ltp": round(float(new_peak), 2)}) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
     except Exception:
         pass
 
 
 def update_orb_ema200(stock: str, today_str: str, ema200_5m: float, ema200_pct: float):
-    """Update EMA200 values — called once when cache is populated."""
     try:
         supabase = get_supabase()
-        supabase.table("orb")             .update({
+        supabase.table("orb") \
+            .update({
                 "ema200_5m" : round(float(ema200_5m),  2),
                 "ema200_pct": round(float(ema200_pct), 2),
-            })             .eq("stock", stock)             .eq("signal_date", today_str)             .execute()
+            }) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
     except Exception:
         pass
 
@@ -412,117 +393,317 @@ def get_vol_momentum(ratio: float) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# HTML TABLE
+# HTML TABLE — MOMENTUM SCANNER STYLE
 # ─────────────────────────────────────────────────────────────
-def render_orb_table(df: pd.DataFrame) -> str:
 
-    def move_color(val):
-        try:
-            v = float(str(val).replace("%","").replace("+",""))
-            if v >= 5.0:  return "#16a34a"
-            if v >= 2.0:  return "#ca8a04"
-            if v >= 0:    return "#64748b"
-            return "#dc2626"
-        except:
-            return "#64748b"
+def _short_vol(vol: float) -> str:
+    if vol >= 1_000_000:
+        return f"{vol/1_000_000:.2f}M"
+    if vol >= 1_000:
+        return f"{vol/1_000:.1f}K"
+    return str(int(vol))
 
-    def ema5m_cell(val, pct):
-        if val is None or pct is None:
-            return '<span style="color:#94a3b8">⏳</span>'
-        color  = "#16a34a" if pct >= 0 else "#dc2626"
-        icon   = "🟢" if pct >= 0 else "❌"
-        sign   = "+" if pct >= 0 else ""
-        return f'<span style="color:{color};font-weight:700">{icon} ₹{val:.2f} ({sign}{pct:.1f}%)</span>'
 
-    def ema_cell(status):
-        if not status:
-            return '<span style="color:#94a3b8">⏳</span>'
-        if status.startswith("✅"):
-            return f'<span style="color:#16a34a;font-weight:700">{status}</span>'
-        if "Below" in str(status):
-            return f'<span style="color:#dc2626;font-weight:700">{status}</span>'
-        if status.startswith("❌"):
-            return f'<span style="color:#ea580c;font-weight:700">{status}</span>'
-        return f'<span style="color:#94a3b8">{status}</span>'
+def _ema_cell(status) -> str:
+    if not status or status == "⏳":
+        return '<span style="color:#94a3b8">⏳</span>'
+    s = str(status)
+    if s.startswith("✅"):
+        return f'<span class="ema-pass">{s}</span>'
+    if "Below" in s:
+        return f'<span class="ema-fail">{s}</span>'
+    if s.startswith("❌"):
+        return f'<span class="ema-ext">{s}</span>'
+    return f'<span style="color:#94a3b8">{s}</span>'
 
-    html = """
-    <style>
-    .orb-table {width:100%; border-collapse:collapse; font-size:13px; font-family:sans-serif;}
-    .orb-table th {background:#f1f5f9; color:#475569; font-weight:600; padding:8px 10px;
-                   text-align:left; border-bottom:2px solid #e2e8f0; white-space:nowrap;}
-    .orb-table th.th-ema  {background:#dcfce7; color:#166534;}
-    .orb-table th.th-new  {background:#ede9fe; color:#5b21b6;}
-    .orb-table th.th-orb  {background:#fef3c7; color:#92400e;}
-    .orb-table td {padding:7px 10px; border-bottom:1px solid #e2e8f0; white-space:nowrap;}
-    .copy-btn {
-        cursor:pointer; font-weight:700; color:#0f172a;
-        background:#e2e8f0; border:none; padding:3px 8px;
-        border-radius:4px; font-size:12px; transition:background 0.2s;
-    }
-    .copy-btn:hover  {background:#10b981; color:white;}
-    .copy-btn.copied {background:#10b981; color:white;}
-    .signal-time-col {font-weight:700; color:#0f172a; background:#fef3c7;}
-    .peak-val {color:#7c3aed; font-weight:600;}
-    .toast {
-        position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
-        background:#0f172a; color:white; padding:8px 20px;
-        border-radius:8px; font-size:13px; z-index:9999;
-        opacity:0; transition:opacity 0.3s; pointer-events:none;
-    }
-    .toast.show {opacity:1;}
-    </style>
-    <div id="orb-toast" class="toast">✅ Copied!</div>
-    <script>
-    // ── Scroll position preservation ──────────────────────────
-    var SCROLL_KEY = 'orb_scroll_pos';
-    function saveScroll() {
-        var el = document.getElementById('orb-scroll-wrap');
-        if (el) sessionStorage.setItem(SCROLL_KEY, el.scrollTop);
-    }
-    function restoreScroll() {
-        var el = document.getElementById('orb-scroll-wrap');
-        var pos = sessionStorage.getItem(SCROLL_KEY);
-        if (el && pos) el.scrollTop = parseInt(pos);
-    }
-    document.addEventListener('DOMContentLoaded', restoreScroll);
-    setTimeout(restoreScroll, 100);
 
-    function copyORB(btn, symbol) {
-        navigator.clipboard.writeText(symbol);
-        btn.classList.add('copied');
-        btn.innerText = '✓ ' + symbol;
-        var t = document.getElementById('orb-toast');
-        t.classList.add('show');
-        setTimeout(function() {
-            btn.classList.remove('copied');
-            btn.innerText = symbol;
-            t.classList.remove('show');
-        }, 1500);
-    }
-    </script>
-    <div id="orb-scroll-wrap" style="overflow-y:auto; max-height:520px;" onscroll="saveScroll()">
-    <table class="orb-table">
-    <thead><tr>
-        <th>Symbol</th>
-        <th>Signal Time</th>
-        <th class="th-ema">EMA20 Status</th>
-        <th class="th-orb">Yesterday High</th>
-        <th class="th-orb">Today Open</th>
-        <th>Gap %</th>
-        <th>Vol Ratio</th>
-        <th>Vol Momentum</th>
-        <th style="background:#e0f2fe;color:#0369a1;">EMA9 (5m)</th>
-        <th style="background:#fef9c3;color:#854d0e;">EMA200 (5m)</th>
-        <th class="th-new">Signal Price</th>
-        <th style="background:#fee2e2;color:#991b1b;">SL</th>
-        <th style="background:#dcfce7;color:#166534;">Target</th>
-        <th class="th-new">Move Since Signal %</th>
-        <th>LTP</th>
-        <th class="th-new">High Since Signal</th>
-        <th class="th-new">Peak Move %</th>
-        <th>Volume</th>
-    </tr></thead><tbody>
-    """
+def _ema5m_cell(val, pct) -> str:
+    """EMA9 / EMA200 (5m) cell — value on top, % status below."""
+    if val is None or pct is None:
+        return '<span style="color:#94a3b8">⏳</span>'
+    positive = pct >= 0
+    color    = "#16a34a" if positive else "#dc2626"
+    icon     = "🟢" if positive else "❌"
+    sign     = "+" if positive else ""
+    val_html = f'<div class="num-primary">₹{float(val):,.2f}</div>'
+    pct_html = f'<div style="color:{color};font-weight:700;font-size:13px;">{icon} {sign}{pct:.1f}%</div>'
+    return f'{val_html}{pct_html}'
+
+
+def _vol_badge(vm: str) -> str:
+    if "Very Strong" in vm or "🔥" in vm:
+        return '<span class="vol-badge vol-high">🔥 Very Strong</span>'
+    if "Strong" in vm or "⚡" in vm:
+        return '<span class="vol-badge vol-med">⚡ Strong</span>'
+    if "Building" in vm or "👀" in vm:
+        return '<span class="vol-badge vol-low">👀 Building</span>'
+    return f'<span class="vol-badge vol-low">{vm}</span>'
+
+
+def _move_color(val: float) -> str:
+    if val >= 5.0: return "#16a34a"
+    if val >= 2.0: return "#ca8a04"
+    if val >= 0:   return "#64748b"
+    return "#dc2626"
+
+
+def _signal_price_html(signal_price_str: str, move_since: float) -> str:
+    positive = move_since >= 0
+    w        = min(abs(move_since) * 10, 100)
+    fill_cls = "fill-green" if positive else "fill-red"
+    color    = _move_color(move_since)
+    sign     = "+" if positive else ""
+    pct_str  = f"{sign}{move_since:.2f}%"
+    return (
+        f'<div class="sig-price-wrap">'
+        f'  <div class="sig-top-row">'
+        f'    <span class="num-primary">{signal_price_str}</span>'
+        f'    <span class="bar-pct" style="color:{color}">{pct_str}</span>'
+        f'  </div>'
+        f'  <div class="progress-bar">'
+        f'    <div class="progress-fill {fill_cls}" style="width:{w:.0f}%"></div>'
+        f'  </div>'
+        f'</div>'
+    )
+
+
+def _chg_html(val: float) -> str:
+    cls  = "chg-pos" if val >= 0 else "chg-neg"
+    sign = "▲" if val >= 0 else "▼"
+    return f'<span class="{cls}">{sign} {abs(val):.2f}%</span>'
+
+
+# ── CSS + JS ──────────────────────────────────────────────────
+_ORB_STYLES = """
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  margin: 0 !important; padding: 0 !important;
+  background: #f5f7fa !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  color: #1a202c; font-size: 13px;
+}
+
+/* ── FILTER BAR ── */
+.filterbar {
+  background: #fff; border-bottom: 1px solid #e2e8f0;
+  padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.filter-label { font-size: 12px; font-weight: 700; color: #374151; }
+.filter-count {
+  background: #f1f5f9; border: 1px solid #e2e8f0;
+  padding: 3px 8px; border-radius: 4px; font-size: 12px; color: #64748b;
+}
+.filter-count b { color: #1a202c; }
+select.filter-select {
+  border: 1px solid #e2e8f0; background: #fff;
+  padding: 6px 28px 6px 10px; border-radius: 6px;
+  font-size: 13px; color: #374151; cursor: pointer; outline: none; appearance: none;
+  height: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+}
+.filter-sep { width: 1px; height: 20px; background: #e2e8f0; }
+.meta-info { margin-left: auto; font-size: 13px; font-weight: 600; color: #0f172a; }
+
+/* ── TABLE WRAP ── */
+.table-wrap { padding: 12px 16px; overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse; background: #fff;
+  border-radius: 10px; border: 1px solid #e2e8f0; overflow: hidden;
+}
+
+/* ── HEADER ── */
+thead tr { background: #fef9f0; }
+th {
+  padding: 10px 10px; text-align: left; font-size: 11px; font-weight: 800;
+  color: #0f172a; border-bottom: 2px solid #fcd34d; white-space: nowrap;
+  cursor: pointer; user-select: none; transition: background 0.15s;
+  border-right: 1px solid #fde68a; text-transform: uppercase; letter-spacing: 0.4px;
+}
+th:last-child { border-right: none; }
+th:hover { background: #fef3c7; }
+th.active-col { background: #fde68a !important; }
+th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
+th.active-col .sort-arrow { opacity: 1; }
+th.th-ema    { background: #f0fdf4; color: #166534; }
+th.th-orb    { background: #fef3c7; color: #92400e; }
+th.th-ema9   { background: #e0f2fe; color: #0369a1; }
+th.th-ema200 { background: #fef9c3; color: #854d0e; }
+th.th-sig    { background: #ede9fe; color: #5b21b6; }
+th.th-risk   { background: #fee2e2; color: #991b1b; }
+th.th-tgt    { background: #dcfce7; color: #166534; }
+
+/* ── ROWS ── */
+tbody tr.main-row {
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer; transition: background 0.1s;
+  border-left: 4px solid #e2e8f0;
+}
+tbody tr.main-row:hover { background: #f0f9ff; }
+tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
+tbody tr.main-row:nth-child(even) { background: #f8fafc; }
+tbody tr.main-row:nth-child(even):hover { background: #f0f9ff; }
+
+/* left border by vol momentum */
+tbody tr.main-row.vol-fire   { border-left: 4px solid #f59e0b; }
+tbody tr.main-row.vol-strong { border-left: 4px solid #3b82f6; }
+tbody tr.main-row.vol-build  { border-left: 4px solid #22c55e; }
+
+td {
+  padding: 9px 10px; vertical-align: middle; white-space: nowrap;
+  border-right: 1px solid #e2e8f0; font-size: 13px; color: #374151;
+  border-bottom: 1px solid #e2e8f0;
+}
+td:last-child { border-right: none; }
+td.active-col { background: #eff6ff; }
+
+/* ── EXPAND ROW ── */
+tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
+.expand-panel {
+  background: #f0f9ff; padding: 12px 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;
+}
+.expand-card {
+  background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px;
+}
+.expand-card .ec-label {
+  font-size: 10px; color: #64748b; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.expand-card .ec-value { font-size: 14px; font-weight: 700; color: #1e3a5f; margin-top: 2px; }
+.expand-card .ec-sub   { font-size: 10px; color: #94a3b8; margin-top: 1px; }
+
+/* ── STOCK CELL ── */
+.stock-cell { display: flex; align-items: center; gap: 8px; }
+.expand-icon {
+  width: 18px; height: 18px; border-radius: 4px;
+  background: #e2e8f0; color: #64748b;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0; transition: all 0.15s;
+}
+tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
+.stock-name { font-weight: 700; font-size: 13px; color: #1e3a5f; }
+
+/* ── BADGES ── */
+.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.vol-high  { background: #fef3c7; color: #92400e; }
+.vol-med   { background: #e0f2fe; color: #075985; }
+.vol-low   { background: #f1f5f9; color: #64748b; }
+
+/* ── NUMBERS ── */
+.num-primary { font-size: 13px; font-weight: 700; color: #0f172a; }
+.peak-val    { color: #7c3aed; font-weight: 700; font-size: 13px; }
+.chg-pos     { color: #16a34a; font-weight: 600; font-size: 13px; }
+.chg-neg     { color: #dc2626; font-weight: 600; font-size: 13px; }
+.ema-pass    { color: #16a34a; font-weight: 600; font-size: 13px; }
+.ema-fail    { color: #dc2626; font-weight: 600; font-size: 13px; }
+.ema-ext     { color: #ea580c; font-weight: 600; font-size: 13px; }
+
+/* ── SIGNAL PRICE CELL ── */
+.sig-price-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+.sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.fill-green { background: #22c55e; }
+.fill-red   { background: #ef4444; }
+.bar-pct    { font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* ── COPY BUTTON ── */
+.copy-btn {
+  cursor: pointer; font-weight: 700; color: #1e3a5f;
+  background: transparent; border: none; padding: 0;
+  font-size: 13px; transition: color 0.2s;
+}
+.copy-btn:hover  { color: #10b981; }
+.copy-btn.copied { color: #10b981; }
+
+/* ── RISK / TARGET ── */
+.sl-val  { color: #dc2626; font-weight: 700; font-size: 13px; }
+.tgt-val { color: #16a34a; font-weight: 700; font-size: 13px; }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+  background: #0f172a; color: white; padding: 8px 20px;
+  border-radius: 8px; font-size: 13px; z-index: 9999;
+  opacity: 0; transition: opacity 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { height: 5px; width: 5px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+
+<div id="orb-toast" class="toast">✅ Copied!</div>
+
+<script>
+var activeCol = -1;
+
+function copyORB(btn, symbol) {
+    navigator.clipboard.writeText(symbol);
+    btn.classList.add('copied');
+    btn.innerText = '✓ ' + symbol;
+    var t = document.getElementById('orb-toast');
+    t.classList.add('show');
+    setTimeout(function() {
+        btn.classList.remove('copied');
+        btn.innerText = symbol;
+        t.classList.remove('show');
+    }, 1500);
+}
+
+function toggleRow(sym) {
+    var mainRow = document.getElementById('orb-main-' + sym);
+    var expRow  = document.getElementById('orb-exp-'  + sym);
+    if (!expRow) return;
+    var isOpen = expRow.style.display !== 'none';
+    expRow.style.display = isOpen ? 'none' : 'table-row';
+    mainRow.classList.toggle('expanded', !isOpen);
+    var icon = mainRow.querySelector('.expand-icon');
+    if (icon) icon.textContent = isOpen ? '+' : '−';
+}
+
+function toggleColExpand(col) {
+    document.querySelectorAll('th').forEach(function(th) { th.classList.remove('active-col'); });
+    document.querySelectorAll('td').forEach(function(td) { td.classList.remove('active-col'); });
+    if (activeCol === col) { activeCol = -1; return; }
+    activeCol = col;
+    document.querySelectorAll('th')[col].classList.add('active-col');
+    document.querySelectorAll('tbody tr.main-row').forEach(function(row) {
+        var cells = row.querySelectorAll('td');
+        if (cells[col]) cells[col].classList.add('active-col');
+    });
+}
+
+function applyFilter() {
+    var volVal = document.getElementById('orbVolFilter').value.toLowerCase();
+    var emaVal = document.getElementById('orbEmaFilter').value;
+    var rows   = document.querySelectorAll('tbody tr.main-row');
+    var count  = 0;
+    rows.forEach(function(row) {
+        var vol = (row.dataset.vol || '').toLowerCase();
+        var ema = (row.dataset.ema || '');
+        var show = true;
+        if (volVal && !vol.includes(volVal)) show = false;
+        if (emaVal === 'pass' && !ema.includes('✅')) show = false;
+        if (emaVal === 'fail' && !ema.includes('❌')) show = false;
+        row.style.display = show ? '' : 'none';
+        var expRow = document.getElementById('orb-exp-' + row.dataset.sym);
+        if (expRow) expRow.style.display = 'none';
+        if (show) count++;
+    });
+    document.getElementById('orbMatchCount').textContent = count;
+}
+</script>
+"""
+
+
+def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str = "", tick_count: int = 0) -> str:
+    rows_html = ""
+    total     = len(df)
 
     for _, row in df.iterrows():
         symbol       = str(row["Symbol"])
@@ -530,74 +711,218 @@ def render_orb_table(df: pd.DataFrame) -> str:
         ema_status   = row.get("EMA20 Status", "")
         yest_high    = row.get("Yesterday High", 0)
         today_open   = row.get("Today Open", 0)
-        gap_pct      = row.get("Gap %", "-")
-        vol_ratio    = row.get("Vol Ratio", "-")
+        gap_pct_raw  = row.get("Gap %", "0%")
+        vol_ratio_str = str(row.get("Vol Ratio", "0x"))
         ltp          = float(row.get("LTP", 0))
-        signal_price  = row.get("Signal Price", None)
-        peak_ltp      = row.get("High Since Signal", None)
-        yest_high_val = row.get("Yesterday High", 0)
-        vol_mom       = row.get("Vol Momentum", "")
-        ema9_val      = row.get("EMA9", None)
-        ema9_pct      = row.get("EMA9 Pct", None)
-        ema200_val    = row.get("EMA200", None)
-        ema200_pct    = row.get("EMA200 Pct", None)
+        signal_price = row.get("Signal Price", None)
+        peak_ltp     = row.get("High Since Signal", None)
+        vol_mom      = str(row.get("Vol Momentum", ""))
+        ema9_val     = row.get("EMA9", None)
+        ema9_pct     = row.get("EMA9 Pct", None)
+        ema200_val   = row.get("EMA200", None)
+        ema200_pct   = row.get("EMA200 Pct", None)
+        volume       = float(row.get("Volume", 0))
 
-        # SL = Yesterday High
-        sl_str = f"₹{float(yest_high_val):.2f}" if yest_high_val else "-"
+        # ── Derived ───────────────────────────────────────────
+        try:
+            gap_float = float(str(gap_pct_raw).replace("%", "").replace("+", ""))
+        except Exception:
+            gap_float = 0.0
 
-        # Target = Signal Price + (Signal Price - SL) × 2
-        if signal_price and yest_high_val and float(signal_price) > 0:
-            risk   = float(signal_price) - float(yest_high_val)
-            target = float(signal_price) + (risk * 2)
-            target_str = f"₹{target:.2f}" if risk > 0 else "-"
-        else:
-            target_str = "-"
+        try:
+            vol_ratio_num = float(vol_ratio_str.replace("x", ""))
+        except Exception:
+            vol_ratio_num = 0.0
 
-        # Move since signal
         if signal_price and float(signal_price) > 0:
-            move_since     = ((ltp - float(signal_price)) / float(signal_price)) * 100
-            move_since_str = f"{move_since:+.2f}%"
-            move_c         = move_color(move_since_str)
+            move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100
         else:
-            move_since_str = "-"
-            move_c         = "#64748b"
+            move_since = 0.0
 
-        # Peak move
         if signal_price and peak_ltp and float(signal_price) > 0:
             peak_move     = ((float(peak_ltp) - float(signal_price)) / float(signal_price)) * 100
             peak_move_str = f"{peak_move:+.2f}%"
+            peak_color    = _move_color(peak_move)
         else:
             peak_move_str = "-"
+            peak_color    = "#64748b"
 
-        signal_price_str = f"₹{float(signal_price):.2f}" if signal_price else "-"
-        peak_ltp_str     = f"₹{float(peak_ltp):.2f}"    if peak_ltp     else "-"
-        yest_high_str    = f"₹{float(yest_high):.2f}"   if yest_high    else "-"
-        today_open_str   = f"₹{float(today_open):.2f}"  if today_open   else "-"
+        signal_price_str = f"₹{float(signal_price):,.2f}" if signal_price else "-"
+        peak_ltp_str     = f"₹{float(peak_ltp):,.2f}"    if peak_ltp     else "-"
+        yest_high_str    = f"₹{float(yest_high):,.2f}"   if yest_high    else "-"
+        today_open_str   = f"₹{float(today_open):,.2f}"  if today_open   else "-"
+        vol_fmt          = _short_vol(volume)
 
-        html += f"""
-        <tr>
-            <td><button class="copy-btn" onclick="copyORB(this, '{symbol}')">{symbol}</button></td>
-            <td class="signal-time-col">{signal_time}</td>
-            <td>{ema_cell(ema_status)}</td>
-            <td class="peak-val">{yest_high_str}</td>
-            <td>₹{float(today_open):.2f}</td>
-            <td>{gap_pct}</td>
-            <td>{vol_ratio}</td>
-            <td>{vol_mom}</td>
-            <td>{ema5m_cell(ema9_val, ema9_pct)}</td>
-            <td>{ema5m_cell(ema200_val, ema200_pct)}</td>
-            <td>{signal_price_str}</td>
-            <td style="color:#dc2626;font-weight:700">{sl_str}</td>
-            <td style="color:#16a34a;font-weight:700">{target_str}</td>
-            <td><span style="font-weight:700;color:{move_c}">{move_since_str}</span></td>
-            <td>₹{ltp:.2f}</td>
-            <td class="peak-val">{peak_ltp_str}</td>
-            <td class="peak-val">{peak_move_str}</td>
-            <td>{int(float(row.get("Volume", 0))):,}</td>
+        # SL = Yesterday High
+        sl_str     = f"₹{float(yest_high):,.2f}" if yest_high else "-"
+
+        # Target = Signal Price + (Signal Price - SL) × 2
+        if signal_price and yest_high and float(signal_price) > 0:
+            risk = float(signal_price) - float(yest_high)
+            if risk > 0:
+                target_val = float(signal_price) + (risk * 2)
+                target_str = f"₹{target_val:,.2f}"
+            else:
+                target_str = "-"
+        else:
+            target_str = "-"
+
+        # Row border class by vol momentum
+        if "Very Strong" in vol_mom or "🔥" in vol_mom:
+            vol_cls = "vol-fire"
+        elif "Strong" in vol_mom or "⚡" in vol_mom:
+            vol_cls = "vol-strong"
+        elif "Building" in vol_mom or "👀" in vol_mom:
+            vol_cls = "vol-build"
+        else:
+            vol_cls = ""
+
+        rows_html += f"""
+        <tr class="main-row {vol_cls}" id="orb-main-{symbol}"
+            data-sym="{symbol}"
+            data-vol="{vol_mom.lower()}"
+            data-ema="{ema_status}"
+            onclick="toggleRow('{symbol}')">
+            <td>
+                <div class="stock-cell">
+                    <div class="expand-icon">+</div>
+                    <span class="stock-name">
+                        <button class="copy-btn"
+                            onclick="event.stopPropagation();copyORB(this,'{symbol}')">{symbol}</button>
+                    </span>
+                </div>
+            </td>
+            <td><span style="font-weight:700;color:#0f172a;">{signal_time}</span></td>
+            <td>{_ema_cell(ema_status)}</td>
+            <td><span class="peak-val">{yest_high_str}</span></td>
+            <td><span class="num-primary">{today_open_str}</span></td>
+            <td>{_chg_html(gap_float)}</td>
+            <td><span class="num-primary">{vol_ratio_str}</span></td>
+            <td>{_vol_badge(vol_mom)}</td>
+            <td>{_ema5m_cell(ema9_val, ema9_pct)}</td>
+            <td>{_ema5m_cell(ema200_val, ema200_pct)}</td>
+            <td>{_signal_price_html(signal_price_str, move_since)}</td>
+            <td><span class="sl-val">{sl_str}</span></td>
+            <td><span class="tgt-val">{target_str}</span></td>
+            <td><span class="num-primary">₹{ltp:,.2f}</span></td>
+            <td><span class="peak-val">{peak_ltp_str}</span></td>
+            <td><span style="font-weight:700;color:{peak_color}">{peak_move_str}</span></td>
+            <td><span class="num-primary">{vol_fmt}</span></td>
+        </tr>
+        <tr class="expand-row" id="orb-exp-{symbol}" style="display:none">
+            <td colspan="17">
+                <div class="expand-panel">
+                    <div class="expand-card">
+                        <div class="ec-label">Yesterday High</div>
+                        <div class="ec-value" style="color:#7c3aed">{yest_high_str}</div>
+                        <div class="ec-sub">ORB breakout level</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Today Open</div>
+                        <div class="ec-value">{today_open_str}</div>
+                        <div class="ec-sub">Gap: {gap_pct_raw}</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Signal Price</div>
+                        <div class="ec-value" style="color:#2563eb">{signal_price_str}</div>
+                        <div class="ec-sub">Entry trigger</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">High Since Signal</div>
+                        <div class="ec-value" style="color:#7c3aed">{peak_ltp_str}</div>
+                        <div class="ec-sub">Peak after signal</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Peak Move %</div>
+                        <div class="ec-value" style="color:{peak_color}">{peak_move_str}</div>
+                        <div class="ec-sub">Max gain possible</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Stop Loss</div>
+                        <div class="ec-value" style="color:#dc2626">{sl_str}</div>
+                        <div class="ec-sub">= Yesterday High</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Target (2R)</div>
+                        <div class="ec-value" style="color:#16a34a">{target_str}</div>
+                        <div class="ec-sub">Risk × 2 reward</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Vol Ratio</div>
+                        <div class="ec-value">{vol_ratio_str}</div>
+                        <div class="ec-sub">vs 5-day median</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Signal Time</div>
+                        <div class="ec-value">{signal_time}</div>
+                        <div class="ec-sub">First detected</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">EMA20 Status</div>
+                        <div class="ec-value">{_ema_cell(ema_status)}</div>
+                        <div class="ec-sub">Distance from EMA</div>
+                    </div>
+                    <div class="expand-card">
+                        <div class="ec-label">Volume</div>
+                        <div class="ec-value">{vol_fmt}</div>
+                        <div class="ec-sub">Current intraday</div>
+                    </div>
+                </div>
+            </td>
         </tr>"""
 
-    html += "</tbody></table></div>"
+    meta = f"📅 {prev_date} &nbsp;|&nbsp; Ticks: {tick_count} &nbsp;|&nbsp; {window_status}"
+
+    html = _ORB_STYLES + f"""
+    <div class="filterbar">
+        <span class="filter-label">ORB Scanner</span>
+        <span class="filter-count"><b id="orbMatchCount">{total}</b> stocks</span>
+        <div class="filter-sep"></div>
+        <select class="filter-select" id="orbVolFilter" onchange="applyFilter()">
+            <option value="">All Volume</option>
+            <option value="very strong">🔥 Very Strong</option>
+            <option value="strong">⚡ Strong</option>
+            <option value="building">👀 Building</option>
+        </select>
+        <select class="filter-select" id="orbEmaFilter" onchange="applyFilter()">
+            <option value="">All EMA</option>
+            <option value="pass">✅ EMA Pass</option>
+            <option value="fail">❌ EMA Fail / Below</option>
+        </select>
+        <span class="meta-info">{meta}</span>
+    </div>
+
+    <div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(1)">Signal Time <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(2)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-orb" onclick="toggleColExpand(3)">Yesterday High <span class="sort-arrow">↕</span></th>
+                <th class="th-orb" onclick="toggleColExpand(4)">Today Open <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Gap % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(6)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(7)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema9" onclick="toggleColExpand(8)">EMA9 (5m) <span class="sort-arrow">↕</span></th>
+                <th class="th-ema200" onclick="toggleColExpand(9)">EMA200 (5m) <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th class="th-risk" onclick="toggleColExpand(11)">SL <span class="sort-arrow">↕</span></th>
+                <th class="th-tgt" onclick="toggleColExpand(12)">Target <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(13)">LTP <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(14)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(15)">Peak Move % <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(16)">Volume <span class="sort-arrow">↕</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+    </div>
+    """
     return html
+
 
 # ─────────────────────────────────────────────────────────────
 # MAIN PAGE
@@ -651,7 +976,8 @@ with col1:
     )
 with col2:
     if st.button("🔄 Reload", use_container_width=True):
-        for key in ["orb_historical", "orb_tracked", "orb_tracked_date", "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated"]:
+        for key in ["orb_historical", "orb_tracked", "orb_tracked_date",
+                    "orb_ema20_cache", "orb_ema5m_cache", "orb_ema200_updated"]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -684,7 +1010,7 @@ def orb_scanner_table():
         get_ema20_cache(list(pending))
         st.session_state["orb_ema_pending"] = set()
 
-    # ── Scan for new stocks (time restriction removed for testing) ──
+    # ── Scan for new stocks ───────────────────────────────────
     if live_ticks:
         for token, tick in live_ticks.items():
             symbol = TOKEN_TO_NAME.get(token)
@@ -698,7 +1024,6 @@ def orb_scanner_table():
             if live_ltp <= 0 or today_open <= 0:
                 continue
 
-            # ── Get yesterday's high + close ──────────────────
             prev_row = df_prev[df_prev["stock"] == symbol]
             if prev_row.empty:
                 continue
@@ -709,41 +1034,33 @@ def orb_scanner_table():
             if yest_high <= 0 or yest_close <= 0:
                 continue
 
-            # ── Condition 3: Gap up OR gap down > 1% → ignore ───
             gap_pct = ((today_open - yest_close) / yest_close) * 100
             if abs(gap_pct) >= MAX_GAP_PCT:
                 continue
 
-            # ── Condition 2: open > yest_high OR ltp > yest_high
             if not (today_open > yest_high or live_ltp > yest_high):
                 continue
 
-            # ── Get median vol + vol ratio check ─────────────────
             med_row    = df_median[df_median["stock"] == symbol]
             median_vol = float(med_row["median_vol"].values[0]) if not med_row.empty else 0
             if median_vol <= 0:
                 continue
             vol_ratio_val = live_volume / median_vol
             if vol_ratio_val < 1.0:
-                continue  # vol ratio < 1x → skip
+                continue
 
-            # ── Condition 1: Yesterday close > EMA20 ─────────
-            # Check cache first — avoid yfinance call inside tick loop
             ema_cache_check = st.session_state.get("orb_ema20_cache", {})
             if symbol in ema_cache_check:
                 ema_status = ema_cache_check[symbol].get("status", "")
                 if not ema_status.startswith("✅"):
                     continue
             else:
-                # Not in cache yet — add to pending, will check next cycle
                 if "orb_ema_pending" not in st.session_state:
                     st.session_state["orb_ema_pending"] = set()
                 st.session_state["orb_ema_pending"].add(symbol)
                 continue
 
-            # ── All conditions pass → save to Supabase + track ──
-            today_date = datetime.now(IST).strftime("%Y-%m-%d")
-            # ── Get EMA200 from cache if available ───────────────
+            today_date   = datetime.now(IST).strftime("%Y-%m-%d")
             ema5m_data   = st.session_state.get("orb_ema5m_cache", {}).get(symbol)
             ema200_val   = ema5m_data.get("ema200",     None) if ema5m_data else None
             ema200_pct_v = ema5m_data.get("ema200_pct", None) if ema5m_data else None
@@ -762,14 +1079,14 @@ def orb_scanner_table():
                 ema200_pct     = ema200_pct_v,
             )
             orb_tracked[symbol] = {
-                "signal_time"   : now_str,
-                "signal_price"  : live_ltp,
-                "peak_ltp"      : live_ltp,
-                "yesterday_high": yest_high,
+                "signal_time"    : now_str,
+                "signal_price"   : live_ltp,
+                "peak_ltp"       : live_ltp,
+                "yesterday_high" : yest_high,
                 "yesterday_close": yest_close,
-                "today_open"    : today_open,
-                "gap_pct"       : round(gap_pct, 2),
-                "median_vol"    : median_vol,
+                "today_open"     : today_open,
+                "gap_pct"        : round(gap_pct, 2),
+                "median_vol"     : median_vol,
             }
 
         st.session_state["orb_tracked"] = orb_tracked
@@ -781,7 +1098,7 @@ def orb_scanner_table():
             st.info("No stocks were tracked during the ORB window today.")
         return
 
-    # ── Update peak_ltp for tracked stocks ───────────────────
+    # ── Update peak_ltp ───────────────────────────────────────
     if live_ticks:
         for token, tick in live_ticks.items():
             symbol = TOKEN_TO_NAME.get(token)
@@ -796,7 +1113,7 @@ def orb_scanner_table():
     # ── Build display DataFrame ───────────────────────────────
     rows = []
     for symbol, data in orb_tracked.items():
-        token      = None
+        token = None
         for t, n in TOKEN_TO_NAME.items():
             if n == symbol:
                 token = t
@@ -804,51 +1121,49 @@ def orb_scanner_table():
 
         live_ltp    = float(live_ticks.get(token, {}).get("ltp",    data["signal_price"])) if token else data["signal_price"]
         live_volume = float(live_ticks.get(token, {}).get("volume", 0)) if token else 0
-        # median_vol — from session data or df_median fallback
         median_vol  = data.get("median_vol", 0)
         if median_vol == 0:
             med_row    = df_median[df_median["stock"] == symbol]
             median_vol = float(med_row["median_vol"].values[0]) if not med_row.empty else 0
-        vol_ratio   = round(live_volume / median_vol, 2) if median_vol > 0 else 0
-
         vol_ratio_num = round(live_volume / median_vol, 2) if median_vol > 0 else 0
+
         rows.append({
-            "Symbol"        : symbol,
-            "Signal Time"   : data["signal_time"],
-            "Yesterday High": data["yesterday_high"],
-            "Today Open"    : data["today_open"],
-            "Gap %"         : f"{data['gap_pct']:+.2f}%",
-            "Vol Ratio"     : f"{vol_ratio_num:.2f}x",
-            "Vol Momentum"  : get_vol_momentum(vol_ratio_num),
-            "Signal Price"  : data["signal_price"],
-            "LTP"           : live_ltp,
+            "Symbol"          : symbol,
+            "Signal Time"     : data["signal_time"],
+            "Yesterday High"  : data["yesterday_high"],
+            "Today Open"      : data["today_open"],
+            "Gap %"           : f"{data['gap_pct']:+.2f}%",
+            "Vol Ratio"       : f"{vol_ratio_num:.2f}x",
+            "Vol Momentum"    : get_vol_momentum(vol_ratio_num),
+            "Signal Price"    : data["signal_price"],
+            "LTP"             : live_ltp,
             "High Since Signal": data["peak_ltp"],
-            "Volume"        : live_volume,
+            "Volume"          : live_volume,
         })
 
     df_display = pd.DataFrame(rows)
 
-    # ── EMA20 — fetch only for tracked stocks ─────────────────
+    # ── EMA20 ─────────────────────────────────────────────────
     ema_cache = get_ema20_cache(list(orb_tracked.keys()))
     df_display["EMA20 Status"] = df_display["Symbol"].apply(
         lambda s: ema_cache.get(s, {}).get("status", "⏳")
     )
 
-    # ── EMA9 + EMA200 (5-min) ────────────────────────────────
+    # ── EMA9 + EMA200 (5m) ────────────────────────────────────
     today_opens = {
         s: float(data.get("today_open", 0))
         for s, data in orb_tracked.items()
     }
     ema5m_cache = get_ema5m_cache(list(orb_tracked.keys()), today_opens)
 
-    # ── Update Supabase with EMA200 — only once per stock ────
+    # ── Update Supabase with EMA200 — once per stock ──────────
     if "orb_ema200_updated" not in st.session_state:
         st.session_state["orb_ema200_updated"] = set()
     today_date = datetime.now(IST).strftime("%Y-%m-%d")
 
     for symbol, data in ema5m_cache.items():
         if symbol in st.session_state["orb_ema200_updated"]:
-            continue  # already updated
+            continue
         if not data:
             continue
         ema200_v = data.get("ema200")
@@ -862,17 +1177,37 @@ def orb_scanner_table():
     df_display["EMA200"]    = df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema200",     None) if ema5m_cache.get(s) else None)
     df_display["EMA200 Pct"]= df_display["Symbol"].apply(lambda s: ema5m_cache.get(s, {}).get("ema200_pct", None) if ema5m_cache.get(s) else None)
 
-    # ── Sort: by Vol Ratio descending ────────────────────────
+    # ── Sort by Vol Ratio descending ──────────────────────────
     df_display["vol_ratio_num"] = df_display["Vol Ratio"].apply(
-        lambda x: float(str(x).replace("x","")) if x else 0
+        lambda x: float(str(x).replace("x", "")) if x else 0
     )
-    df_display = df_display.sort_values("vol_ratio_num", ascending=False)                            .drop(columns=["vol_ratio_num"])                            .reset_index(drop=True)
+    df_display = df_display.sort_values("vol_ratio_num", ascending=False) \
+                            .drop(columns=["vol_ratio_num"]) \
+                            .reset_index(drop=True)
 
-    st.success(f"**{len(df_display)} stocks** tracked in ORB window")
+    # ── Determine window_status for filter bar ─────────────────
+    now_ist2   = datetime.now(IST)
+    orb_start2 = now_ist2.replace(hour=ORB_START_H, minute=ORB_START_M, second=0, microsecond=0)
+    orb_end2   = now_ist2.replace(hour=ORB_END_H,   minute=ORB_END_M,   second=0, microsecond=0)
+    if now_ist2 < orb_start2:
+        win_label = "⏳ Pre-market"
+    elif now_ist2 <= orb_end2:
+        win_label = "🟢 ORB Active"
+    else:
+        win_label = "🔒 ORB Closed"
+
+    # ── Render ────────────────────────────────────────────────
+    html = render_orb_table(
+        df             = df_display,
+        window_status  = win_label,
+        prev_date      = st.session_state["orb_historical"]["prev_date"],
+        tick_count     = len(live_ticks),
+    )
+
     st.components.v1.html(
-        render_orb_table(df_display),
-        height=min(600, 60 + len(df_display) * 38),
-        scrolling=False
+        html,
+        height    = min(900, 160 + len(df_display) * 50),
+        scrolling = True,
     )
 
 
