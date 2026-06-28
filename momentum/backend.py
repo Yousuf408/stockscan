@@ -20,7 +20,6 @@ EMA_DISTANCE_LIMIT = 8.0
 
 
 def get_supabase_client():
-    """Returns a fresh Supabase client. Caller should cache via st.cache_resource."""
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
@@ -28,11 +27,6 @@ def get_supabase_client():
 # EMA20
 # ─────────────────────────────────────────────────────────────
 def fetch_ema20_for_stocks(stock_names: list) -> dict:
-    """
-    Exact same logic as original fetch_ema20_for_stocks().
-    No session_state — caller handles caching.
-    Returns: { stock: { "ema20": val, "gap": val, "status": str } }
-    """
     result = {}
     if not stock_names:
         return result
@@ -92,24 +86,13 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
 
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION START — HYBRID: Yahoo(8) + WS(1)        ║
-# ║  8 closed candles from Yahoo Finance (accurate, no delay)      ║
-# ║  9th candle = live LTP from Angel One WebSocket (real-time)    ║
-# ║  Result: Real-time 9 EMA with no delay                        ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
-EMA9_ENTRY_ZONE = 2.0   # % — safe entry zone
-EMA9_WAIT_ZONE  = 4.0   # % — wait for pullback
+EMA9_ENTRY_ZONE = 2.0
+EMA9_WAIT_ZONE  = 4.0
 
 
 def fetch_ema9_candles(stock_names: list) -> dict:
-    """
-    Step 1 of hybrid approach:
-    Fetch last 8 closed 5min candles from Yahoo Finance.
-    These are historical closed candles — accurate, no distortion.
-
-    Returns: { stock: [c1, c2, c3, c4, c5, c6, c7, c8] }
-    — list of 8 close prices (oldest → newest)
-    """
     result = {}
     if not stock_names:
         return result
@@ -119,9 +102,9 @@ def fetch_ema9_candles(stock_names: list) -> dict:
     try:
         raw = yf.download(
             tickers,
-            period      = "1d",        # Today only — faster, less data
+            period      = "1d",
             interval    = "5m",
-            auto_adjust = False,        # Raw prices — no corporate action distortion
+            auto_adjust = False,
             progress    = False,
             threads     = True,
         )
@@ -131,7 +114,6 @@ def fetch_ema9_candles(stock_names: list) -> dict:
     if raw.empty:
         return result
 
-    # ── Handle Close column ───────────────────────────────────
     if isinstance(raw.columns, pd.MultiIndex):
         if "Close" not in raw.columns.get_level_values(0):
             return result
@@ -157,17 +139,12 @@ def fetch_ema9_candles(stock_names: list) -> dict:
 
         series = close_data[ticker].dropna()
 
-        # Need at least 8 closed candles
         if len(series) < 8:
             result[stock] = None
             continue
 
-        # Last 8 CLOSED candles — iloc[-9:-1] skips current forming candle
-        # iloc[-1] = current forming (incomplete) — skip it
-        # iloc[-9:-1] = last 8 fully closed candles
         last_8 = list(series.iloc[-9:-1].values)
         if len(last_8) < 8:
-            # Fallback — use whatever closed candles available
             last_8 = list(series.iloc[:-1].tail(8).values)
 
         result[stock] = last_8
@@ -176,19 +153,10 @@ def fetch_ema9_candles(stock_names: list) -> dict:
 
 
 def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
-    """
-    Step 2 of hybrid approach:
-    Combine 8 Yahoo candles + 1 live WS LTP → calculate 9 EMA.
-
-    adjust=False = standard recursive EMA (same as TradingView)
-    Returns: { "ema9": float, "distance": float, "status": str, "signal": str }
-    """
     if not candles_8 or len(candles_8) < 8 or live_ltp <= 0:
         return None
 
-    # 8 closed candles + current live LTP = 9 values
-    series_9 = pd.Series(candles_8 + [live_ltp])
-
+    series_9    = pd.Series(candles_8 + [live_ltp])
     ema9_series = series_9.ewm(span=9, adjust=False).mean()
     ema9_value  = round(float(ema9_series.iloc[-1]), 2)
 
@@ -197,7 +165,6 @@ def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
 
     distance = round(((live_ltp - ema9_value) / ema9_value) * 100, 2)
 
-    # ── Status & signal ───────────────────────────────────────
     if live_ltp < ema9_value:
         status = f"📉 {distance:.1f}%"
         signal = "Below EMA9"
@@ -221,11 +188,92 @@ def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION END                                     ║
 # ╚═══════════════════════════════════════════════════════════════╝
+
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION START                              ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+def build_candle(stock: str, candle_time: str, ticks: list) -> dict | None:
+    """Build a 5min OHLC candle from accumulated ticks."""
+    if not ticks:
+        return None
+    ltps = [t["ltp"]    for t in ticks if t.get("ltp",    0) > 0]
+    vols = [t["volume"] for t in ticks if t.get("volume", 0) > 0]
+    if not ltps:
+        return None
+    return {
+        "time"  : candle_time,
+        "open"  : ltps[0],
+        "high"  : max(ltps),
+        "low"   : min(ltps),
+        "close" : ltps[-1],
+        "volume": vols[-1] if vols else 0,  # cumulative — use last tick
+    }
+
+
+def detect_phase_and_trend(candles: list) -> tuple:
+    """
+    Detect phase + vol_trend from last 2-3 completed 5min candles.
+    Returns: (phase: str, vol_trend: str)
+    """
+    if len(candles) < 2:
+        return "⏳ Forming", "→ Stable"
+
+    c1 = candles[-2]   # previous candle
+    c2 = candles[-1]   # most recent completed candle
+
+    price_pct = ((c2["close"] - c1["close"]) / c1["close"] * 100) if c1["close"] > 0 else 0
+    vol_pct   = ((c2["volume"] - c1["volume"]) / c1["volume"] * 100) if c1["volume"] > 0 else 0
+
+    # Vol Trend
+    if vol_pct > 10:
+        vol_trend = "↑ Increasing"
+    elif vol_pct < -10:
+        vol_trend = "↓ Decreasing"
+    else:
+        vol_trend = "→ Stable"
+
+    # Phase
+    price_up   = price_pct >  0.3
+    price_down = price_pct < -0.3
+    vol_up     = vol_trend == "↑ Increasing"
+    vol_down   = vol_trend == "↓ Decreasing"
+
+    if price_up   and vol_up:   phase = "🚀 MOMENTUM"
+    elif price_up  and vol_down: phase = "⚠️ EXHAUSTION"
+    elif price_down and vol_up:  phase = "🔴 REVERSAL"
+    elif price_down and vol_down:phase = "↩️ PULLBACK"
+    elif vol_up:                 phase = "👀 ACCUMULATION"
+    else:                        phase = "➡️ STABLE"
+
+    return phase, vol_trend
+
+
+def update_phase_in_supabase(supabase, stock: str, today_str: str,
+                              phase: str, vol_trend: str):
+    """Update phase + vol_trend in momentum_signal_times every 5 min."""
+    try:
+        supabase.table("momentum_signal_times") \
+            .update({"phase": phase, "vol_trend": vol_trend}) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
+    except Exception:
+        pass
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION END                                ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+
+# ─────────────────────────────────────────────────────────────
+# SIGNAL DATA — SUPABASE CRUD
+# ─────────────────────────────────────────────────────────────
 def fetch_signal_data_from_supabase(supabase, today_str: str) -> dict:
-    """Exact same logic as original. supabase client passed in."""
     try:
         resp = supabase.table("momentum_signal_times") \
-            .select("stock, signal_time, signal_price, peak_ltp") \
+            .select("stock, signal_time, signal_price, peak_ltp, phase, vol_trend") \
             .eq("signal_date", today_str) \
             .execute()
         result = {}
@@ -234,6 +282,8 @@ def fetch_signal_data_from_supabase(supabase, today_str: str) -> dict:
                 "signal_time"  : row.get("signal_time", ""),
                 "signal_price" : row.get("signal_price", None),
                 "peak_ltp"     : row.get("peak_ltp", None),
+                "phase"        : row.get("phase", None),
+                "vol_trend"    : row.get("vol_trend", None),
             }
         return result
     except Exception:
@@ -243,7 +293,6 @@ def fetch_signal_data_from_supabase(supabase, today_str: str) -> dict:
 def save_signal_to_supabase(supabase, stock, today_str, signal_time,
                              vol_ratio, intraday_pct, vol_momentum,
                              momentum, score, signal_price):
-    """Exact same logic as original. supabase client passed in."""
     try:
         supabase.table("momentum_signal_times").upsert({
             "stock"        : stock,
@@ -262,7 +311,6 @@ def save_signal_to_supabase(supabase, stock, today_str, signal_time,
 
 
 def update_peak_ltp_in_supabase(supabase, stock, today_str, new_peak_ltp):
-    """Exact same logic as original. supabase client passed in."""
     try:
         supabase.table("momentum_signal_times") \
             .update({"peak_ltp": round(float(new_peak_ltp), 2)}) \
@@ -277,10 +325,6 @@ def update_peak_ltp_in_supabase(supabase, stock, today_str, new_peak_ltp):
 # FETCH HISTORICAL DATA
 # ─────────────────────────────────────────────────────────────
 def fetch_historical_data(supabase) -> dict | None:
-    """
-    Exact same logic as original fetch_historical_data().
-    supabase client passed in instead of calling get_supabase() internally.
-    """
     all_dates = set()
     offset = 0
     while True:
@@ -306,7 +350,6 @@ def fetch_historical_data(supabase) -> dict | None:
     prev_date    = sorted_dates[1] if len(sorted_dates) > 1 else None
     last_5_dates = sorted_dates[1:6]
 
-    # ── Target date rows ──────────────────────────────────────
     target_rows = []
     offset = 0
     while True:
@@ -333,7 +376,6 @@ def fetch_historical_data(supabase) -> dict | None:
             "volume": "live_volume",
         })
 
-    # ── Prev date rows ────────────────────────────────────────
     df_prev = pd.DataFrame()
     if prev_date:
         prev_rows = []
@@ -358,7 +400,6 @@ def fetch_historical_data(supabase) -> dict | None:
             df_prev = df_prev.drop_duplicates(subset="stock", keep="first")
             df_prev = df_prev.rename(columns={"ltp": "yesterday_close"})
 
-    # ── 5-day median volume ───────────────────────────────────
     df_median = pd.DataFrame()
     if last_5_dates:
         vol_rows = []
@@ -397,11 +438,6 @@ def fetch_historical_data(supabase) -> dict | None:
 # CORE SCAN LOGIC
 # ─────────────────────────────────────────────────────────────
 def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -> tuple:
-    """
-    Exact same logic as original run_momentum_scan().
-    live_ticks and token_to_name passed in — no angel_ws import here.
-    Returns (df, data_source_string).
-    """
     df_target = historical["df_target"]
     df_prev   = historical["df_prev"]
     df_median = historical["df_median"]
@@ -448,8 +484,8 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
         (df["intraday_pct"] >= 1.0) &
         (df["live_ltp"]     >  df["live_open"]) &
         (df["live_ltp"]     >  df["yesterday_close"]) &
-        (df["live_open"]    >= df["yesterday_close"] * 0.99) &   # max gap down 1%
-        (df["live_open"]    <= df["yesterday_close"] * 1.01)     # max gap up 1%
+        (df["live_open"]    >= df["yesterday_close"] * 0.99) &
+        (df["live_open"]    <= df["yesterday_close"] * 1.01)
     ]
 
     if df.empty:
