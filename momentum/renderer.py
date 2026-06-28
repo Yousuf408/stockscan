@@ -109,98 +109,13 @@ def _vol_badge(vm: str) -> str:
     return f'<span class="vol-badge vol-low">{vm}</span>'
 
 
-def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
-    """
-    Momentum badge + DYNAMIC progress bar based on actual vol_ratio & intraday_pct.
-
-    Thresholds (same as backend.py):
-    ──────────────────────────────────────────────────────────
-    STRONG BUILDING : vol >= 2.5  AND intraday >= 1.5
-    BUILDING        : vol >= 2.0  AND intraday >= 0.8
-    STABLE          : vol >= 1.5  AND intraday  0.0–0.7
-    COOLING         : vol >= 1.5  AND intraday < 0
-    WEAK            : everything else that passed entry filter
-
-    Progress = weighted avg of how close each value is to NEXT tier threshold.
-    Vol weight = 40%, Intraday weight = 60% (price move matters more).
-    """
-
-    def _clamp(v, lo, hi):
-        return max(lo, min(hi, v))
-
-    if "STRONG BUILDING" in mom:
-        # Already top — show how far beyond threshold (capped at 100%)
-        vol_progress      = _clamp((vol_ratio   - 2.5) / 2.5 * 100, 0, 100)
-        intra_progress    = _clamp((intraday_pct - 1.5) / 3.5 * 100, 0, 100)
-        fill_pct          = int(vol_progress * 0.4 + intra_progress * 0.6)
-        fill_pct          = _clamp(80 + fill_pct // 5, 80, 100)  # floor at 80 since it IS strong
-        fill_color        = "#7c3aed"
-        badge_html        = f'<span class="badge badge-accel">{mom}</span>'
-        next_label        = "🏆 Top Level"
-
-    elif "BUILDING" in mom:
-        # Progress toward STRONG BUILDING: need vol 2.0→2.5, intraday 0.8→1.5
-        vol_progress      = _clamp((vol_ratio    - 2.0) / (2.5 - 2.0) * 100, 0, 100)
-        intra_progress    = _clamp((intraday_pct - 0.8) / (1.5 - 0.8) * 100, 0, 100)
-        raw_pct           = int(vol_progress * 0.4 + intra_progress * 0.6)
-        fill_pct          = _clamp(40 + raw_pct * 40 // 100, 40, 79)  # range 40–79
-        fill_color        = "#22c55e"
-        badge_html        = f'<span class="badge badge-bull">{mom}</span>'
-        vol_need          = max(0, round(2.5 - vol_ratio, 1))
-        intra_need        = max(0, round(1.5 - intraday_pct, 1))
-        next_label        = f"→ Strong: +{vol_need}x vol, +{intra_need}% move"
-
-    elif "STABLE" in mom:
-        # Progress toward BUILDING: need vol 1.5→2.0, intraday 0.0→0.8
-        vol_progress      = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5) * 100, 0, 100)
-        intra_progress    = _clamp((intraday_pct - 0.0) / (0.8 - 0.0) * 100, 0, 100)
-        raw_pct           = int(vol_progress * 0.4 + intra_progress * 0.6)
-        fill_pct          = _clamp(20 + raw_pct * 20 // 100, 20, 39)
-        fill_color        = "#3b82f6"
-        badge_html        = f'<span class="badge badge-hold">{mom}</span>'
-        vol_need          = max(0, round(2.0 - vol_ratio, 1))
-        intra_need        = max(0, round(0.8 - intraday_pct, 1))
-        next_label        = f"→ Building: +{vol_need}x vol, +{intra_need}% move"
-
-    elif "COOLING" in mom:
-        # Below zero intraday — progress = how far from zero (inverse)
-        vol_progress      = _clamp((vol_ratio - 1.5) / (2.0 - 1.5) * 100, 0, 100)
-        intra_progress    = _clamp((intraday_pct + 2.0) / 2.0 * 100, 0, 100)  # -2% → 0% = 0%→100%
-        raw_pct           = int(vol_progress * 0.4 + intra_progress * 0.6)
-        fill_pct          = _clamp(10 + raw_pct * 10 // 100, 10, 19)
-        fill_color        = "#f59e0b"
-        badge_html        = f'<span class="badge badge-watch">{mom}</span>'
-        next_label        = f"→ Building: price must go +ve"
-
-    elif "WEAK" in mom:
-        # Passed entry filter (vol>=1.5, intra>=1.0) but failed momentum conditions
-        vol_progress      = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5) * 100, 0, 100)
-        intra_progress    = _clamp((intraday_pct - 1.0) / (0.8 - 1.0 + 1.0) * 100, 0, 100)
-        raw_pct           = int(vol_progress * 0.4 + intra_progress * 0.6)
-        fill_pct          = _clamp(5 + raw_pct * 10 // 100, 5, 19)
-        fill_color        = "#ef4444"
-        badge_html        = f'<span class="badge badge-bear">{mom}</span>'
-        vol_need          = max(0, round(2.0 - vol_ratio, 1))
-        intra_need        = max(0, round(0.8 - intraday_pct, 1))
-        next_label        = f"→ Building: need {vol_need}x more vol"
-
-    else:
-        return f'<span class="badge badge-hold">{mom}</span>'
-
-    remaining = 100 - fill_pct
-    is_top    = "STRONG BUILDING" in mom and fill_pct >= 95
-
-    return (
-        f'<div class="mom-wrap">'
-        f'  {badge_html}'
-        f'  <div class="mom-progress-bar">'
-        f'    <div class="mom-progress-fill" style="width:{fill_pct}%;background:{fill_color};"></div>'
-        f'  </div>'
-        f'  <div class="mom-next-label">'
-        f'    {"✅ Top Level" if is_top else next_label}'
-        f'  </div>'
-        f'</div>'
-    )
+def _mom_badge(mom: str) -> str:
+    if "STRONG BUILDING" in mom: return f'<span class="badge badge-accel">{mom}</span>'
+    if "BUILDING"        in mom: return f'<span class="badge badge-bull">{mom}</span>'
+    if "STABLE"          in mom: return f'<span class="badge badge-hold">{mom}</span>'
+    if "COOLING"         in mom: return f'<span class="badge badge-watch">{mom}</span>'
+    if "WEAK"            in mom: return f'<span class="badge badge-bear">{mom}</span>'
+    return f'<span class="badge badge-hold">{mom}</span>'
 
 
 def _chg_html(val: float) -> str:
@@ -376,7 +291,7 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
 
-/* ── PROGRESS BAR (Signal Price) ── */
+/* ── PROGRESS BAR ── */
 .sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
 .sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
@@ -384,12 +299,6 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
 .bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
-
-/* ── MOMENTUM PROGRESS BAR ── */
-.mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 140px; }
-.mom-progress-bar { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
-.mom-progress-fill{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }
-.mom-next-label   { font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
 .num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
@@ -518,9 +427,8 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         signal_price = row.get("Signal Price", None)
         peak_ltp     = row.get("High Since Signal", None)
         ema_status   = row.get("EMA20 Status", None)
-        momentum_str     = str(row.get("Momentum", ""))
-        vol_ratio_raw    = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
-        intraday_pct_raw = float(row.get("intraday_pct", 0) or 0)
+        momentum_str = str(row.get("Momentum", ""))
+        vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
 
         # ── Derived calcs — exact same as original ────────────
         if signal_price and float(signal_price) > 0:
@@ -581,7 +489,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             </td>
             <td><span class="num-primary">{row['Vol Ratio']}</span></td>
             <td>{_vol_badge(str(row['Vol Momentum']))}</td>
-            <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct_raw)}</td>
+            <td>{_mom_badge(momentum_str)}</td>
             <td>{_ema_cell(ema_status)}</td>
             <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
