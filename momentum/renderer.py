@@ -177,7 +177,7 @@ def _vol_badge(vm: str) -> str:
     return f'<span class="vol-badge vol-low">{vm}</span>'
 
 
-def _mom_badge(mom: str) -> str:
+def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
     if "STRONG BUILDING" in mom: return f'<span class="badge badge-accel">{mom}</span>'
     if "BUILDING"        in mom: return f'<span class="badge badge-bull">{mom}</span>'
     if "STABLE"          in mom: return f'<span class="badge badge-hold">{mom}</span>'
