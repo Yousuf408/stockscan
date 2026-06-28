@@ -33,6 +33,15 @@ from momentum.backend import (
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
     # ╚═══════════════════════════════════════════════════════════╝
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION START — imports               ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    build_candle,
+    detect_phase_and_trend,
+    update_phase_in_supabase,
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION END                           ║
+    # ╚═══════════════════════════════════════════════════════════╝
 )
 from momentum.renderer import render_html_table
 
@@ -97,22 +106,15 @@ def get_ema20_status(df) -> dict:
 
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION START — SESSION STATE CACHE             ║
-# ║  2-level cache:                                               ║
-# ║  Level 1 — Yahoo 8 candles → cached every 5 min              ║
-# ║  Level 2 — EMA9 value → recalculated every 5 sec with WS LTP ║
 # ╚═══════════════════════════════════════════════════════════════╝
 def get_ema9_status(df, live_ticks: dict, token_to_name: dict) -> dict:
-    from datetime import datetime as dt
+    now_min      = datetime.now(IST).minute
+    current_slot = (now_min // 5) * 5
 
-    now_min      = dt.now(IST).minute
-    current_slot = (now_min // 5) * 5   # 0,5,10,15... aligned to 5min boundary
-
-    # ── Level 1: Yahoo candles cache (refresh every 5 min) ────
     if "ema9_candles_cache" not in st.session_state:
         st.session_state["ema9_candles_cache"]      = {}
         st.session_state["ema9_candles_cache_slot"] = -1
 
-    # New 5min slot → clear candles cache so fresh candles load
     if st.session_state["ema9_candles_cache_slot"] != current_slot:
         st.session_state["ema9_candles_cache"]      = {}
         st.session_state["ema9_candles_cache_slot"] = current_slot
@@ -120,50 +122,129 @@ def get_ema9_status(df, live_ticks: dict, token_to_name: dict) -> dict:
     candles_cache = st.session_state["ema9_candles_cache"]
     new_stocks    = [s for s in df["Symbol"].tolist() if s not in candles_cache]
 
-    # Fetch Yahoo candles only for new stocks
     if new_stocks:
         try:
             fetched = fetch_ema9_candles(new_stocks)
             candles_cache.update(fetched)
             st.session_state["ema9_candles_cache"] = candles_cache
         except Exception:
-            pass   # Silent fail — show ⏳, never crash main scanner
+            pass
 
-    # ── Level 2: Calculate live EMA9 using WS LTP (every 5 sec) ──
-    # Build name_to_token for reverse lookup
     name_to_token = {v: k for k, v in token_to_name.items()}
     result        = {}
 
     for symbol in df["Symbol"].tolist():
         candles_8 = candles_cache.get(symbol, None)
-
         if not candles_8:
-            result[symbol] = {"ema9": None, "distance": None,
-                              "status": "⚠️ N/A", "signal": ""}
+            result[symbol] = {"ema9": None, "distance": None, "status": "⚠️ N/A", "signal": ""}
             continue
-
-        # Get live LTP from WS ticks
         token    = name_to_token.get(symbol)
         live_ltp = 0.0
         if token and token in live_ticks:
             live_ltp = float(live_ticks[token].get("ltp", 0))
-
         if live_ltp <= 0:
-            result[symbol] = {"ema9": None, "distance": None,
-                              "status": "⏳", "signal": ""}
+            result[symbol] = {"ema9": None, "distance": None, "status": "⏳", "signal": ""}
             continue
-
-        # Calculate EMA9 with 8 Yahoo candles + 1 live LTP
         ema9_data = calculate_ema9_with_live(candles_8, live_ltp)
-        if ema9_data:
-            result[symbol] = ema9_data
-        else:
-            result[symbol] = {"ema9": None, "distance": None,
-                              "status": "⚠️ N/A", "signal": ""}
+        result[symbol] = ema9_data if ema9_data else {"ema9": None, "distance": None, "status": "⚠️ N/A", "signal": ""}
 
     return result
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  9 EMA (5MIN) SECTION END                                     ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION START — SESSION STATE + LOGIC      ║
+# ║  tick_buffer  — raw ticks RAM (reset each 5min slot)          ║
+# ║  candle_store — last 3 completed candles per stock (RAM)      ║
+# ║  phase + vol_trend saved to DB every 5 min                    ║
+# ╚═══════════════════════════════════════════════════════════════╝
+def update_candle_buffer(live_ticks: dict, token_to_name: dict):
+    """
+    Called every 5 sec — accumulates ticks in RAM.
+    On 5min slot change → builds candle → appends to candle_store (max 3).
+    """
+    now          = datetime.now(IST)
+    current_slot = (now.minute // 5) * 5
+    slot_str     = now.strftime(f"%H:{current_slot:02d}")
+
+    if "tick_buffer"      not in st.session_state:
+        st.session_state["tick_buffer"]      = {}
+    if "tick_buffer_slot" not in st.session_state:
+        st.session_state["tick_buffer_slot"] = -1
+    if "candle_store"     not in st.session_state:
+        st.session_state["candle_store"]     = {}
+
+    # ── New 5min slot → build candle from previous ticks ──────
+    if st.session_state["tick_buffer_slot"] != current_slot:
+        for stock, ticks in st.session_state["tick_buffer"].items():
+            candle = build_candle(stock, slot_str, ticks)
+            if candle:
+                store = st.session_state["candle_store"].get(stock, [])
+                store.append(candle)
+                st.session_state["candle_store"][stock] = store[-3:]  # keep last 3
+
+        st.session_state["tick_buffer"]      = {}
+        st.session_state["tick_buffer_slot"] = current_slot
+
+    # ── Accumulate current ticks ──────────────────────────────
+    for token, tick in live_ticks.items():
+        stock  = token_to_name.get(token)
+        if not stock:
+            continue
+        ltp    = float(tick.get("ltp",    0))
+        volume = float(tick.get("volume", 0))
+        if ltp <= 0:
+            continue
+        buf = st.session_state["tick_buffer"].get(stock, [])
+        buf.append({"ltp": ltp, "volume": volume})
+        st.session_state["tick_buffer"][stock] = buf
+
+
+def get_phase_and_trend(supabase, df, signal_data: dict, today_str: str) -> dict:
+    """
+    For each stock: detect phase + vol_trend from last 3 candles.
+    DB update every 5 min only — not every tick.
+    """
+    now_min      = datetime.now(IST).minute
+    current_slot = (now_min // 5) * 5
+
+    if "phase_update_slot" not in st.session_state:
+        st.session_state["phase_update_slot"] = -1
+
+    candle_store = st.session_state.get("candle_store", {})
+    do_db_update = st.session_state["phase_update_slot"] != current_slot
+    result       = {}
+
+    for symbol in df["Symbol"].tolist():
+        candles = candle_store.get(symbol, [])
+
+        if len(candles) < 2:
+            # Not enough candles yet — use DB values if available
+            sig = signal_data.get(symbol, {})
+            result[symbol] = {
+                "phase"    : sig.get("phase",     "⏳ Forming"),
+                "vol_trend": sig.get("vol_trend", "→ Stable"),
+            }
+            continue
+
+        phase, vol_trend = detect_phase_and_trend(candles)
+        result[symbol]   = {"phase": phase, "vol_trend": vol_trend}
+
+        # Update DB every 5 min — only stocks with signal today
+        if do_db_update and symbol in signal_data:
+            try:
+                update_phase_in_supabase(supabase, symbol, today_str, phase, vol_trend)
+            except Exception:
+                pass
+
+    if do_db_update:
+        st.session_state["phase_update_slot"] = current_slot
+
+    return result
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION END                                ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 
@@ -183,7 +264,6 @@ if "momentum_historical" not in st.session_state:
 
 historical = st.session_state["momentum_historical"]
 
-# ── Signal data (today only, refresh on new day) ──────────────
 if (
     "signal_data"      not in st.session_state or
     st.session_state.get("signal_data_date") != today_str
@@ -210,6 +290,14 @@ def scanner_table():
 
     now_ist    = datetime.now(IST).strftime("%H:%M:%S")
     tick_count = len(angel_ws.latest_ticks)
+
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION START — tick buffer update     ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    update_candle_buffer(angel_ws.latest_ticks, TOKEN_TO_NAME)
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION END                           ║
+    # ╚═══════════════════════════════════════════════════════════╝
 
     if df.empty:
         st.info("No stocks matching momentum criteria right now.")
@@ -238,6 +326,8 @@ def scanner_table():
                 "signal_time"  : signal_time_ist,
                 "signal_price" : ltp,
                 "peak_ltp"     : ltp,
+                "phase"        : None,
+                "vol_trend"    : None,
             }
         else:
             current_peak = signal_data[symbol].get("peak_ltp") or ltp
@@ -249,11 +339,19 @@ def scanner_table():
     ema_cache = get_ema20_status(df)
 
     # ╔═══════════════════════════════════════════════════════════╗
-    # ║  9 EMA (5MIN) SECTION START — fetch with live WS ticks    ║
+    # ║  9 EMA (5MIN) SECTION START                               ║
     # ╚═══════════════════════════════════════════════════════════╝
     ema9_cache = get_ema9_status(df, angel_ws.latest_ticks, TOKEN_TO_NAME)
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
+    # ╚═══════════════════════════════════════════════════════════╝
+
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION START — detect & assign        ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    phase_cache = get_phase_and_trend(supabase, df, signal_data, today)
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION END                           ║
     # ╚═══════════════════════════════════════════════════════════╝
 
     # ── Assign display columns ────────────────────────────────
@@ -262,15 +360,23 @@ def scanner_table():
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
     # ╔═══════════════════════════════════════════════════════════╗
-    # ║  9 EMA (5MIN) SECTION START — assign display column       ║
+    # ║  9 EMA (5MIN) SECTION START — assign columns              ║
     # ╚═══════════════════════════════════════════════════════════╝
-    df["EMA9 5min"]  = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("status",  "⏳"))
-    df["EMA9 Value"] = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("ema9",    None))
+    df["EMA9 5min"]  = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("status", "⏳"))
+    df["EMA9 Value"] = df["Symbol"].apply(lambda s: ema9_cache.get(s, {}).get("ema9",   None))
     # ╔═══════════════════════════════════════════════════════════╗
     # ║  9 EMA (5MIN) SECTION END                                ║
     # ╚═══════════════════════════════════════════════════════════╝
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION START — assign columns         ║
+    # ╚═══════════════════════════════════════════════════════════╝
+    df["Phase"]     = df["Symbol"].apply(lambda s: phase_cache.get(s, {}).get("phase",     "⏳ Forming"))
+    df["Vol Trend"] = df["Symbol"].apply(lambda s: phase_cache.get(s, {}).get("vol_trend", "→ Stable"))
+    # ╔═══════════════════════════════════════════════════════════╗
+    # ║  PHASE & VOL TREND SECTION END                           ║
+    # ╚═══════════════════════════════════════════════════════════╝
 
-    # ── Status bar + Reload button in one row ─────────────────
+    # ── Status bar + Reload button ────────────────────────────
     col_info, col_btn = st.columns([5, 1])
     with col_info:
         st.markdown(
@@ -283,10 +389,12 @@ def scanner_table():
     with col_btn:
         if st.button("🔄 Reload", use_container_width=True):
             del st.session_state["momentum_historical"]
-            st.session_state.pop("ema20_cache", None)
+            st.session_state.pop("ema20_cache",        None)
+            st.session_state.pop("ema9_candles_cache", None)
+            st.session_state.pop("tick_buffer",        None)
+            st.session_state.pop("candle_store",       None)
             st.rerun()
 
-    # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
         df          = df,
         data_source = data_source,
@@ -297,7 +405,7 @@ def scanner_table():
 
     st.components.v1.html(
         html,
-        height    = min(900, 160 + len(df) * 52),
+        height    = min(900, 160 + len(df) * 58),
         scrolling = True,
     )
 
