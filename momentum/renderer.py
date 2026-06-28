@@ -109,14 +109,6 @@ def _vol_badge(vm: str) -> str:
     return f'<span class="vol-badge vol-low">{vm}</span>'
 
 
-def _vol_emoji(vm: str) -> str:
-    """Returns just the emoji for Vol Momentum — used inline with Vol Ratio."""
-    if "Very Strong" in vm or "🔥" in vm: return "🔥"
-    if "Strong"      in vm or "⚡" in vm: return "⚡"
-    if "Building"    in vm or "👀" in vm: return "👀"
-    return ""
-
-
 def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
     """
     Momentum badge — same layout as Signal Price cell:
@@ -590,7 +582,8 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
-            <td><span class="num-primary">{_vol_emoji(str(row['Vol Momentum']))} {row['Vol Ratio']}</span></td>
+            <td><span class="num-primary">{row['Vol Ratio']}</span></td>
+            <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct_raw)}</td>
             <td>{_ema_cell(ema_status)}</td>
             <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
@@ -599,7 +592,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="11">
+            <td colspan="12">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -685,14 +678,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(3)">LTP <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(4)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(6)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(7)">EMA20 Status <span class="sort-arrow">↕</span></th>
                 <!-- 9 EMA (5MIN) SECTION START -->
-                <th class="th-ema9" onclick="toggleColExpand(7)">9 EMA 5min <span class="sort-arrow">↕</span></th>
+                <th class="th-ema9" onclick="toggleColExpand(8)">9 EMA 5min <span class="sort-arrow">↕</span></th>
                 <!-- 9 EMA (5MIN) SECTION END -->
-                <th class="th-sig" onclick="toggleColExpand(8)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(10)">Volume <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(9)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(11)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
