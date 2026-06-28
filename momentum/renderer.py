@@ -1,15 +1,6 @@
 """
-momentum/renderer.py
-HTML renderer for Momentum Scanner.
-Replaces old render_html_table() with the approved SEMrush-style design.
-ONLY ADDITION: Phase + Vol Trend columns (marked with section comments)
-Everything else is EXACTLY as in the original working file.
+momentum/renderer.py — EXACT original + Phase/Vol Trend columns only
 """
-
-
-# ─────────────────────────────────────────────────────────────
-# INTERNAL HELPERS
-# ─────────────────────────────────────────────────────────────
 
 def _short_vol(vol: float) -> str:
     if vol >= 1_000_000:
@@ -33,7 +24,7 @@ def _ema_cell(status) -> str:
 
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION START — renderer helper                 ║
+# ║  9 EMA (5MIN) SECTION START                                   ║
 # ╚═══════════════════════════════════════════════════════════════╝
 def _ema9_cell(status: str, ema9_value) -> str:
     if not status or status == "⏳":
@@ -58,7 +49,7 @@ def _ema9_cell(status: str, ema9_value) -> str:
 
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  PHASE & VOL TREND SECTION START — renderer helpers           ║
+# ║  PHASE & VOL TREND SECTION START                              ║
 # ╚═══════════════════════════════════════════════════════════════╝
 def _phase_cell(phase: str) -> str:
     if not phase or phase in ("⏳ Forming", "⏳"):
@@ -68,21 +59,16 @@ def _phase_cell(phase: str) -> str:
     elif "PULLBACK"  in s: color, bg, border = "#b45309", "#fffbeb", "#fde68a"
     elif "REVERSAL"  in s: color, bg, border = "#be123c", "#fff1f2", "#fecdd3"
     else:                  color, bg, border = "#64748b", "#f1f5f9", "#e2e8f0"
-    return (
-        f'<span style="display:inline-flex;align-items:center;padding:2px 8px;'
-        f'border-radius:4px;font-size:13px;font-weight:700;white-space:nowrap;'
-        f'background:{bg};color:{color};border:1px solid {border}">{s}</span>'
-    )
-
+    return (f'<span style="display:inline-flex;align-items:center;padding:2px 8px;'
+            f'border-radius:4px;font-size:13px;font-weight:700;white-space:nowrap;'
+            f'background:{bg};color:{color};border:1px solid {border}">{s}</span>')
 
 def _vol_trend_cell(vol_trend: str) -> str:
     if not vol_trend:
         return '<span style="color:#94a3b8;font-size:14px">→ Stable</span>'
     s = str(vol_trend)
-    if s.startswith("↑"):
-        return f'<span style="color:#16a34a;font-weight:700;font-size:16px">{s}</span>'
-    if s.startswith("↓"):
-        return f'<span style="color:#dc2626;font-weight:700;font-size:16px">{s}</span>'
+    if s.startswith("↑"): return f'<span style="color:#16a34a;font-weight:700;font-size:16px">{s}</span>'
+    if s.startswith("↓"): return f'<span style="color:#dc2626;font-weight:700;font-size:16px">{s}</span>'
     return f'<span style="color:#94a3b8;font-weight:600;font-size:16px">{s}</span>'
 # ╔═══════════════════════════════════════════════════════════════╗
 # ║  PHASE & VOL TREND SECTION END                                ║
@@ -124,7 +110,7 @@ def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> s
         fill_pct   = int(66 + within * 34)
         fill_color = "#7c3aed"
         badge_html = f'<span class="badge badge-accel">{mom}</span>'
-        next_label = "✅ Top Level"
+        next_label = "🏆 Top Level"
 
     elif "BUILDING" in mom:
         vol_p   = _clamp((vol_ratio    - 2.0) / (2.5 - 2.0), 0, 1)
@@ -225,9 +211,6 @@ def _progress_html(val: float) -> str:
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# CSS + JS
-# ─────────────────────────────────────────────────────────────
 _STYLES = """
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -237,8 +220,6 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
   color: #1a202c; font-size: 13px;
 }
-
-/* ── FILTER BAR ── */
 .filterbar {
   background: #fff; border-bottom: 1px solid #e2e8f0;
   padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -259,15 +240,11 @@ select.filter-select {
 }
 .filter-sep { width: 1px; height: 20px; background: #e2e8f0; }
 .meta-info { margin-left: auto; font-size: 15px; font-weight: 700; color: #0f172a; }
-
-/* ── TABLE ── */
 .table-wrap { padding: 12px 16px; overflow-x: auto; }
 table {
   width: 100%; border-collapse: collapse; background: #fff;
   border-radius: 10px; border: 1px solid #e2e8f0; overflow: hidden;
 }
-
-/* ── HEADER ── */
 thead tr { background: #fef9f0; }
 th {
   padding: 10px 10px; text-align: left; font-size: 12px; font-weight: 800;
@@ -282,15 +259,9 @@ th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
 th.active-col .sort-arrow { opacity: 1; }
 th.th-ema { background: #fef9f0; color: #0f172a; }
 th.th-sig { background: #fef9f0; color: #0f172a; }
-/* 9 EMA (5MIN) SECTION START */
-th.th-ema9 { background: #e0f2fe; color: #0369a1; }
-/* 9 EMA (5MIN) SECTION END */
-/* PHASE & VOL TREND SECTION START */
+th.th-ema9  { background: #e0f2fe; color: #0369a1; }
 th.th-phase { background: #faf5ff; color: #5b21b6; }
 th.th-trend { background: #f0fdf4; color: #15803d; }
-/* PHASE & VOL TREND SECTION END */
-
-/* ── ROWS ── */
 tbody tr.main-row {
   border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: background 0.1s;
 }
@@ -305,24 +276,15 @@ td {
 }
 td:last-child { border-right: none; }
 td.active-col { background: #eff6ff; }
-
-/* ── EXPAND ROW ── */
 tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
 .expand-panel {
   background: #f0f9ff; padding: 12px 16px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;
 }
-.expand-card {
-  background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px;
-}
-.expand-card .ec-label {
-  font-size: 10px; color: #64748b; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.5px;
-}
+.expand-card { background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px; }
+.expand-card .ec-label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .expand-card .ec-value { font-size: 14px; font-weight: 700; color: #1e3a5f; margin-top: 2px; }
 .expand-card .ec-sub   { font-size: 10px; color: #94a3b8; margin-top: 1px; }
-
-/* ── STOCK CELL ── */
 .stock-cell { display: flex; align-items: center; gap: 8px; }
 .expand-icon {
   width: 18px; height: 18px; border-radius: 4px;
@@ -332,16 +294,12 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
 }
 tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
 .stock-name  { font-weight: 700; font-size: 16px; color: #1e3a5f; }
-
-/* ── LEFT BORDER ── */
 tbody tr.main-row { border-left: 4px solid #e2e8f0; }
 tbody tr.main-row.mom-strong  { border-left: 4px solid #7c3aed; }
 tbody tr.main-row.mom-build   { border-left: 4px solid #22c55e; }
 tbody tr.main-row.mom-stable  { border-left: 4px solid #3b82f6; }
 tbody tr.main-row.mom-cooling { border-left: 4px solid #f59e0b; }
 tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
-
-/* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
   padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; white-space: nowrap;
@@ -351,14 +309,10 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .badge-watch { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 .badge-hold  { background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
 .badge-accel { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
-
-/* ── VOL BADGE ── */
 .vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; }
 .vol-high  { background: #fef3c7; color: #92400e; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
-
-/* ── SIGNAL PRICE ── */
 .sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
 .sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
@@ -366,30 +320,20 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
 .bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
-
-/* ── MOMENTUM PROGRESS BAR ── */
 .mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
 .mom-top-row      { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .mom-pct-label    { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .mom-progress-bar { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
 .mom-progress-fill{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 .mom-next-label   { font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap; }
-
-/* ── GROUP 1: Primary numbers ── */
 .num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
-
-/* ── GROUP 2: Percentages ── */
 .chg-pos  { color: #16a34a; font-weight: 600; font-size: 16px; }
 .chg-neg  { color: #dc2626; font-weight: 600; font-size: 16px; }
 .ema-pass { color: #16a34a; font-weight: 600; font-size: 16px; }
 .ema-fail { color: #dc2626; font-weight: 600; font-size: 16px; }
 .ema-ext  { color: #ea580c; font-weight: 600; font-size: 16px; }
-
-/* ── LTP ── */
 .ltp-val  { font-size: 16px; font-weight: 700; color: #0f172a; }
 .peak-val { color: #0f172a; font-weight: 700; font-size: 16px; }
-
-/* ── COPY BUTTON ── */
 .copy-btn {
   cursor: pointer; font-weight: 700; color: #1e3a5f;
   background: transparent; border: none; padding: 0;
@@ -397,8 +341,6 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 }
 .copy-btn:hover  { color: #10b981; }
 .copy-btn.copied { color: #10b981; }
-
-/* ── TOAST ── */
 .toast {
   position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
   background: #0f172a; color: white; padding: 8px 20px;
@@ -406,8 +348,6 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
   opacity: 0; transition: opacity 0.3s; pointer-events: none;
 }
 .toast.show { opacity: 1; }
-
-/* ── SCROLLBAR ── */
 ::-webkit-scrollbar { height: 5px; width: 5px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -428,9 +368,7 @@ function copySymbol(btn, symbol) {
         toast.classList.remove('show');
     }, 1500);
 }
-
 var activeCol = -1;
-
 function toggleRow(sym) {
     var mainRow = document.getElementById('main-' + sym);
     var expRow  = document.getElementById('exp-'  + sym);
@@ -441,7 +379,6 @@ function toggleRow(sym) {
     var icon = mainRow.querySelector('.expand-icon');
     if (icon) icon.textContent = isOpen ? '+' : '−';
 }
-
 function toggleColExpand(col) {
     document.querySelectorAll('th').forEach(function(th) { th.classList.remove('active-col'); });
     document.querySelectorAll('td').forEach(function(td) { td.classList.remove('active-col'); });
@@ -453,7 +390,6 @@ function toggleColExpand(col) {
         if (cells[col]) cells[col].classList.add('active-col');
     });
 }
-
 function applyFilter() {
     var momVal = document.getElementById('momFilter').value.toLowerCase();
     var emaVal = document.getElementById('emaFilter').value;
@@ -477,9 +413,6 @@ function applyFilter() {
 """
 
 
-# ─────────────────────────────────────────────────────────────
-# MAIN RENDER FUNCTION
-# ─────────────────────────────────────────────────────────────
 def render_html_table(df, data_source: str = "", target_date: str = "",
                       prev_date: str = "", tick_count: int = 0) -> str:
     rows_html = ""
@@ -537,77 +470,34 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                     </div>
                 </div>
             </td>
-            <td>
-                <span style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;">
-                    {signal_time[:5]}
-                </span>
-            </td>
+            <td><span style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;">{signal_time[:5]}</span></td>
             <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
             <td>
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
             <td><span class="num-primary">{_vol_emoji(str(row['Vol Momentum']))} {row['Vol Ratio']}</span></td>
-            <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct_raw)}</td>
             <td>{_ema_cell(ema_status)}</td>
             <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
-            <!-- PHASE & VOL TREND SECTION START -->
             <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
             <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
-            <!-- PHASE & VOL TREND SECTION END -->
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="14">
+            <td colspan="13">
                 <div class="expand-panel">
-                    <div class="expand-card">
-                        <div class="ec-label">Open</div>
-                        <div class="ec-value">₹{float(row['Open']):,.2f}</div>
-                        <div class="ec-sub">Today's open</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Prev Close</div>
-                        <div class="ec-value">₹{float(row['Prev Close']):,.2f}</div>
-                        <div class="ec-sub">Yesterday's close</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Signal Price</div>
-                        <div class="ec-value" style="color:#2563eb">{signal_price_str}</div>
-                        <div class="ec-sub">Entry trigger</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">High Since Signal</div>
-                        <div class="ec-value" style="color:#7c3aed">{peak_ltp_str}</div>
-                        <div class="ec-sub">Peak after signal</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Peak Move%</div>
-                        <div class="ec-value" style="color:#16a34a">{peak_move_str}</div>
-                        <div class="ec-sub">Max gain possible</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Volume</div>
-                        <div class="ec-value">{vol_fmt}</div>
-                        <div class="ec-sub">Median: {median_vol_str}</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Vol Ratio</div>
-                        <div class="ec-value" style="color:{vr_color}">{row['Vol Ratio']}</div>
-                        <div class="ec-sub">vs 5-day median</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">Signal Time</div>
-                        <div class="ec-value">{signal_time}</div>
-                        <div class="ec-sub">First detected</div>
-                    </div>
-                    <div class="expand-card">
-                        <div class="ec-label">EMA20 Status</div>
-                        <div class="ec-value">{_ema_cell(ema_status)}</div>
-                        <div class="ec-sub">Distance from EMA</div>
-                    </div>
+                    <div class="expand-card"><div class="ec-label">Open</div><div class="ec-value">₹{float(row['Open']):,.2f}</div><div class="ec-sub">Today's open</div></div>
+                    <div class="expand-card"><div class="ec-label">Prev Close</div><div class="ec-value">₹{float(row['Prev Close']):,.2f}</div><div class="ec-sub">Yesterday's close</div></div>
+                    <div class="expand-card"><div class="ec-label">Signal Price</div><div class="ec-value" style="color:#2563eb">{signal_price_str}</div><div class="ec-sub">Entry trigger</div></div>
+                    <div class="expand-card"><div class="ec-label">High Since Signal</div><div class="ec-value" style="color:#7c3aed">{peak_ltp_str}</div><div class="ec-sub">Peak after signal</div></div>
+                    <div class="expand-card"><div class="ec-label">Peak Move%</div><div class="ec-value" style="color:#16a34a">{peak_move_str}</div><div class="ec-sub">Max gain possible</div></div>
+                    <div class="expand-card"><div class="ec-label">Volume</div><div class="ec-value">{vol_fmt}</div><div class="ec-sub">Median: {median_vol_str}</div></div>
+                    <div class="expand-card"><div class="ec-label">Vol Ratio</div><div class="ec-value" style="color:{vr_color}">{row['Vol Ratio']}</div><div class="ec-sub">vs 5-day median</div></div>
+                    <div class="expand-card"><div class="ec-label">Signal Time</div><div class="ec-value">{signal_time}</div><div class="ec-sub">First detected</div></div>
+                    <div class="expand-card"><div class="ec-label">EMA20 Status</div><div class="ec-value">{_ema_cell(ema_status)}</div><div class="ec-sub">Distance from EMA</div></div>
                 </div>
             </td>
         </tr>"""
@@ -637,7 +527,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         </select>
         <span class="meta-info">{meta}</span>
     </div>
-
     <div class="table-wrap">
     <table>
         <thead>
@@ -647,19 +536,14 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(3)">LTP <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(4)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Vol Momentum <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(6)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(7)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <!-- 9 EMA (5MIN) SECTION START -->
-                <th class="th-ema9" onclick="toggleColExpand(8)">9 EMA 5min <span class="sort-arrow">↕</span></th>
-                <!-- 9 EMA (5MIN) SECTION END -->
-                <!-- PHASE & VOL TREND SECTION START -->
-                <th class="th-phase" onclick="toggleColExpand(9)">Phase <span class="sort-arrow">↕</span></th>
-                <th class="th-trend" onclick="toggleColExpand(10)">Vol Trend <span class="sort-arrow">↕</span></th>
-                <!-- PHASE & VOL TREND SECTION END -->
-                <th class="th-sig" onclick="toggleColExpand(11)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(12)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(13)">Volume <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-ema9" onclick="toggleColExpand(7)">9 EMA 5min <span class="sort-arrow">↕</span></th>
+                <th class="th-phase" onclick="toggleColExpand(8)">Phase <span class="sort-arrow">↕</span></th>
+                <th class="th-trend" onclick="toggleColExpand(9)">Vol Trend <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(10)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(11)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
@@ -668,5 +552,4 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
     </table>
     </div>
     """
-
     return html
