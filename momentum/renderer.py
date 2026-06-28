@@ -503,8 +503,9 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         signal_price = row.get("Signal Price", None)
         peak_ltp     = row.get("High Since Signal", None)
         ema_status   = row.get("EMA20 Status", None)
-        momentum_str = str(row.get("Momentum", ""))
-        vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
+        momentum_str     = str(row.get("Momentum", ""))
+        vol_ratio_raw    = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
+        intraday_pct_raw = float(row.get("intraday_pct", 0) or 0)
 
         # ── Derived calcs — exact same as original ────────────
         if signal_price and float(signal_price) > 0:
@@ -572,10 +573,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <!-- PHASE & VOL TREND SECTION END -->
             <td>{_ema_cell(ema_status)}</td>
             <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
-            <!-- PHASE & VOL TREND SECTION START -->
-            <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
-            <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
-            <!-- PHASE & VOL TREND SECTION END -->
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
