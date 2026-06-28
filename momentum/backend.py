@@ -152,7 +152,7 @@ def fetch_ema9_candles(stock_names: list) -> dict:
     return result
 
 
-def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
+def calculate_ema9_with_live(candles_8: list, live_ltp: float):
     if not candles_8 or len(candles_8) < 8 or live_ltp <= 0:
         return None
 
@@ -194,7 +194,7 @@ def calculate_ema9_with_live(candles_8: list, live_ltp: float) -> dict | None:
 # ║  PHASE & VOL TREND SECTION START                              ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
-def build_candle(stock: str, candle_time: str, ticks: list) -> dict | None:
+def build_candle(stock: str, candle_time: str, ticks: list):
     """Build a 5min OHLC candle from accumulated ticks."""
     if not ticks:
         return None
@@ -329,7 +329,7 @@ def update_peak_ltp_in_supabase(supabase, stock, today_str, new_peak_ltp):
 # ─────────────────────────────────────────────────────────────
 # FETCH HISTORICAL DATA
 # ─────────────────────────────────────────────────────────────
-def fetch_historical_data(supabase) -> dict | None:
+def fetch_historical_data(supabase):
     all_dates = set()
     offset = 0
     while True:
