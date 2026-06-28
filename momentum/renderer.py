@@ -78,6 +78,74 @@ def _ema9_cell(status: str, ema9_value) -> str:
 # ╚═══════════════════════════════════════════════════════════════╝
 
 
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION START — renderer helpers           ║
+# ╚═══════════════════════════════════════════════════════════════╝
+def _phase_cell(phase: str) -> str:
+    """Render Phase badge with color."""
+    if not phase or phase in ("⏳ Forming", "⏳"):
+        return '<span style="color:#94a3b8;font-size:13px">⏳ Forming</span>'
+    s = str(phase)
+    if "MOMENTUM"     in s: color, bg = "#15803d", "#f0fdf4"; border = "#bbf7d0"
+    elif "EXHAUSTION" in s: color, bg = "#b45309", "#fffbeb"; border = "#fde68a"
+    elif "REVERSAL"   in s: color, bg = "#be123c", "#fff1f2"; border = "#fecdd3"
+    elif "PULLBACK"   in s: color, bg = "#0369a1", "#f0f9ff"; border = "#bae6fd"
+    elif "ACCUMULAT"  in s: color, bg = "#7c3aed", "#faf5ff"; border = "#ddd6fe"
+    else:                   color, bg = "#64748b", "#f1f5f9"; border = "#e2e8f0"
+    return (
+        f'<span style="display:inline-flex;align-items:center;padding:2px 8px;'
+        f'border-radius:4px;font-size:13px;font-weight:700;white-space:nowrap;'
+        f'background:{bg};color:{color};border:1px solid {border}">{s}</span>'
+    )
+
+
+def _vol_trend_cell(vol_trend: str) -> str:
+    """Render Vol Trend with color — ↑ green, ↓ red, → grey."""
+    if not vol_trend:
+        return '<span style="color:#94a3b8">→ Stable</span>'
+    s = str(vol_trend)
+    if s.startswith("↑"):
+        return f'<span style="color:#16a34a;font-weight:700;font-size:16px">{s}</span>'
+    if s.startswith("↓"):
+        return f'<span style="color:#dc2626;font-weight:700;font-size:16px">{s}</span>'
+    return f'<span style="color:#94a3b8;font-weight:600;font-size:16px">{s}</span>'
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION END                                ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION START — renderer helpers           ║
+# ╚═══════════════════════════════════════════════════════════════╝
+def _phase_cell(phase: str) -> str:
+    if not phase or phase in ("⏳ Forming", "⏳"):
+        return '<span style="color:#94a3b8;font-size:13px">⏳ Forming</span>'
+    s = str(phase)
+    if   "BUILDING"  in s: color, bg, border = "#15803d", "#f0fdf4", "#bbf7d0"
+    elif "PULLBACK"  in s: color, bg, border = "#b45309", "#fffbeb", "#fde68a"
+    elif "REVERSAL"  in s: color, bg, border = "#be123c", "#fff1f2", "#fecdd3"
+    else:                  color, bg, border = "#64748b", "#f1f5f9", "#e2e8f0"
+    return (
+        f'<span style="display:inline-flex;align-items:center;padding:2px 8px;'
+        f'border-radius:4px;font-size:13px;font-weight:700;white-space:nowrap;'
+        f'background:{bg};color:{color};border:1px solid {border}">{s}</span>'
+    )
+
+
+def _vol_trend_cell(vol_trend: str) -> str:
+    if not vol_trend:
+        return '<span style="color:#94a3b8;font-size:14px">→ Stable</span>'
+    s = str(vol_trend)
+    if s.startswith("↑"):
+        return f'<span style="color:#16a34a;font-weight:700;font-size:14px">{s}</span>'
+    if s.startswith("↓"):
+        return f'<span style="color:#dc2626;font-weight:700;font-size:14px">{s}</span>'
+    return f'<span style="color:#94a3b8;font-weight:600;font-size:14px">{s}</span>'
+# ╔═══════════════════════════════════════════════════════════════╗
+# ║  PHASE & VOL TREND SECTION END                                ║
+# ╚═══════════════════════════════════════════════════════════════╝
+
+
 def _move_color(val: float) -> str:
     if val >= 5.0: return "#16a34a"
     if val >= 2.0: return "#ca8a04"
@@ -109,107 +177,13 @@ def _vol_badge(vm: str) -> str:
     return f'<span class="vol-badge vol-low">{vm}</span>'
 
 
-def _vol_emoji(vm: str) -> str:
-    """Returns just the emoji for Vol Momentum — used inline with Vol Ratio."""
-    if "Very Strong" in vm or "🔥" in vm: return "🔥"
-    if "Strong"      in vm or "⚡" in vm: return "⚡"
-    if "Building"    in vm or "👀" in vm: return "👀"
-    return ""
-
-
-def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
-    """
-    Momentum badge — same layout as Signal Price cell:
-      [badge]              [XX%]
-      ████████████░░░░░░░░
-      next level hint
-
-    Full 0–100% scale across all tiers:
-      WEAK          →  0– 33%   (red)
-      BUILDING      → 33– 66%   (green)
-      STRONG BUILD  → 66–100%   (purple)
-
-    Within each tier, actual vol_ratio + intraday_pct progress fills the bar.
-    """
-
-    def _clamp(v, lo, hi):
-        return max(lo, min(hi, v))
-
-    if "STRONG BUILDING" in mom:
-        # Tier range 66–100. Within tier: how much beyond threshold?
-        # vol threshold 2.5, cap at 5.0 (reasonable max)
-        # intraday threshold 1.5, cap at 4.0
-        vol_p   = _clamp((vol_ratio    - 2.5) / (5.0 - 2.5), 0, 1)
-        intra_p = _clamp((intraday_pct - 1.5) / (4.0 - 1.5), 0, 1)
-        within  = vol_p * 0.4 + intra_p * 0.6          # 0–1
-        fill_pct   = int(66 + within * 34)              # 66–100
-        fill_color = "#7c3aed"
-        badge_html = f'<span class="badge badge-accel">{mom}</span>'
-        next_label = "🏆 Top Level"
-
-    elif "BUILDING" in mom:
-        # Tier range 33–66. Within tier: vol 2.0→2.5, intraday 0.8→1.5
-        vol_p   = _clamp((vol_ratio    - 2.0) / (2.5 - 2.0), 0, 1)
-        intra_p = _clamp((intraday_pct - 0.8) / (1.5 - 0.8), 0, 1)
-        within  = vol_p * 0.4 + intra_p * 0.6
-        fill_pct   = int(33 + within * 33)              # 33–66
-        fill_color = "#22c55e"
-        badge_html = f'<span class="badge badge-bull">{mom}</span>'
-        v_need     = max(0.0, round(2.5 - vol_ratio, 1))
-        i_need     = max(0.0, round(1.5 - intraday_pct, 1))
-        next_label = f"→ Strong: need {v_need}x vol · {i_need}% move"
-
-    elif "STABLE" in mom:
-        # Tier range 20–33. Within tier: vol 1.5→2.0, intraday 0.0→0.8
-        vol_p   = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5), 0, 1)
-        intra_p = _clamp((intraday_pct - 0.0) / (0.8 - 0.0), 0, 1)
-        within  = vol_p * 0.4 + intra_p * 0.6
-        fill_pct   = int(20 + within * 13)              # 20–33
-        fill_color = "#3b82f6"
-        badge_html = f'<span class="badge badge-hold">{mom}</span>'
-        v_need     = max(0.0, round(2.0 - vol_ratio, 1))
-        i_need     = max(0.0, round(0.8 - intraday_pct, 1))
-        next_label = f"→ Building: need {v_need}x vol · {i_need}% move"
-
-    elif "COOLING" in mom:
-        # Tier range 10–20. Intraday is negative — progress = closeness to 0
-        vol_p   = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5), 0, 1)
-        intra_p = _clamp((intraday_pct + 3.0) / 3.0,          0, 1)  # -3%→0
-        within  = vol_p * 0.4 + intra_p * 0.6
-        fill_pct   = int(10 + within * 10)              # 10–20
-        fill_color = "#f59e0b"
-        badge_html = f'<span class="badge badge-watch">{mom}</span>'
-        next_label = "→ Building: price must turn +ve"
-
-    elif "WEAK" in mom:
-        # Tier range 0–20. Passed entry filter but weak momentum
-        vol_p   = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5), 0, 1)
-        intra_p = _clamp((intraday_pct - 1.0) / (0.8        ), 0, 1)
-        within  = vol_p * 0.4 + intra_p * 0.6
-        fill_pct   = int(within * 20)                   # 0–20
-        fill_color = "#ef4444"
-        badge_html = f'<span class="badge badge-bear">{mom}</span>'
-        v_need     = max(0.0, round(2.0 - vol_ratio, 1))
-        next_label = f"→ Building: need {v_need}x more vol"
-
-    else:
-        return f'<span class="badge badge-hold">{mom}</span>'
-
-    pct_color = fill_color
-    is_top    = "STRONG BUILDING" in mom
-
-    return (
-        f'<div class="mom-wrap">'
-        f'  <div class="mom-top-row">'
-        f'    {badge_html}'
-        f'    <span class="mom-pct-label" style="color:{pct_color}">{fill_pct}%</span>'
-        f'  </div>'
-        f'  <div class="mom-progress-bar">'
-        f'    <div class="mom-progress-fill" style="width:{fill_pct}%;background:{fill_color};"></div>'
-        f'  </div>'
-        f'  <div class="mom-next-label">{"✅ Top Level" if is_top else next_label}</div>'
-        f'</div>'
-    )
+def _mom_badge(mom: str) -> str:
+    if "STRONG BUILDING" in mom: return f'<span class="badge badge-accel">{mom}</span>'
+    if "BUILDING"        in mom: return f'<span class="badge badge-bull">{mom}</span>'
+    if "STABLE"          in mom: return f'<span class="badge badge-hold">{mom}</span>'
+    if "COOLING"         in mom: return f'<span class="badge badge-watch">{mom}</span>'
+    if "WEAK"            in mom: return f'<span class="badge badge-bear">{mom}</span>'
+    return f'<span class="badge badge-hold">{mom}</span>'
 
 
 def _chg_html(val: float) -> str:
@@ -316,6 +290,14 @@ th.th-sig { background: #fef9f0; color: #0f172a; }
 /* 9 EMA (5MIN) SECTION START */
 th.th-ema9 { background: #e0f2fe; color: #0369a1; }
 /* 9 EMA (5MIN) SECTION END */
+/* PHASE & VOL TREND SECTION START */
+th.th-phase { background: #faf5ff; color: #5b21b6; }
+th.th-trend { background: #f0fdf4; color: #15803d; }
+/* PHASE & VOL TREND SECTION END */
+/* PHASE & VOL TREND SECTION START */
+th.th-phase { background: #faf5ff; color: #5b21b6; }
+th.th-trend { background: #f0fdf4; color: #15803d; }
+/* PHASE & VOL TREND SECTION END */
 
 /* ── ROWS ── */
 tbody tr.main-row {
@@ -385,7 +367,7 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
 
-/* ── PROGRESS BAR (Signal Price) ── */
+/* ── PROGRESS BAR ── */
 .sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
 .sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
@@ -393,14 +375,6 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
 .bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
-
-/* ── MOMENTUM PROGRESS BAR ── */
-.mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
-.mom-top-row      { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.mom-pct-label    { font-size: 13px; font-weight: 700; white-space: nowrap; }
-.mom-progress-bar { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
-.mom-progress-fill{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }
-.mom-next-label   { font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
 .num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
@@ -529,9 +503,8 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         signal_price = row.get("Signal Price", None)
         peak_ltp     = row.get("High Since Signal", None)
         ema_status   = row.get("EMA20 Status", None)
-        momentum_str     = str(row.get("Momentum", ""))
-        vol_ratio_raw    = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
-        intraday_pct_raw = float(row.get("intraday_pct", 0) or 0)
+        momentum_str = str(row.get("Momentum", ""))
+        vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
 
         # ── Derived calcs — exact same as original ────────────
         if signal_price and float(signal_price) > 0:
@@ -590,16 +563,25 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
             </td>
-            <td><span class="num-primary">{_vol_emoji(str(row['Vol Momentum']))} {row['Vol Ratio']}</span></td>
+            <td><span class="num-primary">{row['Vol Ratio']}</span></td>
+            <td>{_vol_badge(str(row['Vol Momentum']))}</td>
             <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct_raw)}</td>
+            <!-- PHASE & VOL TREND SECTION START -->
+            <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
+            <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
+            <!-- PHASE & VOL TREND SECTION END -->
             <td>{_ema_cell(ema_status)}</td>
             <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
+            <!-- PHASE & VOL TREND SECTION START -->
+            <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
+            <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
+            <!-- PHASE & VOL TREND SECTION END -->
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
             <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="11">
+            <td colspan="14">
                 <div class="expand-panel">
                     <div class="expand-card">
                         <div class="ec-label">Open</div>
@@ -685,14 +667,19 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(3)">LTP <span class="sort-arrow">↕</span></th>
                 <th onclick="toggleColExpand(4)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(5)">Vol Momentum <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(6)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(7)">EMA20 Status <span class="sort-arrow">↕</span></th>
                 <!-- 9 EMA (5MIN) SECTION START -->
-                <th class="th-ema9" onclick="toggleColExpand(7)">9 EMA 5min <span class="sort-arrow">↕</span></th>
+                <th class="th-ema9" onclick="toggleColExpand(8)">9 EMA 5min <span class="sort-arrow">↕</span></th>
                 <!-- 9 EMA (5MIN) SECTION END -->
-                <th class="th-sig" onclick="toggleColExpand(8)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(9)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(10)">Volume <span class="sort-arrow">↕</span></th>
+                <!-- PHASE & VOL TREND SECTION START -->
+                <th class="th-phase" onclick="toggleColExpand(9)">Phase <span class="sort-arrow">↕</span></th>
+                <th class="th-trend" onclick="toggleColExpand(10)">Vol Trend <span class="sort-arrow">↕</span></th>
+                <!-- PHASE & VOL TREND SECTION END -->
+                <th class="th-sig" onclick="toggleColExpand(11)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(12)">High Since Signal <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(13)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
