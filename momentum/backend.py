@@ -214,14 +214,17 @@ def build_candle(stock: str, candle_time: str, ticks: list) -> dict | None:
 
 def detect_phase_and_trend(candles: list) -> tuple:
     """
-    Detect phase + vol_trend from last 2-3 completed 5min candles.
+    3 phases — intraday trader friendly:
+      🚀 BUILDING  — Price up + Vol up   → Enter/Hold
+      ⚠️ PULLBACK  — Vol down            → Wait/Tighten SL
+      🔴 REVERSAL  — Price down + Vol up → Exit immediately
     Returns: (phase: str, vol_trend: str)
     """
     if len(candles) < 2:
         return "⏳ Forming", "→ Stable"
 
-    c1 = candles[-2]   # previous candle
-    c2 = candles[-1]   # most recent completed candle
+    c1 = candles[-2]
+    c2 = candles[-1]
 
     price_pct = ((c2["close"] - c1["close"]) / c1["close"] * 100) if c1["close"] > 0 else 0
     vol_pct   = ((c2["volume"] - c1["volume"]) / c1["volume"] * 100) if c1["volume"] > 0 else 0
@@ -234,18 +237,20 @@ def detect_phase_and_trend(candles: list) -> tuple:
     else:
         vol_trend = "→ Stable"
 
-    # Phase
     price_up   = price_pct >  0.3
     price_down = price_pct < -0.3
     vol_up     = vol_trend == "↑ Increasing"
     vol_down   = vol_trend == "↓ Decreasing"
 
-    if price_up   and vol_up:   phase = "🚀 MOMENTUM"
-    elif price_up  and vol_down: phase = "⚠️ EXHAUSTION"
-    elif price_down and vol_up:  phase = "🔴 REVERSAL"
-    elif price_down and vol_down:phase = "↩️ PULLBACK"
-    elif vol_up:                 phase = "👀 ACCUMULATION"
-    else:                        phase = "➡️ STABLE"
+    # 3 phases only
+    if price_down and vol_up:
+        phase = "🔴 REVERSAL"    # Strong sellers — exit
+    elif vol_down:
+        phase = "⚠️ PULLBACK"    # Volume fading — wait/tighten SL
+    elif price_up and vol_up:
+        phase = "🚀 BUILDING"    # Price + Vol both up — enter/hold
+    else:
+        phase = "⚠️ PULLBACK"    # Default conservative
 
     return phase, vol_trend
 
