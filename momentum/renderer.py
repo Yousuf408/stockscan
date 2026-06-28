@@ -110,12 +110,58 @@ def _vol_badge(vm: str) -> str:
 
 
 def _mom_badge(mom: str) -> str:
-    if "STRONG BUILDING" in mom: return f'<span class="badge badge-accel">{mom}</span>'
-    if "BUILDING"        in mom: return f'<span class="badge badge-bull">{mom}</span>'
-    if "STABLE"          in mom: return f'<span class="badge badge-hold">{mom}</span>'
-    if "COOLING"         in mom: return f'<span class="badge badge-watch">{mom}</span>'
-    if "WEAK"            in mom: return f'<span class="badge badge-bear">{mom}</span>'
-    return f'<span class="badge badge-hold">{mom}</span>'
+    """
+    Momentum badge + progress bar showing how far to next level.
+
+    Tier ladder  (fill % = current tier position)
+    ─────────────────────────────────────────────
+    WEAK          →  25%  fill (red)     next: BUILDING
+    STABLE        →  40%  fill (blue)    next: BUILDING
+    COOLING       →  35%  fill (orange)  next: STABLE
+    BUILDING      →  65%  fill (green)   next: STRONG BUILDING
+    STRONG BUILD  → 100%  fill (purple)  already top
+    """
+    if "STRONG BUILDING" in mom:
+        badge_html = f'<span class="badge badge-accel">{mom}</span>'
+        fill_pct   = 100
+        fill_color = "#7c3aed"
+        next_label = "🏆 Peak"
+    elif "BUILDING" in mom:
+        badge_html = f'<span class="badge badge-bull">{mom}</span>'
+        fill_pct   = 65
+        fill_color = "#22c55e"
+        next_label = "35% → Strong"
+    elif "COOLING" in mom:
+        badge_html = f'<span class="badge badge-watch">{mom}</span>'
+        fill_pct   = 35
+        fill_color = "#f59e0b"
+        next_label = "65% → Building"
+    elif "STABLE" in mom:
+        badge_html = f'<span class="badge badge-hold">{mom}</span>'
+        fill_pct   = 40
+        fill_color = "#3b82f6"
+        next_label = "60% → Building"
+    elif "WEAK" in mom:
+        badge_html = f'<span class="badge badge-bear">{mom}</span>'
+        fill_pct   = 25
+        fill_color = "#ef4444"
+        next_label = "75% → Building"
+    else:
+        return f'<span class="badge badge-hold">{mom}</span>'
+
+    remaining = 100 - fill_pct
+
+    return (
+        f'<div class="mom-wrap">'
+        f'  {badge_html}'
+        f'  <div class="mom-progress-bar">'
+        f'    <div class="mom-progress-fill" style="width:{fill_pct}%;background:{fill_color};"></div>'
+        f'  </div>'
+        f'  <div class="mom-next-label">'
+        f'    {"✅ Top Level" if fill_pct == 100 else f"{remaining}% to go &nbsp;·&nbsp; {next_label}"}'
+        f'  </div>'
+        f'</div>'
+    )
 
 
 def _chg_html(val: float) -> str:
@@ -291,7 +337,7 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
 
-/* ── PROGRESS BAR ── */
+/* ── PROGRESS BAR (Signal Price) ── */
 .sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
 .sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
@@ -299,6 +345,12 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
 .bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
+
+/* ── MOMENTUM PROGRESS BAR ── */
+.mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 140px; }
+.mom-progress-bar { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.mom-progress-fill{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.mom-next-label   { font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap; }
 
 /* ── GROUP 1: Primary numbers — LTP, Signal Price, High Since, Volume, Vol Ratio ── */
 .num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
