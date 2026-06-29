@@ -128,7 +128,7 @@ def apply_styles():
         gap: 11px !important;
         padding: 10px 14px !important;
         border-radius: 8px !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
         font-weight: 500 !important;
         color: #4a5568 !important;
         margin: 2px 8px !important;
@@ -137,6 +137,7 @@ def apply_styles():
         transition: all 0.15s !important;
         border-left: 3px solid transparent !important;
         font-family: 'Inter', sans-serif !important;
+        white-space: nowrap !important;
     }
     .ts-nav-item:hover {
         background: #f7f9fc !important;
@@ -322,13 +323,19 @@ def sidebar_brand():
 </div>
 """, unsafe_allow_html=True)
 
-        # Navigation
+        # Navigation — Change 1: Momentum → Momentum, Breakout Scanner → Breakout 4H
+        # Change 2: Dashboard commented out
+        # Change 3: JS for dynamic active page highlight
         st.markdown("""
 <div>
   <div class="ts-nav-section">Market</div>
-  <a class="ts-nav-item" href="/app" target="_self">
+
+  <!-- Dashboard — future me enable karna hai
+  <a class="ts-nav-item" href="/" target="_self">
     <i class="ti ti-layout-dashboard"></i>&nbsp; Dashboard
   </a>
+  -->
+
   <a class="ts-nav-item" href="/LiveFeed" target="_self">
     <i class="ti ti-radio"></i>&nbsp; Live Feed
   </a>
@@ -336,13 +343,13 @@ def sidebar_brand():
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Scanners</div>
   <a class="ts-nav-item" href="/MomentumScanner" target="_self">
-    <i class="ti ti-rocket"></i>&nbsp; Momentum Scanner
+    <i class="ti ti-rocket"></i>&nbsp; Momentum
   </a>
   <a class="ts-nav-item" href="/ORBScanner" target="_self">
     <i class="ti ti-circle-dot"></i>&nbsp; ORB Scanner
   </a>
   <a class="ts-nav-item" href="/BreakoutScanner" target="_self">
-    <i class="ti ti-chart-bar"></i>&nbsp; Breakout Scanner
+    <i class="ti ti-chart-bar"></i>&nbsp; Breakout 4H
   </a>
   <a class="ts-nav-item" href="/AIScanner" target="_self">
     <i class="ti ti-brain"></i>&nbsp; AI Scanner
@@ -363,4 +370,23 @@ def sidebar_brand():
     <i class="ti ti-chart-pie"></i>&nbsp; Sectors
   </a>
 </div>
+
+<script>
+(function() {
+    function setActive() {
+        var path = window.location.pathname;
+        var links = document.querySelectorAll('.ts-nav-item');
+        links.forEach(function(link) {
+            link.classList.remove('ts-active');
+            var href = link.getAttribute('href');
+            if (href && path.endsWith(href)) {
+                link.classList.add('ts-active');
+            }
+        });
+    }
+    setActive();
+    setTimeout(setActive, 500);
+    setTimeout(setActive, 1500);
+})();
+</script>
 """, unsafe_allow_html=True)
