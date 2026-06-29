@@ -128,7 +128,7 @@ def apply_styles():
         gap: 11px !important;
         padding: 10px 14px !important;
         border-radius: 8px !important;
-        font-size: 13px !important;
+        font-size: 14px !important;
         font-weight: 500 !important;
         color: #4a5568 !important;
         margin: 2px 8px !important;
@@ -315,6 +315,20 @@ def sidebar_brand():
             unsafe_allow_html=True
         )
 
+        # ── Detect current page from Streamlit context ──
+        try:
+            ctx = st.context.headers
+            referer = ctx.get("Referer", "") or ctx.get("referer", "")
+            current = referer.rstrip("/").split("/")[-1].split("?")[0].lower()
+        except Exception:
+            current = ""
+
+        # ── Helper to build nav item with active class ──
+        def nav(href, icon, label):
+            page_name = href.strip("/").lower()
+            active = "ts-active" if current == page_name else ""
+            return f'<a class="ts-nav-item {active}" href="{href}" target="_self"><i class="ti {icon}"></i>&nbsp; {label}</a>'
+
         # Brand block
         st.markdown("""
 <div class="ts-brand-wrap">
@@ -323,70 +337,31 @@ def sidebar_brand():
 </div>
 """, unsafe_allow_html=True)
 
-        # Navigation — Change 1: Momentum → Momentum, Breakout Scanner → Breakout 4H
-        # Change 2: Dashboard commented out
-        # Change 3: JS for dynamic active page highlight
-        st.markdown("""
+        # Navigation
+        st.markdown(f"""
 <div>
   <div class="ts-nav-section">Market</div>
 
   <!-- Dashboard — future me enable karna hai
-  <a class="ts-nav-item" href="/" target="_self">
-    <i class="ti ti-layout-dashboard"></i>&nbsp; Dashboard
-  </a>
+  {nav("/", "ti-layout-dashboard", "Dashboard")}
   -->
 
-  <a class="ts-nav-item" href="/LiveFeed" target="_self">
-    <i class="ti ti-radio"></i>&nbsp; Live Feed
-  </a>
+  {nav("/LiveFeed", "ti-radio", "Live Feed")}
 
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Scanners</div>
-  <a class="ts-nav-item" href="/MomentumScanner" target="_self">
-    <i class="ti ti-rocket"></i>&nbsp; Momentum
-  </a>
-  <a class="ts-nav-item" href="/ORBScanner" target="_self">
-    <i class="ti ti-circle-dot"></i>&nbsp; ORB Scanner
-  </a>
-  <a class="ts-nav-item" href="/BreakoutScanner" target="_self">
-    <i class="ti ti-chart-bar"></i>&nbsp; Breakout 4H
-  </a>
-  <a class="ts-nav-item" href="/AIScanner" target="_self">
-    <i class="ti ti-brain"></i>&nbsp; AI Scanner
-  </a>
+
+  {nav("/MomentumScanner", "ti-rocket", "Momentum")}
+  {nav("/ORBScanner", "ti-circle-dot", "ORB Scanner")}
+  {nav("/BreakoutScanner", "ti-chart-bar", "Breakout 4H")}
+  {nav("/AIScanner", "ti-brain", "AI Scanner")}
 
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Tools</div>
-  <a class="ts-nav-item" href="/Watchlist" target="_self">
-    <i class="ti ti-list-check"></i>&nbsp; Watchlist
-  </a>
-  <a class="ts-nav-item" href="/Observation" target="_self">
-    <i class="ti ti-eye"></i>&nbsp; Observation
-  </a>
-  <a class="ts-nav-item" href="/SetupTracker" target="_self">
-    <i class="ti ti-shield-check"></i>&nbsp; Setup Tracker
-  </a>
-  <a class="ts-nav-item" href="/Sectors" target="_self">
-    <i class="ti ti-chart-pie"></i>&nbsp; Sectors
-  </a>
-</div>
 
-<script>
-(function() {
-    function setActive() {
-        var path = window.location.pathname;
-        var links = document.querySelectorAll('.ts-nav-item');
-        links.forEach(function(link) {
-            link.classList.remove('ts-active');
-            var href = link.getAttribute('href');
-            if (href && path.endsWith(href)) {
-                link.classList.add('ts-active');
-            }
-        });
-    }
-    setActive();
-    setTimeout(setActive, 500);
-    setTimeout(setActive, 1500);
-})();
-</script>
+  {nav("/Watchlist", "ti-list-check", "Watchlist")}
+  {nav("/Observation", "ti-eye", "Observation")}
+  {nav("/SetupTracker", "ti-shield-check", "Setup Tracker")}
+  {nav("/Sectors", "ti-chart-pie", "Sectors")}
+</div>
 """, unsafe_allow_html=True)
