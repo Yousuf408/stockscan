@@ -94,48 +94,49 @@ def apply_styles():
 
     /* ── SIDEBAR NAV CUSTOM STYLES ── */
     .ts-brand-wrap {
-        padding: 18px 14px 12px 14px;
+        padding: 22px 18px 16px 18px;
         border-bottom: 1px solid #f0f2f5;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
     .ts-brand-name {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 15px;
+        font-size: 16px;
         font-weight: 800;
         color: #0f1117;
         letter-spacing: 0.08em;
     }
     .ts-brand-name span { color: #00a854; }
     .ts-brand-sub {
-        font-size: 9px;
+        font-size: 10px;
         color: #9aa3b2;
         font-weight: 600;
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        margin-top: 3px;
+        margin-top: 4px;
     }
     .ts-nav-section {
-        font-size: 8px;
+        font-size: 10px;
         font-weight: 700;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: #c0c7d4;
-        padding: 10px 16px 4px 16px;
+        color: #b0b9c8;
+        padding: 14px 18px 5px 18px;
     }
     .ts-nav-item {
         display: flex !important;
         align-items: center !important;
-        gap: 9px !important;
-        padding: 8px 12px !important;
-        border-radius: 7px !important;
-        font-size: 12px !important;
+        gap: 11px !important;
+        padding: 10px 14px !important;
+        border-radius: 8px !important;
+        font-size: 14px !important;
         font-weight: 500 !important;
         color: #4a5568 !important;
-        margin: 1px 8px !important;
+        margin: 2px 8px !important;
         cursor: pointer !important;
         text-decoration: none !important;
         transition: all 0.15s !important;
         border-left: 3px solid transparent !important;
+        font-family: 'Inter', sans-serif !important;
     }
     .ts-nav-item:hover {
         background: #f7f9fc !important;
@@ -149,15 +150,18 @@ def apply_styles():
         border-left: 3px solid #00a854 !important;
     }
     .ts-nav-item i {
-        font-size: 16px !important;
-        width: 18px !important;
+        font-size: 18px !important;
+        width: 20px !important;
         text-align: center !important;
         flex-shrink: 0 !important;
+        color: #9aa3b2 !important;
     }
+    .ts-nav-item:hover i { color: #0f1117 !important; }
+    .ts-nav-item.ts-active i { color: #00a854 !important; }
     .ts-nav-divider {
         height: 1px;
         background: #f0f2f5;
-        margin: 6px 14px;
+        margin: 8px 16px;
     }
 
     /* ── BUTTONS ── */
@@ -321,15 +325,10 @@ def sidebar_brand():
         # Navigation
         st.markdown("""
 <div>
-  <!-- Dashboard — future me enable karna hai
-    <div class="ts-nav-section">Market</div>
-
-  <!-- Dashboard — future me enable karna hai
-  <a class="ts-nav-item" href="/" target="_self">
+  <div class="ts-nav-section">Market</div>
+  <a class="ts-nav-item" href="/app" target="_self">
     <i class="ti ti-layout-dashboard"></i>&nbsp; Dashboard
   </a>
-  -->
-  
   <a class="ts-nav-item" href="/LiveFeed" target="_self">
     <i class="ti ti-radio"></i>&nbsp; Live Feed
   </a>
