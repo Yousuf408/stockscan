@@ -459,7 +459,55 @@ window.addEventListener('load', function() {
         applyFilter();
     }
 });
+
+// ── Screenshot shortcut: Ctrl + Shift + S ──
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        takeScreenshot();
+    }
+});
+
+function takeScreenshot() {
+    var toast = document.getElementById('toast');
+    toast.innerHTML = '📸 Capturing...';
+    toast.classList.add('show');
+
+    html2canvas(document.body, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#f8faff',
+        scrollY: 0,
+        windowHeight: document.body.scrollHeight,
+        height: document.body.scrollHeight,
+    }).then(function(canvas) {
+        canvas.toBlob(function(blob) {
+            var item = new ClipboardItem({ 'image/png': blob });
+            navigator.clipboard.write([item]).then(function() {
+                toast.innerHTML = '✅ Table copied to clipboard!';
+                setTimeout(function() {
+                    toast.classList.remove('show');
+                    toast.innerHTML = '✅ Copied!';
+                }, 2000);
+            }).catch(function() {
+                toast.innerHTML = '❌ Clipboard failed — try HTTPS';
+                setTimeout(function() {
+                    toast.classList.remove('show');
+                    toast.innerHTML = '✅ Copied!';
+                }, 2000);
+            });
+        });
+    }).catch(function() {
+        toast.innerHTML = '❌ Screenshot failed';
+        setTimeout(function() {
+            toast.classList.remove('show');
+            toast.innerHTML = '✅ Copied!';
+        }, 2000);
+    });
+}
 </script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 """
 
 
