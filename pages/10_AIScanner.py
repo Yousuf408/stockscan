@@ -21,7 +21,7 @@ st.set_page_config(page_title="AI Pattern Scanner", page_icon="🤖", layout="wi
 # ── STYLES & SIDEBAR ──
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
+sidebar_brand("AIScanner")
 
 st.markdown("""
 <style>
