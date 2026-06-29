@@ -576,7 +576,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         <span class="meta-info">{meta}</span>
     </div>
     <div class="table-wrap">
-    <table>
+    <table class="ms-table">
         <thead>
             <tr>
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
