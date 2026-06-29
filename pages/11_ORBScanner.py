@@ -20,11 +20,6 @@ from supabase import create_client
 import angel_ws
 from config import STOCKS_WATCHLIST
 
-# ── STYLES & SIDEBAR ──
-from styles import apply_styles, sidebar_brand, page_header
-apply_styles()
-sidebar_brand()
-
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
