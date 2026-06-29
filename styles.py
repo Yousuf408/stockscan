@@ -321,10 +321,15 @@ def sidebar_brand():
         # Navigation
         st.markdown("""
 <div>
-  <div class="ts-nav-section">Market</div>
-  <a class="ts-nav-item" href="/app" target="_self">
+  <!-- Dashboard — future me enable karna hai
+    <div class="ts-nav-section">Market</div>
+
+  <!-- Dashboard — future me enable karna hai
+  <a class="ts-nav-item" href="/" target="_self">
     <i class="ti ti-layout-dashboard"></i>&nbsp; Dashboard
   </a>
+  -->
+  
   <a class="ts-nav-item" href="/LiveFeed" target="_self">
     <i class="ti ti-radio"></i>&nbsp; Live Feed
   </a>
