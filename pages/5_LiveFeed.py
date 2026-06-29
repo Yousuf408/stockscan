@@ -27,7 +27,6 @@ st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
 sidebar_brand("LiveFeed")
-st.write(f"DEBUG: current_page = LiveFeed")  # temporary
 #---------------------- END---------------
 st.title("📡 Angel One — Live Market Feed")
 
