@@ -29,6 +29,24 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# SIGNAL SORT ORDER
+# ──────────────────────────────────────────────────────────────────────────────
+
+SIGNAL_ORDER = {"🔥": 0, "🟢": 1, "🟡": 2, "🔴": 3, "⏳": 4}
+
+def signal_sort_key(signal_str):
+    """Returns (group_order, -vol_ratio) so Explosive sorts first, highest ratio on top."""
+    if not signal_str or signal_str == "⏳":
+        return (4, 0.0)
+    emoji = signal_str[:2].strip()
+    order = SIGNAL_ORDER.get(emoji, 4)
+    try:
+        num = float(signal_str.split("(")[-1].replace(")", ""))
+    except:
+        num = 0.0
+    return (order, -num)  # negative = descending within same group
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SECTION 4: VOLUME METRICS FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -123,6 +141,7 @@ def calculate_volume_metrics(stock_name, current_volume, change_pct, all_volumes
         status = "WATCH"
     
     return round(vol_ratio, 2), vol_signal, status
+
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 5: SUPABASE UPLOAD FUNCTION (FIXED – NO .clear())
 # ──────────────────────────────────────────────────────────────────────────────
@@ -369,6 +388,11 @@ if st.session_state.angel_connected:
             })
 
         df = pd.DataFrame(rows)
+
+        # ── Sort: 🔥 Explosive → 🟢 Strong → 🟡 Build → 🔴 Weak → ⏳
+        # Within same emoji group: highest vol_ratio number on top ──────────
+        df["_sort_key"] = df["Signal"].apply(signal_sort_key)
+        df = df.sort_values("_sort_key").drop(columns=["_sort_key"]).reset_index(drop=True)
 
         with placeholder.container():
             st.dataframe(
