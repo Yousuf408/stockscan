@@ -9,7 +9,6 @@ def apply_styles():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
-    @import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css');
 
     :root {
         --bg:        #ffffff;
@@ -121,48 +120,55 @@ def apply_styles():
         text-transform: uppercase;
         color: #b0b9c8;
         padding: 14px 18px 5px 18px;
+        font-family: 'Inter', sans-serif;
     }
-    .ts-nav-item {
-        display: flex !important;
-        align-items: center !important;
-        gap: 11px !important;
-        padding: 10px 14px !important;
-        border-radius: 8px !important;
-        font-size: 14px !important;
-        font-weight: 500 !important;
-        color: #4a5568 !important;
-        margin: 2px 8px !important;
-        cursor: pointer !important;
-        text-decoration: none !important;
-        transition: all 0.15s !important;
-        border-left: 3px solid transparent !important;
-        font-family: 'Inter', sans-serif !important;
-        white-space: nowrap !important;
-    }
-    .ts-nav-item:hover {
-        background: #f7f9fc !important;
-        color: #0f1117 !important;
-        text-decoration: none !important;
-    }
-    .ts-nav-item.ts-active {
-        background: #f0faf5 !important;
-        color: #00a854 !important;
-        font-weight: 600 !important;
-        border-left: 3px solid #00a854 !important;
-    }
-    .ts-nav-item i {
-        font-size: 18px !important;
-        width: 20px !important;
-        text-align: center !important;
-        flex-shrink: 0 !important;
-        color: #9aa3b2 !important;
-    }
-    .ts-nav-item:hover i { color: #0f1117 !important; }
-    .ts-nav-item.ts-active i { color: #00a854 !important; }
     .ts-nav-divider {
         height: 1px;
         background: #f0f2f5;
         margin: 8px 16px;
+    }
+
+    /* ── st.page_link custom styling ── */
+    [data-testid="stSidebar"] [data-testid="stPageLink"] {
+        margin: 2px 8px !important;
+        border-radius: 8px !important;
+        border-left: 3px solid transparent !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stPageLink"] a {
+        font-size: 14px !important;
+        font-weight: 500 !important;
+        color: #4a5568 !important;
+        padding: 10px 14px !important;
+        border-radius: 8px !important;
+        text-decoration: none !important;
+        font-family: 'Inter', sans-serif !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 10px !important;
+        transition: all 0.15s !important;
+        white-space: nowrap !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {
+        background: #f7f9fc !important;
+        color: #0f1117 !important;
+        text-decoration: none !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stPageLink"] a p {
+        font-size: 14px !important;
+        font-weight: 500 !important;
+        margin: 0 !important;
+    }
+    /* Active page link */
+    [data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {
+        background: #f0faf5 !important;
+        color: #00a854 !important;
+        font-weight: 600 !important;
+        border-left: 3px solid #00a854 !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] p {
+        color: #00a854 !important;
+        font-weight: 600 !important;
     }
 
     /* ── BUTTONS ── */
@@ -308,21 +314,7 @@ def page_header(title: str, subtitle: str = ""):
 
 
 def sidebar_brand(current_page: str = ""):
-    """
-    current_page: page ka naam pass karo — e.g. sidebar_brand("MomentumScanner")
-    href ke saath exact match hona chahiye — /MomentumScanner → "MomentumScanner"
-    """
     with st.sidebar:
-        st.markdown(
-            '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">',
-            unsafe_allow_html=True
-        )
-
-        # ── Helper — active class Python side se inject ──
-        def nav(href, icon, label):
-            page_name = href.strip("/")
-            active = "ts-active" if current_page == page_name else ""
-            return f'<a class="ts-nav-item {active}" href="{href}" target="_self"><i class="ti {icon}"></i>&nbsp; {label}</a>'
 
         # Brand block
         st.markdown("""
@@ -332,24 +324,20 @@ def sidebar_brand(current_page: str = ""):
 </div>
 """, unsafe_allow_html=True)
 
-        # Navigation
-        st.markdown(f"""
-<div>
-  <div class="ts-nav-section">Market</div>
-  {nav("/LiveFeed", "ti-radio", "Live Feed")}
+        # ── MARKET ──
+        st.markdown('<div class="ts-nav-section">Market</div>', unsafe_allow_html=True)
+        st.page_link("pages/5_LiveFeed.py",        label="📡  Live Feed")
 
-  <div class="ts-nav-divider"></div>
-  <div class="ts-nav-section">Scanners</div>
-  {nav("/MomentumScanner", "ti-rocket", "Momentum")}
-  {nav("/ORBScanner", "ti-circle-dot", "ORB Scanner")}
-  {nav("/BreakoutScanner", "ti-chart-bar", "Breakout 4H")}
-  {nav("/AIScanner", "ti-brain", "AI Scanner")}
+        # ── SCANNERS ──
+        st.markdown('<div class="ts-nav-divider"></div><div class="ts-nav-section">Scanners</div>', unsafe_allow_html=True)
+        st.page_link("pages/8_MomentumScanner.py", label="🚀  Momentum")
+        st.page_link("pages/11_ORBScanner.py",     label="⭕  ORB Scanner")
+        st.page_link("pages/7_BreakoutScanner.py", label="📊  Breakout 4H")
+        st.page_link("pages/10_AIScanner.py",      label="🤖  AI Scanner")
 
-  <div class="ts-nav-divider"></div>
-  <div class="ts-nav-section">Tools</div>
-  {nav("/Watchlist", "ti-list-check", "Watchlist")}
-  {nav("/Observation", "ti-eye", "Observation")}
-  {nav("/SetupTracker", "ti-shield-check", "Setup Tracker")}
-  {nav("/Sectors", "ti-chart-pie", "Sectors")}
-</div>
-""", unsafe_allow_html=True)
+        # ── TOOLS ──
+        st.markdown('<div class="ts-nav-divider"></div><div class="ts-nav-section">Tools</div>', unsafe_allow_html=True)
+        st.page_link("pages/3_Watchlist.py",       label="📋  Watchlist")
+        st.page_link("pages/6_Observation.py",     label="👁  Observation")
+        st.page_link("pages/12_SetupTracker.py",   label="🛡  Setup Tracker")
+        st.page_link("pages/2_Sectors.py",         label="🌐  Sectors")
