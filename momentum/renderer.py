@@ -493,21 +493,34 @@ function takeScreenshot() {
         height: document.body.scrollHeight,
     }).then(function(canvas) {
         canvas.toBlob(function(blob) {
-            var item = new ClipboardItem({ 'image/png': blob });
-            navigator.clipboard.write([item]).then(function() {
-                toast.innerHTML = '✅ Table copied to clipboard!';
+            try {
+                navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(function() {
+                    toast.innerHTML = '✅ Screenshot copied!';
+                    toast.classList.add('show');
+                    setTimeout(function() {
+                        toast.classList.remove('show');
+                        toast.innerHTML = '✅ Copied!';
+                        document.getElementById('ms-root').focus();
+                    }, 2000);
+                }).catch(function(err) {
+                    toast.innerHTML = '❌ Allow clipboard permission';
+                    toast.classList.add('show');
+                    setTimeout(function() {
+                        toast.classList.remove('show');
+                        toast.innerHTML = '✅ Copied!';
+                        document.getElementById('ms-root').focus();
+                    }, 2500);
+                });
+            } catch(e) {
+                toast.innerHTML = '❌ Browser not supported';
+                toast.classList.add('show');
                 setTimeout(function() {
                     toast.classList.remove('show');
                     toast.innerHTML = '✅ Copied!';
-                }, 2000);
-            }).catch(function() {
-                toast.innerHTML = '❌ Clipboard failed — try HTTPS';
-                setTimeout(function() {
-                    toast.classList.remove('show');
-                    toast.innerHTML = '✅ Copied!';
-                }, 2000);
-            });
-        });
+                    document.getElementById('ms-root').focus();
+                }, 2500);
+            }
+        }, 'image/png');
     }).catch(function() {
         toast.innerHTML = '❌ Screenshot failed';
         setTimeout(function() {
@@ -537,7 +550,11 @@ function copySymbols() {
     navigator.clipboard.writeText(text).then(function() {
         toast.innerHTML = '✅ ' + symbols.length + ' symbols copied!';
         toast.classList.add('show');
-        setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '✅ Copied!'; }, 2000);
+        setTimeout(function() {
+            toast.classList.remove('show');
+            toast.innerHTML = '✅ Copied!';
+            document.getElementById('ms-root').focus();
+        }, 2000);
     });
 }
 </script>
