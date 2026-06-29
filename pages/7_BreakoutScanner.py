@@ -24,6 +24,13 @@ from breakout_4h.breakout_4h_chart  import render_chart
 from breakout_4h.breakout_4h_watch  import scan_consolidating, check_live_alerts
 
 st.set_page_config(page_title="Breakout Scanner", page_icon="⚡", layout="wide")
+# ─────────────────────────────────────────────────────────────
+# STYLES & SIDEBAR
+# ─────────────────────────────────────────────────────────────
+from styles import apply_styles, sidebar_brand, page_header
+apply_styles()
+sidebar_brand()
+#------------ END ---------------
 
 NAME_TO_TOKEN = {name: token for name, token, kind in STOCKS_WATCHLIST if kind == "stock"}
 ALL_STOCKS    = [name for name, _, kind in STOCKS_WATCHLIST if kind == "stock"]
