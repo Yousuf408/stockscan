@@ -99,13 +99,13 @@ def apply_styles():
         margin-bottom: 4px;
     }
 
-    /* Remove Streamlit default top padding in sidebar */
-    [data-testid="stSidebar"] > div:first-child {
-        padding-top: 0 !important;
-    }
-    [data-testid="stSidebarContent"] {
-        padding-top: 0 !important;
-    }
+    /* Remove ALL Streamlit default top padding in sidebar */
+    [data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
+    [data-testid="stSidebarContent"] { padding-top: 0 !important; }
+    [data-testid="stSidebar"] section { padding-top: 0 !important; }
+    [data-testid="stSidebar"] .stVerticalBlock { padding-top: 0 !important; gap: 0 !important; }
+    [data-testid="stSidebar"] .stMainBlockContainer { padding-top: 0 !important; }
+    [data-testid="stSidebarUserContent"] { padding-top: 0 !important; margin-top: 0 !important; }
     .ts-brand-name {
         font-family: 'JetBrains Mono', monospace;
         font-size: 16px;
