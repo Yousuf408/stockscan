@@ -407,8 +407,8 @@ def scanner_table():
 
     st.components.v1.html(
         html,
-        height    = min(1200, 120 + len(df) * 62),
-        scrolling = False,
+        height    = 800,
+        scrolling = True,
     )
 
 
