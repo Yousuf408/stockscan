@@ -84,15 +84,25 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
     return result
 
 
+
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION START — HYBRID: Yahoo(8) + WS(1)        ║
+# ║  9 EMA + PHASE + VOL TREND — UNIFIED CANDLE SYSTEM            ║
+# ║  Day start → Yahoo 8 closed OHLCV candles (baseline)          ║
+# ║  Every 5min → WS candle appended → Yahoo dependency reduces   ║
+# ║  All candles stored in DB (candles jsonb column)               ║
+# ║  Page refresh → DB se candles → instant EMA9 + Phase          ║
 # ╚═══════════════════════════════════════════════════════════════╝
 
 EMA9_ENTRY_ZONE = 2.0
 EMA9_WAIT_ZONE  = 4.0
 
 
-def fetch_ema9_candles(stock_names: list) -> dict:
+def fetch_initial_candles_yahoo(stock_names: list) -> dict:
+    """
+    Fetch last 8 closed 5min OHLCV candles from Yahoo Finance.
+    Used only when DB has no candles for a stock.
+    Returns: { stock: [ {time,open,high,low,close,volume,source}, ... ] }
+    """
     result = {}
     if not stock_names:
         return result
@@ -114,49 +124,133 @@ def fetch_ema9_candles(stock_names: list) -> dict:
     if raw.empty:
         return result
 
-    if isinstance(raw.columns, pd.MultiIndex):
-        if "Close" not in raw.columns.get_level_values(0):
-            return result
-        close_col = raw["Close"]
-    else:
-        if "Close" not in raw.columns:
-            return result
-        close_col = raw["Close"]
+    is_multi = isinstance(raw.columns, pd.MultiIndex)
 
-    close_data = {}
-    if isinstance(close_col, pd.Series):
-        close_data[tickers[0]] = close_col
-    else:
-        for ticker in tickers:
-            if ticker in close_col.columns:
-                close_data[ticker] = close_col[ticker]
+    try:
+        close_df  = raw["Close"]  if (is_multi and "Close"  in raw.columns.get_level_values(0)) or (not is_multi and "Close"  in raw.columns) else None
+        open_df   = raw["Open"]   if (is_multi and "Open"   in raw.columns.get_level_values(0)) or (not is_multi and "Open"   in raw.columns) else None
+        high_df   = raw["High"]   if (is_multi and "High"   in raw.columns.get_level_values(0)) or (not is_multi and "High"   in raw.columns) else None
+        low_df    = raw["Low"]    if (is_multi and "Low"    in raw.columns.get_level_values(0)) or (not is_multi and "Low"    in raw.columns) else None
+        volume_df = raw["Volume"] if (is_multi and "Volume" in raw.columns.get_level_values(0)) or (not is_multi and "Volume" in raw.columns) else None
+    except Exception:
+        return result
+
+    if close_df is None:
+        return result
 
     for stock in stock_names:
         ticker = f"{stock}.NS"
-        if ticker not in close_data:
+        try:
+            if isinstance(close_df, pd.Series):
+                c = close_df.dropna()
+                o = open_df.dropna()   if open_df   is not None else c
+                h = high_df.dropna()   if high_df   is not None else c
+                l = low_df.dropna()    if low_df    is not None else c
+                v = volume_df.dropna() if volume_df is not None else pd.Series([0]*len(c), index=c.index)
+            else:
+                if ticker not in close_df.columns:
+                    result[stock] = None
+                    continue
+                c = close_df[ticker].dropna()
+                o = open_df[ticker].dropna()   if open_df   is not None and ticker in open_df.columns   else c
+                h = high_df[ticker].dropna()   if high_df   is not None and ticker in high_df.columns   else c
+                l = low_df[ticker].dropna()    if low_df    is not None and ticker in low_df.columns    else c
+                v = volume_df[ticker].dropna() if volume_df is not None and ticker in volume_df.columns else pd.Series([0]*len(c), index=c.index)
+
+            if len(c) < 8:
+                result[stock] = None
+                continue
+
+            # Last 8 CLOSED candles — skip current forming candle
+            idx_list = list(c.iloc[-9:-1].index) if len(c) >= 9 else list(c.iloc[:-1].index)
+            candles = []
+            for idx in idx_list:
+                t_str = str(idx)
+                # Extract HH:MM from timestamp
+                try:
+                    t_str = pd.Timestamp(idx).strftime("%H:%M")
+                except Exception:
+                    t_str = str(idx)[-8:-3]
+                candles.append({
+                    "time"  : t_str,
+                    "open"  : round(float(o.get(idx, c[idx])), 2),
+                    "high"  : round(float(h.get(idx, c[idx])), 2),
+                    "low"   : round(float(l.get(idx, c[idx])), 2),
+                    "close" : round(float(c[idx]), 2),
+                    "volume": round(float(v.get(idx, 0)), 0),
+                    "source": "yahoo",
+                })
+
+            result[stock] = candles[-8:] if len(candles) >= 8 else (candles if candles else None)
+
+        except Exception:
             result[stock] = None
-            continue
-
-        series = close_data[ticker].dropna()
-
-        if len(series) < 8:
-            result[stock] = None
-            continue
-
-        last_8 = list(series.iloc[-9:-1].values)
-        if len(last_8) < 8:
-            last_8 = list(series.iloc[:-1].tail(8).values)
-
-        result[stock] = last_8
 
     return result
 
 
-def calculate_ema9_with_live(candles_8: list, live_ltp: float):
-    if not candles_8 or len(candles_8) < 8 or live_ltp <= 0:
+def build_ws_candle(candle_time: str, ticks: list):
+    """Build a single 5min candle from accumulated WS ticks."""
+    if not ticks:
+        return None
+    ltps = [t["ltp"]    for t in ticks if t.get("ltp",    0) > 0]
+    vols = [t["volume"] for t in ticks if t.get("volume", 0) > 0]
+    if not ltps:
+        return None
+    return {
+        "time"  : candle_time,
+        "open"  : round(ltps[0],    2),
+        "high"  : round(max(ltps),  2),
+        "low"   : round(min(ltps),  2),
+        "close" : round(ltps[-1],   2),
+        "volume": round(vols[-1], 0) if vols else 0,
+        "source": "websocket",
+    }
+
+
+def append_candle_and_save(supabase, stock: str, today_str: str,
+                           existing_candles: list, new_candle: dict) -> list:
+    """
+    Append new WS candle → keep max 9 → save to DB.
+    Returns updated candles list.
+    """
+    candles = list(existing_candles or [])
+    candles.append(new_candle)
+    if len(candles) > 9:
+        candles = candles[-9:]
+    try:
+        supabase.table("momentum_signal_times") \
+            .update({"candles": candles}) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
+    except Exception:
+        pass
+    return candles
+
+
+def save_initial_candles_to_db(supabase, stock: str, today_str: str, candles: list):
+    """Save Yahoo initial 8 candles to DB when signal first detected."""
+    try:
+        supabase.table("momentum_signal_times") \
+            .update({"candles": candles}) \
+            .eq("stock", stock) \
+            .eq("signal_date", today_str) \
+            .execute()
+    except Exception:
+        pass
+
+
+def calculate_ema9_with_live(candles: list, live_ltp: float):
+    """
+    Calculate 9 EMA using stored candles + live LTP as 9th value.
+    Works with any number of candles (1-8 historical + 1 live).
+    """
+    if not candles or live_ltp <= 0:
         return None
 
-    series_9    = pd.Series(candles_8 + [live_ltp])
+    closes      = [c["close"] for c in candles]
+    series_9    = pd.Series(closes + [live_ltp])
     ema9_series = series_9.ewm(span=9, adjust=False).mean()
     ema9_value  = round(float(ema9_series.iloc[-1]), 2)
 
@@ -166,16 +260,16 @@ def calculate_ema9_with_live(candles_8: list, live_ltp: float):
     distance = round(((live_ltp - ema9_value) / ema9_value) * 100, 2)
 
     if live_ltp < ema9_value:
-        status = f"📉 {distance:.1f}%"
+        status = f"\U0001f4c9 {distance:.1f}%"
         signal = "Below EMA9"
     elif distance <= EMA9_ENTRY_ZONE:
-        status = f"✅ +{distance:.1f}%"
+        status = f"\u2705 +{distance:.1f}%"
         signal = "Entry Zone"
     elif distance <= EMA9_WAIT_ZONE:
-        status = f"⚠️ +{distance:.1f}%"
+        status = f"\u26a0\ufe0f +{distance:.1f}%"
         signal = "Wait - Pullback"
     else:
-        status = f"❌ +{distance:.1f}%"
+        status = f"\u274c +{distance:.1f}%"
         signal = "Extended - Avoid"
 
     return {
@@ -185,43 +279,19 @@ def calculate_ema9_with_live(candles_8: list, live_ltp: float):
         "signal"  : signal,
     }
 
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION END                                     ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
-
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  PHASE & VOL TREND SECTION START                              ║
-# ╚═══════════════════════════════════════════════════════════════╝
-
-def build_candle(stock: str, candle_time: str, ticks: list):
-    """Build a 5min OHLC candle from accumulated ticks."""
-    if not ticks:
-        return None
-    ltps = [t["ltp"]    for t in ticks if t.get("ltp",    0) > 0]
-    vols = [t["volume"] for t in ticks if t.get("volume", 0) > 0]
-    if not ltps:
-        return None
-    return {
-        "time"  : candle_time,
-        "open"  : ltps[0],
-        "high"  : max(ltps),
-        "low"   : min(ltps),
-        "close" : ltps[-1],
-        "volume": vols[-1] if vols else 0,  # cumulative — use last tick
-    }
-
 
 def detect_phase_and_trend(candles: list) -> tuple:
     """
-    3 phases — intraday trader friendly:
-      🚀 BUILDING  — Price up + Vol up   → Enter/Hold
-      ⚠️ PULLBACK  — Vol down            → Wait/Tighten SL
-      🔴 REVERSAL  — Price down + Vol up → Exit immediately
-    Returns: (phase: str, vol_trend: str)
+    Detect phase + vol_trend from last 2 completed candles.
+    Works with both Yahoo and WS candles.
+
+    3 phases:
+      BUILDING  — Price up + Vol up   → Enter/Hold
+      PULLBACK  — Vol down            → Wait/Tighten SL
+      REVERSAL  — Price down + Vol up → Exit immediately
     """
     if len(candles) < 2:
-        return "⏳ Forming", "→ Stable"
+        return "\u23f3 Forming", "\u2192 Stable"
 
     c1 = candles[-2]
     c2 = candles[-1]
@@ -229,35 +299,33 @@ def detect_phase_and_trend(candles: list) -> tuple:
     price_pct = ((c2["close"] - c1["close"]) / c1["close"] * 100) if c1["close"] > 0 else 0
     vol_pct   = ((c2["volume"] - c1["volume"]) / c1["volume"] * 100) if c1["volume"] > 0 else 0
 
-    # Vol Trend
     if vol_pct > 10:
-        vol_trend = "↑ Increasing"
+        vol_trend = "\u2191 Increasing"
     elif vol_pct < -10:
-        vol_trend = "↓ Decreasing"
+        vol_trend = "\u2193 Decreasing"
     else:
-        vol_trend = "→ Stable"
+        vol_trend = "\u2192 Stable"
 
     price_up   = price_pct >  0.3
     price_down = price_pct < -0.3
-    vol_up     = vol_trend == "↑ Increasing"
-    vol_down   = vol_trend == "↓ Decreasing"
+    vol_up     = vol_trend == "\u2191 Increasing"
+    vol_down   = vol_trend == "\u2193 Decreasing"
 
-    # 3 phases only
     if price_down and vol_up:
-        phase = "🔴 REVERSAL"    # Strong sellers — exit
+        phase = "\U0001f534 REVERSAL"
     elif vol_down:
-        phase = "⚠️ PULLBACK"    # Volume fading — wait/tighten SL
+        phase = "\u26a0\ufe0f PULLBACK"
     elif price_up and vol_up:
-        phase = "🚀 BUILDING"    # Price + Vol both up — enter/hold
+        phase = "\U0001f680 BUILDING"
     else:
-        phase = "⚠️ PULLBACK"    # Default conservative
+        phase = "\u26a0\ufe0f PULLBACK"
 
     return phase, vol_trend
 
 
 def update_phase_in_supabase(supabase, stock: str, today_str: str,
                               phase: str, vol_trend: str):
-    """Update phase + vol_trend in momentum_signal_times every 5 min."""
+    """Update phase + vol_trend in DB every 5 min."""
     try:
         supabase.table("momentum_signal_times") \
             .update({"phase": phase, "vol_trend": vol_trend}) \
@@ -268,8 +336,9 @@ def update_phase_in_supabase(supabase, stock: str, today_str: str,
         pass
 
 # ╔═══════════════════════════════════════════════════════════════╗
-# ║  PHASE & VOL TREND SECTION END                                ║
+# ║  9 EMA + PHASE + VOL TREND SECTION END                        ║
 # ╚═══════════════════════════════════════════════════════════════╝
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -278,7 +347,7 @@ def update_phase_in_supabase(supabase, stock: str, today_str: str,
 def fetch_signal_data_from_supabase(supabase, today_str: str) -> dict:
     try:
         resp = supabase.table("momentum_signal_times") \
-            .select("stock, signal_time, signal_price, peak_ltp, phase, vol_trend") \
+            .select("stock, signal_time, signal_price, peak_ltp, phase, vol_trend, candles") \
             .eq("signal_date", today_str) \
             .execute()
         result = {}
@@ -289,6 +358,7 @@ def fetch_signal_data_from_supabase(supabase, today_str: str) -> dict:
                 "peak_ltp"     : row.get("peak_ltp", None),
                 "phase"        : row.get("phase", None),
                 "vol_trend"    : row.get("vol_trend", None),
+                "candles"      : row.get("candles", None),
             }
         return result
     except Exception:
