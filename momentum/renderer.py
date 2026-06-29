@@ -451,6 +451,7 @@ function applyFilter() {
     document.getElementById('matchCount').textContent = count;
 }
 window.addEventListener('load', function() {
+    document.getElementById('ms-root').focus();
     var momVal = localStorage.getItem('momFilter') || '';
     var emaVal = localStorage.getItem('emaFilter') || '';
     if (momVal || emaVal) {
@@ -462,7 +463,13 @@ window.addEventListener('load', function() {
 
 // ── Screenshot shortcut: Ctrl + Shift + S ──
 document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        e.preventDefault();
+        takeScreenshot();
+    }
+});
+window.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
         e.preventDefault();
         takeScreenshot();
     }
@@ -604,7 +611,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         meta = f"{data_source} &nbsp;|&nbsp; 📅 {target_date} vs {prev_date} &nbsp;|&nbsp; Ticks: {tick_count}"
 
     html = _STYLES + f"""
-    <div class="filterbar">
+    <div class="filterbar" tabindex="0" id="ms-root">
         <span class="filter-label">Momentum Scanner</span>
         <span class="filter-count"><b id="matchCount">{total}</b> stocks</span>
         <div class="filter-sep"></div>
