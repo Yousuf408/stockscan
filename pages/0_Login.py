@@ -7,15 +7,15 @@ import streamlit as st
 import requests
 import os
 
-# ── STYLES & SIDEBAR ──
+from auth_session import save_refresh_token, delete_refresh_token, restore_session
+st.set_page_config(page_title="Trade Sentry — Login", layout="centered")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ── STYLES ONLY (sidebar nahi login page pe) ──
+# ─────────────────────────────────────────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
-
-
-from auth_session import save_refresh_token, delete_refresh_token, restore_session
-
-st.set_page_config(page_title="Trade Sentry — Login", layout="centered")
+# sidebar_brand()  ← intentionally skip — login page pe sidebar nahi chahiye
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUPABASE AUTH HELPERS
