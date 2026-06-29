@@ -467,11 +467,10 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                             <button class="copy-btn"
                                 onclick="event.stopPropagation();copySymbol(this,'{symbol}')">{symbol}</button>
                         </div>
+                        <div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:3px;border-top:1px solid #e2e8f0;padding-top:3px">{signal_time[:5]}</div>
                     </div>
                 </div>
             </td>
-            <td><span style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;">{signal_time[:5]}</span></td>
-            <td>{_chg_html(float(str(row['Gap %']).replace('%','').replace('+','')))}</td>
             <td>
                 <div class="ltp-val">₹{ltp:,.2f}</div>
                 {_chg_html(float(str(row['Chg vs Prev %']).replace('%','').replace('+','')))}
@@ -483,11 +482,10 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
             <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
             <td>{_signal_price_html(signal_price_str, move_since)}</td>
-            <td><span class="peak-val">{peak_ltp_str}</span></td>
             <td><span class="num-primary">{vol_fmt}</span></td>
         </tr>
         <tr class="expand-row" id="exp-{symbol}" style="display:none">
-            <td colspan="13">
+            <td colspan="10">
                 <div class="expand-panel">
                     <div class="expand-card"><div class="ec-label">Open</div><div class="ec-value">₹{float(row['Open']):,.2f}</div><div class="ec-sub">Today's open</div></div>
                     <div class="expand-card"><div class="ec-label">Prev Close</div><div class="ec-value">₹{float(row['Prev Close']):,.2f}</div><div class="ec-sub">Yesterday's close</div></div>
@@ -532,18 +530,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         <thead>
             <tr>
                 <th onclick="toggleColExpand(0)">Symbol <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(1)">Signal Time <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(2)">Gap % <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(3)">LTP <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(4)">Vol Ratio <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(5)">Momentum <span class="sort-arrow">↕</span></th>
-                <th class="th-ema" onclick="toggleColExpand(6)">EMA20 Status <span class="sort-arrow">↕</span></th>
-                <th class="th-ema9" onclick="toggleColExpand(7)">9 EMA 5min <span class="sort-arrow">↕</span></th>
-                <th class="th-phase" onclick="toggleColExpand(8)">Phase <span class="sort-arrow">↕</span></th>
-                <th class="th-trend" onclick="toggleColExpand(9)">Vol Trend <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(10)">Signal Price <span class="sort-arrow">↕</span></th>
-                <th class="th-sig" onclick="toggleColExpand(11)">High Since Signal <span class="sort-arrow">↕</span></th>
-                <th onclick="toggleColExpand(12)">Volume <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(1)">LTP <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(2)">Vol Ratio <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(3)">Momentum <span class="sort-arrow">↕</span></th>
+                <th class="th-ema" onclick="toggleColExpand(4)">EMA20 Status <span class="sort-arrow">↕</span></th>
+                <th class="th-ema9" onclick="toggleColExpand(5)">9 EMA 5min <span class="sort-arrow">↕</span></th>
+                <th class="th-phase" onclick="toggleColExpand(6)">Phase <span class="sort-arrow">↕</span></th>
+                <th class="th-trend" onclick="toggleColExpand(7)">Vol Trend <span class="sort-arrow">↕</span></th>
+                <th class="th-sig" onclick="toggleColExpand(8)">Signal Price <span class="sort-arrow">↕</span></th>
+                <th onclick="toggleColExpand(9)">Volume <span class="sort-arrow">↕</span></th>
             </tr>
         </thead>
         <tbody>
