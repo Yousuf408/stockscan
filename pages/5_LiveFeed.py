@@ -21,6 +21,13 @@ from config import STOCKS_WATCHLIST
 from supabase import create_client, Client
 
 st.set_page_config(page_title="Live Feed", page_icon="📡", layout="wide")
+# ─────────────────────────────────────────────────────────────
+# STYLES & SIDEBAR
+# ─────────────────────────────────────────────────────────────
+from styles import apply_styles, sidebar_brand, page_header
+apply_styles()
+sidebar_brand()
+#---------------------- END---------------
 st.title("📡 Angel One — Live Market Feed")
 
 # ── SUPABASE CONFIGURATION ────────────────────────────────────
