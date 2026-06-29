@@ -33,7 +33,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
+sidebar_brand("SetupTracker")
 
 st.markdown("""
     <style>
