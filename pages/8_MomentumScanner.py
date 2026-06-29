@@ -105,11 +105,13 @@ def get_ema20_status(df) -> dict:
 # ║  candle_cache: { stock: [candle1...candle9] } in RAM          ║
 # ║  DB (candles jsonb) = persistent across page refresh           ║
 # ║  Flow:                                                         ║
-# ║  1. Signal detected → Yahoo 8 candles → save to DB + RAM      ║
+# ║  1. Signal detected → Yahoo 8 candles → background thread     ║
 # ║  2. Every 5 min → WS candle built → append DB + RAM           ║
 # ║  3. Every 5 sec → live LTP + candles → EMA9 + Phase           ║
 # ║  4. Page refresh → DB candles → instant restore                ║
 # ╚═══════════════════════════════════════════════════════════════╝
+
+import threading
 
 def get_candle_cache() -> dict:
     """Get or init candle cache from session state."""
@@ -118,11 +120,27 @@ def get_candle_cache() -> dict:
     return st.session_state["candle_cache"]
 
 
+def _yahoo_fetch_worker(stocks: list, supabase, today_str: str, candle_cache: dict):
+    """
+    Background thread — fetch Yahoo candles without blocking fragment.
+    Writes directly into candle_cache (shared dict reference).
+    """
+    try:
+        yahoo_data = fetch_initial_candles_yahoo(stocks)
+        for stock, candles in yahoo_data.items():
+            if candles:
+                candle_cache[stock] = candles
+                save_initial_candles_to_db(supabase, stock, today_str, candles)
+    except Exception:
+        pass
+
+
 def process_candles(supabase, df, signal_data: dict,
                     live_ticks: dict, token_to_name: dict,
                     today_str: str) -> tuple:
     """
     Unified function — handles candles, EMA9, Phase, Vol Trend.
+    Yahoo fetch runs in background thread — no blur/block.
 
     Returns:
       ema9_results  : { stock: { ema9, distance, status, signal } }
@@ -135,10 +153,12 @@ def process_candles(supabase, df, signal_data: dict,
     slot_str     = now.strftime(f"%H:{current_slot:02d}")
 
     # ── Init slot tracking ────────────────────────────────────
-    if "candle_slot"   not in st.session_state:
-        st.session_state["candle_slot"]   = -1
-    if "tick_buffer"   not in st.session_state:
-        st.session_state["tick_buffer"]   = {}
+    if "candle_slot"         not in st.session_state:
+        st.session_state["candle_slot"]         = -1
+    if "tick_buffer"         not in st.session_state:
+        st.session_state["tick_buffer"]         = {}
+    if "yahoo_fetching"      not in st.session_state:
+        st.session_state["yahoo_fetching"]      = set()
 
     candle_cache  = get_candle_cache()
     name_to_token = {v: k for k, v in token_to_name.items()}
@@ -156,9 +176,8 @@ def process_candles(supabase, df, signal_data: dict,
                     supabase, stock, today_str,
                     candle_cache[stock], new_candle
                 )
-        # Reset tick buffer
-        st.session_state["tick_buffer"]   = {}
-        st.session_state["candle_slot"]   = current_slot
+        st.session_state["tick_buffer"] = {}
+        st.session_state["candle_slot"] = current_slot
 
     # ── Step 2: Accumulate current ticks ──────────────────────
     for token, tick in live_ticks.items():
@@ -174,39 +193,43 @@ def process_candles(supabase, df, signal_data: dict,
         st.session_state["tick_buffer"][stock] = buf
 
     # ── Step 3: For each scan stock — ensure candles exist ────
-    stocks = df["Symbol"].tolist()
-
-    # Stocks not in cache → check DB first → else Yahoo
+    stocks  = df["Symbol"].tolist()
     missing = [s for s in stocks if s not in candle_cache]
 
     if missing:
-        # Try loading from DB (page refresh case)
+        # Try DB first (page refresh case) — instant, no network call
         for stock in missing:
-            sig = signal_data.get(stock, {})
+            sig        = signal_data.get(stock, {})
             db_candles = sig.get("candles", None)
             if db_candles and len(db_candles) >= 2:
                 candle_cache[stock] = db_candles
 
-        # Still missing → fetch from Yahoo
-        still_missing = [s for s in missing if s not in candle_cache]
+        # Still missing → background thread (no blur!)
+        still_missing = [
+            s for s in missing
+            if s not in candle_cache
+            and s not in st.session_state["yahoo_fetching"]
+        ]
         if still_missing:
-            try:
-                yahoo_data = fetch_initial_candles_yahoo(still_missing)
-                for stock, candles in yahoo_data.items():
-                    if candles:
-                        candle_cache[stock] = candles
-                        # Save to DB immediately
-                        save_initial_candles_to_db(
-                            supabase, stock, today_str, candles
-                        )
-            except Exception:
-                pass
+            # Mark as fetching so we don't spawn duplicate threads
+            st.session_state["yahoo_fetching"].update(still_missing)
+            t = threading.Thread(
+                target = _yahoo_fetch_worker,
+                args   = (still_missing, supabase, today_str, candle_cache),
+                daemon = True,
+            )
+            t.start()
+            # Clean up fetching set after thread completes
+            def _cleanup(stocks_to_clean=still_missing):
+                t.join()
+                for s in stocks_to_clean:
+                    st.session_state["yahoo_fetching"].discard(s)
+            threading.Thread(target=_cleanup, daemon=True).start()
 
     # ── Step 4: Calculate EMA9 + Phase for all stocks ─────────
     ema9_results  = {}
     phase_results = {}
-
-    do_phase_update = do_ws_candle  # Update phase DB same time as candle
+    do_phase_update = do_ws_candle
 
     for symbol in stocks:
         candles  = candle_cache.get(symbol, [])
@@ -231,8 +254,6 @@ def process_candles(supabase, df, signal_data: dict,
         if len(candles) >= 2:
             phase, vol_trend = detect_phase_and_trend(candles)
             phase_results[symbol] = {"phase": phase, "vol_trend": vol_trend}
-
-            # Update DB every 5 min
             if do_phase_update and symbol in signal_data:
                 try:
                     update_phase_in_supabase(
@@ -241,7 +262,6 @@ def process_candles(supabase, df, signal_data: dict,
                 except Exception:
                     pass
         else:
-            # Fallback to DB saved values
             sig = signal_data.get(symbol, {})
             phase_results[symbol] = {
                 "phase"    : sig.get("phase",     "⏳ Forming"),
