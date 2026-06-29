@@ -23,7 +23,9 @@ st.set_page_config(
     page_icon="🚀",
     initial_sidebar_state="expanded"
 )
-
+# ─────────────────────────────────────────────────────────────
+# STYLES & SIDEBAR
+# ─────────────────────────────────────────────────────────────
 apply_styles()
 sidebar_brand()
 page_header("Prewatch", "Daily EMA Scanner")
