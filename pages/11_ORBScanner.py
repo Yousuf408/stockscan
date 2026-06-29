@@ -30,7 +30,7 @@ st.set_page_config(page_title="ORB Scanner", page_icon="📈", layout="wide")
 # ─────────────────────────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
+sidebar_brand("ORBScanner")
 
 # ── Auto-connect WebSocket — standalone, no Momentum dependency
 if not angel_ws.is_connected():
