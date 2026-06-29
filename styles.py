@@ -324,9 +324,6 @@ def sidebar_brand(current_page: str = ""):
             active = "ts-active" if current_page == page_name else ""
             return f'<a class="ts-nav-item {active}" href="{href}" target="_self"><i class="ti {icon}"></i>&nbsp; {label}</a>'
 
-        # DEBUG — remove after testing
-        st.sidebar.caption(f"🔍 current_page = [{current_page}]")
-
         # Brand block
         st.markdown("""
 <div class="ts-brand-wrap">
