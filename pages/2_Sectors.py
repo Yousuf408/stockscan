@@ -17,7 +17,7 @@ from stocks import SECTOR_YAHOO, get_stocks_by_sector
 # 1. Page Configuration
 st.set_page_config(page_title="TradeSentry — Sectors", layout="wide", page_icon="📊")
 apply_styles()
-sidebar_brand()
+sidebar_brand("Sectors")
 page_header("Sector Performance — NSE Indices")
 
 st.markdown("""
