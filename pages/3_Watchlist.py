@@ -36,7 +36,7 @@ st.set_page_config(
 
 
 apply_styles()
-sidebar_brand()
+sidebar_brand("Watchlist")
 page_header("Watchlist", "Track your trades")
 
 # ══════════════════════════════════════════
