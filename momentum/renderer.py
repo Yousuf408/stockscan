@@ -247,14 +247,12 @@ table {
 }
 
 /* ── HEADER ── */
-thead tr {
-  background: rgba(248,250,252,0.9);
-}
+thead tr { background: #fef9f0; }
 th {
   padding: 10px 10px; text-align: left; font-size: 11px; font-weight: 700;
-  color: #64748b; border-bottom: 1px solid rgba(224,227,232,0.8); white-space: nowrap;
+  color: #64748b; border-bottom: 2px solid #fcd34d; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid rgba(224,227,232,0.6);
+  border-right: 1px solid #fde68a;
   text-transform: uppercase; letter-spacing: 0.5px;
 }
 th:last-child { border-right: none; }
@@ -288,7 +286,7 @@ tbody tr.main-row.mom-cooling { border-left: 4px solid #f59e0b; }
 tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
 
 td {
-  padding: 9px 10px; vertical-align: middle; white-space: nowrap;
+  padding: 11px 10px; vertical-align: middle; white-space: nowrap;
   border-right: 1px solid rgba(224,227,232,0.5);
   font-size: 13px; color: #374151;
   border-bottom: 1px solid rgba(224,227,232,0.5);
@@ -519,7 +517,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                             <button class="copy-btn"
                                 onclick="event.stopPropagation();copySymbol(this,'{symbol}')">{symbol}</button>
                         </div>
-                        <div style="font-size:11px;color:#94a3b8;margin-top:3px;border-top:1px solid rgba(224,227,232,0.6);padding-top:3px">{signal_time[:5]}</div>
+                        <div style="font-size:12px;font-weight:700;color:#0f172a;margin-top:3px;border-top:1px solid rgba(224,227,232,0.6);padding-top:3px">{signal_time[:5]}</div>
                     </div>
                 </div>
             </td>
