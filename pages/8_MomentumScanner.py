@@ -71,7 +71,7 @@ st.set_page_config(
 # ── STYLES & SIDEBAR ──────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
+sidebar_brand("MomentumScanner")
 
 # ── STYLES & SIDEBAR end here ──────────────────────────────────
 
