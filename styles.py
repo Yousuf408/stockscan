@@ -307,26 +307,21 @@ def page_header(title: str, subtitle: str = ""):
     """, unsafe_allow_html=True)
 
 
-def sidebar_brand():
+def sidebar_brand(current_page: str = ""):
+    """
+    current_page: page ka naam pass karo — e.g. sidebar_brand("MomentumScanner")
+    href ke saath exact match hona chahiye — /MomentumScanner → "MomentumScanner"
+    """
     with st.sidebar:
-        # Inject Tabler icons font
         st.markdown(
             '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">',
             unsafe_allow_html=True
         )
 
-        # ── Detect current page from Streamlit context ──
-        try:
-            ctx = st.context.headers
-            referer = ctx.get("Referer", "") or ctx.get("referer", "")
-            current = referer.rstrip("/").split("/")[-1].split("?")[0].lower()
-        except Exception:
-            current = ""
-
-        # ── Helper to build nav item with active class ──
+        # ── Helper — active class Python side se inject ──
         def nav(href, icon, label):
-            page_name = href.strip("/").lower()
-            active = "ts-active" if current == page_name else ""
+            page_name = href.strip("/")
+            active = "ts-active" if current_page == page_name else ""
             return f'<a class="ts-nav-item {active}" href="{href}" target="_self"><i class="ti {icon}"></i>&nbsp; {label}</a>'
 
         # Brand block
@@ -341,16 +336,10 @@ def sidebar_brand():
         st.markdown(f"""
 <div>
   <div class="ts-nav-section">Market</div>
-
-  <!-- Dashboard — future me enable karna hai
-  {nav("/", "ti-layout-dashboard", "Dashboard")}
-  -->
-
   {nav("/LiveFeed", "ti-radio", "Live Feed")}
 
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Scanners</div>
-
   {nav("/MomentumScanner", "ti-rocket", "Momentum")}
   {nav("/ORBScanner", "ti-circle-dot", "ORB Scanner")}
   {nav("/BreakoutScanner", "ti-chart-bar", "Breakout 4H")}
@@ -358,7 +347,6 @@ def sidebar_brand():
 
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Tools</div>
-
   {nav("/Watchlist", "ti-list-check", "Watchlist")}
   {nav("/Observation", "ti-eye", "Observation")}
   {nav("/SetupTracker", "ti-shield-check", "Setup Tracker")}
