@@ -299,6 +299,26 @@ def scanner_table():
     # ║  PHASE & VOL TREND SECTION END                           ║
     # ╚═══════════════════════════════════════════════════════════╝
 
+    # ── Status bar + Reload button — always visible ───────────
+    col_info, col_btn = st.columns([5, 1])
+    with col_info:
+        stock_count = len(df) if not df.empty else 0
+        st.markdown(
+            f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;'
+            f'padding:8px 14px;font-size:15px;color:#166534;">'
+            f'<b>{stock_count} stocks</b> matching momentum criteria &nbsp;|&nbsp; Last updated: {now_ist}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    with col_btn:
+        if st.button("🔄 Reload", use_container_width=True):
+            del st.session_state["momentum_historical"]
+            st.session_state.pop("ema20_cache",        None)
+            st.session_state.pop("ema9_candles_cache", None)
+            st.session_state.pop("tick_buffer",        None)
+            st.session_state.pop("candle_store",       None)
+            st.rerun()
+
     if df.empty:
         st.info("No stocks matching momentum criteria right now.")
         return
@@ -376,25 +396,7 @@ def scanner_table():
     # ║  PHASE & VOL TREND SECTION END                           ║
     # ╚═══════════════════════════════════════════════════════════╝
 
-    # ── Status bar + Reload button ────────────────────────────
-    col_info, col_btn = st.columns([5, 1])
-    with col_info:
-        st.markdown(
-            f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;'
-            f'padding:8px 14px;font-size:15px;color:#166534;">'
-            f'<b>{len(df)} stocks</b> matching momentum criteria &nbsp;|&nbsp; Last updated: {now_ist}'
-            f'</div>',
-            unsafe_allow_html=True
-        )
-    with col_btn:
-        if st.button("🔄 Reload", use_container_width=True):
-            del st.session_state["momentum_historical"]
-            st.session_state.pop("ema20_cache",        None)
-            st.session_state.pop("ema9_candles_cache", None)
-            st.session_state.pop("tick_buffer",        None)
-            st.session_state.pop("candle_store",       None)
-            st.rerun()
-
+    # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
         df          = df,
         data_source = data_source,
