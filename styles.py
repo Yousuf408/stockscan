@@ -1,8 +1,7 @@
 # ══════════════════════════════════════════
 #  TRADESENTRY — styles.py
-#  Global CSS for entire app
-#  Theme: Professional White / Light
-#  Usage: from styles import apply_styles
+#  Theme: Glass Gradient + Option A Sidebar
+#  Usage: from styles import apply_styles, sidebar_brand, page_header
 #         apply_styles()  ← call on every page
 # ══════════════════════════════════════════
 
@@ -19,8 +18,8 @@ def apply_styles():
     :root {
         --bg:        #ffffff;
         --bg2:       #f8f9fb;
-        --bg3:       #f0f2f5;
-        --bg4:       #e8eaed;
+        --bg3:       #f0f4ff;
+        --bg4:       #eef6f2;
         --border:    #e0e3e8;
         --border2:   #cdd1d8;
         --text:      #0f1117;
@@ -49,57 +48,45 @@ def apply_styles():
        GLOBAL RESET
     ══════════════════════════════════════ */
     * { box-sizing: border-box; }
-    #MainMenu, footer { visibility: hidden; }
+    #MainMenu, footer, header,
+    [data-testid="stToolbar"] { visibility: hidden; }
 
     /* ══════════════════════════════════════
-       APP BACKGROUND
+       APP BACKGROUND — Glass Gradient
     ══════════════════════════════════════ */
     .stApp {
-        background: var(--bg3) !important;
+        background: linear-gradient(135deg, #f0f4ff 0%, #f8faff 55%, #eef6f2 100%) !important;
+        background-attachment: fixed !important;
         font-family: var(--sans) !important;
         color: var(--text) !important;
     }
     .block-container {
-        padding: 0rem 2rem 2rem 2rem !important;
-        margin-top: 0rem !important;
+        padding: 1.5rem 2rem 2rem 2rem !important;
         max-width: 100% !important;
     }
 
     /* ══════════════════════════════════════
-       SIDEBAR
+       SIDEBAR — Option A: Icon + Label
     ══════════════════════════════════════ */
     [data-testid="stSidebar"] {
-        background: var(--bg) !important;
+        background: #ffffff !important;
         border-right: 1px solid var(--border) !important;
-        box-shadow: 2px 0 8px rgba(0,0,0,0.04) !important;
+        box-shadow: 2px 0 12px rgba(0,0,0,0.05) !important;
     }
     [data-testid="stSidebarHeader"] {
-        background: var(--bg) !important;
-        padding: 16px 16px 0 16px !important;
-        border-bottom: 1px solid var(--border) !important;
+        background: #ffffff !important;
+        padding: 0 !important;
+        border-bottom: none !important;
     }
-    [data-testid="stSidebar"] a {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        font-weight: 500 !important;
-        color: var(--text2) !important;
-        border-radius: var(--radius) !important;
-        padding: 8px 12px !important;
-        transition: all 0.15s !important;
-        letter-spacing: 0.01em !important;
+
+    /* Hide default Streamlit page nav links */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
     }
-    [data-testid="stSidebar"] a:hover {
-        color: var(--green) !important;
-        background: var(--green-dim) !important;
-    }
-    [data-testid="stSidebar"] [aria-current="page"] {
-        color: var(--green) !important;
-        background: var(--green-bg) !important;
-        border-left: 3px solid var(--green) !important;
-        font-weight: 600 !important;
-    }
+
+    /* Sidebar collapse button */
     [data-testid="stSidebarCollapseButton"] button {
-        background: var(--bg3) !important;
+        background: var(--bg2) !important;
         border: 1px solid var(--border2) !important;
         border-radius: var(--radius) !important;
         color: var(--text2) !important;
@@ -120,10 +107,6 @@ def apply_styles():
         border-radius: var(--radius) !important;
         box-shadow: var(--shadow) !important;
     }
-    [data-testid="collapsedControl"]:hover {
-        border-color: var(--green) !important;
-        color: var(--green) !important;
-    }
 
     /* ══════════════════════════════════════
        STREAMLIT BUTTONS
@@ -134,12 +117,12 @@ def apply_styles():
         font-weight: 600 !important;
         border-radius: var(--radius) !important;
         border: 1px solid var(--border2) !important;
-        background: var(--bg) !important;
+        background: rgba(255,255,255,0.85) !important;
         color: var(--text) !important;
         padding: 6px 16px !important;
         transition: all 0.15s !important;
         box-shadow: var(--shadow) !important;
-        letter-spacing: 0.01em !important;
+        backdrop-filter: blur(4px) !important;
     }
     div[data-testid="stButton"] button:hover {
         border-color: var(--green) !important;
@@ -152,18 +135,19 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       STREAMLIT INPUTS / SELECTBOX
+       INPUTS / SELECTBOX
     ══════════════════════════════════════ */
     div[data-testid="stTextInput"] input,
     div[data-testid="stNumberInput"] input,
     div[data-testid="stSelectbox"] select {
         font-family: var(--sans) !important;
         font-size: 13px !important;
-        background: var(--bg) !important;
+        background: rgba(255,255,255,0.85) !important;
         border: 1px solid var(--border2) !important;
         border-radius: var(--radius) !important;
         color: var(--text) !important;
         box-shadow: none !important;
+        backdrop-filter: blur(4px) !important;
     }
     div[data-testid="stTextInput"] input:focus {
         border-color: var(--green) !important;
@@ -171,25 +155,27 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       DATAFRAME / TABLES
+       DATAFRAME / TABLES — Glass style
     ══════════════════════════════════════ */
     div[data-testid="stDataFrame"] {
-        border: 1px solid var(--border) !important;
+        border: 1px solid rgba(255,255,255,0.9) !important;
         border-radius: var(--radius-lg) !important;
         overflow: hidden !important;
-        box-shadow: var(--shadow) !important;
-        background: var(--bg) !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04) !important;
+        background: rgba(255,255,255,0.6) !important;
+        backdrop-filter: blur(8px) !important;
     }
 
     /* ══════════════════════════════════════
-       METRICS
+       METRICS — Glass card
     ══════════════════════════════════════ */
     div[data-testid="stMetric"] {
-        background: var(--bg) !important;
-        border: 1px solid var(--border) !important;
+        background: rgba(255,255,255,0.75) !important;
+        border: 1px solid rgba(255,255,255,0.9) !important;
         border-radius: var(--radius-lg) !important;
         padding: 16px 20px !important;
         box-shadow: var(--shadow) !important;
+        backdrop-filter: blur(6px) !important;
     }
     div[data-testid="stMetricLabel"] {
         font-size: 11px !important;
@@ -207,13 +193,14 @@ def apply_styles():
     }
 
     /* ══════════════════════════════════════
-       EXPANDER
+       EXPANDER — Glass
     ══════════════════════════════════════ */
     div[data-testid="stExpander"] {
-        background: var(--bg) !important;
-        border: 1px solid var(--border) !important;
+        background: rgba(255,255,255,0.7) !important;
+        border: 1px solid rgba(255,255,255,0.9) !important;
         border-radius: var(--radius-lg) !important;
         box-shadow: var(--shadow) !important;
+        backdrop-filter: blur(6px) !important;
     }
 
     /* ══════════════════════════════════════
@@ -223,22 +210,15 @@ def apply_styles():
         border-radius: var(--radius) !important;
         font-family: var(--sans) !important;
         font-size: 13px !important;
-    }
-
-    /* ══════════════════════════════════════
-       SPINNER
-    ══════════════════════════════════════ */
-    div[data-testid="stSpinner"] {
-        font-family: var(--sans) !important;
-        font-size: 13px !important;
-        color: var(--text3) !important;
+        background: rgba(255,255,255,0.75) !important;
+        backdrop-filter: blur(4px) !important;
     }
 
     /* ══════════════════════════════════════
        SCROLLBAR
     ══════════════════════════════════════ */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: var(--bg3); }
+    ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--green); }
 
@@ -252,7 +232,7 @@ def apply_styles():
         align-items: center;
         justify-content: space-between;
         padding: 0 0 20px 0;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid rgba(224,227,232,0.6);
         margin-bottom: 20px;
     }
     .ts-logo {
@@ -271,28 +251,30 @@ def apply_styles():
         font-family: var(--sans);
     }
 
-    /* Card */
+    /* Glass Card */
     .ts-card {
-        background: var(--bg);
-        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.75);
+        border: 1px solid rgba(255,255,255,0.9);
         border-radius: var(--radius-lg);
         padding: 16px 20px;
         box-shadow: var(--shadow);
+        backdrop-filter: blur(6px);
         margin-bottom: 12px;
+        transition: all 0.15s;
     }
     .ts-card:hover {
-        border-color: var(--border2);
         box-shadow: var(--shadow-md);
-        transition: all 0.15s;
+        background: rgba(255,255,255,0.88);
     }
 
     /* Metric card */
     .ts-metric {
-        background: var(--bg);
-        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.75);
+        border: 1px solid rgba(255,255,255,0.9);
         border-radius: var(--radius-lg);
         padding: 14px 18px;
         box-shadow: var(--shadow);
+        backdrop-filter: blur(6px);
     }
     .ts-metric-label {
         font-size: 10px;
@@ -352,10 +334,6 @@ def apply_styles():
         font-family: var(--mono);
     }
 
-    /* Table row states */
-    .ts-row-up   { border-left: 3px solid var(--green) !important; background: var(--green-bg) !important; }
-    .ts-row-down { border-left: 3px solid var(--red) !important;   background: var(--red-bg) !important; }
-
     /* Section label */
     .ts-section-label {
         font-size: 10px;
@@ -369,13 +347,6 @@ def apply_styles():
         margin-bottom: 12px;
     }
 
-    /* Divider */
-    .ts-divider {
-        border: none;
-        border-top: 1px solid var(--border);
-        margin: 16px 0;
-    }
-
     /* Status dot */
     .ts-dot-green { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; }
     .ts-dot-red   { width:7px; height:7px; border-radius:50%; background:var(--red);   display:inline-block; }
@@ -383,39 +354,31 @@ def apply_styles():
 
     /* ══════════════════════════════════════
        WATCHLIST PAGE CLASSES
-       Horizontal card design
     ══════════════════════════════════════ */
-
-    /* Horizontal stock card */
     .wl-card {
-        background: var(--bg);
-        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.75);
+        border: 1px solid rgba(255,255,255,0.9);
         border-left: 4px solid var(--border2);
         border-radius: var(--radius-lg);
         padding: 12px 16px;
         margin-bottom: 8px;
         box-shadow: var(--shadow);
+        backdrop-filter: blur(6px);
         transition: all 0.15s;
     }
-    .wl-card:hover { box-shadow: var(--shadow-md); border-color: var(--border2); }
-
+    .wl-card:hover { box-shadow: var(--shadow-md); }
     .wl-watching  { border-left-color: var(--border2); }
     .wl-near      { border-left-color: var(--amber); }
-    .wl-triggered { border-left-color: var(--green); background: var(--green-bg); }
-    .wl-sl_hit    { border-left-color: var(--red);   background: var(--red-bg); }
+    .wl-triggered { border-left-color: var(--green); background: rgba(240,250,245,0.8); }
+    .wl-sl_hit    { border-left-color: var(--red);   background: rgba(255,245,245,0.8); }
     .wl-target1   { border-left-color: var(--blue); }
     .wl-target2   { border-left-color: var(--purple); }
 
-    /* Symbol */
     .wl-symbol {
         font-family: var(--mono);
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text);
-        letter-spacing: 0.04em;
+        font-size: 18px; font-weight: 700;
+        color: var(--text); letter-spacing: 0.04em;
     }
-
-    /* Pill badges */
     .wl-pill-buy {
         font-size: 10px; font-weight: 700;
         background: var(--green-bg); color: var(--green);
@@ -430,18 +393,62 @@ def apply_styles():
         padding: 2px 8px; border-radius: 12px;
         font-family: var(--mono); display: inline-block;
     }
-
-    /* LTP */
     .wl-ltp {
         font-family: var(--mono);
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--text);
+        font-size: 18px; font-weight: 700; color: var(--text);
     }
-
-    /* Percentage color */
     .wl-pct-pos { font-size:12px; color:var(--green); font-family:var(--mono); font-weight:600; }
     .wl-pct-neg { font-size:12px; color:var(--red);   font-family:var(--mono); font-weight:600; }
+
+    /* ══════════════════════════════════════
+       CUSTOM SIDEBAR NAV STYLES
+    ══════════════════════════════════════ */
+    .ts-nav-section {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #c0c7d4;
+        padding: 10px 12px 4px 12px;
+        font-family: var(--sans);
+    }
+    .ts-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 12px;
+        border-radius: 7px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #4a5568;
+        margin: 1px 6px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    .ts-nav-item:hover {
+        background: #f7f9fc;
+        color: #0f1117;
+    }
+    .ts-nav-item.active {
+        background: #f0faf5;
+        color: #00a854;
+        font-weight: 600;
+        border-left: 3px solid #00a854;
+        padding-left: 9px;
+    }
+    .ts-nav-item i {
+        font-size: 15px;
+        width: 16px;
+        text-align: center;
+        opacity: 0.7;
+    }
+    .ts-nav-item.active i { opacity: 1; }
+    .ts-nav-divider {
+        height: 1px;
+        background: #f0f2f5;
+        margin: 6px 12px;
+    }
 
     </style>
     """, unsafe_allow_html=True)
@@ -458,16 +465,76 @@ def page_header(title: str, subtitle: str = ""):
 
 
 def sidebar_brand():
+    # Tabler icons CDN
+    st.markdown("""
+    <link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+    """, unsafe_allow_html=True)
+
     with st.sidebar:
+        # Brand header
         st.markdown("""
-        <div style="padding:12px 8px 14px 8px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:15px;
-            font-weight:700;color:#0f1117;letter-spacing:0.08em;">
+        <div style="padding: 18px 14px 12px 14px; border-bottom: 1px solid #f0f2f5;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:15px;
+                font-weight:800; color:#0f1117; letter-spacing:0.08em;">
                 TRADE<span style="color:#00a854;">SENTRY</span>
             </div>
-            <div style="font-size:9px;color:#7a8394;font-family:'Inter',sans-serif;
-            font-weight:600;letter-spacing:0.12em;text-transform:uppercase;
-            margin-top:3px;">NSE Professional Screener</div>
+            <div style="font-size:9px; color:#9aa3b2; font-family:'Inter',sans-serif;
+                font-weight:600; letter-spacing:0.12em; text-transform:uppercase;
+                margin-top:3px;">NSE Professional Screener</div>
         </div>
-        <hr style="border:none;border-top:1px solid #e0e3e8;margin:0 0 8px 0;">
+        """, unsafe_allow_html=True)
+
+        # Get current page for active state
+        try:
+            current = st.context.page_script_hash
+        except:
+            current = ""
+
+        # Navigation HTML
+        st.markdown("""
+        <div style="padding: 8px 0 12px 0;">
+
+            <div class="ts-nav-section">Market</div>
+
+            <a class="ts-nav-item" href="/app" target="_self">
+                <i class="ti ti-layout-dashboard"></i> Dashboard
+            </a>
+            <a class="ts-nav-item" href="/LiveFeed" target="_self">
+                <i class="ti ti-radio"></i> Live Feed
+            </a>
+
+            <div class="ts-nav-divider"></div>
+            <div class="ts-nav-section">Scanners</div>
+
+            <a class="ts-nav-item" href="/MomentumScanner" target="_self">
+                <i class="ti ti-rocket"></i> Momentum Scanner
+            </a>
+            <a class="ts-nav-item" href="/ORBScanner" target="_self">
+                <i class="ti ti-circle-dot"></i> ORB Scanner
+            </a>
+            <a class="ts-nav-item" href="/BreakoutScanner" target="_self">
+                <i class="ti ti-chart-bar"></i> Breakout Scanner
+            </a>
+            <a class="ts-nav-item" href="/AIScanner" target="_self">
+                <i class="ti ti-brain"></i> AI Scanner
+            </a>
+
+            <div class="ts-nav-divider"></div>
+            <div class="ts-nav-section">Tools</div>
+
+            <a class="ts-nav-item" href="/Watchlist" target="_self">
+                <i class="ti ti-list-check"></i> Watchlist
+            </a>
+            <a class="ts-nav-item" href="/Observation" target="_self">
+                <i class="ti ti-eye"></i> Observation
+            </a>
+            <a class="ts-nav-item" href="/SetupTracker" target="_self">
+                <i class="ti ti-shield-check"></i> Setup Tracker
+            </a>
+            <a class="ts-nav-item" href="/Sectors" target="_self">
+                <i class="ti ti-chart-pie"></i> Sectors
+            </a>
+
+        </div>
         """, unsafe_allow_html=True)
