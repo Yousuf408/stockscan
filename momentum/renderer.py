@@ -479,55 +479,40 @@ window.addEventListener('keydown', function(e) {
     }
 });
 
-function takeScreenshot() {
+async function takeScreenshot() {
     var toast = document.getElementById('toast');
     toast.innerHTML = '📸 Capturing...';
     toast.classList.add('show');
-
-    html2canvas(document.body, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#f8faff',
-        scrollY: 0,
-        windowHeight: document.body.scrollHeight,
-        height: document.body.scrollHeight,
-    }).then(function(canvas) {
-        canvas.toBlob(function(blob) {
-            try {
-                navigator.clipboard.write([new ClipboardItem({'image/png': blob})]).then(function() {
-                    toast.innerHTML = '✅ Screenshot copied!';
-                    toast.classList.add('show');
-                    setTimeout(function() {
-                        toast.classList.remove('show');
-                        toast.innerHTML = '✅ Copied!';
-                        document.getElementById('ms-root').focus();
-                    }, 2000);
-                }).catch(function(err) {
-                    toast.innerHTML = '❌ Allow clipboard permission';
-                    toast.classList.add('show');
-                    setTimeout(function() {
-                        toast.classList.remove('show');
-                        toast.innerHTML = '✅ Copied!';
-                        document.getElementById('ms-root').focus();
-                    }, 2500);
-                });
-            } catch(e) {
-                toast.innerHTML = '❌ Browser not supported';
-                toast.classList.add('show');
-                setTimeout(function() {
-                    toast.classList.remove('show');
-                    toast.innerHTML = '✅ Copied!';
-                    document.getElementById('ms-root').focus();
-                }, 2500);
-            }
-        }, 'image/png');
-    }).catch(function() {
-        toast.innerHTML = '❌ Screenshot failed';
+    try {
+        var blobPromise = new Promise(function(resolve) {
+            html2canvas(document.body, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#f8faff',
+                scrollY: 0,
+                windowHeight: document.body.scrollHeight,
+                height: document.body.scrollHeight,
+            }).then(function(canvas) {
+                canvas.toBlob(function(blob) { resolve(blob); }, 'image/png');
+            });
+        });
+        await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blobPromise })
+        ]);
+        toast.innerHTML = '✅ Screenshot copied!';
         setTimeout(function() {
             toast.classList.remove('show');
             toast.innerHTML = '✅ Copied!';
+            document.getElementById('ms-root').focus();
         }, 2000);
-    });
+    } catch(e) {
+        toast.innerHTML = '❌ ' + (e.message || 'Failed');
+        setTimeout(function() {
+            toast.classList.remove('show');
+            toast.innerHTML = '✅ Copied!';
+            document.getElementById('ms-root').focus();
+        }, 2500);
+    }
 }
 
 function copySymbols() {
