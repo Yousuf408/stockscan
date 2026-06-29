@@ -393,6 +393,8 @@ function toggleColExpand(col) {
 function applyFilter() {
     var momVal = document.getElementById('momFilter').value.toLowerCase();
     var emaVal = document.getElementById('emaFilter').value;
+    localStorage.setItem('momFilter', momVal);
+    localStorage.setItem('emaFilter', emaVal);
     var rows   = document.querySelectorAll('tbody tr.main-row');
     var count  = 0;
     rows.forEach(function(row) {
@@ -409,6 +411,17 @@ function applyFilter() {
     });
     document.getElementById('matchCount').textContent = count;
 }
+
+// Restore filter on every re-render
+window.addEventListener('load', function() {
+    var momVal = localStorage.getItem('momFilter') || '';
+    var emaVal = localStorage.getItem('emaFilter') || '';
+    if (momVal || emaVal) {
+        document.getElementById('momFilter').value = momVal;
+        document.getElementById('emaFilter').value = emaVal;
+        applyFilter();
+    }
+});
 </script>
 """
 
