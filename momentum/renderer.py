@@ -23,9 +23,6 @@ def _ema_cell(status) -> str:
     return f'<span style="color:#94a3b8">{s}</span>'
 
 
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION START                                   ║
-# ╚═══════════════════════════════════════════════════════════════╝
 def _ema9_cell(status: str, ema9_value) -> str:
     if not status or status == "⏳":
         return '<span style="color:#94a3b8">⏳</span>'
@@ -41,38 +38,29 @@ def _ema9_cell(status: str, ema9_value) -> str:
             val_html = f'<div class="num-primary">₹{float(ema9_value):,.2f}</div>'
         except Exception:
             pass
-    pct_html = f'<div style="color:{color};font-weight:700;font-size:14px;">{s}</div>'
+    pct_html = f'<div style="color:{color};font-weight:700;font-size:13px;">{s}</div>'
     return f'{val_html}{pct_html}'
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  9 EMA (5MIN) SECTION END                                     ║
-# ╚═══════════════════════════════════════════════════════════════╝
 
 
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  PHASE & VOL TREND SECTION START                              ║
-# ╚═══════════════════════════════════════════════════════════════╝
 def _phase_cell(phase: str) -> str:
     if not phase or phase in ("⏳ Forming", "⏳"):
-        return '<span style="color:#94a3b8;font-size:13px">⏳ Forming</span>'
+        return '<span style="color:#94a3b8;font-size:12px">⏳ Forming</span>'
     s = str(phase)
     if   "BUILDING"  in s: color, bg, border = "#15803d", "#f0fdf4", "#bbf7d0"
     elif "PULLBACK"  in s: color, bg, border = "#b45309", "#fffbeb", "#fde68a"
     elif "REVERSAL"  in s: color, bg, border = "#be123c", "#fff1f2", "#fecdd3"
     else:                  color, bg, border = "#64748b", "#f1f5f9", "#e2e8f0"
     return (f'<span style="display:inline-flex;align-items:center;padding:2px 8px;'
-            f'border-radius:4px;font-size:13px;font-weight:700;white-space:nowrap;'
+            f'border-radius:4px;font-size:12px;font-weight:700;white-space:nowrap;'
             f'background:{bg};color:{color};border:1px solid {border}">{s}</span>')
 
 def _vol_trend_cell(vol_trend: str) -> str:
     if not vol_trend:
-        return '<span style="color:#94a3b8;font-size:14px">→ Stable</span>'
+        return '<span style="color:#94a3b8;font-size:13px">→ Stable</span>'
     s = str(vol_trend)
-    if s.startswith("↑"): return f'<span style="color:#16a34a;font-weight:700;font-size:16px">{s}</span>'
-    if s.startswith("↓"): return f'<span style="color:#dc2626;font-weight:700;font-size:16px">{s}</span>'
-    return f'<span style="color:#94a3b8;font-weight:600;font-size:16px">{s}</span>'
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║  PHASE & VOL TREND SECTION END                                ║
-# ╚═══════════════════════════════════════════════════════════════╝
+    if s.startswith("↑"): return f'<span style="color:#16a34a;font-weight:700;font-size:14px">{s}</span>'
+    if s.startswith("↓"): return f'<span style="color:#dc2626;font-weight:700;font-size:14px">{s}</span>'
+    return f'<span style="color:#94a3b8;font-weight:600;font-size:14px">{s}</span>'
 
 
 def _move_color(val: float) -> str:
@@ -216,75 +204,117 @@ _STYLES = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   margin: 0 !important; padding: 0 !important;
-  background: #f5f7fa !important;
+  background: linear-gradient(135deg, #f0f4ff 0%, #f8faff 55%, #eef6f2 100%) !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
   color: #1a202c; font-size: 13px;
 }
+
+/* ── FILTER BAR ── */
 .filterbar {
-  background: #fff; border-bottom: 1px solid #e2e8f0;
+  background: rgba(255,255,255,0.85);
+  border-bottom: 1px solid rgba(224,227,232,0.8);
   padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  backdrop-filter: blur(6px);
 }
 .filter-label { font-size: 12px; font-weight: 700; color: #374151; }
 .filter-count {
-  background: #f1f5f9; border: 1px solid #e2e8f0;
+  background: rgba(241,245,249,0.9); border: 1px solid #e2e8f0;
   padding: 3px 8px; border-radius: 4px; font-size: 12px; color: #64748b;
 }
-.filter-count b { color: #1a202c; }
+.filter-count b { color: #00a854; }
 select.filter-select {
-  border: 1px solid #e2e8f0; background: #fff;
+  border: 1px solid #e0e3e8; background: rgba(255,255,255,0.9);
   padding: 6px 28px 6px 10px; border-radius: 6px;
   font-size: 13px; color: #374151; cursor: pointer; outline: none; appearance: none;
   height: 36px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 8px center;
 }
+select.filter-select:focus { border-color: #00a854; }
 .filter-sep { width: 1px; height: 20px; background: #e2e8f0; }
-.meta-info { margin-left: auto; font-size: 15px; font-weight: 700; color: #0f172a; }
+.meta-info { margin-left: auto; font-size: 13px; font-weight: 600; color: #0f172a; }
+
+/* ── TABLE WRAP ── */
 .table-wrap { padding: 12px 16px; overflow-x: auto; }
 table {
-  width: 100%; border-collapse: collapse; background: #fff;
-  border-radius: 10px; border: 1px solid #e2e8f0; overflow: hidden;
+  width: 100%; border-collapse: collapse;
+  background: rgba(255,255,255,0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.9);
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+  backdrop-filter: blur(8px);
 }
-thead tr { background: #fef9f0; }
+
+/* ── HEADER ── */
+thead tr {
+  background: rgba(248,250,252,0.9);
+}
 th {
-  padding: 10px 10px; text-align: left; font-size: 12px; font-weight: 800;
-  color: #0f172a; border-bottom: 2px solid #fcd34d; white-space: nowrap;
+  padding: 10px 10px; text-align: left; font-size: 11px; font-weight: 700;
+  color: #64748b; border-bottom: 1px solid rgba(224,227,232,0.8); white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid #fde68a; text-transform: uppercase; letter-spacing: 0.4px;
+  border-right: 1px solid rgba(224,227,232,0.6);
+  text-transform: uppercase; letter-spacing: 0.5px;
 }
 th:last-child { border-right: none; }
-th:hover { background: #fef3c7; color: #0f172a; }
-th.active-col { background: #fde68a !important; color: #0f172a !important; }
-th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.5; }
+th:hover { background: rgba(240,244,255,0.9); color: #0f172a; }
+th.active-col { background: rgba(0,168,84,0.08) !important; color: #00a854 !important; }
+th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.4; }
 th.active-col .sort-arrow { opacity: 1; }
-th.th-ema { background: #fef9f0; color: #0f172a; }
-th.th-sig { background: #fef9f0; color: #0f172a; }
-th.th-ema9  { background: #e0f2fe; color: #0369a1; }
-th.th-phase { background: #faf5ff; color: #5b21b6; }
-th.th-trend { background: #f0fdf4; color: #15803d; }
+th.th-ema   { color: #15803d; }
+th.th-sig   { color: #7c3aed; }
+th.th-ema9  { color: #0369a1; }
+th.th-phase { color: #5b21b6; }
+th.th-trend { color: #15803d; }
+
+/* ── ROWS ── */
 tbody tr.main-row {
-  border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: background 0.1s;
+  border-bottom: 1px solid rgba(224,227,232,0.6);
+  cursor: pointer; transition: background 0.12s;
+  border-left: 4px solid transparent;
+  background: rgba(255,255,255,0.5);
 }
-tbody tr.main-row:hover { background: #f0f9ff; }
-tbody tr.main-row.expanded { background: #f0f9ff; border-bottom: none; }
-tbody tr.main-row:nth-child(even) { background: #f8fafc; }
-tbody tr.main-row:nth-child(even):hover { background: #f0f9ff; }
+tbody tr.main-row:hover   { background: rgba(255,255,255,0.85); }
+tbody tr.main-row.expanded { background: rgba(240,249,255,0.9); border-bottom: none; }
+tbody tr.main-row:nth-child(even) { background: rgba(248,250,252,0.5); }
+tbody tr.main-row:nth-child(even):hover { background: rgba(255,255,255,0.85); }
+
+/* Left border by momentum */
+tbody tr.main-row.mom-strong  { border-left: 4px solid #7c3aed; }
+tbody tr.main-row.mom-build   { border-left: 4px solid #22c55e; }
+tbody tr.main-row.mom-stable  { border-left: 4px solid #3b82f6; }
+tbody tr.main-row.mom-cooling { border-left: 4px solid #f59e0b; }
+tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
+
 td {
   padding: 9px 10px; vertical-align: middle; white-space: nowrap;
-  border-right: 1px solid #cbd5e1; font-size: 16px; color: #374151;
-  border-bottom: 1px solid #cbd5e1;
+  border-right: 1px solid rgba(224,227,232,0.5);
+  font-size: 13px; color: #374151;
+  border-bottom: 1px solid rgba(224,227,232,0.5);
 }
 td:last-child { border-right: none; }
-td.active-col { background: #eff6ff; }
-tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
+td.active-col { background: rgba(0,168,84,0.05); }
+
+/* ── EXPAND ROW ── */
+tr.expand-row td { padding: 0; border-bottom: 2px solid #00a854; }
 .expand-panel {
-  background: #f0f9ff; padding: 12px 16px;
+  background: rgba(240,250,245,0.8);
+  padding: 12px 16px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px;
+  backdrop-filter: blur(4px);
 }
-.expand-card { background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 10px; }
+.expand-card {
+  background: rgba(255,255,255,0.85);
+  border: 1px solid rgba(0,168,84,0.15);
+  border-radius: 8px; padding: 8px 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
 .expand-card .ec-label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.expand-card .ec-value { font-size: 14px; font-weight: 700; color: #1e3a5f; margin-top: 2px; }
+.expand-card .ec-value { font-size: 13px; font-weight: 700; color: #1e3a5f; margin-top: 2px; }
 .expand-card .ec-sub   { font-size: 10px; color: #94a3b8; margin-top: 1px; }
+
+/* ── STOCK CELL ── */
 .stock-cell { display: flex; align-items: center; gap: 8px; }
 .expand-icon {
   width: 18px; height: 18px; border-radius: 4px;
@@ -292,55 +322,63 @@ tr.expand-row td { padding: 0; border-bottom: 2px solid #3b82f6; }
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 700; flex-shrink: 0; transition: all 0.15s;
 }
-tr.expanded .expand-icon { background: #3b82f6; color: #fff; }
-.stock-name  { font-weight: 700; font-size: 16px; color: #1e3a5f; }
-tbody tr.main-row { border-left: 4px solid #e2e8f0; }
-tbody tr.main-row.mom-strong  { border-left: 4px solid #7c3aed; }
-tbody tr.main-row.mom-build   { border-left: 4px solid #22c55e; }
-tbody tr.main-row.mom-stable  { border-left: 4px solid #3b82f6; }
-tbody tr.main-row.mom-cooling { border-left: 4px solid #f59e0b; }
-tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
+tr.expanded .expand-icon { background: #00a854; color: #fff; }
+.stock-name { font-weight: 700; font-size: 13px; color: #1e3a5f; }
+
+/* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; white-space: nowrap;
+  padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; white-space: nowrap;
 }
 .badge-bull  { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
 .badge-bear  { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
 .badge-watch { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 .badge-hold  { background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
 .badge-accel { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
-.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 16px; font-weight: 700; }
-.vol-high  { background: #fef3c7; color: #92400e; }
+
+/* ── VOL BADGE ── */
+.vol-badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.vol-high  { background: #fff7ed; color: #c2410c; }
 .vol-med   { background: #e0f2fe; color: #075985; }
 .vol-low   { background: #f1f5f9; color: #64748b; }
-.sig-price-wrap { display: flex; flex-direction: column; gap: 3px; }
+
+/* ── SIGNAL PRICE ── */
+.sig-price-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 110px; }
 .sig-top-row    { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.progress-bar   { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.progress-bar   { width: 100%; height: 3px; background: rgba(224,227,232,0.8); border-radius: 3px; overflow: hidden; }
 .progress-fill  { height: 100%; border-radius: 3px; transition: width 0.3s; }
 .fill-green { background: #22c55e; }
 .fill-red   { background: #ef4444; }
-.bar-pct    { font-size: 16px; font-weight: 600; white-space: nowrap; }
-.mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
+.bar-pct    { font-size: 11px; font-weight: 600; white-space: nowrap; }
+
+/* ── MOMENTUM ── */
+.mom-wrap         { display: flex; flex-direction: column; gap: 3px; min-width: 160px; }
 .mom-top-row      { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.mom-pct-label    { font-size: 13px; font-weight: 700; white-space: nowrap; }
-.mom-progress-bar { width: 100%; height: 4px; background: #e2e8f0; border-radius: 3px; overflow: hidden; }
+.mom-pct-label    { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.mom-progress-bar { width: 100%; height: 3px; background: rgba(224,227,232,0.8); border-radius: 3px; overflow: hidden; }
 .mom-progress-fill{ height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 .mom-next-label   { font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap; }
-.num-primary { font-size: 16px; font-weight: 700; color: #0f172a; }
-.chg-pos  { color: #16a34a; font-weight: 600; font-size: 16px; }
-.chg-neg  { color: #dc2626; font-weight: 600; font-size: 16px; }
-.ema-pass { color: #16a34a; font-weight: 600; font-size: 16px; }
-.ema-fail { color: #dc2626; font-weight: 600; font-size: 16px; }
-.ema-ext  { color: #ea580c; font-weight: 600; font-size: 16px; }
-.ltp-val  { font-size: 16px; font-weight: 700; color: #0f172a; }
-.peak-val { color: #0f172a; font-weight: 700; font-size: 16px; }
+
+/* ── NUMBERS ── */
+.num-primary { font-size: 13px; font-weight: 700; color: #0f172a; }
+.chg-pos  { color: #16a34a; font-weight: 600; font-size: 12px; }
+.chg-neg  { color: #dc2626; font-weight: 600; font-size: 12px; }
+.ema-pass { color: #16a34a; font-weight: 600; font-size: 12px; }
+.ema-fail { color: #dc2626; font-weight: 600; font-size: 12px; }
+.ema-ext  { color: #ea580c; font-weight: 600; font-size: 12px; }
+.ltp-val  { font-size: 13px; font-weight: 700; color: #0f172a; }
+.peak-val { color: #0f172a; font-weight: 700; font-size: 13px; }
+
+/* ── COPY BUTTON ── */
 .copy-btn {
   cursor: pointer; font-weight: 700; color: #1e3a5f;
   background: transparent; border: none; padding: 0;
-  font-size: 16px; transition: color 0.2s;
+  font-size: 13px; transition: color 0.2s;
 }
-.copy-btn:hover  { color: #10b981; }
-.copy-btn.copied { color: #10b981; }
+.copy-btn:hover  { color: #00a854; }
+.copy-btn.copied { color: #00a854; }
+
+/* ── TOAST ── */
 .toast {
   position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
   background: #0f172a; color: white; padding: 8px 20px;
@@ -348,9 +386,12 @@ tbody tr.main-row.mom-weak    { border-left: 4px solid #ef4444; }
   opacity: 0; transition: opacity 0.3s; pointer-events: none;
 }
 .toast.show { opacity: 1; }
+
+/* ── SCROLLBAR ── */
 ::-webkit-scrollbar { height: 5px; width: 5px; }
-::-webkit-scrollbar-track { background: #f1f5f9; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cdd1d8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #00a854; }
 </style>
 
 <div id="toast" class="toast">✅ Copied!</div>
@@ -411,8 +452,6 @@ function applyFilter() {
     });
     document.getElementById('matchCount').textContent = count;
 }
-
-// Restore filter on every re-render
 window.addEventListener('load', function() {
     var momVal = localStorage.getItem('momFilter') || '';
     var emaVal = localStorage.getItem('emaFilter') || '';
@@ -480,7 +519,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                             <button class="copy-btn"
                                 onclick="event.stopPropagation();copySymbol(this,'{symbol}')">{symbol}</button>
                         </div>
-                        <div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:3px;border-top:1px solid #e2e8f0;padding-top:3px">{signal_time[:5]}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:3px;border-top:1px solid rgba(224,227,232,0.6);padding-top:3px">{signal_time[:5]}</div>
                     </div>
                 </div>
             </td>
