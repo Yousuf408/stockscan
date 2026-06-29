@@ -94,9 +94,17 @@ def apply_styles():
 
     /* ── SIDEBAR NAV CUSTOM STYLES ── */
     .ts-brand-wrap {
-        padding: 12px 16px 10px 16px;
+        padding: 5px 16px 10px 16px;
         border-bottom: 1px solid #f0f2f5;
         margin-bottom: 4px;
+    }
+
+    /* Remove Streamlit default top padding in sidebar */
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 0 !important;
+    }
+    [data-testid="stSidebarContent"] {
+        padding-top: 0 !important;
     }
     .ts-brand-name {
         font-family: 'JetBrains Mono', monospace;
