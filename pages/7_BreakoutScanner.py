@@ -29,7 +29,7 @@ st.set_page_config(page_title="Breakout Scanner", page_icon="⚡", layout="wide"
 # ─────────────────────────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
-sidebar_brand()
+sidebar_brand("BreakoutScanner")
 #------------ END ---------------
 
 NAME_TO_TOKEN = {name: token for name, token, kind in STOCKS_WATCHLIST if kind == "stock"}
