@@ -473,10 +473,7 @@ window.addEventListener('keydown', function(e) {
         e.preventDefault();
         takeScreenshot();
     }
-    if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
-        e.preventDefault();
-        copySymbols();
-    }
+
 });
 
 async function takeScreenshot() {
@@ -515,33 +512,6 @@ async function takeScreenshot() {
     }
 }
 
-function copySymbols() {
-    var toast = document.getElementById('toast');
-    var rows = document.querySelectorAll('tbody tr.main-row');
-    var symbols = [];
-    rows.forEach(function(row) {
-        if (row.style.display !== 'none') {
-            var sym = row.dataset.sym;
-            if (sym) symbols.push(sym);
-        }
-    });
-    if (symbols.length === 0) {
-        toast.innerHTML = '❌ No stocks visible';
-        toast.classList.add('show');
-        setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '✅ Copied!'; }, 2000);
-        return;
-    }
-    var text = symbols.join(', ');
-    navigator.clipboard.writeText(text).then(function() {
-        toast.innerHTML = '✅ ' + symbols.length + ' symbols copied!';
-        toast.classList.add('show');
-        setTimeout(function() {
-            toast.classList.remove('show');
-            toast.innerHTML = '✅ Copied!';
-            document.getElementById('ms-root').focus();
-        }, 2000);
-    });
-}
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
