@@ -247,12 +247,12 @@ table {
 }
 
 /* ── HEADER ── */
-thead tr { background: #f0faf5; }
+thead tr { background: #fef9f0; }
 th {
   padding: 10px 10px; text-align: left; font-size: 11px; font-weight: 700;
-  color: #00a854; border-bottom: 2px solid #00a854; white-space: nowrap;
+  color: #0f172a; border-bottom: 2px solid #fcd34d; white-space: nowrap;
   cursor: pointer; user-select: none; transition: background 0.15s;
-  border-right: 1px solid rgba(0,168,84,0.15);
+  border-right: 1px solid #fde68a;
   text-transform: uppercase; letter-spacing: 0.5px;
 }
 th:last-child { border-right: none; }
@@ -260,11 +260,11 @@ th:hover { background: rgba(240,244,255,0.9); color: #0f172a; }
 th.active-col { background: rgba(0,168,84,0.08) !important; color: #00a854 !important; }
 th .sort-arrow { margin-left: 4px; font-size: 10px; opacity: 0.4; }
 th.active-col .sort-arrow { opacity: 1; }
-th.th-ema   { color: #00a854; }
-th.th-sig   { color: #00a854; }
-th.th-ema9  { color: #00a854; }
-th.th-phase { color: #00a854; }
-th.th-trend { color: #00a854; }
+th.th-ema   { color: #0f172a; }
+th.th-sig   { color: #0f172a; }
+th.th-ema9  { color: #0f172a; }
+th.th-phase { color: #0f172a; }
+th.th-trend { color: #0f172a; }
 
 /* ── ROWS ── */
 tbody tr.main-row {
