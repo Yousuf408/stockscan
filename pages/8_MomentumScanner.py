@@ -68,6 +68,12 @@ st.set_page_config(
     page_icon="🚀",
     layout="wide"
 )
+# ── STYLES & SIDEBAR ──────────────────────────────────────────
+from styles import apply_styles, sidebar_brand, page_header
+apply_styles()
+sidebar_brand()
+
+# ── STYLES & SIDEBAR end here ──────────────────────────────────
 
 st.markdown("""
     <style>
