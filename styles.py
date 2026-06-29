@@ -94,7 +94,7 @@ def apply_styles():
 
     /* ── SIDEBAR NAV CUSTOM STYLES ── */
     .ts-brand-wrap {
-        padding: 5px 16px 10px 16px;
+        padding: 0px 16px 10px 16px;
         border-bottom: 1px solid #f0f2f5;
         margin-bottom: 4px;
     }
