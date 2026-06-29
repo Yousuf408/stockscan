@@ -18,6 +18,11 @@ import ai_pattern_engine
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="AI Pattern Scanner", page_icon="🤖", layout="wide")
 
+# ── STYLES & SIDEBAR ──
+from styles import apply_styles, sidebar_brand, page_header
+apply_styles()
+sidebar_brand()
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
