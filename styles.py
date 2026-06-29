@@ -330,8 +330,8 @@ def sidebar_brand(current_page: str = ""):
         # Brand block — Smart Trade naam, tight padding
         st.markdown("""
 <div class="ts-brand-wrap">
-  <div class="ts-brand-name">Smart <span>Trade</span></div>
-  <div class="ts-brand-sub">NSE Professional Screener</div>
+  <div class="ts-brand-name">Smart<span>Money</span></div>
+  <div class="ts-brand-sub">Follow the Smart Money</div>
 </div>
 """, unsafe_allow_html=True)
 
