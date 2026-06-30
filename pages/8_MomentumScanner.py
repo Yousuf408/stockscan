@@ -27,6 +27,9 @@ from momentum.backend import (
     IST,
 )
 from momentum.renderer import render_html_table
+# ── For Notification ─────────────────────────────────────────────
+
+from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
 
 # ── Token lookups ─────────────────────────────────────────────
 TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
@@ -198,6 +201,9 @@ def scanner_table():
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
+   # ── Notification ─────────────────────────────────────
+    init_notif_state()
+    process_notifications(df)
 
     # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
@@ -215,4 +221,5 @@ def scanner_table():
     )
 
 
+request_permission_js()
 scanner_table()
