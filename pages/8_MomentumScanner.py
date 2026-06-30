@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from supabase import create_client
 
 import angel_ws
@@ -171,12 +171,19 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Save / update signals ─────────────────────────────────
+    # ── Save / update signals — ONLY during market hours (9:15–15:30 IST) ──
+    # Outside market hours, stale WebSocket/Yahoo ticks can falsely look like
+    # new signals. Display (df/table) is untouched — only the SAVE is gated.
+    current_t   = datetime.now(IST).time()
+    market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
+
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
+            if not market_open:
+                continue   # skip saving a brand-new signal outside market hours
             signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
