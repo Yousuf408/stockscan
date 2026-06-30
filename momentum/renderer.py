@@ -1,5 +1,5 @@
 """
-momentum/renderer.py — Redesigned to match SMARTSentry Image 1 style
+momentum/renderer.py — Redesigned to match TradeSentry Image 1 style
 Clean white, spacious rows, bold symbol, muted time below, clear hierarchy.
 Volume column REMOVED — visible in expand dropdown instead.
 """
@@ -166,30 +166,20 @@ def _chg_html(val: float) -> str:
 def _signal_price_html(signal_price_str: str, move_since: float) -> str:
     if signal_price_str == "-":
         return '<span style="color:#94a3b8;font-size:13px">—</span>'
-    show_move = abs(move_since) >= 0.05
-    positive  = move_since >= 0
-    w         = min(abs(move_since) * 10, 100)
-    fill      = "#22c55e" if positive else "#ef4444"
-    color     = _move_color(move_since)
-    sign      = "+" if positive else ""
-    move_html = (
-        f'<span style="font-size:11px;font-weight:600;color:{color}">{sign}{move_since:.2f}%</span>'
-        if show_move else
-        '<span style="font-size:11px;color:#94a3b8">at entry</span>'
-    )
-    bar_html = (
-        f'<div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
-        f'  <div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div>'
-        f'</div>'
-        if show_move else ''
-    )
+    positive = move_since >= 0
+    w        = min(abs(move_since) * 10, 100)
+    fill     = "#22c55e" if positive else "#ef4444"
+    color    = _move_color(move_since)
+    sign     = "+" if positive else ""
     return (
-        f'<div style="display:flex;flex-direction:column;gap:3px;min-width:110px">'
+        f'<div style="display:flex;flex-direction:column;gap:4px;min-width:110px">'
         f'  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
         f'    <span style="font-size:14px;font-weight:700;color:#1e3a5f">{signal_price_str}</span>'
-        f'    {move_html}'
+        f'    <span style="font-size:12px;font-weight:700;color:{color}">{sign}{move_since:.2f}%</span>'
         f'  </div>'
-        f'  {bar_html}'
+        f'  <div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
+        f'    <div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div>'
+        f'  </div>'
         f'</div>'
     )
 
@@ -593,7 +583,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
     html = _STYLES + f"""
 <div class="ts-header">
-  <div class="ts-brand">SMART<span>Money</span></div>
+  <div class="ts-brand">TRADE<span>SENTRY</span></div>
   <div class="ts-status">
     <div class="ts-live">
       <div class="ts-live-dot"></div>
