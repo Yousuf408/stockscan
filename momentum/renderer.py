@@ -1,5 +1,5 @@
 """
-momentum/renderer.py — Redesigned to match TradeSentry Image 1 style
+momentum/renderer.py — Redesigned to match SMARTSentry Image 1 style
 Clean white, spacious rows, bold symbol, muted time below, clear hierarchy.
 Volume column REMOVED — visible in expand dropdown instead.
 """
@@ -593,7 +593,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
     html = _STYLES + f"""
 <div class="ts-header">
-  <div class="ts-brand">TRADE<span>SENTRY</span></div>
+  <div class="ts-brand">SMART<span>Money</span></div>
   <div class="ts-status">
     <div class="ts-live">
       <div class="ts-live-dot"></div>
