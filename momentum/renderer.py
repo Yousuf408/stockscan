@@ -465,6 +465,11 @@ function tsColHighlight(col) {
 function tsFilter() {
   var mom = document.getElementById('tsf-mom').value.toLowerCase();
   var ema = document.getElementById('tsf-ema').value;
+  // Persist filter choices so the 5-sec fragment refresh doesn't reset them
+  try {
+    localStorage.setItem('ts_filter_mom', mom);
+    localStorage.setItem('ts_filter_ema', ema);
+  } catch (e) {}
   var rows = document.querySelectorAll('tbody tr.ts-row');
   var count = 0;
   rows.forEach(function(row) {
@@ -482,6 +487,46 @@ function tsFilter() {
   document.getElementById('ts-match-count').textContent = count;
   tsAutoResize();
 }
+
+// ── Restore filters + scroll position after every refresh ──
+function tsRestoreState() {
+  try {
+    var savedMom = localStorage.getItem('ts_filter_mom') || '';
+    var savedEma = localStorage.getItem('ts_filter_ema') || '';
+    if (savedMom || savedEma) {
+      var momEl = document.getElementById('tsf-mom');
+      var emaEl = document.getElementById('tsf-ema');
+      if (momEl) momEl.value = savedMom;
+      if (emaEl) emaEl.value = savedEma;
+      tsFilter();
+    }
+  } catch (e) {}
+  try {
+    var savedScroll = sessionStorage.getItem('ts_scroll_y');
+    if (savedScroll !== null) {
+      window.scrollTo(0, parseInt(savedScroll, 10));
+      if (window.parent) {
+        window.parent.scrollTo(0, parseInt(savedScroll, 10));
+      }
+    }
+  } catch (e) {}
+}
+
+// Save scroll position continuously (both iframe and parent page)
+function tsSaveScroll() {
+  try {
+    sessionStorage.setItem('ts_scroll_y', window.scrollY || window.pageYOffset || 0);
+  } catch (e) {}
+}
+window.addEventListener('scroll', tsSaveScroll);
+try {
+  if (window.parent) {
+    window.parent.addEventListener('scroll', tsSaveScroll);
+  }
+} catch (e) {}
+
+window.addEventListener('load', tsRestoreState);
+setTimeout(tsRestoreState, 200);
 
 // ── Auto-resize: tell parent iframe the real content height ──
 function tsAutoResize() {
