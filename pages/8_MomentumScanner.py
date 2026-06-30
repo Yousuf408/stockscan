@@ -123,15 +123,10 @@ if (
     st.session_state["signal_data"]      = fetch_signal_data_from_supabase(get_supabase(), today_str)
     st.session_state["signal_data_date"] = today_str
 
-st.divider()
-
-# ── TEMPORARY TEST — remove after testing ──────────────────
-from momentum.delivery import get_latest_available_delivery_pct
-if st.button("🧪 Test Delivery Fetch"):
-    m, d = get_latest_available_delivery_pct()
-    st.write(f"Date used: {d}")
-    st.write(f"Total stocks found: {len(m)}")
-    st.write(dict(list(m.items())[:10]))
+from momentum.delivery import debug_fetch_raw
+if st.button("🧪 Test Delivery Fetch (debug)"):
+    info = debug_fetch_raw()
+    st.json(info)
 # ── END TEMPORARY TEST ───────────────────────────────────────
 
 
