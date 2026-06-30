@@ -642,15 +642,9 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
           <td>{_ema_cell(ema_status)}</td>
 
-          <td>{_ema9_cell(str(row.get('EMA9 5min', '⏳')), row.get('EMA9 Value', None))}</td>
-
-          <td>{_phase_cell(str(row.get('Phase', '⏳ Forming')))}</td>
-
-          <td>{_vol_trend_cell(str(row.get('Vol Trend', '→ Stable')))}</td>
-
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="9">
+          <td colspan="6">
             <div class="ts-expand-panel">
               <div class="ts-ec">
                 <div class="ts-ec-label">Open</div>
@@ -730,9 +724,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
       <th onclick="tsColHighlight(3)">Vol Ratio</th>
       <th onclick="tsColHighlight(4)">Momentum</th>
       <th onclick="tsColHighlight(5)">EMA20 Status</th>
-      <th onclick="tsColHighlight(6)">9 EMA 5min</th>
-      <th onclick="tsColHighlight(7)">Phase</th>
-      <th onclick="tsColHighlight(8)">Vol Trend</th>
     </tr>
   </thead>
   <tbody>
