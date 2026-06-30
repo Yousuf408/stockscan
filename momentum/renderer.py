@@ -290,7 +290,8 @@ th {
 }
 th:last-child { border-right: none; }
 th:hover { color: #374151; }
-th.sorted { color: #00a854; }
+th.sorted { color: #00a854; cursor: pointer; }
+td.active-col { background: #f0fdf4 !important; }
 .sort-arrow { margin-left: 3px; font-size: 10px; opacity: 0.5; }
 th.sorted .sort-arrow { opacity: 1; }
 
@@ -413,9 +414,19 @@ function tsToast(msg) {
 }
 function tsCopy(e, btn, sym) {
   e.stopPropagation();
-  navigator.clipboard.writeText(sym).then(function() {
+  function showCopied() {
+    var nameEl = btn.querySelector('.ts-sym-name');
+    if (!nameEl) return;
+    var original = nameEl.textContent;
+    nameEl.textContent = '✓ ' + sym;
+    nameEl.style.color = '#00a854';
     tsToast('✅ ' + sym + ' copied!');
-  }).catch(function() {
+    setTimeout(function() {
+      nameEl.textContent = original;
+      nameEl.style.color = '';
+    }, 1500);
+  }
+  navigator.clipboard.writeText(sym).then(showCopied).catch(function() {
     // Fallback for browsers/contexts where clipboard API is blocked
     var ta = document.createElement('textarea');
     ta.value = sym;
@@ -423,7 +434,7 @@ function tsCopy(e, btn, sym) {
     ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); tsToast('✅ ' + sym + ' copied!'); }
+    try { document.execCommand('copy'); showCopied(); }
     catch (err) { tsToast('❌ Copy failed'); }
     document.body.removeChild(ta);
   });
@@ -437,6 +448,19 @@ function tsToggle(sym) {
   main.classList.toggle('expanded', !open);
   var btn = main.querySelector('.ts-expand-btn');
   if (btn) btn.textContent = open ? '+' : '−';
+}
+var tsActiveCol = -1;
+function tsColHighlight(col) {
+  document.querySelectorAll('th').forEach(function(th) { th.classList.remove('sorted'); });
+  document.querySelectorAll('td.active-col').forEach(function(td) { td.classList.remove('active-col'); });
+  if (tsActiveCol === col) { tsActiveCol = -1; return; }
+  tsActiveCol = col;
+  var headers = document.querySelectorAll('th');
+  if (headers[col]) headers[col].classList.add('sorted');
+  document.querySelectorAll('tbody tr.ts-row').forEach(function(row) {
+    var cells = row.querySelectorAll('td');
+    if (cells[col]) cells[col].classList.add('active-col');
+  });
 }
 function tsFilter() {
   var mom = document.getElementById('tsf-mom').value.toLowerCase();
@@ -700,15 +724,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 <table>
   <thead>
     <tr>
-      <th>Symbol</th>
-      <th>Signal Price</th>
-      <th>LTP</th>
-      <th>Vol Ratio</th>
-      <th>Momentum</th>
-      <th>EMA20 Status</th>
-      <th>9 EMA 5min</th>
-      <th>Phase</th>
-      <th>Vol Trend</th>
+      <th onclick="tsColHighlight(0)">Symbol</th>
+      <th onclick="tsColHighlight(1)">Signal Price</th>
+      <th onclick="tsColHighlight(2)">LTP</th>
+      <th onclick="tsColHighlight(3)">Vol Ratio</th>
+      <th onclick="tsColHighlight(4)">Momentum</th>
+      <th onclick="tsColHighlight(5)">EMA20 Status</th>
+      <th onclick="tsColHighlight(6)">9 EMA 5min</th>
+      <th onclick="tsColHighlight(7)">Phase</th>
+      <th onclick="tsColHighlight(8)">Vol Trend</th>
     </tr>
   </thead>
   <tbody>
