@@ -444,7 +444,32 @@ function tsFilter() {
     if (show) count++;
   });
   document.getElementById('ts-match-count').textContent = count;
+  tsAutoResize();
 }
+
+// ── Auto-resize: tell parent iframe the real content height ──
+function tsAutoResize() {
+  var height = document.documentElement.scrollHeight;
+  if (window.frameElement) {
+    window.frameElement.style.height = height + 'px';
+  }
+  // Streamlit's own resize bridge (works inside components.v1.html)
+  try {
+    window.parent.postMessage({
+      type: 'streamlit:setFrameHeight',
+      height: height
+    }, '*');
+  } catch (e) {}
+}
+window.addEventListener('load', tsAutoResize);
+window.addEventListener('resize', tsAutoResize);
+// Re-measure shortly after load (fonts/icons can shift layout)
+setTimeout(tsAutoResize, 150);
+setTimeout(tsAutoResize, 500);
+// Watch for DOM changes (row expand/collapse, filter, live updates)
+new MutationObserver(tsAutoResize).observe(document.body, {
+  childList: true, subtree: true, attributes: true
+});
 </script>
 """
 
