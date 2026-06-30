@@ -40,6 +40,10 @@ def fetch_delivery_pct_for_date(date_obj: datetime, timeout: int = 10) -> dict:
     url = _build_url(date_obj)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        print(f"[DELIVERY DEBUG] URL: {url}")
+        print(f"[DELIVERY DEBUG] Status: {resp.status_code}")
+        print(f"[DELIVERY DEBUG] Response length: {len(resp.text)}")
+        print(f"[DELIVERY DEBUG] First 200 chars: {resp.text[:200]}")
         if resp.status_code != 200:
             return {}
         delivery_map = {}
@@ -54,7 +58,8 @@ def fetch_delivery_pct_for_date(date_obj: datetime, timeout: int = 10) -> dict:
             delivery_pct = parts[6].strip()
             delivery_map[symbol] = delivery_pct
         return delivery_map
-    except Exception:
+    except Exception as e:
+        print(f"[DELIVERY DEBUG] Exception: {repr(e)}")
         return {}
 
 
@@ -90,3 +95,23 @@ def get_latest_available_delivery_pct(max_lookback_days: int = 5) -> tuple:
         if m:
             return m, d
     return {}, None
+
+
+def debug_fetch_raw(date_obj: datetime = None) -> dict:
+    """
+    Non-cached, verbose debug fetch — use this from a Streamlit button
+    to see the exact status code / response NSE is returning, without
+    needing to check server logs.
+    """
+    if date_obj is None:
+        date_obj = datetime.now() - timedelta(days=1)
+    url = _build_url(date_obj)
+    info = {"url": url, "date_tried": date_obj.strftime("%Y-%m-%d")}
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        info["status_code"]   = resp.status_code
+        info["response_len"]  = len(resp.text)
+        info["response_head"] = resp.text[:300]
+    except Exception as e:
+        info["exception"] = repr(e)
+    return info
