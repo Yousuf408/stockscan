@@ -470,7 +470,50 @@ setTimeout(tsAutoResize, 500);
 new MutationObserver(tsAutoResize).observe(document.body, {
   childList: true, subtree: true, attributes: true
 });
+
+// ── Screenshot shortcut: Ctrl + Shift + S ──
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        e.preventDefault();
+        takeScreenshot();
+    }
+});
+
+async function takeScreenshot() {
+    var toast = document.getElementById('ts-toast');
+    toast.innerHTML = '📸 Capturing...';
+    toast.classList.add('show');
+    try {
+        var blobPromise = new Promise(function(resolve) {
+            html2canvas(document.body, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#f8faff',
+                scrollY: 0,
+                windowHeight: document.body.scrollHeight,
+                height: document.body.scrollHeight,
+            }).then(function(canvas) {
+                canvas.toBlob(function(blob) { resolve(blob); }, 'image/png');
+            });
+        });
+        await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blobPromise })
+        ]);
+        toast.innerHTML = '✅ Screenshot copied!';
+        setTimeout(function() {
+            toast.classList.remove('show');
+            toast.innerHTML = '✅ Copied!';
+        }, 2000);
+    } catch(e) {
+        toast.innerHTML = '❌ ' + (e.message || 'Failed');
+        setTimeout(function() {
+            toast.classList.remove('show');
+            toast.innerHTML = '✅ Copied!';
+        }, 2500);
+    }
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 """
 
 
