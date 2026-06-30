@@ -30,6 +30,7 @@ from momentum.renderer import render_html_table
 # ── For Notification ─────────────────────────────────────────────
 
 from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
+from momentum.delivery import get_latest_available_delivery_pct
 
 # ── Display cutoff — stocks whose FIRST signal was after this time ──
 # ── are excluded from the table (still saved to Supabase though)   ──
@@ -116,19 +117,18 @@ if "momentum_historical" not in st.session_state:
 
 historical = st.session_state["momentum_historical"]
 
+# ── DELIVERY % — fetched once per session, cached for the whole day ──
+if "delivery_pct_map" not in st.session_state:
+    delivery_map, delivery_date = get_latest_available_delivery_pct()
+    st.session_state["delivery_pct_map"]  = delivery_map
+    st.session_state["delivery_pct_date"] = delivery_date
+
 if (
     "signal_data"      not in st.session_state or
     st.session_state.get("signal_data_date") != today_str
 ):
     st.session_state["signal_data"]      = fetch_signal_data_from_supabase(get_supabase(), today_str)
     st.session_state["signal_data_date"] = today_str
-
-from momentum.delivery import debug_fetch_raw
-if st.button("🧪 Test Delivery Fetch (debug)"):
-    info = debug_fetch_raw()
-    st.json(info)
-# ── END TEMPORARY TEST ───────────────────────────────────────
-
 
 
 # ─────────────────────────────────────────────────────────────
@@ -212,6 +212,10 @@ def scanner_table():
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
+
+    # ── DELIVERY % — from cached NSE EOD data (yesterday's session) ──
+    delivery_map = st.session_state.get("delivery_pct_map", {})
+    df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
 
     # ── TIME CUTOFF — hide stocks whose first signal was AFTER ──
     # ── SIGNAL_CUTOFF_TIME from the table. They stay saved in   ──
