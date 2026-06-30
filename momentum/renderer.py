@@ -48,16 +48,16 @@ def _phase_cell(phase: str) -> str:
     if not phase or phase in ("⏳ Forming", "⏳"):
         return '<span style="color:#94a3b8;font-size:12px">⏳ Forming</span>'
     s = str(phase)
-    if   "BUILDING"  in s: color, bg, border = "#15803d", "#f0fdf4", "#bbf7d0"
-    elif "PULLBACK"  in s: color, bg, border = "#b45309", "#fffbeb", "#fde68a"
-    elif "REVERSAL"  in s: color, bg, border = "#be123c", "#fff1f2", "#fecdd3"
-    else:                  color, bg, border = "#64748b", "#f1f5f9", "#e2e8f0"
-    icon = "🚀" if "BUILDING" in s else "⚠️" if "PULLBACK" in s else "🔴" if "REVERSAL" in s else ""
+    # Extract just the keyword — PULLBACK / BUILDING / REVERSAL
+    if   "BUILDING"  in s: keyword, color, bg, border, icon = "BUILDING",  "#15803d", "#f0fdf4", "#bbf7d0", "🚀"
+    elif "PULLBACK"  in s: keyword, color, bg, border, icon = "PULLBACK",  "#b45309", "#fffbeb", "#fde68a", "⚠️"
+    elif "REVERSAL"  in s: keyword, color, bg, border, icon = "REVERSAL",  "#be123c", "#fff1f2", "#fecdd3", "🔴"
+    else:                  keyword, color, bg, border, icon = s,            "#64748b", "#f1f5f9", "#e2e8f0", ""
     return (
         f'<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;'
         f'border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;'
         f'background:{bg};color:{color};border:1px solid {border}">'
-        f'{icon} {s}</span>'
+        f'{icon} {keyword}</span>'
     )
 
 
@@ -86,6 +86,13 @@ def _vol_emoji(vm: str) -> str:
 
 def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
     def _clamp(v, lo, hi): return max(lo, min(hi, v))
+    # Extract clean label — just the keyword(s) without leading emojis
+    if   "STRONG BUILDING" in mom: clean_mom = "STRONG BUILDING"
+    elif "BUILDING"        in mom: clean_mom = "BUILDING"
+    elif "STABLE"          in mom: clean_mom = "STABLE"
+    elif "COOLING"         in mom: clean_mom = "COOLING"
+    elif "WEAK"            in mom: clean_mom = "WEAK"
+    else:                          clean_mom = mom.strip()
 
     if "STRONG BUILDING" in mom:
         vol_p   = _clamp((vol_ratio    - 2.5) / (5.0 - 2.5), 0, 1)
@@ -131,7 +138,7 @@ def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> s
         v_need = max(0.0, round(2.0 - vol_ratio, 1))
         next_label = f"→ Building: need {v_need}x more vol"
     else:
-        return f'<span style="color:#64748b;font-size:13px">{mom}</span>'
+        return f'<span style="color:#64748b;font-size:13px">{clean_mom}</span>'
 
     return (
         f'<div style="display:flex;flex-direction:column;gap:5px;min-width:180px">'
@@ -139,7 +146,7 @@ def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> s
         f'    <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;'
         f'           border-radius:6px;font-size:13px;font-weight:700;'
         f'           background:{badge_bg};color:{badge_color};border:1px solid {badge_border}">'
-        f'      {badge_icon} {mom}</span>'
+        f'      {badge_icon} {clean_mom}</span>'
         f'    <span style="font-size:12px;font-weight:700;color:{fill_color}">{fill_pct}%</span>'
         f'  </div>'
         f'  <div style="width:100%;height:4px;background:#e2e8f0;border-radius:4px;overflow:hidden">'
@@ -157,20 +164,32 @@ def _chg_html(val: float) -> str:
 
 
 def _signal_price_html(signal_price_str: str, move_since: float) -> str:
-    positive = move_since >= 0
-    w        = min(abs(move_since) * 10, 100)
-    fill     = "#22c55e" if positive else "#ef4444"
-    color    = _move_color(move_since)
-    sign     = "+" if positive else ""
+    if signal_price_str == "-":
+        return '<span style="color:#94a3b8;font-size:13px">—</span>'
+    show_move = abs(move_since) >= 0.05
+    positive  = move_since >= 0
+    w         = min(abs(move_since) * 10, 100)
+    fill      = "#22c55e" if positive else "#ef4444"
+    color     = _move_color(move_since)
+    sign      = "+" if positive else ""
+    move_html = (
+        f'<span style="font-size:11px;font-weight:600;color:{color}">{sign}{move_since:.2f}%</span>'
+        if show_move else
+        '<span style="font-size:11px;color:#94a3b8">at entry</span>'
+    )
+    bar_html = (
+        f'<div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
+        f'  <div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div>'
+        f'</div>'
+        if show_move else ''
+    )
     return (
-        f'<div style="display:flex;flex-direction:column;gap:4px;min-width:110px">'
+        f'<div style="display:flex;flex-direction:column;gap:3px;min-width:110px">'
         f'  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
         f'    <span style="font-size:14px;font-weight:700;color:#1e3a5f">{signal_price_str}</span>'
-        f'    <span style="font-size:12px;font-weight:600;color:{color}">{sign}{move_since:.2f}%</span>'
+        f'    {move_html}'
         f'  </div>'
-        f'  <div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
-        f'    <div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div>'
-        f'  </div>'
+        f'  {bar_html}'
         f'</div>'
     )
 
@@ -273,7 +292,7 @@ th {
   padding: 10px 16px;
   text-align: left;
   font-size: 11px; font-weight: 700;
-  color: #94a3b8;
+  color: #0f172a;
   letter-spacing: 0.6px; text-transform: uppercase;
   white-space: nowrap;
   user-select: none; cursor: pointer;
@@ -327,8 +346,8 @@ tr.expanded .ts-expand-btn { background: #00a854; color: #fff; border-color: #00
   color: #0f172a; letter-spacing: 0.2px;
 }
 .ts-sym-time {
-  font-size: 11px; color: #94a3b8;
-  margin-top: 2px; font-weight: 500;
+  font-size: 13px; color: #374151;
+  margin-top: 3px; font-weight: 700;
 }
 .ts-copy-btn {
   background: none; border: none; padding: 0; cursor: pointer;
@@ -550,11 +569,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <div class="ts-ec-sub">Yesterday's close</div>
               </div>
               <div class="ts-ec">
-                <div class="ts-ec-label">Signal Price</div>
-                <div class="ts-ec-value" style="color:#2563eb">{signal_price_str}</div>
-                <div class="ts-ec-sub">Entry trigger</div>
-              </div>
-              <div class="ts-ec">
                 <div class="ts-ec-label">Peak Since Signal</div>
                 <div class="ts-ec-value" style="color:#7c3aed">{peak_ltp_str}</div>
                 <div class="ts-ec-sub">Max LTP after entry</div>
@@ -568,21 +582,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
                 <div class="ts-ec-label">Volume</div>
                 <div class="ts-ec-value">{vol_fmt}</div>
                 <div class="ts-ec-sub">Median: {median_vol_str}</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Vol Ratio</div>
-                <div class="ts-ec-value" style="color:{vr_color}">{row['Vol Ratio']}</div>
-                <div class="ts-ec-sub">vs 5-day median</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Signal Time</div>
-                <div class="ts-ec-value">{signal_time}</div>
-                <div class="ts-ec-sub">First detected</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">EMA20</div>
-                <div class="ts-ec-value">{_ema_cell(ema_status)}</div>
-                <div class="ts-ec-sub">Distance from EMA20</div>
               </div>
             </div>
           </td>
