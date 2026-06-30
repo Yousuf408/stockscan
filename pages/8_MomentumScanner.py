@@ -34,7 +34,7 @@ from momentum.delivery import get_latest_available_delivery_pct
 
 # ── Display cutoff — stocks whose FIRST signal was after this time ──
 # ── are excluded from the table (still saved to Supabase though)   ──
-SIGNAL_CUTOFF_TIME = "10:00:00"   # HH:MM:SS IST
+SIGNAL_CUTOFF_TIME = "11:00:00"   # HH:MM:SS IST
 
 # ── Token lookups ─────────────────────────────────────────────
 TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
