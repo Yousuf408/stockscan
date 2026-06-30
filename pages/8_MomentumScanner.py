@@ -150,6 +150,15 @@ def scanner_table():
     now_ist    = datetime.now(IST).strftime("%H:%M:%S")
     tick_count = len(angel_ws.latest_ticks)
 
+    # ── Market hours check (9:15–15:30 IST) ────────────────────
+    current_t   = datetime.now(IST).time()
+    market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
+
+    # ── Outside market hours: only show stocks already saved in DB ──
+    # (drops brand-new symbols that only appeared from stale ticks)
+    if not market_open and not df.empty:
+        df = df[df["Symbol"].isin(signal_data.keys())].reset_index(drop=True)
+
     # ── Status bar + Reload button — always visible ───────────
     col_info, col_btn = st.columns([5, 1])
     with col_info:
@@ -173,10 +182,7 @@ def scanner_table():
 
     # ── Save / update signals — ONLY during market hours (9:15–15:30 IST) ──
     # Outside market hours, stale WebSocket/Yahoo ticks can falsely look like
-    # new signals. Display (df/table) is untouched — only the SAVE is gated.
-    current_t   = datetime.now(IST).time()
-    market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
-
+    # new signals. Table is already filtered above to drop those.
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
