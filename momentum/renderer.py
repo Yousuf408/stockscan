@@ -157,6 +157,18 @@ def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> s
     )
 
 
+def _prev_day_move_html(val_str: str) -> str:
+    if not val_str or val_str == "-":
+        return '<span style="color:#94a3b8;font-size:13px">—</span>'
+    try:
+        val = float(val_str.replace("%", "").replace("+", ""))
+    except (ValueError, AttributeError):
+        return '<span style="color:#94a3b8;font-size:13px">—</span>'
+    color = _move_color(val)
+    sign  = "+" if val >= 0 else ""
+    return f'<span style="color:{color};font-weight:600;font-size:13px">{sign}{val:.2f}%</span>'
+
+
 def _chg_html(val: float) -> str:
     color = "#16a34a" if val >= 0 else "#dc2626"
     sign  = "▲" if val >= 0 else "▼"
@@ -683,13 +695,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             </span>
           </td>
 
+          <td>{_prev_day_move_html(str(row.get('Prev Day Move %', '-')))}</td>
+
           <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct)}</td>
 
           <td>{_ema_cell(ema_status)}</td>
 
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="6">
+          <td colspan="7">
             <div class="ts-expand-panel">
               <div class="ts-ec">
                 <div class="ts-ec-label">Open</div>
@@ -767,8 +781,9 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
       <th onclick="tsColHighlight(1)">Signal Price</th>
       <th onclick="tsColHighlight(2)">LTP</th>
       <th onclick="tsColHighlight(3)">Vol Ratio</th>
-      <th onclick="tsColHighlight(4)">Momentum</th>
-      <th onclick="tsColHighlight(5)">EMA20 Status</th>
+      <th onclick="tsColHighlight(4)">Prev Day Move %</th>
+      <th onclick="tsColHighlight(5)">Momentum</th>
+      <th onclick="tsColHighlight(6)">EMA20 Status</th>
     </tr>
   </thead>
   <tbody>
