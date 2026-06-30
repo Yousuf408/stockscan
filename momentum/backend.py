@@ -423,6 +423,7 @@ def fetch_historical_data(supabase):
     sorted_dates = sorted(all_dates, reverse=True)
     target_date  = sorted_dates[0]
     prev_date    = sorted_dates[1] if len(sorted_dates) > 1 else None
+    prev2_date   = sorted_dates[2] if len(sorted_dates) > 2 else None
     last_5_dates = sorted_dates[1:6]
 
     target_rows = []
@@ -475,6 +476,31 @@ def fetch_historical_data(supabase):
             df_prev = df_prev.drop_duplicates(subset="stock", keep="first")
             df_prev = df_prev.rename(columns={"ltp": "yesterday_close"})
 
+    # ── Day-before-yesterday close (for "Prev Day Move %" column) ──
+    df_prev2 = pd.DataFrame()
+    if prev2_date:
+        prev2_rows = []
+        offset = 0
+        while True:
+            resp = supabase.table("websocket_stock_values") \
+                .select("stock, ltp") \
+                .eq("date", prev2_date) \
+                .order("created_at", desc=True) \
+                .range(offset, offset + 999) \
+                .execute()
+            rows = resp.data
+            if not rows:
+                break
+            prev2_rows.extend(rows)
+            if len(rows) < 1000:
+                break
+            offset += 1000
+
+        df_prev2 = pd.DataFrame(prev2_rows)
+        if not df_prev2.empty:
+            df_prev2 = df_prev2.drop_duplicates(subset="stock", keep="first")
+            df_prev2 = df_prev2.rename(columns={"ltp": "day_before_close"})
+
     df_median = pd.DataFrame()
     if last_5_dates:
         vol_rows = []
@@ -503,8 +529,10 @@ def fetch_historical_data(supabase):
     return {
         "target_date": target_date,
         "prev_date"  : prev_date,
+        "prev2_date" : prev2_date,
         "df_target"  : df_target,
         "df_prev"    : df_prev,
+        "df_prev2"   : df_prev2,
         "df_median"  : df_median,
     }
 
@@ -516,6 +544,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df_target = historical["df_target"]
     df_prev   = historical["df_prev"]
     df_median = historical["df_median"]
+    df_prev2  = historical.get("df_prev2", pd.DataFrame())
 
     if live_ticks:
         rows = []
@@ -541,8 +570,15 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df = df_live.merge(df_prev,  on="stock", how="inner")
     df = df.merge(df_median,     on="stock", how="inner")
 
+    # ── Prev Day Move % — optional, left join so missing data doesn't drop rows ──
+    if not df_prev2.empty:
+        df = df.merge(df_prev2, on="stock", how="left")
+    else:
+        df["day_before_close"] = None
+
     for col in ["live_ltp", "live_open", "live_volume", "yesterday_close", "median_vol"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["day_before_close"] = pd.to_numeric(df["day_before_close"], errors="coerce")
 
     df = df.dropna(subset=["live_ltp", "live_open", "live_volume", "yesterday_close", "median_vol"])
     df = df[df["median_vol"] > 0]
@@ -553,6 +589,9 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["intraday_pct"]   = ((df["live_ltp"]  - df["live_open"]) / df["live_open"] * 100)
     df["chg_vs_prev"]    = ((df["live_ltp"]  - df["yesterday_close"]) / df["yesterday_close"] * 100)
     df["priority_score"] = (df["vol_ratio"] * 0.3 + df["intraday_pct"] * 0.7)
+
+    # ── Prev Day Move % = (yesterday_close - day_before_close) / day_before_close ──
+    df["prev_day_move_pct"] = ((df["yesterday_close"] - df["day_before_close"]) / df["day_before_close"] * 100)
 
     df = df[
         (df["vol_ratio"]    >= 1.5) &
@@ -589,6 +628,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["intraday_pct"]   = df["intraday_pct"].round(2)
     df["chg_vs_prev"]    = df["chg_vs_prev"].round(2)
     df["priority_score"] = df["priority_score"].round(2)
+    df["prev_day_move_pct"] = df["prev_day_move_pct"].round(2)
 
     df = df.rename(columns={
         "stock"          : "Symbol",
@@ -602,12 +642,16 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["Chg vs Prev %"] = df["chg_vs_prev"].apply(lambda x: f"{x:+.2f}%")
     df["Vol Ratio"]     = df["vol_ratio"].apply(lambda x: f"{x:.2f}x")
     df["Score"]         = df["priority_score"]
+    df["Prev Day Move %"] = df["prev_day_move_pct"].apply(
+        lambda x: f"{x:+.2f}%" if pd.notna(x) else "-"
+    )
 
     display_cols = [
         "Symbol", "Prev Close", "Open", "LTP", "Volume",
         "Gap %", "Chg vs Prev %",
         "Vol Ratio", "vol_momentum", "momentum_detection", "Score",
         "vol_ratio", "intraday_pct", "priority_score",
+        "Prev Day Move %", "prev_day_move_pct",
     ]
 
     df = df[display_cols].rename(columns={
