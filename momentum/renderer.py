@@ -411,10 +411,22 @@ function tsToast(msg) {
   t.textContent = msg; t.classList.add('show');
   setTimeout(function() { t.classList.remove('show'); }, 1500);
 }
-function tsCopy(btn, sym) {
-  event.stopPropagation();
-  navigator.clipboard.writeText(sym);
-  tsToast('✅ ' + sym + ' copied!');
+function tsCopy(e, btn, sym) {
+  e.stopPropagation();
+  navigator.clipboard.writeText(sym).then(function() {
+    tsToast('✅ ' + sym + ' copied!');
+  }).catch(function() {
+    // Fallback for browsers/contexts where clipboard API is blocked
+    var ta = document.createElement('textarea');
+    ta.value = sym;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); tsToast('✅ ' + sym + ' copied!'); }
+    catch (err) { tsToast('❌ Copy failed'); }
+    document.body.removeChild(ta);
+  });
 }
 function tsToggle(sym) {
   var main = document.getElementById('tsm-' + sym);
@@ -582,7 +594,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             <div class="ts-symbol-cell">
               <div class="ts-expand-btn">+</div>
               <button class="ts-copy-btn"
-                onclick="tsCopy(this, '{symbol}')">
+                onclick="tsCopy(event, this, '{symbol}')">
                 <div class="ts-sym-name">{symbol}</div>
                 <div class="ts-sym-time">{signal_time[:5]}</div>
               </button>
