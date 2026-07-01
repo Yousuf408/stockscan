@@ -57,25 +57,33 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
     for stock in stock_names:
         ticker = f"{stock}.NS"
         if ticker not in close_data:
-            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A"}
+            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A", "below_ema20": False}
             continue
 
         series = close_data[ticker].dropna()
         if len(series) < 21:
-            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A"}
+            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A", "below_ema20": False}
             continue
 
         ema_series      = series.ewm(span=20, adjust=False).mean()
         yesterday_close = round(float(series.iloc[-2]), 2)
         ema20_yesterday = round(float(ema_series.iloc[-2]), 2)
 
-        gap_pct = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 1)
-        status  = f"✅ +{gap_pct}%" if gap_pct >= 0 else f"❌ {gap_pct}%"
+        gap_pct     = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 1)
+        below_ema20 = gap_pct < 0
+
+        if below_ema20:
+            status = f"❌ {gap_pct}%"
+        elif gap_pct > 7:
+            status = f"❌ +{gap_pct}%"
+        else:
+            status = f"✅ +{gap_pct}%"
 
         result[stock] = {
             "ema20": ema20_yesterday,
             "yesterday_close": yesterday_close,
             "status": status,
+            "below_ema20": below_ema20,
         }
 
     return result
@@ -328,7 +336,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["prev_day_move_pct"] = ((df["yesterday_close"] - df["day_before_close"]) / df["day_before_close"] * 100)
 
     df = df[
-        (df["vol_ratio"]    >= 1.5) &
+        (df["vol_ratio"]    >= 1.0) &
         (df["intraday_pct"] >= 1.0) &
         (df["live_ltp"]     >  df["live_open"]) &
         (df["live_ltp"]     >  df["yesterday_close"]) &
