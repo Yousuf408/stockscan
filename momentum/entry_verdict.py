@@ -4,7 +4,7 @@ entry_verdict.py
 AI Trade-Entry Verdict Engine for SmartMoney Momentum Scanner.
 
 Purpose: stop impulsive FOMO entries. Runs a 6-point Sr-Trader checklist
-the moment a stock appears in the momentum tab, then asks Claude to act
+the moment a stock appears in the momentum tab, then asks Gemini to act
 as a senior trader and give a direct BUY NOW / WAIT FOR PULLBACK / AVOID
 call with a short reason.
 
@@ -13,20 +13,22 @@ Plug into renderer.py:
     verdict = get_entry_verdict(stock_data)   # see schema below
     # then render verdict["verdict"] / verdict["reason"] as a badge
 
-Requires: pip install anthropic
-Env var:  ANTHROPIC_API_KEY  (add to Streamlit secrets)
+Requires: pip install google-generativeai
+Env var:  GEMINI_API_KEY  (add to Streamlit secrets — get one free at aistudio.google.com)
 """
 
 import os
 import time
 import threading
 from datetime import datetime
-from anthropic import Anthropic
+import google.generativeai as genai
 import yfinance as yf
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-MODEL = "claude-sonnet-5"
+MODEL = "gemini-2.5-flash"
+_model = genai.GenerativeModel(MODEL)
+
 
 # ---------------------------------------------------------------------
 # Required input schema (fill whatever you have — missing fields are
@@ -164,12 +166,11 @@ def get_entry_verdict(stock_data: dict) -> dict:
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
+        response = _model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 300, "temperature": 0.4},
         )
-        llm_text = response.content[0].text
+        llm_text = response.text
     except Exception as e:
         llm_text = f"VERDICT: ERROR\nCONFIDENCE: Low\nREASON: AI call failed ({e})"
 
