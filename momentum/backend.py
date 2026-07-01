@@ -328,7 +328,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["prev_day_move_pct"] = ((df["yesterday_close"] - df["day_before_close"]) / df["day_before_close"] * 100)
 
     df = df[
-        (df["vol_ratio"]    >= 1.0) &
+        (df["vol_ratio"]    >= 1.5) &
         (df["intraday_pct"] >= 1.0) &
         (df["live_ltp"]     >  df["live_open"]) &
         (df["live_ltp"]     >  df["yesterday_close"]) &
@@ -340,16 +340,14 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
         return pd.DataFrame(), data_source
 
     def vol_momentum(r):
-        if r >= 3.0: return "🔥 Very Strong"
-        if r >= 2.0: return "⚡ Strong"
-        if r >= 1.5: return "👀 Building"
+        if r >= 3.0: return "🔥 Explosive"
+        if r >= 2.0: return "🟢 Strong"
+        if r >= 1.5: return "🟡 Build"
         return ""
 
     def momentum_detection(v, i, g):
         if v >= 2.5 and i >= 1.5 and g <= 0.5: return "🚀 STRONG BUILDING"
         if v >= 2.0 and i >= 0.8:               return "📈 BUILDING"
-        if v >= 1.5 and 0 <= i <= 0.7:          return "➡️ STABLE"
-        if v >= 1.5 and i < 0:                  return "⚠️ COOLING"
         return "❌ WEAK"
 
     df["vol_momentum"]       = df["vol_ratio"].apply(vol_momentum)
