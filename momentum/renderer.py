@@ -77,9 +77,9 @@ def _move_color(val: float) -> str:
 
 
 def _vol_emoji(vm: str) -> str:
-    if "Very Strong" in vm or "🔥" in vm: return "🔥"
-    if "Strong"      in vm or "⚡" in vm: return "⚡"
-    if "Building"    in vm or "👀" in vm: return "👀"
+    if "Explosive" in vm or "🔥" in vm: return "🔥"
+    if "Strong"    in vm or "🟢" in vm: return "🟢"
+    if "Build"     in vm or "🟡" in vm: return "🟡"
     return ""
 
 
