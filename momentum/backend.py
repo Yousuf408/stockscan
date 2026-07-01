@@ -69,7 +69,8 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
         yesterday_close = round(float(series.iloc[-2]), 2)
         ema20_yesterday = round(float(ema_series.iloc[-2]), 2)
 
-        status = "✅ Above" if yesterday_close >= ema20_yesterday else "❌ Below"
+        gap_pct = round(((yesterday_close - ema20_yesterday) / ema20_yesterday) * 100, 1)
+        status  = f"✅ +{gap_pct}%" if gap_pct >= 0 else f"❌ {gap_pct}%"
 
         result[stock] = {
             "ema20": ema20_yesterday,
