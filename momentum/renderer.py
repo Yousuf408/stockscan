@@ -287,6 +287,36 @@ html, body {
   min-width: 24px; text-align: center;
 }
 .ts-sep { width: 1px; height: 18px; background: #e2e8f0; }
+.ts-toggle-switch {
+  position: relative; display: inline-block;
+  width: 34px; height: 18px;
+}
+.ts-toggle-switch input {
+  opacity: 0; width: 0; height: 0;
+}
+.ts-toggle-slider {
+  position: absolute; cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #e2e8f0;
+  border-radius: 18px;
+  transition: 0.2s;
+}
+.ts-toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 14px; width: 14px;
+  left: 2px; bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.ts-toggle-switch input:checked + .ts-toggle-slider {
+  background: #00a854;
+}
+.ts-toggle-switch input:checked + .ts-toggle-slider::before {
+  transform: translateX(16px);
+}
 select.ts-select {
   height: 32px;
   padding: 0 28px 0 10px;
@@ -487,19 +517,23 @@ function tsColHighlight(col) {
 function tsFilter() {
   var mom = document.getElementById('tsf-mom').value.toLowerCase();
   var ema = document.getElementById('tsf-ema').value;
+  var bodyOn = document.getElementById('tsf-body').checked;
   try {
     localStorage.setItem('ts_filter_mom', mom);
     localStorage.setItem('ts_filter_ema', ema);
+    localStorage.setItem('ts_filter_body', bodyOn ? '1' : '0');
   } catch (e) {}
   var rows = document.querySelectorAll('tbody tr.ts-row');
   var count = 0;
   rows.forEach(function(row) {
     var rmom = (row.dataset.mom || '').toLowerCase();
     var rema = (row.dataset.ema || '');
+    var rbody = parseFloat(row.dataset.body || '0');
     var show = true;
     if (mom && !rmom.includes(mom)) show = false;
     if (ema === 'pass' && !rema.includes('✅')) show = false;
     if (ema === 'fail' && !rema.includes('❌')) show = false;
+    if (bodyOn && rbody < 75) show = false;
     row.style.display = show ? '' : 'none';
     var exp = document.getElementById('tse-' + row.dataset.sym);
     if (exp) exp.style.display = 'none';
@@ -513,11 +547,14 @@ function tsRestoreState() {
   try {
     var savedMom = localStorage.getItem('ts_filter_mom') || '';
     var savedEma = localStorage.getItem('ts_filter_ema') || '';
-    if (savedMom || savedEma) {
+    var savedBody = localStorage.getItem('ts_filter_body') === '1';
+    if (savedMom || savedEma || savedBody) {
       var momEl = document.getElementById('tsf-mom');
       var emaEl = document.getElementById('tsf-ema');
+      var bodyEl = document.getElementById('tsf-body');
       if (momEl) momEl.value = savedMom;
       if (emaEl) emaEl.value = savedEma;
+      if (bodyEl) bodyEl.checked = savedBody;
       tsFilter();
     }
   } catch (e) {}
@@ -629,6 +666,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
         intraday_pct  = float(row.get("intraday_pct", 0) or 0)
         delivery_pct  = row.get("Delivery %", None)
+        body_ratio    = row.get("Body Ratio", None)
 
         move_since = 0.0
         if signal_price and float(signal_price) > 0:
@@ -670,6 +708,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             data-sym="{symbol}"
             data-mom="{momentum_str.lower()}"
             data-ema="{ema_status or ''}"
+            data-body="{body_ratio if body_ratio is not None else 0}"
             onclick="tsToggle('{symbol}')">
 
           <td>
@@ -774,6 +813,14 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
     <option value="pass">✅ EMA Pass</option>
     <option value="fail">❌ EMA Fail</option>
   </select>
+  <div class="ts-sep"></div>
+  <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;user-select:none">
+    <span class="ts-toggle-switch">
+      <input type="checkbox" id="tsf-body" onchange="tsFilter()">
+      <span class="ts-toggle-slider"></span>
+    </span>
+    Hide low body (&lt;75%)
+  </label>
 </div>
 
 <div class="ts-table-wrap">
