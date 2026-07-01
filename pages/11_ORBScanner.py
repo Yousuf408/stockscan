@@ -827,7 +827,7 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
         yest_high     = row.get("Yesterday High", 0)
         today_open    = row.get("Today Open", 0)
         prev_close    = row.get("Prev Close", 0)
-        gap_pct_raw   = row.get("Gap %", "0%")
+        gap_pct_raw   = str(row.get("Gap %", "0%"))
         vol_ratio_str = str(row.get("Vol Ratio", "0x"))
         ltp           = float(row.get("LTP", 0))
         signal_price  = row.get("Signal Price", None)
@@ -878,11 +878,6 @@ def render_orb_table(df: pd.DataFrame, window_status: str = "", prev_date: str =
 
         ema200_filter_val = "above" if (ema200_val is not None and float(today_open) > float(ema200_val)) else "below"
 
-        # CHANGE 1: New column order
-        # Symbol | Signal Time | EMA20 | Yesterday High | Today Open | Gap% |
-        # LTP (with %chg) | Vol Ratio | Vol Momentum |
-        # EMA9(5m) | EMA200(5m) | Signal Price | SL | Target |
-        # High Since Signal | Peak Move% | Volume
         rows_html += f"""
         <tr class="main-row {vol_cls}" id="orb-main-{symbol}"
             data-sym="{symbol}"
