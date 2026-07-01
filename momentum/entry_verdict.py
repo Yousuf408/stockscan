@@ -26,7 +26,7 @@ import yfinance as yf
 
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-2.5-flash-lite"
 _model = genai.GenerativeModel(MODEL)
 
 
@@ -166,10 +166,7 @@ def get_entry_verdict(stock_data: dict) -> dict:
     )
 
     try:
-        response = _model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 300, "temperature": 0.4},
-        )
+        response = _throttled_generate(prompt)
         llm_text = response.text
     except Exception as e:
         llm_text = f"VERDICT: ERROR\nCONFIDENCE: Low\nREASON: AI call failed ({e})"
@@ -233,6 +230,29 @@ _verdict_cache = {}
 _pending = set()
 _cache_lock = threading.Lock()
 CACHE_TTL_SECONDS = 180  # re-check a stock at most every 3 min (or when signal_price changes)
+
+# --- Gemini rate limiter -------------------------------------------------
+# Flash-Lite free tier allows ~30 RPM. Even so, if many stocks queue at once
+# each background thread would fire a request in the same second and still
+# trip a 429. This serializes all Gemini calls with a minimum gap between
+# them so we never burst past the limit, no matter how many stocks are
+# checked simultaneously.
+_rate_lock = threading.Lock()
+_last_call_ts = [0.0]
+MIN_CALL_INTERVAL = 2.5  # seconds between Gemini calls (~24 RPM, safely under 30 RPM cap)
+
+
+def _throttled_generate(prompt: str):
+    with _rate_lock:
+        elapsed = time.time() - _last_call_ts[0]
+        if elapsed < MIN_CALL_INTERVAL:
+            time.sleep(MIN_CALL_INTERVAL - elapsed)
+        response = _model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 300, "temperature": 0.4},
+        )
+        _last_call_ts[0] = time.time()
+        return response
 
 
 def _fetch_5m_emas(symbol: str) -> dict:
