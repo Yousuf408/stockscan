@@ -4,6 +4,18 @@ Clean white, spacious rows, bold symbol, muted time below, clear hierarchy.
 Volume column REMOVED — visible in expand dropdown instead.
 """
 
+from entry_verdict import queue_or_get_verdict, render_verdict_badge
+
+
+def _get_daily_ema20(row):
+    """Tries a few common column-name variants for the daily 20 EMA from your DB.
+    If your actual column name is different, add it to this tuple."""
+    for col in ("Daily EMA20", "Daily_EMA20", "EMA20_Daily", "daily_ema20", "DailyEMA20"):
+        val = row.get(col, None)
+        if val is not None:
+            return val
+    return None
+
 def _short_vol(vol: float) -> str:
     if vol >= 1_000_000:
         return f"{vol/1_000_000:.2f}M"
@@ -665,6 +677,32 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             .replace('%', '').replace('+', '') or 0
         )
 
+        # --- AI entry verdict (non-blocking: reads cache, queues background thread) ---
+        prev_day_move_val = float(
+            str(row.get('Prev Day Move %', '0')).replace('%', '').replace('+', '') or 0
+        )
+        raw_delivery = delivery_pct
+        try:
+            delivery_val = float(raw_delivery) if raw_delivery not in (None, "", "NA") else None
+        except (ValueError, TypeError):
+            delivery_val = None
+
+        stock_data_for_ai = {
+            "symbol": symbol,
+            "signal_price": float(signal_price) if signal_price else ltp,
+            "ltp": ltp,
+            "vol_ratio": vol_ratio_raw,
+            "prev_day_move_pct": prev_day_move_val,
+            "phase": momentum_str,
+            "phase_pct": intraday_pct,
+            "delivery_pct": delivery_val,
+            "daily_ema20": _get_daily_ema20(row),
+            # ema5m_9 / ema5m_20 / ema5m_200 are fetched from Yahoo Finance
+            # inside the background thread (entry_verdict._fetch_5m_emas) —
+            # not passed from here.
+        }
+        ai_verdict = queue_or_get_verdict(stock_data_for_ai)
+
         rows_html += f"""
         <tr class="ts-row {mom_cls}" id="tsm-{symbol}"
             data-sym="{symbol}"
@@ -704,9 +742,11 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 
           <td>{_delivery_cell(delivery_pct)}</td>
 
+          <td>{render_verdict_badge(ai_verdict)}</td>
+
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="8">
+          <td colspan="9">
             <div class="ts-expand-panel">
               <div class="ts-ec">
                 <div class="ts-ec-label">Open</div>
@@ -788,6 +828,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
       <th onclick="tsColHighlight(5)">Momentum</th>
       <th onclick="tsColHighlight(6)">EMA20 Status</th>
       <th onclick="tsColHighlight(7)">Delivery %</th>
+      <th onclick="tsColHighlight(8)">AI Verdict</th>
     </tr>
   </thead>
   <tbody>
