@@ -57,21 +57,24 @@ def fetch_ema20_for_stocks(stock_names: list) -> dict:
     for stock in stock_names:
         ticker = f"{stock}.NS"
         if ticker not in close_data:
-            result[stock] = {"ema20": None, "gap": None, "status": "⚠️ N/A"}
+            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A"}
             continue
 
         series = close_data[ticker].dropna()
         if len(series) < 21:
-            result[stock] = {"ema20": None, "gap": None, "status": "⚠️ N/A"}
+            result[stock] = {"ema20": None, "yesterday_close": None, "status": "⚠️ N/A"}
             continue
 
         ema_series      = series.ewm(span=20, adjust=False).mean()
         yesterday_close = round(float(series.iloc[-2]), 2)
         ema20_yesterday = round(float(ema_series.iloc[-2]), 2)
 
+        status = "✅ Above" if yesterday_close >= ema20_yesterday else "❌ Below"
+
         result[stock] = {
-            "ema20": ema20_yesterday, 
+            "ema20": ema20_yesterday,
             "yesterday_close": yesterday_close,
+            "status": status,
         }
 
     return result
