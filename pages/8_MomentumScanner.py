@@ -226,6 +226,11 @@ def scanner_table():
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
 
+    # ── HARD FILTER — stocks below yesterday's 20 EMA are dropped ──
+    # ── completely from the list (not just badged ❌). Stocks whose ──
+    # ── EMA status hasn't loaded yet ("⏳") are kept until resolved. ──
+    df = df[~df["EMA20 Status"].astype(str).str.startswith("❌")].reset_index(drop=True)
+
     # ── DELIVERY % — from cached NSE EOD data (yesterday's session) ──
     delivery_map = st.session_state.get("delivery_pct_map", {})
     df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
