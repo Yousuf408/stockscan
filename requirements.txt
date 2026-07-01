@@ -14,3 +14,4 @@ smartapi-python
 supabase
 scikit-learn>=1.2.0
 joblib>=1.2.0
+anthropic
