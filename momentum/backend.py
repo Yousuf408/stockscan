@@ -328,7 +328,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
     df["prev_day_move_pct"] = ((df["yesterday_close"] - df["day_before_close"]) / df["day_before_close"] * 100)
 
     df = df[
-        (df["vol_ratio"]    >= 1.5) &
+        (df["vol_ratio"]    >= 1.0) &
         (df["intraday_pct"] >= 1.0) &
         (df["live_ltp"]     >  df["live_open"]) &
         (df["live_ltp"]     >  df["yesterday_close"]) &
