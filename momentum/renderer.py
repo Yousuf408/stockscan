@@ -4,7 +4,7 @@ Clean white, spacious rows, bold symbol, muted time below, clear hierarchy.
 Volume column REMOVED — visible in expand dropdown instead.
 """
 
-from entry_verdict import queue_or_get_verdict, render_verdict_badge
+from momentum.entry_verdict import queue_or_get_verdict, render_verdict_badge
 
 
 def _get_daily_ema20(row):
