@@ -370,14 +370,18 @@ def _process_stock(stock: str, today_str: str, min_score: int, supabase) -> dict
 # SECTION 8 — MAIN SCANNER (parallel execution)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def run_swing_scan(min_score: int = STRONG_ZONE_SCORE) -> list:
+def run_swing_scan(min_score: int = STRONG_ZONE_SCORE, progress_callback=None) -> list:
+    """
+    progress_callback(done, total) — called after each stock completes.
+    """
     results   = []
     today_str = date.today().isoformat()
     supabase  = get_supabase()
 
     stock_names = [name for name, token, kind in STOCKS_WATCHLIST if kind != "index"]
+    total       = len(stock_names)
+    done        = 0
 
-    # Run 20 stocks in parallel — 20x faster than sequential
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {
             executor.submit(_process_stock, stock, today_str, min_score, supabase): stock
@@ -387,6 +391,9 @@ def run_swing_scan(min_score: int = STRONG_ZONE_SCORE) -> list:
             result = future.result()
             if result:
                 results.append(result)
+            done += 1
+            if progress_callback:
+                progress_callback(done, total)
 
     results.sort(key=lambda x: (0 if x["status"] == "TRIGGERED" else 1, -x["zone_score"]))
     return results
