@@ -31,6 +31,7 @@ from momentum.renderer import render_html_table
 
 from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
 from momentum.delivery import get_latest_available_delivery_pct
+from momentum.first_candle import fetch_body_ratio_for_stocks
 
 # ── Display cutoff — stocks whose FIRST signal was after this time ──
 # ── are excluded from the table (still saved to Supabase though)   ──
@@ -98,6 +99,22 @@ def get_ema20_status(df) -> dict:
         fetched = fetch_ema20_for_stocks(new_stocks)
         cache.update(fetched)
         st.session_state["ema20_cache"] = cache
+    return cache
+
+
+# ─────────────────────────────────────────────────────────────
+# BODY RATIO SESSION-STATE CACHE (first 5-min candle, 9:15-9:20)
+# ─────────────────────────────────────────────────────────────
+def get_body_ratio_cache(df) -> dict:
+    if "body_ratio_cache" not in st.session_state:
+        st.session_state["body_ratio_cache"] = {}
+    cache         = st.session_state["body_ratio_cache"]
+    result_stocks = df["Symbol"].tolist()
+    new_stocks    = [s for s in result_stocks if s not in cache]
+    if new_stocks:
+        fetched = fetch_body_ratio_for_stocks(new_stocks)
+        cache.update(fetched)
+        st.session_state["body_ratio_cache"] = cache
     return cache
 
 
@@ -225,6 +242,10 @@ def scanner_table():
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
+
+    # ── BODY RATIO — first 5-min candle (9:15-9:20), toggle-filter only ──
+    body_cache = get_body_ratio_cache(df)
+    df["Body Ratio"] = df["Symbol"].apply(lambda s: body_cache.get(s, None))
 
     # ── HARD FILTER — stocks below yesterday's 20 EMA are dropped ──
     # ── completely from the list (not just badged ❌). Stocks whose ──
