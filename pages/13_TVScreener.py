@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import yfinance as yf
+from datetime import datetime, timedelta
+import pandas_market_calendars as mcal
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -24,26 +26,67 @@ sidebar_brand("TVScreener")
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Remove default streamlit top padding */
 .block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
-
-/* Compact selectbox */
 div[data-testid="stSelectbox"] { margin-top: 0 !important; margin-bottom: 0 !important; }
-
-/* Compact button */
 div[data-testid="stButton"] button {
     padding: 4px 12px !important;
     font-size: 12px !important;
     height: 32px !important;
 }
-
-/* Hide streamlit header gap */
 div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# FETCH FUNCTION
+# LAST WORKING DAY
+# ─────────────────────────────────────────────────────────────
+def get_last_trading_day():
+    try:
+        nse = mcal.get_calendar('NSE')
+        today = datetime.now().date()
+        schedule = nse.schedule(start_date=today - timedelta(days=10), end_date=today - timedelta(days=1))
+        if not schedule.empty:
+            return schedule.index[-1].date()
+    except:
+        pass
+    # Fallback — simple weekday logic
+    d = datetime.now().date() - timedelta(days=1)
+    while d.weekday() >= 5:  # Saturday=5, Sunday=6
+        d -= timedelta(days=1)
+    return d
+
+# ─────────────────────────────────────────────────────────────
+# ATP CALCULATION — kal ka 5min data se
+# ─────────────────────────────────────────────────────────────
+def get_yesterday_atp(symbol):
+    try:
+        last_day = get_last_trading_day()
+        ticker = symbol + ".NS"
+        df = yf.download(
+            ticker,
+            start=last_day,
+            end=last_day + timedelta(days=1),
+            interval="5m",
+            progress=False,
+            auto_adjust=True
+        )
+        if df.empty:
+            return None
+        # Sirf market hours — 9:15 to 15:30
+        df.index = pd.to_datetime(df.index)
+        df = df.between_time("09:15", "15:30")
+        if df.empty:
+            return None
+        # ATP = sum(close * volume) / sum(volume)
+        close = df['Close'].values.flatten()
+        volume = df['Volume'].values.flatten()
+        atp = (close * volume).sum() / volume.sum()
+        return round(float(atp), 2)
+    except:
+        return None
+
+# ─────────────────────────────────────────────────────────────
+# TV SCREENER FETCH
 # ─────────────────────────────────────────────────────────────
 def fetch_tv_data():
     try:
@@ -71,7 +114,7 @@ def fetch_tv_data():
         return 0, pd.DataFrame(), str(e)
 
 # ─────────────────────────────────────────────────────────────
-# TOP BAR — Title + Filters + Refresh in one row
+# FETCH TV DATA
 # ─────────────────────────────────────────────────────────────
 with st.spinner("Fetching from TradingView..."):
     count, df, error = fetch_tv_data()
@@ -85,13 +128,18 @@ if df.empty:
     st.stop()
 
 # ─────────────────────────────────────────────────────────────
-# CLEAN & FORMAT DATA
+# CLEAN DATA
 # ─────────────────────────────────────────────────────────────
 df = df.copy()
-df = df.drop(columns=['ticker', 'high', 'High.1M'], errors='ignore')
+df = df.drop(columns=['high', 'High.1M'], errors='ignore')
 df['change']           = df['change'].round(2)
 df['relative_volume']  = df['relative_volume'].round(2)
 df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
+
+# Symbol clean — "NSE:SONACOMS" → "SONACOMS"
+df['name'] = df['ticker'].str.replace('NSE:', '', regex=False)
+df = df.drop(columns=['ticker'], errors='ignore')
+
 df = df.rename(columns={
     'name'            : 'Symbol',
     'close'           : 'Price ₹',
@@ -103,12 +151,30 @@ df = df.rename(columns={
 })
 
 # ─────────────────────────────────────────────────────────────
-# HEADER ROW — all controls in one line
+# ATP FETCH — har stock ke liye
 # ─────────────────────────────────────────────────────────────
-sectors = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
+with st.spinner(f"Calculating yesterday's ATP for {len(df)} stocks..."):
+    signals = []
+    for _, row in df.iterrows():
+        symbol  = row['Symbol']
+        price   = row['Price ₹']
+        atp     = get_yesterday_atp(symbol)
+        if atp is None:
+            signals.append("⚪ N/A")
+        elif price > atp:
+            signals.append(f"🟢 ₹{atp:,.2f}")
+        else:
+            signals.append(f"🔴 ₹{atp:,.2f}")
+    df['Signal'] = signals
+
+# ─────────────────────────────────────────────────────────────
+# HEADER ROW
+# ─────────────────────────────────────────────────────────────
+sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
 top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
 max_chg    = df['Chg %'].max()
 now_time   = datetime.now().strftime('%H:%M:%S')
+last_day   = get_last_trading_day()
 
 c1, c2, c3 = st.columns([3, 5, 2])
 
@@ -131,6 +197,10 @@ with c1:
             <div style="font-size:10px; color:#6b7280; font-weight:600;">UPDATED</div>
             <div style="font-size:14px; font-weight:700; color:#ca8a04; line-height:1.2;">{now_time}</div>
         </div>
+        <div style="background:#fdf4ff; border:1px solid #e9d5ff; border-radius:6px; padding:5px 12px; text-align:center;">
+            <div style="font-size:10px; color:#6b7280; font-weight:600;">ATP DATE</div>
+            <div style="font-size:13px; font-weight:700; color:#7c3aed; line-height:1.2;">{last_day.strftime('%d %b')}</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -142,13 +212,13 @@ with c3:
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────
-# FILTER
+# SECTOR FILTER
 # ─────────────────────────────────────────────────────────────
 if selected_sector != 'All':
     df = df[df['Sector'] == selected_sector]
 
 # ─────────────────────────────────────────────────────────────
-# TABLE
+# TABLE STYLING
 # ─────────────────────────────────────────────────────────────
 def color_chg(val):
     if val > 0:   return 'color: #16a34a; font-weight: 600;'
@@ -156,7 +226,7 @@ def color_chg(val):
     return ''
 
 def color_relvol(val):
-    if val >= 3:   return 'background-color: #fef9c3; font-weight: 600;'
+    if val >= 3:     return 'background-color: #fef9c3; font-weight: 600;'
     elif val >= 1.5: return 'background-color: #dcfce7;'
     return ''
 
@@ -180,6 +250,6 @@ st.dataframe(styled_df, use_container_width=True, height=620, hide_index=True)
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="margin-top:6px; font-size:10px; color:#9ca3af; text-align:center;">
-    TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Sorted by Chg% ↓
+    TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Sorted by Chg% ↓ · ATP = Yesterday's Weighted Avg Price
 </div>
 """, unsafe_allow_html=True)
