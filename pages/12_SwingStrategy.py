@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 from datetime import datetime, timezone, timedelta
 
-from swing_strategy.backend  import run_swing_scan, fetch_saved_signals, update_signal_status, STRONG_ZONE_SCORE, MEDIUM_ZONE_SCORE
+from swing_strategy.backend  import run_swing_scan, fetch_saved_signals, update_signal_status
 from swing_strategy.renderer import render_swing_cards
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ with col1:
 with col2:
     min_score = st.selectbox(
         "Min Zone Score",
-        options  = [5, 6, 7, 8, 9],
-        index    = 2,   # default = 7
+        options  = [3, 4, 5, 6, 7, 8, 9],
+        index    = 2,   # default = 5
         label_visibility = "collapsed"
     )
 
@@ -73,25 +73,30 @@ tab1, tab2 = st.tabs(["📡 Live Scan", "📋 Saved Signals"])
 
 with tab1:
     if run_scan:
-        with st.spinner("🔍 Scanning all stocks for consolidation zones + breakouts..."):
+        with st.spinner("🔍 Scanning all stocks for consolidation zones..."):
             results = run_swing_scan(min_score=min_score)
-            st.session_state["swing_results"] = results
+            st.session_state["swing_results"]   = results
             st.session_state["swing_scan_time"] = datetime.now(IST).strftime("%H:%M:%S")
+            st.session_state["swing_min_score"] = min_score
 
     if "swing_results" in st.session_state:
         results   = st.session_state["swing_results"]
         scan_time = st.session_state.get("swing_scan_time", "—")
+        used_score = st.session_state.get("swing_min_score", min_score)
 
         triggered = [r for r in results if r["status"] == "TRIGGERED"]
         watching  = [r for r in results if r["status"] == "WATCHING"]
 
-        st.caption(f"Last scan: {scan_time} | Total: {len(results)} | 🟢 Triggered: {len(triggered)} | 🔵 Watching: {len(watching)}")
+        st.caption(
+            f"Last scan: {scan_time} | Min Score used: {used_score} | "
+            f"Total: {len(results)} | 🟢 Triggered: {len(triggered)} | 🔵 Watching: {len(watching)}"
+        )
 
         if triggered:
             st.markdown("### 🚀 Breakout Triggered")
             st.components.v1.html(
                 render_swing_cards(triggered),
-                height = min(800, 200 + len(triggered) * 180),
+                height    = min(800, 200 + len(triggered) * 200),
                 scrolling = True
             )
 
@@ -99,22 +104,22 @@ with tab1:
             st.markdown("### 👀 Watching — Zone Ready, Awaiting Breakout")
             st.components.v1.html(
                 render_swing_cards(watching),
-                height = min(1000, 200 + len(watching) * 180),
+                height    = min(1200, 200 + len(watching) * 200),
                 scrolling = True
             )
 
         if not results:
-            st.info("No stocks matched the criteria. Try lowering the Min Zone Score.")
+            st.info(f"No stocks matched criteria with Min Zone Score = {used_score}. Try lowering the score.")
 
     else:
         st.info("👆 'Run Scanner' button dabao — sab stocks scan hoga consolidation zones ke liye.")
         st.markdown("""
         **How it works:**
-        - ✅ 5-15 days consolidation detect karta hai
+        - ✅ Last 5 trading days ka consolidation detect karta hai
         - ✅ Zone score 0-10 calculate karta hai
-        - ✅ 1H timeframe pe breakout check karta hai
         - ✅ Entry, Stoploss, Target auto-calculate
         - ✅ Signals Supabase mein save hote hain
+        - 🔜 1H breakout detection — coming soon
         """)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -127,8 +132,8 @@ with tab2:
     with col_a:
         days_back = st.selectbox(
             "Show signals from last:",
-            options = [1, 3, 7, 14],
-            index   = 2,
+            options     = [1, 3, 7, 14],
+            index       = 2,
             format_func = lambda x: f"{x} days"
         )
 
@@ -139,7 +144,6 @@ with tab2:
     saved = fetch_saved_signals(days_back=days_back)
 
     if saved:
-        # Status filter
         status_filter = st.radio(
             "Filter by status:",
             options    = ["All", "TRIGGERED", "WATCHING", "EXITED"],
@@ -151,22 +155,9 @@ with tab2:
 
         st.caption(f"Showing {len(saved)} signals")
 
-        # Update status buttons
-        if saved:
-            st.markdown("**Quick Status Update:**")
-            cols = st.columns(len(saved[:5]))  # max 5 at a time
-            for idx, sig in enumerate(saved[:5]):
-                with cols[idx]:
-                    stock  = sig["stock"]
-                    s_date = sig["signal_date"]
-                    st.caption(stock)
-                    if st.button("✅ Exit", key=f"exit_{stock}_{s_date}"):
-                        update_signal_status(stock, s_date, "EXITED")
-                        st.rerun()
-
         st.components.v1.html(
             render_swing_cards(saved),
-            height    = min(1200, 200 + len(saved) * 180),
+            height    = min(1200, 200 + len(saved) * 200),
             scrolling = True
         )
     else:
