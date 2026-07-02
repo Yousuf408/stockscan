@@ -348,7 +348,7 @@ def sidebar_brand(current_page: str = ""):
   {nav("/BreakoutScanner", "ti-chart-bar", "Breakout 4H")}
   {nav("/AIScanner", "ti-brain", "AI Scanner")}
   {nav("/SwingStrategy", "ti-trending-up", "Swing Strategy")}
-  {nav("/TV Screener", "ti-trending-up", "TV Screener")}
+  {nav("/TVScreener", "ti-device-tv", "TV Screener")}
 
 
   <div class="ts-nav-divider"></div>
