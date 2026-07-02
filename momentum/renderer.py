@@ -517,23 +517,19 @@ function tsColHighlight(col) {
 function tsFilter() {
   var mom = document.getElementById('tsf-mom').value.toLowerCase();
   var ema = document.getElementById('tsf-ema').value;
-  var bodyOn = document.getElementById('tsf-body').checked;
   try {
     localStorage.setItem('ts_filter_mom', mom);
     localStorage.setItem('ts_filter_ema', ema);
-    localStorage.setItem('ts_filter_body', bodyOn ? '1' : '0');
   } catch (e) {}
   var rows = document.querySelectorAll('tbody tr.ts-row');
   var count = 0;
   rows.forEach(function(row) {
     var rmom = (row.dataset.mom || '').toLowerCase();
     var rema = (row.dataset.ema || '');
-    var rbody = parseFloat(row.dataset.body || '0');
     var show = true;
     if (mom && !rmom.includes(mom)) show = false;
     if (ema === 'pass' && !rema.includes('✅')) show = false;
     if (ema === 'fail' && !rema.includes('❌')) show = false;
-    if (bodyOn && rbody < 75) show = false;
     row.style.display = show ? '' : 'none';
     var exp = document.getElementById('tse-' + row.dataset.sym);
     if (exp) exp.style.display = 'none';
@@ -547,14 +543,11 @@ function tsRestoreState() {
   try {
     var savedMom = localStorage.getItem('ts_filter_mom') || '';
     var savedEma = localStorage.getItem('ts_filter_ema') || '';
-    var savedBody = localStorage.getItem('ts_filter_body') === '1';
-    if (savedMom || savedEma || savedBody) {
+    if (savedMom || savedEma) {
       var momEl = document.getElementById('tsf-mom');
       var emaEl = document.getElementById('tsf-ema');
-      var bodyEl = document.getElementById('tsf-body');
       if (momEl) momEl.value = savedMom;
       if (emaEl) emaEl.value = savedEma;
-      if (bodyEl) bodyEl.checked = savedBody;
       tsFilter();
     }
   } catch (e) {}
@@ -583,6 +576,7 @@ try {
 
 window.addEventListener('load', tsRestoreState);
 setTimeout(tsRestoreState, 200);
+tsRestoreState();
 
 function tsAutoResize() {
   var height = document.documentElement.scrollHeight;
@@ -666,7 +660,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
         intraday_pct  = float(row.get("intraday_pct", 0) or 0)
         delivery_pct  = row.get("Delivery %", None)
-        body_ratio    = row.get("Body Ratio", None)
 
         move_since = 0.0
         if signal_price and float(signal_price) > 0:
@@ -708,7 +701,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
             data-sym="{symbol}"
             data-mom="{momentum_str.lower()}"
             data-ema="{ema_status or ''}"
-            data-body="{body_ratio if body_ratio is not None else 0}"
             onclick="tsToggle('{symbol}')">
 
           <td>
@@ -813,14 +805,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
     <option value="pass">✅ EMA Pass</option>
     <option value="fail">❌ EMA Fail</option>
   </select>
-  <div class="ts-sep"></div>
-  <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;user-select:none">
-    <span class="ts-toggle-switch">
-      <input type="checkbox" id="tsf-body" onchange="tsFilter()">
-      <span class="ts-toggle-slider"></span>
-    </span>
-    Hide low body (&lt;75%)
-  </label>
 </div>
 
 <div class="ts-table-wrap">
