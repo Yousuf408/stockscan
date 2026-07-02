@@ -237,9 +237,9 @@ function tsCopy(e, btn, sym) {
     var nameEl = btn.querySelector('.ts-sym-name');
     if (!nameEl) return;
     var original = nameEl.textContent;
-    nameEl.textContent = '\u2713 ' + sym;
+    nameEl.textContent = '✓ ' + sym;
     nameEl.style.color = '#00a854';
-    tsToast('\u2705 ' + sym + ' copied!');
+    tsToast('✅ ' + sym + ' copied!');
     setTimeout(function() { nameEl.textContent = original; nameEl.style.color = ''; }, 1500);
   }
   navigator.clipboard.writeText(sym).then(showCopied).catch(function() {
@@ -247,7 +247,7 @@ function tsCopy(e, btn, sym) {
     ta.value = sym; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); showCopied(); }
-    catch (err) { tsToast('\u274c Copy failed'); }
+    catch (err) { tsToast('❌ Copy failed'); }
     document.body.removeChild(ta);
   });
 }
@@ -259,7 +259,7 @@ function tsToggle(sym) {
   exp.style.display = open ? 'none' : 'table-row';
   main.classList.toggle('expanded', !open);
   var btn = main.querySelector('.ts-expand-btn');
-  if (btn) btn.textContent = open ? '+' : '\u2212';
+  if (btn) btn.textContent = open ? '+' : '−';
 }
 var tsActiveCol = -1;
 function tsColHighlight(col) {
@@ -284,8 +284,8 @@ function tsFilter() {
     var rema = (row.dataset.ema || '');
     var show = true;
     if (mom && !rmom.includes(mom)) show = false;
-    if (ema === 'pass' && !rema.includes('\u2705')) show = false;
-    if (ema === 'fail' && !rema.includes('\u274c')) show = false;
+    if (ema === 'pass' && !rema.includes('✅')) show = false;
+    if (ema === 'fail' && !rema.includes('❌')) show = false;
     row.style.display = show ? '' : 'none';
     var exp = document.getElementById('tse-' + row.dataset.sym);
     if (exp) exp.style.display = 'none';
@@ -337,7 +337,7 @@ document.addEventListener('keydown', function(e) {
 });
 async function takeScreenshot() {
   var toast = document.getElementById('ts-toast');
-  toast.innerHTML = '\ud83d\udcf8 Capturing...'; toast.classList.add('show');
+  toast.innerHTML = '📸 Capturing...'; toast.classList.add('show');
   try {
     var blobPromise = new Promise(function(resolve) {
       html2canvas(document.body, {
@@ -346,11 +346,11 @@ async function takeScreenshot() {
       }).then(function(canvas) { canvas.toBlob(function(blob) { resolve(blob); }, 'image/png'); });
     });
     await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ]);
-    toast.innerHTML = '\u2705 Screenshot copied!';
-    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '\u2705 Copied!'; }, 2000);
+    toast.innerHTML = '✅ Screenshot copied!';
+    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '✅ Copied!'; }, 2000);
   } catch(e) {
-    toast.innerHTML = '\u274c ' + (e.message || 'Failed');
-    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '\u2705 Copied!'; }, 2500);
+    toast.innerHTML = '❌ ' + (e.message || 'Failed');
+    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '✅ Copied!'; }, 2500);
   }
 }
 </script>
