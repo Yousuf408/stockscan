@@ -347,6 +347,7 @@ def sidebar_brand(current_page: str = ""):
   {nav("/ORBScanner", "ti-circle-dot", "ORB Scanner")}
   {nav("/BreakoutScanner", "ti-chart-bar", "Breakout 4H")}
   {nav("/AIScanner", "ti-brain", "AI Scanner")}
+  {nav("/SwingStrategy", "ti-trending-up", "Swing Strategy")}
 
   <div class="ts-nav-divider"></div>
   <div class="ts-nav-section">Tools</div>
