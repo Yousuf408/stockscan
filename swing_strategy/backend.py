@@ -23,8 +23,8 @@ MAX_DAILY_RANGE = 3.0
 MIN_ZONE_WIDTH  = 1.5
 MAX_ZONE_WIDTH  = 4.0
 
-STRONG_ZONE_SCORE = 7
-MEDIUM_ZONE_SCORE = 5
+STRONG_ZONE_SCORE = 5
+MEDIUM_ZONE_SCORE = 3
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SUPABASE CLIENT
