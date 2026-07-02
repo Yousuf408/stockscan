@@ -80,6 +80,7 @@ def _vol_emoji(vm: str) -> str:
     if "Explosive" in vm or "🔥" in vm: return "🔥"
     if "Strong"    in vm or "🟢" in vm: return "🟢"
     if "Build"     in vm or "🟡" in vm: return "🟡"
+    if "Emerging"  in vm or "🔵" in vm: return "🔵"
     return ""
 
 
