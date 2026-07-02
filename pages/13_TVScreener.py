@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
-import pandas_market_calendars as mcal
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -41,17 +40,8 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 # LAST WORKING DAY
 # ─────────────────────────────────────────────────────────────
 def get_last_trading_day():
-    try:
-        nse = mcal.get_calendar('NSE')
-        today = datetime.now().date()
-        schedule = nse.schedule(start_date=today - timedelta(days=10), end_date=today - timedelta(days=1))
-        if not schedule.empty:
-            return schedule.index[-1].date()
-    except:
-        pass
-    # Fallback — simple weekday logic
     d = datetime.now().date() - timedelta(days=1)
-    while d.weekday() >= 5:  # Saturday=5, Sunday=6
+    while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
 
