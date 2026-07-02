@@ -1,72 +1,65 @@
 """
-momentum/renderer.py — Redesigned to match TradeSentry Image 1 style
-Clean white, spacious rows, bold symbol, muted time below, clear hierarchy.
-Volume column REMOVED — visible in expand dropdown instead.
+momentum/renderer.py — Compressed version. Same logic/output as original, fewer lines.
+Clean white TradeSentry style. Volume column in expand dropdown.
 """
 
+_GREY = '<span style="color:#94a3b8;font-size:13px">{}</span>'
+
+
 def _short_vol(vol: float) -> str:
-    if vol >= 1_000_000:
-        return f"{vol/1_000_000:.2f}M"
-    if vol >= 1_000:
-        return f"{vol/1_000:.1f}K"
+    if vol >= 1_000_000: return f"{vol/1_000_000:.2f}M"
+    if vol >= 1_000:     return f"{vol/1_000:.1f}K"
     return str(int(vol))
 
 
 def _ema_cell(status) -> str:
-    if status is None or status == "⏳":
-        return '<span style="color:#94a3b8;font-size:13px">⏳</span>'
+    if status is None or status == "⏳": return _GREY.format("⏳")
     s = str(status)
-    if s.startswith("✅"):
-        return f'<span style="color:#16a34a;font-weight:600;font-size:13px">{s}</span>'
-    if "Below" in s:
-        return f'<span style="color:#dc2626;font-weight:600;font-size:13px">{s}</span>'
-    if s.startswith("❌"):
-        return f'<span style="color:#ea580c;font-weight:600;font-size:13px">{s}</span>'
-    return f'<span style="color:#94a3b8;font-size:13px">{s}</span>'
+    color = ("#16a34a" if s.startswith("✅") else "#dc2626" if "Below" in s
+             else "#ea580c" if s.startswith("❌") else None)
+    if color: return f'<span style="color:{color};font-weight:600;font-size:13px">{s}</span>'
+    return _GREY.format(s)
 
 
 def _ema9_cell(status: str, ema9_value) -> str:
-    if not status or status == "⏳":
-        return '<span style="color:#94a3b8;font-size:13px">⏳</span>'
+    if not status or status == "⏳": return _GREY.format("⏳")
     s = str(status)
-    if s.startswith("✅"):   color = "#16a34a"
-    elif s.startswith("⚠️"): color = "#d97706"
-    elif s.startswith("❌"): color = "#dc2626"
-    elif s.startswith("📉"): color = "#7c3aed"
-    else:                    color = "#94a3b8"
+    color = {"✅": "#16a34a", "⚠": "#d97706", "❌": "#dc2626", "📉": "#7c3aed"}.get(s[:1], "#94a3b8")
+    if s.startswith("⚠️"): color = "#d97706"
     val_html = ""
     if ema9_value is not None:
-        try:
-            val_html = f'<div style="font-size:14px;font-weight:700;color:#1e3a5f">₹{float(ema9_value):,.2f}</div>'
-        except Exception:
-            pass
-    pct_html = f'<div style="color:{color};font-weight:600;font-size:12px;margin-top:2px">{s}</div>'
-    return f'{val_html}{pct_html}'
+        try: val_html = f'<div style="font-size:14px;font-weight:700;color:#1e3a5f">₹{float(ema9_value):,.2f}</div>'
+        except Exception: pass
+    return f'{val_html}<div style="color:{color};font-weight:600;font-size:12px;margin-top:2px">{s}</div>'
 
+
+_PHASES = {  # keyword: (color, bg, border, icon)
+    "BUILDING": ("#15803d", "#f0fdf4", "#bbf7d0", "🚀"),
+    "PULLBACK": ("#b45309", "#fffbeb", "#fde68a", "⚠️"),
+    "REVERSAL": ("#be123c", "#fff1f2", "#fecdd3", "🔴"),
+}
 
 def _phase_cell(phase: str) -> str:
     if not phase or phase in ("⏳ Forming", "⏳"):
         return '<span style="color:#94a3b8;font-size:12px">⏳ Forming</span>'
     s = str(phase)
-    if   "BUILDING"  in s: keyword, color, bg, border, icon = "BUILDING",  "#15803d", "#f0fdf4", "#bbf7d0", "🚀"
-    elif "PULLBACK"  in s: keyword, color, bg, border, icon = "PULLBACK",  "#b45309", "#fffbeb", "#fde68a", "⚠️"
-    elif "REVERSAL"  in s: keyword, color, bg, border, icon = "REVERSAL",  "#be123c", "#fff1f2", "#fecdd3", "🔴"
-    else:                  keyword, color, bg, border, icon = s,            "#64748b", "#f1f5f9", "#e2e8f0", ""
-    return (
-        f'<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;'
-        f'border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;'
-        f'background:{bg};color:{color};border:1px solid {border}">'
-        f'{icon} {keyword}</span>'
-    )
+    for kw, (color, bg, border, icon) in _PHASES.items():
+        if kw in s:
+            keyword = kw; break
+    else:
+        keyword, (color, bg, border, icon) = s, ("#64748b", "#f1f5f9", "#e2e8f0", "")
+    return (f'<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;'
+            f'border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;'
+            f'background:{bg};color:{color};border:1px solid {border}">{icon} {keyword}</span>')
 
 
 def _vol_trend_cell(vol_trend: str) -> str:
-    if not vol_trend:
-        return '<span style="color:#94a3b8;font-size:13px">→ Stable</span>'
+    if not vol_trend: return _GREY.format("→ Stable")
     s = str(vol_trend)
-    if s.startswith("↑"): return f'<span style="color:#16a34a;font-weight:600;font-size:13px">{s}</span>'
-    if s.startswith("↓"): return f'<span style="color:#dc2626;font-weight:600;font-size:13px">{s}</span>'
-    return f'<span style="color:#94a3b8;font-size:13px">{s}</span>'
+    if s[:1] in ("↑", "↓"):
+        color = "#16a34a" if s.startswith("↑") else "#dc2626"
+        return f'<span style="color:{color};font-weight:600;font-size:13px">{s}</span>'
+    return _GREY.format(s)
 
 
 def _move_color(val: float) -> str:
@@ -77,386 +70,158 @@ def _move_color(val: float) -> str:
 
 
 def _vol_emoji(vm: str) -> str:
-    if "Explosive" in vm or "🔥" in vm: return "🔥"
-    if "Strong"    in vm or "🟢" in vm: return "🟢"
-    if "Build"     in vm or "🟡" in vm: return "🟡"
-    if "Emerging"  in vm or "🔵" in vm: return "🔵"
+    for kw, e in (("Explosive", "🔥"), ("🔥", "🔥"), ("Strong", "🟢"), ("🟢", "🟢"),
+                  ("Build", "🟡"), ("🟡", "🟡"), ("Emerging", "🔵"), ("🔵", "🔵")):
+        if kw in vm: return e
     return ""
 
 
 def _delivery_cell(delivery_pct) -> str:
-    """
-    Renders Delivery % cell (yesterday's EOD value from NSE).
-    Color-coded:
-      >= 60%  -> strong green  (high conviction buying)
-      >= 40%  -> amber         (moderate)
-      <  40%  -> grey          (speculative / low delivery)
-    Shows '—' if data unavailable.
-    """
+    """Delivery % (yesterday EOD, NSE). >=60 green, >=40 amber, <40 grey, '—' if NA."""
     if delivery_pct is None or delivery_pct == "" or str(delivery_pct).upper() == "NA":
-        return '<span style="color:#94a3b8;font-size:13px">—</span>'
-    try:
-        val = float(delivery_pct)
-    except (ValueError, TypeError):
-        return '<span style="color:#94a3b8;font-size:13px">—</span>'
-
-    if val >= 60:
-        color = "#16a34a"
-    elif val >= 40:
-        color = "#d97706"
-    else:
-        color = "#94a3b8"
-
+        return _GREY.format("—")
+    try: val = float(delivery_pct)
+    except (ValueError, TypeError): return _GREY.format("—")
+    color = "#16a34a" if val >= 60 else "#d97706" if val >= 40 else "#94a3b8"
     return f'<span style="color:{color};font-weight:700;font-size:14px">{val:.1f}%</span>'
 
 
 def _mom_badge(mom: str, vol_ratio: float = 0.0, intraday_pct: float = 0.0) -> str:
-    def _clamp(v, lo, hi): return max(lo, min(hi, v))
-    if   "STRONG BUILDING" in mom: clean_mom = "STRONG BUILDING"
-    elif "BUILDING"        in mom: clean_mom = "BUILDING"
-    elif "STABLE"          in mom: clean_mom = "STABLE"
-    elif "COOLING"         in mom: clean_mom = "COOLING"
-    elif "WEAK"            in mom: clean_mom = "WEAK"
-    else:                          clean_mom = mom.strip()
+    c = lambda v: max(0.0, min(1.0, v))
+    clean = next((k for k in ("STRONG BUILDING", "BUILDING", "STABLE", "COOLING", "WEAK") if k in mom), mom.strip())
 
-    if "STRONG BUILDING" in mom:
-        vol_p   = _clamp((vol_ratio    - 2.5) / (5.0 - 2.5), 0, 1)
-        intra_p = _clamp((intraday_pct - 1.5) / (4.0 - 1.5), 0, 1)
-        fill_pct   = int(66 + (vol_p * 0.4 + intra_p * 0.6) * 34)
-        fill_color = "#7c3aed"
-        badge_color, badge_bg, badge_border = "#7c3aed", "#faf5ff", "#ddd6fe"
-        badge_icon = "🚀"
-        next_label = "✅ Top Level"
-
-    elif "BUILDING" in mom:
-        vol_p   = _clamp((vol_ratio    - 2.0) / (2.5 - 2.0), 0, 1)
-        intra_p = _clamp((intraday_pct - 0.8) / (1.5 - 0.8), 0, 1)
-        fill_pct   = int(33 + (vol_p * 0.4 + intra_p * 0.6) * 33)
-        fill_color = "#22c55e"
-        badge_color, badge_bg, badge_border = "#15803d", "#f0fdf4", "#bbf7d0"
-        badge_icon = "📈"
-        v_need     = max(0.0, round(2.5 - vol_ratio, 1))
-        i_need     = max(0.0, round(1.5 - intraday_pct, 1))
-        next_label = f"→ Strong: need {v_need}x vol · {i_need}% move"
-
-    elif "STABLE" in mom:
-        vol_p   = _clamp((vol_ratio    - 1.5) / (2.0 - 1.5), 0, 1)
-        intra_p = _clamp((intraday_pct - 0.0) / (0.8 - 0.0), 0, 1)
-        fill_pct   = int(20 + (vol_p * 0.4 + intra_p * 0.6) * 13)
-        fill_color = "#3b82f6"
-        badge_color, badge_bg, badge_border = "#1d4ed8", "#eff6ff", "#bfdbfe"
-        badge_icon = "➡️"
-        v_need     = max(0.0, round(2.0 - vol_ratio, 1))
-        i_need     = max(0.0, round(0.8 - intraday_pct, 1))
-        next_label = f"→ Building: need {v_need}x vol · {i_need}% move"
-
-    elif "COOLING" in mom:
-        fill_pct, fill_color = 15, "#f59e0b"
-        badge_color, badge_bg, badge_border = "#b45309", "#fffbeb", "#fde68a"
-        badge_icon = "⚠️"
-        next_label = "→ Building: price must turn +ve"
-
-    elif "WEAK" in mom:
-        fill_pct, fill_color = 8, "#ef4444"
-        badge_color, badge_bg, badge_border = "#be123c", "#fff1f2", "#fecdd3"
-        badge_icon = "❌"
-        v_need = max(0.0, round(2.0 - vol_ratio, 1))
-        next_label = f"→ Building: need {v_need}x more vol"
+    if clean == "STRONG BUILDING":
+        fp = int(66 + (c((vol_ratio - 2.5) / 2.5) * 0.4 + c((intraday_pct - 1.5) / 2.5) * 0.6) * 34)
+        fill, bc, bg, bd, icon = "#7c3aed", "#7c3aed", "#faf5ff", "#ddd6fe", "🚀"
+        nxt = "✅ Top Level"
+    elif clean == "BUILDING":
+        fp = int(33 + (c((vol_ratio - 2.0) / 0.5) * 0.4 + c((intraday_pct - 0.8) / 0.7) * 0.6) * 33)
+        fill, bc, bg, bd, icon = "#22c55e", "#15803d", "#f0fdf4", "#bbf7d0", "📈"
+        nxt = f"→ Strong: need {max(0.0, round(2.5 - vol_ratio, 1))}x vol · {max(0.0, round(1.5 - intraday_pct, 1))}% move"
+    elif clean == "STABLE":
+        fp = int(20 + (c((vol_ratio - 1.5) / 0.5) * 0.4 + c(intraday_pct / 0.8) * 0.6) * 13)
+        fill, bc, bg, bd, icon = "#3b82f6", "#1d4ed8", "#eff6ff", "#bfdbfe", "➡️"
+        nxt = f"→ Building: need {max(0.0, round(2.0 - vol_ratio, 1))}x vol · {max(0.0, round(0.8 - intraday_pct, 1))}% move"
+    elif clean == "COOLING":
+        fp, fill, bc, bg, bd, icon = 15, "#f59e0b", "#b45309", "#fffbeb", "#fde68a", "⚠️"
+        nxt = "→ Building: price must turn +ve"
+    elif clean == "WEAK":
+        fp, fill, bc, bg, bd, icon = 8, "#ef4444", "#be123c", "#fff1f2", "#fecdd3", "❌"
+        nxt = f"→ Building: need {max(0.0, round(2.0 - vol_ratio, 1))}x more vol"
     else:
-        return f'<span style="color:#64748b;font-size:13px">{clean_mom}</span>'
+        return f'<span style="color:#64748b;font-size:13px">{clean}</span>'
 
     return (
         f'<div style="display:flex;flex-direction:column;gap:5px;min-width:180px">'
-        f'  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
-        f'    <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;'
-        f'           border-radius:6px;font-size:13px;font-weight:700;'
-        f'           background:{badge_bg};color:{badge_color};border:1px solid {badge_border}">'
-        f'      {badge_icon} {clean_mom}</span>'
-        f'    <span style="font-size:12px;font-weight:700;color:{fill_color}">{fill_pct}%</span>'
-        f'  </div>'
-        f'  <div style="width:100%;height:4px;background:#e2e8f0;border-radius:4px;overflow:hidden">'
-        f'    <div style="height:100%;width:{fill_pct}%;background:{fill_color};border-radius:4px;transition:width 0.4s"></div>'
-        f'  </div>'
-        f'  <div style="font-size:11px;color:#94a3b8">{next_label}</div>'
-        f'</div>'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
+        f'<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;'
+        f'font-size:13px;font-weight:700;background:{bg};color:{bc};border:1px solid {bd}">{icon} {clean}</span>'
+        f'<span style="font-size:12px;font-weight:700;color:{fill}">{fp}%</span></div>'
+        f'<div style="width:100%;height:4px;background:#e2e8f0;border-radius:4px;overflow:hidden">'
+        f'<div style="height:100%;width:{fp}%;background:{fill};border-radius:4px;transition:width 0.4s"></div></div>'
+        f'<div style="font-size:11px;color:#94a3b8">{nxt}</div></div>'
     )
 
 
 def _prev_day_move_html(val_str: str) -> str:
-    if not val_str or val_str == "-":
-        return '<span style="color:#94a3b8;font-size:13px">—</span>'
-    try:
-        val = float(val_str.replace("%", "").replace("+", ""))
-    except (ValueError, AttributeError):
-        return '<span style="color:#94a3b8;font-size:13px">—</span>'
-    color = _move_color(val)
-    sign  = "+" if val >= 0 else ""
-    return f'<span style="color:{color};font-weight:600;font-size:13px">{sign}{val:.2f}%</span>'
+    if not val_str or val_str == "-": return _GREY.format("—")
+    try: val = float(val_str.replace("%", "").replace("+", ""))
+    except (ValueError, AttributeError): return _GREY.format("—")
+    sign = "+" if val >= 0 else ""
+    return f'<span style="color:{_move_color(val)};font-weight:600;font-size:13px">{sign}{val:.2f}%</span>'
 
 
 def _chg_html(val: float) -> str:
-    color = "#16a34a" if val >= 0 else "#dc2626"
-    sign  = "▲" if val >= 0 else "▼"
+    color, sign = ("#16a34a", "▲") if val >= 0 else ("#dc2626", "▼")
     return f'<span style="color:{color};font-weight:600;font-size:12px">{sign} {abs(val):.2f}%</span>'
 
 
 def _signal_price_html(signal_price_str: str, move_since: float) -> str:
-    if signal_price_str == "-":
-        return '<span style="color:#94a3b8;font-size:13px">—</span>'
+    if signal_price_str == "-": return _GREY.format("—")
     positive = move_since >= 0
-    w        = min(abs(move_since) * 10, 100)
-    fill     = "#22c55e" if positive else "#ef4444"
-    color    = _move_color(move_since)
-    sign     = "+" if positive else ""
+    w    = min(abs(move_since) * 10, 100)
+    fill = "#22c55e" if positive else "#ef4444"
+    sign = "+" if positive else ""
     return (
         f'<div style="display:flex;flex-direction:column;gap:4px;min-width:110px">'
-        f'  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
-        f'    <span style="font-size:14px;font-weight:700;color:#1e3a5f">{signal_price_str}</span>'
-        f'    <span style="font-size:12px;font-weight:700;color:{color}">{sign}{move_since:.2f}%</span>'
-        f'  </div>'
-        f'  <div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
-        f'    <div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div>'
-        f'  </div>'
-        f'</div>'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
+        f'<span style="font-size:14px;font-weight:700;color:#1e3a5f">{signal_price_str}</span>'
+        f'<span style="font-size:12px;font-weight:700;color:{_move_color(move_since)}">{sign}{move_since:.2f}%</span></div>'
+        f'<div style="width:100%;height:3px;background:#e2e8f0;border-radius:3px;overflow:hidden">'
+        f'<div style="height:100%;width:{w:.0f}%;background:{fill};border-radius:3px"></div></div></div>'
     )
 
 
 _STYLES = """
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  background: #f8faff !important;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-  color: #1a202c; font-size: 14px;
-}
-
-.ts-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 20px 12px;
-  background: #fff;
-  border-bottom: 1px solid #f0f2f5;
-}
-.ts-brand {
-  font-size: 20px; font-weight: 800; letter-spacing: -0.5px;
-  color: #0f172a;
-}
-.ts-brand span { color: #00a854; }
-.ts-status {
-  display: flex; align-items: center; gap: 16px;
-  font-size: 13px; color: #64748b;
-}
-.ts-live {
-  display: flex; align-items: center; gap: 6px;
-  background: #f0fdf4; color: #16a34a;
-  border: 1px solid #bbf7d0;
-  padding: 4px 10px; border-radius: 20px;
-  font-size: 12px; font-weight: 600;
-}
-.ts-live-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #16a34a;
-  animation: pulse 1.8s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(0.8); }
-}
-
-.ts-banner {
-  background: #f0fdf4;
-  border-bottom: 1px solid #d1fae5;
-  padding: 10px 20px;
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 13px; color: #166534;
-}
-.ts-banner b { font-weight: 700; color: #15803d; }
-
-.ts-filters {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 20px;
-  background: #fff;
-  border-bottom: 1px solid #f0f2f5;
-  flex-wrap: wrap;
-}
-.ts-filter-label {
-  font-size: 13px; font-weight: 700; color: #0f172a;
-}
-.ts-count {
-  background: #16a34a; color: #fff;
-  font-size: 11px; font-weight: 700;
-  padding: 2px 8px; border-radius: 10px;
-  min-width: 24px; text-align: center;
-}
-.ts-sep { width: 1px; height: 18px; background: #e2e8f0; }
-.ts-toggle-switch {
-  position: relative; display: inline-block;
-  width: 34px; height: 18px;
-}
-.ts-toggle-switch input {
-  opacity: 0; width: 0; height: 0;
-}
-.ts-toggle-slider {
-  position: absolute; cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: #e2e8f0;
-  border-radius: 18px;
-  transition: 0.2s;
-}
-.ts-toggle-slider::before {
-  content: "";
-  position: absolute;
-  height: 14px; width: 14px;
-  left: 2px; bottom: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: 0.2s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
-}
-.ts-toggle-switch input:checked + .ts-toggle-slider {
-  background: #00a854;
-}
-.ts-toggle-switch input:checked + .ts-toggle-slider::before {
-  transform: translateX(16px);
-}
-select.ts-select {
-  height: 32px;
-  padding: 0 28px 0 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 13px; color: #374151;
-  background: #fff;
-  cursor: pointer; outline: none; appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 8px center;
-  transition: border-color 0.15s;
-}
-select.ts-select:focus { border-color: #00a854; }
-.ts-meta { margin-left: auto; font-size: 12px; color: #94a3b8; }
-
-.ts-table-wrap { overflow-x: auto; }
-table {
-  width: 100%; border-collapse: collapse;
-  background: #fff;
-}
-
-thead tr { border-bottom: 2px solid #f0f2f5; }
-th {
-  padding: 10px 16px;
-  text-align: left;
-  font-size: 11px; font-weight: 700;
-  color: #0f172a;
-  letter-spacing: 0.6px; text-transform: uppercase;
-  white-space: nowrap;
-  user-select: none; cursor: pointer;
-  border-right: 1px solid #f8faff;
-}
-th:last-child { border-right: none; }
-th:hover { color: #374151; }
-th.sorted { color: #00a854; cursor: pointer; }
-td.active-col { background: #f0fdf4 !important; }
-.sort-arrow { margin-left: 3px; font-size: 10px; opacity: 0.5; }
-th.sorted .sort-arrow { opacity: 1; }
-
-tbody tr.ts-row {
-  border-bottom: 1px solid #f5f7fa;
-  cursor: pointer;
-  transition: background 0.12s;
-  border-left: 3px solid transparent;
-}
-tbody tr.ts-row:hover { background: #fafbfe; }
-tbody tr.ts-row.expanded { background: #f0fdf4; border-left-color: #00a854; }
-
-tbody tr.ts-row.mom-strong  { border-left-color: #7c3aed; }
-tbody tr.ts-row.mom-build   { border-left-color: #22c55e; }
-tbody tr.ts-row.mom-stable  { border-left-color: #3b82f6; }
-tbody tr.ts-row.mom-cooling { border-left-color: #f59e0b; }
-tbody tr.ts-row.mom-weak    { border-left-color: #ef4444; }
-
-td {
-  padding: 14px 16px;
-  vertical-align: middle;
-  font-size: 14px; color: #374151;
-  border-right: 1px solid #f8faff;
-  white-space: nowrap;
-}
-td:last-child { border-right: none; }
-
-.ts-symbol-cell { display: flex; align-items: center; gap: 10px; }
-.ts-expand-btn {
-  width: 20px; height: 20px; border-radius: 4px;
-  background: #f1f5f9; color: #64748b;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700; flex-shrink: 0;
-  transition: all 0.15s;
-  border: 1px solid #e2e8f0;
-}
-tr.expanded .ts-expand-btn { background: #00a854; color: #fff; border-color: #00a854; }
-.ts-sym-name {
-  font-size: 15px; font-weight: 800;
-  color: #0f172a; letter-spacing: 0.2px;
-}
-.ts-sym-time {
-  font-size: 13px; color: #374151;
-  margin-top: 3px; font-weight: 700;
-}
-.ts-copy-btn {
-  background: none; border: none; padding: 0; cursor: pointer;
-  color: inherit; font-weight: inherit; font-size: inherit;
-  font-family: inherit;
-}
-.ts-copy-btn:hover .ts-sym-name { color: #00a854; }
-
-.ts-ltp-val {
-  font-size: 15px; font-weight: 700; color: #0f172a;
-}
-
-.ts-vol-ratio {
-  font-size: 14px; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.ts-vol-ratio.vr-high   { color: #7c3aed; }
-.ts-vol-ratio.vr-med    { color: #d97706; }
-.ts-vol-ratio.vr-normal { color: #374151; }
-
-tr.ts-expand-row td {
-  padding: 0;
-  border-bottom: 2px solid #00a854;
-}
-.ts-expand-panel {
-  background: #f8fffe;
-  padding: 14px 20px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px;
-}
-.ts-ec {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px; padding: 10px 12px;
-}
-.ts-ec-label {
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.5px; color: #94a3b8;
-}
-.ts-ec-value {
-  font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 4px;
-}
-.ts-ec-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-
-.ts-toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: #0f172a; color: #fff;
-  padding: 8px 18px; border-radius: 8px;
-  font-size: 13px; font-weight: 600;
-  z-index: 9999; opacity: 0; pointer-events: none;
-  transition: opacity 0.2s;
-}
-.ts-toast.show { opacity: 1; }
-
-::-webkit-scrollbar { height: 5px; width: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #00a854; }
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html, body { background:#f8faff !important; font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif; color:#1a202c; font-size:14px; }
+.ts-header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px 12px; background:#fff; border-bottom:1px solid #f0f2f5; }
+.ts-brand { font-size:20px; font-weight:800; letter-spacing:-0.5px; color:#0f172a; }
+.ts-brand span { color:#00a854; }
+.ts-status { display:flex; align-items:center; gap:16px; font-size:13px; color:#64748b; }
+.ts-live { display:flex; align-items:center; gap:6px; background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+.ts-live-dot { width:7px; height:7px; border-radius:50%; background:#16a34a; animation:pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.8); } }
+.ts-banner { background:#f0fdf4; border-bottom:1px solid #d1fae5; padding:10px 20px; display:flex; align-items:center; justify-content:space-between; font-size:13px; color:#166534; }
+.ts-banner b { font-weight:700; color:#15803d; }
+.ts-filters { display:flex; align-items:center; gap:10px; padding:10px 20px; background:#fff; border-bottom:1px solid #f0f2f5; flex-wrap:wrap; }
+.ts-filter-label { font-size:13px; font-weight:700; color:#0f172a; }
+.ts-count { background:#16a34a; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; min-width:24px; text-align:center; }
+.ts-sep { width:1px; height:18px; background:#e2e8f0; }
+.ts-toggle-switch { position:relative; display:inline-block; width:34px; height:18px; }
+.ts-toggle-switch input { opacity:0; width:0; height:0; }
+.ts-toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#e2e8f0; border-radius:18px; transition:0.2s; }
+.ts-toggle-slider::before { content:""; position:absolute; height:14px; width:14px; left:2px; bottom:2px; background:#fff; border-radius:50%; transition:0.2s; box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+.ts-toggle-switch input:checked + .ts-toggle-slider { background:#00a854; }
+.ts-toggle-switch input:checked + .ts-toggle-slider::before { transform:translateX(16px); }
+select.ts-select { height:32px; padding:0 28px 0 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; color:#374151; background:#fff; cursor:pointer; outline:none; appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; transition:border-color 0.15s; }
+select.ts-select:focus { border-color:#00a854; }
+.ts-meta { margin-left:auto; font-size:12px; color:#94a3b8; }
+.ts-table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; background:#fff; }
+thead tr { border-bottom:2px solid #f0f2f5; }
+th { padding:10px 16px; text-align:left; font-size:11px; font-weight:700; color:#0f172a; letter-spacing:0.6px; text-transform:uppercase; white-space:nowrap; user-select:none; cursor:pointer; border-right:1px solid #f8faff; }
+th:last-child { border-right:none; }
+th:hover { color:#374151; }
+th.sorted { color:#00a854; cursor:pointer; }
+td.active-col { background:#f0fdf4 !important; }
+.sort-arrow { margin-left:3px; font-size:10px; opacity:0.5; }
+th.sorted .sort-arrow { opacity:1; }
+tbody tr.ts-row { border-bottom:1px solid #f5f7fa; cursor:pointer; transition:background 0.12s; border-left:3px solid transparent; }
+tbody tr.ts-row:hover { background:#fafbfe; }
+tbody tr.ts-row.expanded { background:#f0fdf4; border-left-color:#00a854; }
+tbody tr.ts-row.mom-strong  { border-left-color:#7c3aed; }
+tbody tr.ts-row.mom-build   { border-left-color:#22c55e; }
+tbody tr.ts-row.mom-stable  { border-left-color:#3b82f6; }
+tbody tr.ts-row.mom-cooling { border-left-color:#f59e0b; }
+tbody tr.ts-row.mom-weak    { border-left-color:#ef4444; }
+td { padding:14px 16px; vertical-align:middle; font-size:14px; color:#374151; border-right:1px solid #f8faff; white-space:nowrap; }
+td:last-child { border-right:none; }
+.ts-symbol-cell { display:flex; align-items:center; gap:10px; }
+.ts-expand-btn { width:20px; height:20px; border-radius:4px; background:#f1f5f9; color:#64748b; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0; transition:all 0.15s; border:1px solid #e2e8f0; }
+tr.expanded .ts-expand-btn { background:#00a854; color:#fff; border-color:#00a854; }
+.ts-sym-name { font-size:15px; font-weight:800; color:#0f172a; letter-spacing:0.2px; }
+.ts-sym-time { font-size:13px; color:#374151; margin-top:3px; font-weight:700; }
+.ts-copy-btn { background:none; border:none; padding:0; cursor:pointer; color:inherit; font-weight:inherit; font-size:inherit; font-family:inherit; }
+.ts-copy-btn:hover .ts-sym-name { color:#00a854; }
+.ts-ltp-val { font-size:15px; font-weight:700; color:#0f172a; }
+.ts-vol-ratio { font-size:14px; font-weight:700; display:inline-flex; align-items:center; gap:4px; }
+.ts-vol-ratio.vr-high   { color:#7c3aed; }
+.ts-vol-ratio.vr-med    { color:#d97706; }
+.ts-vol-ratio.vr-normal { color:#374151; }
+tr.ts-expand-row td { padding:0; border-bottom:2px solid #00a854; }
+.ts-expand-panel { background:#f8fffe; padding:14px 20px; display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px; }
+.ts-ec { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; }
+.ts-ec-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:#94a3b8; }
+.ts-ec-value { font-size:14px; font-weight:700; color:#0f172a; margin-top:4px; }
+.ts-ec-sub { font-size:11px; color:#94a3b8; margin-top:2px; }
+.ts-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#0f172a; color:#fff; padding:8px 18px; border-radius:8px; font-size:13px; font-weight:600; z-index:9999; opacity:0; pointer-events:none; transition:opacity 0.2s; }
+.ts-toast.show { opacity:1; }
+::-webkit-scrollbar { height:5px; width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:#00a854; }
 </style>
 
 <div id="ts-toast" class="ts-toast">✅ Copied!</div>
@@ -472,23 +237,17 @@ function tsCopy(e, btn, sym) {
     var nameEl = btn.querySelector('.ts-sym-name');
     if (!nameEl) return;
     var original = nameEl.textContent;
-    nameEl.textContent = '✓ ' + sym;
+    nameEl.textContent = '\u2713 ' + sym;
     nameEl.style.color = '#00a854';
-    tsToast('✅ ' + sym + ' copied!');
-    setTimeout(function() {
-      nameEl.textContent = original;
-      nameEl.style.color = '';
-    }, 1500);
+    tsToast('\u2705 ' + sym + ' copied!');
+    setTimeout(function() { nameEl.textContent = original; nameEl.style.color = ''; }, 1500);
   }
   navigator.clipboard.writeText(sym).then(showCopied).catch(function() {
     var ta = document.createElement('textarea');
-    ta.value = sym;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
+    ta.value = sym; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); showCopied(); }
-    catch (err) { tsToast('❌ Copy failed'); }
+    catch (err) { tsToast('\u274c Copy failed'); }
     document.body.removeChild(ta);
   });
 }
@@ -500,7 +259,7 @@ function tsToggle(sym) {
   exp.style.display = open ? 'none' : 'table-row';
   main.classList.toggle('expanded', !open);
   var btn = main.querySelector('.ts-expand-btn');
-  if (btn) btn.textContent = open ? '+' : '−';
+  if (btn) btn.textContent = open ? '+' : '\u2212';
 }
 var tsActiveCol = -1;
 function tsColHighlight(col) {
@@ -518,19 +277,15 @@ function tsColHighlight(col) {
 function tsFilter() {
   var mom = document.getElementById('tsf-mom').value.toLowerCase();
   var ema = document.getElementById('tsf-ema').value;
-  try {
-    localStorage.setItem('ts_filter_mom', mom);
-    localStorage.setItem('ts_filter_ema', ema);
-  } catch (e) {}
-  var rows = document.querySelectorAll('tbody tr.ts-row');
+  try { localStorage.setItem('ts_filter_mom', mom); localStorage.setItem('ts_filter_ema', ema); } catch (e) {}
   var count = 0;
-  rows.forEach(function(row) {
+  document.querySelectorAll('tbody tr.ts-row').forEach(function(row) {
     var rmom = (row.dataset.mom || '').toLowerCase();
     var rema = (row.dataset.ema || '');
     var show = true;
     if (mom && !rmom.includes(mom)) show = false;
-    if (ema === 'pass' && !rema.includes('✅')) show = false;
-    if (ema === 'fail' && !rema.includes('❌')) show = false;
+    if (ema === 'pass' && !rema.includes('\u2705')) show = false;
+    if (ema === 'fail' && !rema.includes('\u274c')) show = false;
     row.style.display = show ? '' : 'none';
     var exp = document.getElementById('tse-' + row.dataset.sym);
     if (exp) exp.style.display = 'none';
@@ -539,7 +294,6 @@ function tsFilter() {
   document.getElementById('ts-match-count').textContent = count;
   tsAutoResize();
 }
-
 function tsRestoreState() {
   try {
     var savedMom = localStorage.getItem('ts_filter_mom') || '';
@@ -556,92 +310,59 @@ function tsRestoreState() {
     var savedScroll = sessionStorage.getItem('ts_scroll_y');
     if (savedScroll !== null) {
       window.scrollTo(0, parseInt(savedScroll, 10));
-      if (window.parent) {
-        window.parent.scrollTo(0, parseInt(savedScroll, 10));
-      }
+      if (window.parent) { window.parent.scrollTo(0, parseInt(savedScroll, 10)); }
     }
   } catch (e) {}
 }
-
 function tsSaveScroll() {
-  try {
-    sessionStorage.setItem('ts_scroll_y', window.scrollY || window.pageYOffset || 0);
-  } catch (e) {}
+  try { sessionStorage.setItem('ts_scroll_y', window.scrollY || window.pageYOffset || 0); } catch (e) {}
 }
 window.addEventListener('scroll', tsSaveScroll);
-try {
-  if (window.parent) {
-    window.parent.addEventListener('scroll', tsSaveScroll);
-  }
-} catch (e) {}
-
+try { if (window.parent) { window.parent.addEventListener('scroll', tsSaveScroll); } } catch (e) {}
 window.addEventListener('load', tsRestoreState);
 setTimeout(tsRestoreState, 200);
 tsRestoreState();
-
 function tsAutoResize() {
   var height = document.documentElement.scrollHeight;
-  if (window.frameElement) {
-    window.frameElement.style.height = height + 'px';
-  }
-  try {
-    window.parent.postMessage({
-      type: 'streamlit:setFrameHeight',
-      height: height
-    }, '*');
-  } catch (e) {}
+  if (window.frameElement) { window.frameElement.style.height = height + 'px'; }
+  try { window.parent.postMessage({ type: 'streamlit:setFrameHeight', height: height }, '*'); } catch (e) {}
 }
 window.addEventListener('load', tsAutoResize);
 window.addEventListener('resize', tsAutoResize);
 setTimeout(tsAutoResize, 150);
 setTimeout(tsAutoResize, 500);
-new MutationObserver(tsAutoResize).observe(document.body, {
-  childList: true, subtree: true, attributes: true
-});
-
+new MutationObserver(tsAutoResize).observe(document.body, { childList: true, subtree: true, attributes: true });
 document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
-        e.preventDefault();
-        takeScreenshot();
-    }
+  if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); takeScreenshot(); }
 });
-
 async function takeScreenshot() {
-    var toast = document.getElementById('ts-toast');
-    toast.innerHTML = '📸 Capturing...';
-    toast.classList.add('show');
-    try {
-        var blobPromise = new Promise(function(resolve) {
-            html2canvas(document.body, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: '#f8faff',
-                scrollY: 0,
-                windowHeight: document.body.scrollHeight,
-                height: document.body.scrollHeight,
-            }).then(function(canvas) {
-                canvas.toBlob(function(blob) { resolve(blob); }, 'image/png');
-            });
-        });
-        await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blobPromise })
-        ]);
-        toast.innerHTML = '✅ Screenshot copied!';
-        setTimeout(function() {
-            toast.classList.remove('show');
-            toast.innerHTML = '✅ Copied!';
-        }, 2000);
-    } catch(e) {
-        toast.innerHTML = '❌ ' + (e.message || 'Failed');
-        setTimeout(function() {
-            toast.classList.remove('show');
-            toast.innerHTML = '✅ Copied!';
-        }, 2500);
-    }
+  var toast = document.getElementById('ts-toast');
+  toast.innerHTML = '\ud83d\udcf8 Capturing...'; toast.classList.add('show');
+  try {
+    var blobPromise = new Promise(function(resolve) {
+      html2canvas(document.body, {
+        scale: 2, useCORS: true, backgroundColor: '#f8faff', scrollY: 0,
+        windowHeight: document.body.scrollHeight, height: document.body.scrollHeight,
+      }).then(function(canvas) { canvas.toBlob(function(blob) { resolve(blob); }, 'image/png'); });
+    });
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ]);
+    toast.innerHTML = '\u2705 Screenshot copied!';
+    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '\u2705 Copied!'; }, 2000);
+  } catch(e) {
+    toast.innerHTML = '\u274c ' + (e.message || 'Failed');
+    setTimeout(function() { toast.classList.remove('show'); toast.innerHTML = '\u2705 Copied!'; }, 2500);
+  }
 }
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 """
+
+
+def _expand_card(label: str, value: str, sub: str, color: str = "") -> str:
+    style = f' style="color:{color}"' if color else ""
+    return (f'<div class="ts-ec"><div class="ts-ec-label">{label}</div>'
+            f'<div class="ts-ec-value"{style}>{value}</div>'
+            f'<div class="ts-ec-sub">{sub}</div></div>')
 
 
 def render_html_table(df, data_source: str = "", target_date: str = "",
@@ -662,9 +383,8 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         intraday_pct  = float(row.get("intraday_pct", 0) or 0)
         delivery_pct  = row.get("Delivery %", None)
 
-        move_since = 0.0
-        if signal_price and float(signal_price) > 0:
-            move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100
+        move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100 \
+                     if signal_price and float(signal_price) > 0 else 0.0
 
         peak_move_str = "-"
         if peak_ltp and signal_price and float(signal_price) > 0:
@@ -678,117 +398,62 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         median_vol_str   = _short_vol(float(median_vol_raw)) if median_vol_raw else "-"
 
         vr_class = "vr-high" if vol_ratio_raw >= 5 else "vr-med" if vol_ratio_raw >= 3 else "vr-normal"
-        vr_color  = "#7c3aed" if vol_ratio_raw >= 5 else "#d97706" if vol_ratio_raw >= 3 else "#374151"
 
-        if   "STRONG BUILDING" in momentum_str: mom_cls = "mom-strong"
-        elif "BUILDING"        in momentum_str: mom_cls = "mom-build"
-        elif "STABLE"          in momentum_str: mom_cls = "mom-stable"
-        elif "COOLING"         in momentum_str: mom_cls = "mom-cooling"
-        elif "WEAK"            in momentum_str: mom_cls = "mom-weak"
-        else:                                   mom_cls = ""
+        mom_cls = next((cls for kw, cls in (
+            ("STRONG BUILDING", "mom-strong"), ("BUILDING", "mom-build"),
+            ("STABLE", "mom-stable"), ("COOLING", "mom-cooling"), ("WEAK", "mom-weak"),
+        ) if kw in momentum_str), "")
 
-        vol_emoji = _vol_emoji(str(row['Vol Momentum']))
-
+        vol_emoji      = _vol_emoji(str(row['Vol Momentum']))
         prev_close_val = float(row.get('Prev Close', 0))
         open_val       = float(row.get('Open', 0))
+        chg_vs_prev    = float(str(row.get('Chg vs Prev %', '0')).replace('%', '').replace('+', '') or 0)
 
-        chg_vs_prev = float(
-            str(row.get('Chg vs Prev %', '0'))
-            .replace('%', '').replace('+', '') or 0
+        expand_cards = (
+            _expand_card("Open", f"₹{open_val:,.2f}", "Today's open")
+            + _expand_card("Prev Close", f"₹{prev_close_val:,.2f}", "Yesterday's close")
+            + _expand_card("Peak Since Signal", peak_ltp_str, "Max LTP after entry", "#7c3aed")
+            + _expand_card("Peak Move", peak_move_str, "Max gain possible", "#16a34a")
+            + _expand_card("Volume", vol_fmt, f"Median: {median_vol_str}")
         )
 
         rows_html += f"""
-        <tr class="ts-row {mom_cls}" id="tsm-{symbol}"
-            data-sym="{symbol}"
-            data-mom="{momentum_str.lower()}"
-            data-ema="{ema_status or ''}"
+        <tr class="ts-row {mom_cls}" id="tsm-{symbol}" data-sym="{symbol}"
+            data-mom="{momentum_str.lower()}" data-ema="{ema_status or ''}"
             onclick="tsToggle('{symbol}')">
-
-          <td>
-            <div class="ts-symbol-cell">
-              <div class="ts-expand-btn">+</div>
-              <button class="ts-copy-btn"
-                onclick="tsCopy(event, this, '{symbol}')">
-                <div class="ts-sym-name">{symbol}</div>
-                <div class="ts-sym-time">{signal_time[:5]}</div>
-              </button>
-            </div>
-          </td>
-
+          <td><div class="ts-symbol-cell">
+            <div class="ts-expand-btn">+</div>
+            <button class="ts-copy-btn" onclick="tsCopy(event, this, '{symbol}')">
+              <div class="ts-sym-name">{symbol}</div>
+              <div class="ts-sym-time">{signal_time[:5]}</div>
+            </button>
+          </div></td>
           <td>{_signal_price_html(signal_price_str, move_since)}</td>
-
-          <td>
-            <div class="ts-ltp-val">₹{ltp:,.2f}</div>
-            {_chg_html(chg_vs_prev)}
-          </td>
-
-          <td>
-            <span class="ts-vol-ratio {vr_class}">
-              {vol_emoji} {row['Vol Ratio']}
-            </span>
-          </td>
-
+          <td><div class="ts-ltp-val">₹{ltp:,.2f}</div>{_chg_html(chg_vs_prev)}</td>
+          <td><span class="ts-vol-ratio {vr_class}">{vol_emoji} {row['Vol Ratio']}</span></td>
           <td>{_prev_day_move_html(str(row.get('Prev Day Move %', '-')))}</td>
-
           <td>{_mom_badge(momentum_str, vol_ratio_raw, intraday_pct)}</td>
-
           <td>{_ema_cell(ema_status)}</td>
-
           <td>{_delivery_cell(delivery_pct)}</td>
-
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="8">
-            <div class="ts-expand-panel">
-              <div class="ts-ec">
-                <div class="ts-ec-label">Open</div>
-                <div class="ts-ec-value">₹{open_val:,.2f}</div>
-                <div class="ts-ec-sub">Today's open</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Prev Close</div>
-                <div class="ts-ec-value">₹{prev_close_val:,.2f}</div>
-                <div class="ts-ec-sub">Yesterday's close</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Peak Since Signal</div>
-                <div class="ts-ec-value" style="color:#7c3aed">{peak_ltp_str}</div>
-                <div class="ts-ec-sub">Max LTP after entry</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Peak Move</div>
-                <div class="ts-ec-value" style="color:#16a34a">{peak_move_str}</div>
-                <div class="ts-ec-sub">Max gain possible</div>
-              </div>
-              <div class="ts-ec">
-                <div class="ts-ec-label">Volume</div>
-                <div class="ts-ec-value">{vol_fmt}</div>
-                <div class="ts-ec-sub">Median: {median_vol_str}</div>
-              </div>
-            </div>
-          </td>
+          <td colspan="8"><div class="ts-expand-panel">{expand_cards}</div></td>
         </tr>"""
 
-    meta = ""
-    if data_source or target_date:
-        meta = f"📅 {target_date} vs {prev_date} &nbsp;|&nbsp; Ticks: {tick_count}"
+    meta = f"📅 {target_date} vs {prev_date} &nbsp;|&nbsp; Ticks: {tick_count}" \
+           if (data_source or target_date) else ""
 
-    html = _STYLES + f"""
+    return _STYLES + f"""
 <div class="ts-header">
   <div class="ts-brand">TRADE<span>SENTRY</span></div>
   <div class="ts-status">
-    <div class="ts-live">
-      <div class="ts-live-dot"></div>
-      Live WebSocket
-    </div>
+    <div class="ts-live"><div class="ts-live-dot"></div>Live WebSocket</div>
     <span style="font-size:12px;color:#94a3b8">{meta}</span>
   </div>
 </div>
-
 <div class="ts-banner">
   <span><b id="ts-match-count">{total}</b> stocks matching momentum criteria</span>
 </div>
-
 <div class="ts-filters">
   <span class="ts-filter-label">Momentum Scanner</span>
   <span class="ts-count">{total}</span>
@@ -807,25 +472,19 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
     <option value="fail">❌ EMA Fail</option>
   </select>
 </div>
-
 <div class="ts-table-wrap">
 <table>
-  <thead>
-    <tr>
-      <th onclick="tsColHighlight(0)">Symbol</th>
-      <th onclick="tsColHighlight(1)">Signal Price</th>
-      <th onclick="tsColHighlight(2)">LTP</th>
-      <th onclick="tsColHighlight(3)">Vol Ratio</th>
-      <th onclick="tsColHighlight(4)">Prev Day Move %</th>
-      <th onclick="tsColHighlight(5)">Momentum</th>
-      <th onclick="tsColHighlight(6)">EMA20 Status</th>
-      <th onclick="tsColHighlight(7)">Delivery %</th>
-    </tr>
-  </thead>
-  <tbody>
-    {rows_html}
-  </tbody>
+  <thead><tr>
+    <th onclick="tsColHighlight(0)">Symbol</th>
+    <th onclick="tsColHighlight(1)">Signal Price</th>
+    <th onclick="tsColHighlight(2)">LTP</th>
+    <th onclick="tsColHighlight(3)">Vol Ratio</th>
+    <th onclick="tsColHighlight(4)">Prev Day Move %</th>
+    <th onclick="tsColHighlight(5)">Momentum</th>
+    <th onclick="tsColHighlight(6)">EMA20 Status</th>
+    <th onclick="tsColHighlight(7)">Delivery %</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
 </table>
 </div>
 """
-    return html
