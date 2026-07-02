@@ -1,6 +1,6 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # swing_strategy/backend.py
-# Zone Detection — Bulk Fetch (5 days), No 1H breakout (coming later)
+# Simple Consolidation Detection — 5 days, no over-engineering
 # ──────────────────────────────────────────────────────────────────────────────
 
 import numpy as np
@@ -16,12 +16,9 @@ from config import STOCKS_WATCHLIST
 SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
 
-IST = timezone(timedelta(hours=5, minutes=30))
-
+IST             = timezone(timedelta(hours=5, minutes=30))
 MIN_CONSOL_DAYS = 5
-MAX_DAILY_RANGE = 3.0
-MIN_ZONE_WIDTH  = 1.5
-MAX_ZONE_WIDTH  = 4.0
+MAX_DAILY_RANGE = 3.0   # % max (high-low)/low per day
 
 STRONG_ZONE_SCORE = 5
 MEDIUM_ZONE_SCORE = 3
@@ -33,20 +30,19 @@ MEDIUM_ZONE_SCORE = 3
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 1 — BULK FETCH LAST 5 DAYS (ALL STOCKS, ONE QUERY)
+# SECTION 1 — BULK FETCH LAST 5 TRADING DAYS (ONE QUERY)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def fetch_all_stocks_bulk() -> pd.DataFrame:
     """
-    Single Supabase query — fetch last 5 trading days EOD data for ALL stocks.
+    Fetch last 5 trading days EOD data for ALL stocks in one Supabase query.
     Returns DataFrame: stock, date, open, high, low, close, volume
     """
     try:
         supabase = get_supabase()
 
-        # Step 1: Get last 5 distinct trading dates
+        # Step 1: Get last 5 distinct dates
         date_resp = supabase.table("websocket_stock_values") \
             .select("date") \
             .order("date", desc=True) \
@@ -62,7 +58,7 @@ def fetch_all_stocks_bulk() -> pd.DataFrame:
         if len(last_5_dates) < MIN_CONSOL_DAYS:
             return pd.DataFrame()
 
-        # Step 2: Fetch all stocks for those 5 dates in batches
+        # Step 2: Fetch all stock data for those dates
         all_rows = []
         offset   = 0
 
@@ -94,20 +90,24 @@ def fetch_all_stocks_bulk() -> pd.DataFrame:
 
         df["date"] = pd.to_datetime(df["date"])
 
-        # Keep latest record per (stock, date) = EOD value
+        # Latest record per (stock, date) = EOD
         df = df.sort_values("created_at", ascending=False)
         df = df.drop_duplicates(subset=["stock", "date"], keep="first")
         df = df.drop(columns=["created_at"])
 
-        df = df.dropna(subset=["open", "high", "low", "close", "volume"])
+        df = df.dropna(subset=["close", "volume"])
         df = df[(df["close"] > 0) & (df["volume"] > 0)]
-        df = df.sort_values(["stock", "date"]).reset_index(drop=True)
 
+        # If high/low missing, derive from open/close
+        df["high"] = df["high"].fillna(df[["open", "close"]].max(axis=1))
+        df["low"]  = df["low"].fillna(df[["open", "close"]].min(axis=1))
+        df["open"] = df["open"].fillna(df["close"])
+
+        df = df.sort_values(["stock", "date"]).reset_index(drop=True)
         return df
 
     except Exception as e:
         return pd.DataFrame()
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 2 — CONSOLIDATION DETECTION
@@ -115,58 +115,58 @@ def fetch_all_stocks_bulk() -> pd.DataFrame:
 
 def detect_consolidation(stock_df: pd.DataFrame) -> dict:
     """
-    Check if stock has been consolidating for all 5 days.
-    Each day: (High-Low)/Low*100 < 3%
-    Zone width: 1.5% - 4%
-    Zone based on closing prices (body, not wicks)
+    5 days consolidation check:
+    - Each day (high - low) / low * 100 < 3%
+    - All 5 days must qualify
+    - Resistance = max close of 5 days
+    - Support    = min close of 5 days
     """
-    if stock_df.empty or len(stock_df) < MIN_CONSOL_DAYS:
+    if len(stock_df) < MIN_CONSOL_DAYS:
         return None
 
-    stock_df = stock_df.copy()
-    stock_df["day_range_pct"] = ((stock_df["high"] - stock_df["low"]) / stock_df["low"]) * 100
+    df = stock_df.copy()
 
-    qualifying = stock_df[stock_df["day_range_pct"] <= MAX_DAILY_RANGE]
+    # Day range check
+    df["day_range_pct"] = ((df["high"] - df["low"]) / df["low"]) * 100
 
+    qualifying = df[df["day_range_pct"] <= MAX_DAILY_RANGE]
+
+    # All 5 days must be tight
     if len(qualifying) < MIN_CONSOL_DAYS:
         return None
 
-    consol_df  = qualifying.copy()
-    resistance = round(float(np.percentile(consol_df["close"], 90)), 2)
-    support    = round(float(np.percentile(consol_df["close"], 10)), 2)
-    zone_high  = round(float(consol_df["high"].max()), 2)
-    zone_low   = round(float(consol_df["low"].min()), 2)
+    # Zone = simple max/min of closing prices
+    resistance = round(float(qualifying["close"].max()), 2)
+    support    = round(float(qualifying["close"].min()), 2)
+    zone_high  = round(float(qualifying["high"].max()), 2)
+    zone_low   = round(float(qualifying["low"].min()), 2)
 
     if support <= 0:
         return None
 
     zone_width_pct = round(((resistance - support) / support) * 100, 2)
 
-    if zone_width_pct < MIN_ZONE_WIDTH or zone_width_pct > MAX_ZONE_WIDTH:
-        return None
-
     return {
-        "consol_days"   : len(consol_df),
+        "consol_days"   : len(qualifying),
         "resistance"    : resistance,
         "support"       : support,
         "zone_high"     : zone_high,
         "zone_low"      : zone_low,
         "zone_width_pct": zone_width_pct,
-        "consol_df"     : consol_df,
+        "consol_df"     : qualifying,
     }
 
-
 # ──────────────────────────────────────────────────────────────────────────────
-# SECTION 3 — ZONE STRENGTH SCORE
+# SECTION 3 — ZONE SCORE (simple, 0-10)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def calculate_zone_score(stock_df: pd.DataFrame, consol_info: dict) -> int:
     """
-    Score 0-10:
-    +2 → All 5 days qualify
-    +2 → Zone width 2-3% sweet spot
+    Simple score:
+    +2 → All 5 days tight (range < 3%)
+    +2 → Zone width < 3% (very tight consolidation)
     +2 → Volume declining (accumulation)
-    +2 → Last close near resistance (coiling up)
+    +2 → Last close near resistance (ready to breakout)
     +2 → Today volume > yesterday (interest building)
     """
     score     = 0
@@ -176,14 +176,14 @@ def calculate_zone_score(stock_df: pd.DataFrame, consol_info: dict) -> int:
     if consol_info["consol_days"] >= MIN_CONSOL_DAYS:
         score += 2
 
-    # +2 Zone width sweet spot
+    # +2 Tight zone width
     w = consol_info["zone_width_pct"]
-    if 2.0 <= w <= 3.0:
+    if w <= 3.0:
         score += 2
-    elif 1.5 <= w <= 4.0:
+    elif w <= 5.0:
         score += 1
 
-    # +2 Volume declining
+    # +2 Volume declining (accumulation pattern)
     if len(consol_df) >= 3:
         mid        = len(consol_df) // 2
         first_vol  = consol_df["volume"].iloc[:mid].mean()
@@ -198,9 +198,9 @@ def calculate_zone_score(stock_df: pd.DataFrame, consol_info: dict) -> int:
     resistance = consol_info["resistance"]
     if resistance > 0:
         pct_from_res = ((resistance - last_close) / resistance) * 100
-        if pct_from_res <= 0.5:
+        if pct_from_res <= 1.0:
             score += 2
-        elif pct_from_res <= 1.5:
+        elif pct_from_res <= 2.0:
             score += 1
 
     # +2 Today volume > yesterday
@@ -214,13 +214,11 @@ def calculate_zone_score(stock_df: pd.DataFrame, consol_info: dict) -> int:
 
     return min(score, 10)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 4 — DAILY VOLUME RATIO
 # ──────────────────────────────────────────────────────────────────────────────
 
 def calculate_daily_vol_ratio(stock_df: pd.DataFrame) -> float:
-    """Today's volume vs median of previous 4 days."""
     if len(stock_df) < 2:
         return 0.0
     today_vol  = float(stock_df["volume"].iloc[-1])
@@ -229,22 +227,16 @@ def calculate_daily_vol_ratio(stock_df: pd.DataFrame) -> float:
         return 0.0
     return round(today_vol / median_vol, 2)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 5 — MAIN SCANNER
 # ──────────────────────────────────────────────────────────────────────────────
 
 def run_swing_scan(min_score: int = STRONG_ZONE_SCORE) -> list:
-    """
-    1. ONE Supabase bulk fetch — all stocks 5 days
-    2. groupby stock → consolidation check locally
-    3. Zone score filter
-    4. Save + return results
-    """
     results   = []
     today_str = date.today().isoformat()
     supabase  = get_supabase()
 
+    # ONE bulk fetch
     df_all = fetch_all_stocks_bulk()
     if df_all.empty:
         return []
@@ -257,6 +249,10 @@ def run_swing_scan(min_score: int = STRONG_ZONE_SCORE) -> list:
 
         try:
             stock_df = stock_df.sort_values("date").reset_index(drop=True)
+
+            # Need exactly 5 days
+            if len(stock_df) < MIN_CONSOL_DAYS:
+                continue
 
             consol = detect_consolidation(stock_df)
             if not consol:
@@ -298,7 +294,6 @@ def run_swing_scan(min_score: int = STRONG_ZONE_SCORE) -> list:
     results.sort(key=lambda x: -x["zone_score"])
     return results
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 6 — SAVE TO SUPABASE
 # ──────────────────────────────────────────────────────────────────────────────
@@ -316,7 +311,6 @@ def save_signal_to_supabase(signal: dict, supabase=None):
     except Exception:
         pass
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 7 — FETCH SAVED SIGNALS
 # ──────────────────────────────────────────────────────────────────────────────
@@ -333,7 +327,6 @@ def fetch_saved_signals(days_back: int = 7) -> list:
         return resp.data or []
     except Exception:
         return []
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SECTION 8 — UPDATE SIGNAL STATUS
