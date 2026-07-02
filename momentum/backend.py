@@ -351,6 +351,7 @@ def run_momentum_scan(historical: dict, live_ticks: dict, token_to_name: dict) -
         if r >= 3.0: return "🔥 Explosive"
         if r >= 2.0: return "🟢 Strong"
         if r >= 1.5: return "🟡 Build"
+        if r >= 1.0: return "🔵 Emerging"
         return ""
 
     def momentum_detection(v, i, g):
