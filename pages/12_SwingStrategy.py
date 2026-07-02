@@ -73,11 +73,26 @@ tab1, tab2 = st.tabs(["📡 Live Scan", "📋 Saved Signals"])
 
 with tab1:
     if run_scan:
-        with st.spinner("🔍 Scanning all stocks for consolidation zones..."):
-            results = run_swing_scan(min_score=min_score)
-            st.session_state["swing_results"]   = results
-            st.session_state["swing_scan_time"] = datetime.now(IST).strftime("%H:%M:%S")
-            st.session_state["swing_min_score"] = min_score
+        from config import STOCKS_WATCHLIST
+        total_stocks = len([n for n, t, k in STOCKS_WATCHLIST if k != "index"])
+
+        st.markdown(f"🔍 **Scanning {total_stocks} stocks...**")
+        progress_bar  = st.progress(0)
+        status_text   = st.empty()
+
+        def update_progress(done, total):
+            pct = done / total
+            progress_bar.progress(pct)
+            status_text.caption(f"⏳ Scanned {done} / {total} stocks...")
+
+        results = run_swing_scan(min_score=min_score, progress_callback=update_progress)
+
+        progress_bar.progress(1.0)
+        status_text.caption(f"✅ Scan complete — {total_stocks} stocks scanned | {len(results)} matched")
+
+        st.session_state["swing_results"]   = results
+        st.session_state["swing_scan_time"] = datetime.now(IST).strftime("%H:%M:%S")
+        st.session_state["swing_min_score"] = min_score
 
     if "swing_results" in st.session_state:
         results   = st.session_state["swing_results"]
