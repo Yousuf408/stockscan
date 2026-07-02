@@ -176,8 +176,8 @@ def scanner_table():
     if not market_open and not df.empty:
         df = df[df["Symbol"].isin(signal_data.keys())].reset_index(drop=True)
 
-    # ── Status bar + Reload button — always visible ───────────
-    col_info, col_btn = st.columns([5, 1])
+    # ── Status bar + Body Ratio toggle + Reload button — always visible ──
+    col_info, col_toggle, col_btn = st.columns([4, 2, 1])
     with col_info:
         stock_count = len(df) if not df.empty else 0
         st.markdown(
@@ -187,11 +187,24 @@ def scanner_table():
             f'</div>',
             unsafe_allow_html=True
         )
+    with col_toggle:
+        hide_low_body = st.toggle("Hide low body (<75%)", key="hide_low_body_toggle")
     with col_btn:
         if st.button("🔄 Reload", use_container_width=True):
             del st.session_state["momentum_historical"]
             st.session_state.pop("ema20_cache",    None)
+            st.session_state.pop("body_ratio_cache", None)
             st.rerun()
+
+    if df.empty:
+        st.info("No stocks matching momentum criteria right now.")
+        return
+
+    # ── BODY RATIO — hard filter driven by the native Streamlit toggle. ──
+    # ── No JS/localStorage involved, so no flicker on fragment refresh.  ──
+    if hide_low_body:
+        body_cache_pre = get_body_ratio_cache(df)
+        df = df[df["Symbol"].apply(lambda s: (body_cache_pre.get(s) or 0) >= 75)].reset_index(drop=True)
 
     if df.empty:
         st.info("No stocks matching momentum criteria right now.")
