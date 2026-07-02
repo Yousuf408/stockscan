@@ -23,7 +23,6 @@ page_header("TV Screener", "NSE · Mkt Cap > 51B · New High 1M")
 # ─────────────────────────────────────────────────────────────
 # FETCH FUNCTION
 # ─────────────────────────────────────────────────────────────
-@st.cache_data(ttl=300)  # 5 min cache
 def fetch_tv_data():
     try:
         from tradingview_screener import Query
@@ -63,7 +62,7 @@ with col2:
     refresh = st.button("🔄 Refresh", use_container_width=True)
 
 if refresh:
-    st.cache_data.clear()
+    st.rerun()
 
 # ─────────────────────────────────────────────────────────────
 # FETCH DATA
