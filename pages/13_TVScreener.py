@@ -410,11 +410,34 @@ for i, (_, row) in enumerate(df.iterrows()):
     <tr style="background:{bg};">
         <td style="{td_left}">
             <span id="sym_{i}" onclick="
-                navigator.clipboard.writeText('{sym}');
+                var sym = '{sym}';
                 var el = document.getElementById('sym_{i}');
                 var orig = el.innerHTML;
-                el.innerHTML = '<span style=\'color:#16a34a;font-size:10px;\'>✓ Copied</span>';
-                setTimeout(function(){{ el.innerHTML = orig; }}, 1000);
+                function showCopied() {{
+                    el.innerHTML = '<span style=\'color:#16a34a;font-weight:700;font-size:11px;\'>✓ ' + sym + '</span>';
+                    setTimeout(function(){{ el.innerHTML = orig; }}, 1500);
+                }}
+                if (navigator.clipboard && window.isSecureContext) {{
+                    navigator.clipboard.writeText(sym).then(showCopied).catch(function() {{
+                        var ta = document.createElement('textarea');
+                        ta.value = sym;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        try {{ document.execCommand('copy'); showCopied(); }} catch(e) {{}}
+                        document.body.removeChild(ta);
+                    }});
+                }} else {{
+                    var ta = document.createElement('textarea');
+                    ta.value = sym;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {{ document.execCommand('copy'); showCopied(); }} catch(e) {{}}
+                    document.body.removeChild(ta);
+                }}
             " style="cursor:pointer;color:#1e40af;font-weight:700;">{sym}</span>
         </td>
         <td style="{td_style}">₹{float(price):.2f}</td>
