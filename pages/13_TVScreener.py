@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
+import pytz
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -36,17 +37,22 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
+IST = pytz.timezone("Asia/Kolkata")
+
 # ─────────────────────────────────────────────────────────────
-# LAST WORKING DAY
+# HELPERS
 # ─────────────────────────────────────────────────────────────
 def get_last_trading_day():
-    d = datetime.now().date() - timedelta(days=1)
+    d = datetime.now(IST).date() - timedelta(days=1)
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
 
+def get_current_ist_time():
+    return datetime.now(IST)
+
 # ─────────────────────────────────────────────────────────────
-# ATP CALCULATION — kal ka 5min data se
+# ATP — kal ka full day 5min VWAP
 # ─────────────────────────────────────────────────────────────
 def get_yesterday_atp(symbol):
     try:
@@ -62,18 +68,59 @@ def get_yesterday_atp(symbol):
         )
         if df.empty:
             return None
-        # Sirf market hours — 9:15 to 15:30
         df.index = pd.to_datetime(df.index)
         df = df.between_time("09:15", "15:30")
         if df.empty:
             return None
-        # ATP = sum(close * volume) / sum(volume)
-        close = df['Close'].values.flatten()
+        close  = df['Close'].values.flatten()
         volume = df['Volume'].values.flatten()
         atp = (close * volume).sum() / volume.sum()
         return round(float(atp), 2)
     except:
         return None
+
+# ─────────────────────────────────────────────────────────────
+# CANDLE CHECK — aaj ka specific time candle
+# Green = Close > Open, blank otherwise
+# ─────────────────────────────────────────────────────────────
+def get_candle_signal(symbol, candle_time_str):
+    """
+    candle_time_str: start time of the 5min candle
+    e.g. "09:35" = candle that starts 9:35 and closes at 9:40
+    Returns "🟢" if green (close > open), "" otherwise
+    """
+    try:
+        today = datetime.now(IST).date()
+        ticker = symbol + ".NS"
+        df = yf.download(
+            ticker,
+            start=today,
+            end=today + timedelta(days=1),
+            interval="5m",
+            progress=False,
+            auto_adjust=True
+        )
+        if df.empty:
+            return ""
+        df.index = pd.to_datetime(df.index)
+        # Convert to IST
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+
+        # Filter sirf us candle ka row
+        df_candle = df.between_time(candle_time_str, candle_time_str)
+        if df_candle.empty:
+            return ""
+
+        row = df_candle.iloc[0]
+        open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
+        close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
+
+        return "🟢" if close_ > open_ else ""
+    except:
+        return ""
 
 # ─────────────────────────────────────────────────────────────
 # TV SCREENER FETCH
@@ -126,7 +173,6 @@ df['change']           = df['change'].round(2)
 df['relative_volume']  = df['relative_volume'].round(2)
 df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
 
-# Symbol clean — "NSE:SONACOMS" → "SONACOMS"
 df['name'] = df['ticker'].str.replace('NSE:', '', regex=False)
 df = df.drop(columns=['ticker'], errors='ignore')
 
@@ -141,21 +187,56 @@ df = df.rename(columns={
 })
 
 # ─────────────────────────────────────────────────────────────
-# ATP FETCH — har stock ke liye
+# ATP FETCH
 # ─────────────────────────────────────────────────────────────
-with st.spinner(f"Calculating yesterday's ATP for {len(df)} stocks..."):
+with st.spinner(f"Calculating yesterday ATP for {len(df)} stocks..."):
     signals = []
     for _, row in df.iterrows():
-        symbol  = row['Symbol']
-        price   = row['Price ₹']
-        atp     = get_yesterday_atp(symbol)
+        symbol = row['Symbol']
+        price  = row['Price ₹']
+        atp    = get_yesterday_atp(symbol)
         if atp is None:
             signals.append("⚪ N/A")
         elif price > atp:
-            signals.append(f"🟢 ₹{atp:,.2f}")
+            pct = ((price - atp) / atp) * 100
+            signals.append(f"🟢 ₹{atp:,.2f} (+{pct:.1f}%)")
         else:
-            signals.append(f"🔴 ₹{atp:,.2f}")
+            pct = ((atp - price) / atp) * 100
+            signals.append(f"🔴 ₹{atp:,.2f} (-{pct:.1f}%)")
     df['Signal'] = signals
+
+# ─────────────────────────────────────────────────────────────
+# CANDLE COLUMNS — time based
+# 9:40 column = 9:35 candle (closes at 9:40) — show when time >= 9:40
+# 9:45 column = 9:40 candle (closes at 9:45) — show when time >= 9:45
+# 9:50 column = 9:45 candle (closes at 9:50) — show when time >= 9:50
+# ─────────────────────────────────────────────────────────────
+now_ist  = get_current_ist_time()
+now_time = now_ist.strftime('%H:%M:%S')
+now_hhmm = now_ist.hour * 60 + now_ist.minute  # minutes since midnight
+
+show_940 = now_hhmm >= (9 * 60 + 40)   # 9:40+ → fetch 9:35 candle
+show_945 = now_hhmm >= (9 * 60 + 45)   # 9:45+ → fetch 9:40 candle
+show_950 = now_hhmm >= (9 * 60 + 50)   # 9:50+ → fetch 9:45 candle
+
+if show_940 or show_945 or show_950:
+    with st.spinner("Fetching candle data..."):
+        c940_list, c945_list, c950_list = [], [], []
+        for _, row in df.iterrows():
+            sym = row['Symbol']
+            # 9:40 column → 9:35 closed candle
+            c940_list.append(get_candle_signal(sym, "09:35") if show_940 else "")
+            # 9:45 column → 9:40 closed candle
+            c945_list.append(get_candle_signal(sym, "09:40") if show_945 else "")
+            # 9:50 column → 9:45 closed candle
+            c950_list.append(get_candle_signal(sym, "09:45") if show_950 else "")
+        df['9:40'] = c940_list
+        df['9:45'] = c945_list
+        df['9:50'] = c950_list
+else:
+    df['9:40'] = ""
+    df['9:45'] = ""
+    df['9:50'] = ""
 
 # ─────────────────────────────────────────────────────────────
 # HEADER ROW
@@ -163,7 +244,6 @@ with st.spinner(f"Calculating yesterday's ATP for {len(df)} stocks..."):
 sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
 top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
 max_chg    = df['Chg %'].max()
-now_time   = datetime.now().strftime('%H:%M:%S')
 last_day   = get_last_trading_day()
 
 c1, c2, c3 = st.columns([3, 5, 2])
@@ -240,6 +320,6 @@ st.dataframe(styled_df, use_container_width=True, height=620, hide_index=True)
 # ─────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="margin-top:6px; font-size:10px; color:#9ca3af; text-align:center;">
-    TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Sorted by Chg% ↓ · ATP = Yesterday's Weighted Avg Price
+    TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Sorted by Chg% ↓ · ATP = Yesterday VWAP · 🟢 = Green candle
 </div>
 """, unsafe_allow_html=True)
