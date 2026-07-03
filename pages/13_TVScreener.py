@@ -143,7 +143,7 @@ def fetch_tv_data():
                 col('high') >= col('High.1M'),
             )
             .order_by('change', ascending=False)
-            .limit(200)
+            .limit(15)
             .get_scanner_data()
         )
         return count, df, None
@@ -187,23 +187,31 @@ df = df.rename(columns={
 })
 
 # ─────────────────────────────────────────────────────────────
-# ATP FETCH
+# ATP FETCH — split into ATP + Gap columns
 # ─────────────────────────────────────────────────────────────
 with st.spinner(f"Calculating yesterday ATP for {len(df)} stocks..."):
-    signals = []
+    atp_vals, gap_vals, gap_pcts = [], [], []
     for _, row in df.iterrows():
         symbol = row['Symbol']
         price  = row['Price ₹']
         atp    = get_yesterday_atp(symbol)
         if atp is None:
-            signals.append("⚪ N/A")
+            atp_vals.append("N/A")
+            gap_vals.append("—")
+            gap_pcts.append(None)
         elif price > atp:
             pct = ((price - atp) / atp) * 100
-            signals.append(f"🟢 ₹{atp:,.2f} (+{pct:.1f}%)")
+            atp_vals.append(atp)
+            gap_vals.append(f"↑ +{pct:.1f}%")
+            gap_pcts.append(pct)
         else:
             pct = ((atp - price) / atp) * 100
-            signals.append(f"🔴 ₹{atp:,.2f} (-{pct:.1f}%)")
-    df['Signal'] = signals
+            atp_vals.append(atp)
+            gap_vals.append(f"↓ -{pct:.1f}%")
+            gap_pcts.append(-pct)
+    df['ATP'] = atp_vals
+    df['Gap'] = gap_vals
+    df['_gap_pct'] = gap_pcts  # hidden col for coloring
 
 # ─────────────────────────────────────────────────────────────
 # CANDLE COLUMNS — time based
@@ -300,10 +308,34 @@ def color_relvol(val):
     elif val >= 1.5: return 'background-color: #dcfce7;'
     return ''
 
+def color_gap(val):
+    """Color Gap column based on % value"""
+    if val == '—' or not isinstance(val, str):
+        return 'color: #9ca3af;'
+    if val.startswith('↑'):
+        pct = float(val.replace('↑ +', '').replace('%', ''))
+        if pct >= 5:    return 'color: #14532d; font-weight: 700;'  # dark green
+        elif pct >= 2:  return 'color: #16a34a; font-weight: 600;'  # medium green
+        else:           return 'color: #4ade80; font-weight: 500;'  # light green
+    elif val.startswith('↓'):
+        return 'color: #dc2626; font-weight: 600;'  # red
+    return ''
+
+# Column order — Sector last
+col_order = ['Symbol', 'Price ₹', 'Chg %', 'Volume', 'Rel Vol', 'Mkt Cap (B)', 'ATP', 'Gap', '9:40', '9:45', '9:50', 'Sector']
+col_order = [c for c in col_order if c in df.columns]
+display_df = df[col_order].copy()
+
+# Format ATP
+display_df['ATP'] = display_df['ATP'].apply(
+    lambda x: f"₹{x:,.2f}" if isinstance(x, (int, float)) else x
+)
+
 styled_df = (
-    df.style
+    display_df.style
     .applymap(color_chg, subset=['Chg %'])
     .applymap(color_relvol, subset=['Rel Vol'])
+    .applymap(color_gap, subset=['Gap'])
     .format({
         'Price ₹'    : '₹{:.2f}',
         'Chg %'      : '{:+.2f}%',
