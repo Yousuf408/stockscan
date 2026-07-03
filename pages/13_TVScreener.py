@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
+import time
 import pytz
 
 # ─────────────────────────────────────────────────────────────
@@ -187,31 +188,41 @@ df = df.rename(columns={
 })
 
 # ─────────────────────────────────────────────────────────────
-# ATP FETCH — split into ATP + Gap columns
+# ATP FETCH — session_state cache (fetch once, reuse on refresh)
 # ─────────────────────────────────────────────────────────────
-with st.spinner(f"Calculating yesterday ATP for {len(df)} stocks..."):
-    atp_vals, gap_vals, gap_pcts = [], [], []
-    for _, row in df.iterrows():
-        symbol = row['Symbol']
-        price  = row['Price ₹']
-        atp    = get_yesterday_atp(symbol)
-        if atp is None:
-            atp_vals.append("N/A")
-            gap_vals.append("—")
-            gap_pcts.append(None)
-        elif price > atp:
-            pct = ((price - atp) / atp) * 100
-            atp_vals.append(atp)
-            gap_vals.append(f"↑ +{pct:.1f}%")
-            gap_pcts.append(pct)
-        else:
-            pct = ((atp - price) / atp) * 100
-            atp_vals.append(atp)
-            gap_vals.append(f"↓ -{pct:.1f}%")
-            gap_pcts.append(-pct)
-    df['ATP'] = atp_vals
-    df['Gap'] = gap_vals
-    df['_gap_pct'] = gap_pcts  # hidden col for coloring
+if 'atp_cache' not in st.session_state:
+    st.session_state['atp_cache'] = {}
+
+# Sirf naye stocks fetch karo
+new_symbols = [s for s in df['Symbol'] if s not in st.session_state['atp_cache']]
+if new_symbols:
+    with st.spinner(f"Fetching ATP for {len(new_symbols)} new stocks..."):
+        for symbol in new_symbols:
+            st.session_state['atp_cache'][symbol] = get_yesterday_atp(symbol)
+
+# Ab cache se ATP lo aur Gap calculate karo
+atp_vals, gap_vals, gap_pcts = [], [], []
+for _, row in df.iterrows():
+    symbol = row['Symbol']
+    price  = row['Price ₹']
+    atp    = st.session_state['atp_cache'].get(symbol)
+    if atp is None:
+        atp_vals.append("N/A")
+        gap_vals.append("—")
+        gap_pcts.append(None)
+    elif price > atp:
+        pct = ((price - atp) / atp) * 100
+        atp_vals.append(atp)
+        gap_vals.append(f"↑ +{pct:.1f}%")
+        gap_pcts.append(pct)
+    else:
+        pct = ((atp - price) / atp) * 100
+        atp_vals.append(atp)
+        gap_vals.append(f"↓ -{pct:.1f}%")
+        gap_pcts.append(-pct)
+df['ATP'] = atp_vals
+df['Gap'] = gap_vals
+df['_gap_pct'] = gap_pcts  # hidden col for coloring
 
 # ─────────────────────────────────────────────────────────────
 # CANDLE COLUMNS — time based
@@ -288,6 +299,20 @@ with c2:
 with c3:
     if st.button("🔄 Refresh", use_container_width=True):
         st.rerun()
+
+# ─────────────────────────────────────────────────────────────
+# AUTO REFRESH — har 60 second pe
+# ─────────────────────────────────────────────────────────────
+# Countdown timer dikhao
+placeholder = st.empty()
+for remaining in range(60, 0, -1):
+    placeholder.markdown(
+        f'<div style="font-size:11px; color:#9ca3af; text-align:right;">🔄 Auto refresh in {remaining}s</div>',
+        unsafe_allow_html=True
+    )
+    time.sleep(1)
+placeholder.empty()
+st.rerun()
 
 # ─────────────────────────────────────────────────────────────
 # SECTOR FILTER
