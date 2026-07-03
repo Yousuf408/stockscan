@@ -224,37 +224,53 @@ df['Gap'] = gap_vals
 df['_gap_pct'] = gap_pcts  # hidden col for coloring
 
 # ─────────────────────────────────────────────────────────────
-# CANDLE COLUMNS — time based
-# 9:40 column = 9:40 candle (9:40-9:45) → show after 9:45 (close hone ke baad)
-# 9:45 column = 9:45 candle (9:45-9:50) → show after 9:50
-# 9:50 column = 9:50 candle (9:50-9:55) → show after 9:55
+# CANDLE COLUMNS — session_state cache
+# Ek baar candle close ho gayi → fix ho gayi → cache mein rakh do
 # ─────────────────────────────────────────────────────────────
 now_ist  = get_current_ist_time()
 now_time = now_ist.strftime('%H:%M:%S')
-now_hhmm = now_ist.hour * 60 + now_ist.minute  # minutes since midnight
+now_hhmm = now_ist.hour * 60 + now_ist.minute
 
 show_940 = now_hhmm >= (9 * 60 + 45)   # 9:45+ → 9:40 candle closed
 show_945 = now_hhmm >= (9 * 60 + 50)   # 9:50+ → 9:45 candle closed
 show_950 = now_hhmm >= (9 * 60 + 55)   # 9:55+ → 9:50 candle closed
 
-if show_940 or show_945 or show_950:
-    with st.spinner("Fetching candle data..."):
-        c940_list, c945_list, c950_list = [], [], []
-        for _, row in df.iterrows():
-            sym = row['Symbol']
-            # 9:40 column → 9:40 closed candle (closes at 9:45)
-            c940_list.append(get_candle_signal(sym, "09:40") if show_940 else "")
-            # 9:45 column → 9:45 closed candle (closes at 9:50)
-            c945_list.append(get_candle_signal(sym, "09:45") if show_945 else "")
-            # 9:50 column → 9:50 closed candle (closes at 9:55)
-            c950_list.append(get_candle_signal(sym, "09:50") if show_950 else "")
-        df['9:40'] = c940_list
-        df['9:45'] = c945_list
-        df['9:50'] = c950_list
-else:
-    df['9:40'] = ""
-    df['9:45'] = ""
-    df['9:50'] = ""
+if 'candle_cache' not in st.session_state:
+    st.session_state['candle_cache'] = {}
+
+def get_candle_cached(symbol, candle_time, should_show):
+    """Cache se lo — nahi hai toh fetch karo"""
+    if not should_show:
+        return ""
+    key = f"{symbol}_{candle_time}"
+    if key not in st.session_state['candle_cache']:
+        st.session_state['candle_cache'][key] = get_candle_signal(symbol, candle_time)
+    return st.session_state['candle_cache'][key]
+
+# Sirf naye symbols ya uncached candles fetch honge
+new_candles = [
+    (row['Symbol'], t)
+    for _, row in df.iterrows()
+    for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
+    if show and f"{row['Symbol']}_{t}" not in st.session_state['candle_cache']
+]
+
+if new_candles:
+    with st.spinner(f"Fetching {len(new_candles)} new candles..."):
+        for sym, t in new_candles:
+            key = f"{sym}_{t}"
+            st.session_state['candle_cache'][key] = get_candle_signal(sym, t)
+
+c940_list, c945_list, c950_list = [], [], []
+for _, row in df.iterrows():
+    sym = row['Symbol']
+    c940_list.append(get_candle_cached(sym, "09:40", show_940))
+    c945_list.append(get_candle_cached(sym, "09:45", show_945))
+    c950_list.append(get_candle_cached(sym, "09:50", show_950))
+
+df['9:40'] = c940_list
+df['9:45'] = c945_list
+df['9:50'] = c950_list
 
 # ─────────────────────────────────────────────────────────────
 # HEADER ROW
