@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
-import time
 import pytz
 
 # ─────────────────────────────────────────────────────────────
@@ -299,20 +298,6 @@ with c2:
 with c3:
     if st.button("🔄 Refresh", use_container_width=True):
         st.rerun()
-
-# ─────────────────────────────────────────────────────────────
-# AUTO REFRESH — har 60 second pe
-# ─────────────────────────────────────────────────────────────
-# Countdown timer dikhao
-placeholder = st.empty()
-for remaining in range(60, 0, -1):
-    placeholder.markdown(
-        f'<div style="font-size:11px; color:#9ca3af; text-align:right;">🔄 Auto refresh in {remaining}s</div>',
-        unsafe_allow_html=True
-    )
-    time.sleep(1)
-placeholder.empty()
-st.rerun()
 
 # ─────────────────────────────────────────────────────────────
 # SECTOR FILTER
