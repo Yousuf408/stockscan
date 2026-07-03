@@ -454,7 +454,8 @@ table_html = f"""
 </div>
 """
 
-st.markdown(table_html, unsafe_allow_html=True)
+import streamlit.components.v1 as components
+components.html(table_html, height=len(df) * 42 + 60, scrolling=False)
 
 # ─────────────────────────────────────────────────────────────
 # FOOTER
