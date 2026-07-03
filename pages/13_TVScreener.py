@@ -34,6 +34,14 @@ div[data-testid="stButton"] button {
     height: 32px !important;
 }
 div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
+
+/* Center align all table cells */
+div[data-testid="stDataFrame"] td {
+    text-align: center !important;
+}
+div[data-testid="stDataFrame"] th {
+    text-align: center !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
