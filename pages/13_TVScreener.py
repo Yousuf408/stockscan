@@ -207,29 +207,29 @@ with st.spinner(f"Calculating yesterday ATP for {len(df)} stocks..."):
 
 # ─────────────────────────────────────────────────────────────
 # CANDLE COLUMNS — time based
-# 9:40 column = 9:35 candle (closes at 9:40) — show when time >= 9:40
-# 9:45 column = 9:40 candle (closes at 9:45) — show when time >= 9:45
-# 9:50 column = 9:45 candle (closes at 9:50) — show when time >= 9:50
+# 9:40 column = 9:40 candle (9:40-9:45) → show after 9:45 (close hone ke baad)
+# 9:45 column = 9:45 candle (9:45-9:50) → show after 9:50
+# 9:50 column = 9:50 candle (9:50-9:55) → show after 9:55
 # ─────────────────────────────────────────────────────────────
 now_ist  = get_current_ist_time()
 now_time = now_ist.strftime('%H:%M:%S')
 now_hhmm = now_ist.hour * 60 + now_ist.minute  # minutes since midnight
 
-show_940 = now_hhmm >= (9 * 60 + 40)   # 9:40+ → fetch 9:35 candle
-show_945 = now_hhmm >= (9 * 60 + 45)   # 9:45+ → fetch 9:40 candle
-show_950 = now_hhmm >= (9 * 60 + 50)   # 9:50+ → fetch 9:45 candle
+show_940 = now_hhmm >= (9 * 60 + 45)   # 9:45+ → 9:40 candle closed
+show_945 = now_hhmm >= (9 * 60 + 50)   # 9:50+ → 9:45 candle closed
+show_950 = now_hhmm >= (9 * 60 + 55)   # 9:55+ → 9:50 candle closed
 
 if show_940 or show_945 or show_950:
     with st.spinner("Fetching candle data..."):
         c940_list, c945_list, c950_list = [], [], []
         for _, row in df.iterrows():
             sym = row['Symbol']
-            # 9:40 column → 9:35 closed candle
-            c940_list.append(get_candle_signal(sym, "09:35") if show_940 else "")
-            # 9:45 column → 9:40 closed candle
-            c945_list.append(get_candle_signal(sym, "09:40") if show_945 else "")
-            # 9:50 column → 9:45 closed candle
-            c950_list.append(get_candle_signal(sym, "09:45") if show_950 else "")
+            # 9:40 column → 9:40 closed candle (closes at 9:45)
+            c940_list.append(get_candle_signal(sym, "09:40") if show_940 else "")
+            # 9:45 column → 9:45 closed candle (closes at 9:50)
+            c945_list.append(get_candle_signal(sym, "09:45") if show_945 else "")
+            # 9:50 column → 9:50 closed candle (closes at 9:55)
+            c950_list.append(get_candle_signal(sym, "09:50") if show_950 else "")
         df['9:40'] = c940_list
         df['9:45'] = c945_list
         df['9:50'] = c950_list
