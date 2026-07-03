@@ -409,36 +409,9 @@ for i, (_, row) in enumerate(df.iterrows()):
     rows_html += f"""
     <tr style="background:{bg};">
         <td style="{td_left}">
-            <span id="sym_{i}" onclick="
-                var sym = '{sym}';
-                var el = document.getElementById('sym_{i}');
-                var orig = el.innerHTML;
-                function showCopied() {{
-                    el.innerHTML = '<span style=\'color:#16a34a;font-weight:700;font-size:11px;\'>✓ ' + sym + '</span>';
-                    setTimeout(function(){{ el.innerHTML = orig; }}, 1500);
-                }}
-                if (navigator.clipboard && window.isSecureContext) {{
-                    navigator.clipboard.writeText(sym).then(showCopied).catch(function() {{
-                        var ta = document.createElement('textarea');
-                        ta.value = sym;
-                        ta.style.position = 'fixed';
-                        ta.style.opacity = '0';
-                        document.body.appendChild(ta);
-                        ta.select();
-                        try {{ document.execCommand('copy'); showCopied(); }} catch(e) {{}}
-                        document.body.removeChild(ta);
-                    }});
-                }} else {{
-                    var ta = document.createElement('textarea');
-                    ta.value = sym;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try {{ document.execCommand('copy'); showCopied(); }} catch(e) {{}}
-                    document.body.removeChild(ta);
-                }}
-            " style="cursor:pointer;color:#1e40af;font-weight:700;">{sym}</span>
+            <span onclick="tsCopy(event, this, '{sym}')" style="cursor:pointer;color:#1e40af;font-weight:700;">
+                <span class="ts-sym-name">{sym}</span>
+            </span>
         </td>
         <td style="{td_style}">₹{float(price):.2f}</td>
         <td style="{td_style}">{fmt_chg(chg)}</td>
@@ -454,6 +427,38 @@ for i, (_, row) in enumerate(df.iterrows()):
     </tr>"""
 
 table_html = f"""
+<script>
+function tsCopy(e, btn, sym) {{
+  e.stopPropagation();
+  function showCopied() {{
+    var nameEl = btn.querySelector('.ts-sym-name');
+    if (!nameEl) return;
+    var original = nameEl.textContent;
+    nameEl.textContent = '✓ ' + sym;
+    nameEl.style.color = '#00a854';
+    nameEl.style.fontWeight = '700';
+    setTimeout(function() {{
+      nameEl.textContent = original;
+      nameEl.style.color = '';
+    }}, 1500);
+  }}
+  if (navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(sym).then(showCopied).catch(function() {{
+      var ta = document.createElement('textarea');
+      ta.value = sym; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try {{ document.execCommand('copy'); showCopied(); }} catch(err) {{}}
+      document.body.removeChild(ta);
+    }});
+  }} else {{
+    var ta = document.createElement('textarea');
+    ta.value = sym; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try {{ document.execCommand('copy'); showCopied(); }} catch(err) {{}}
+    document.body.removeChild(ta);
+  }}
+}}
+</script>
 <div style="overflow-x:auto; border:1px solid #e5e7eb; border-radius:8px; margin-top:8px;">
 <table style="width:100%; border-collapse:collapse; font-family:sans-serif;">
     <thead style="background:#f9fafb;">
