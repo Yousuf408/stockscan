@@ -330,56 +330,131 @@ if selected_sector != 'All':
     df = df[df['Sector'] == selected_sector]
 
 # ─────────────────────────────────────────────────────────────
-# TABLE STYLING
+# FORMAT HELPERS
 # ─────────────────────────────────────────────────────────────
-def color_chg(val):
-    if val > 0:   return 'color: #16a34a; font-weight: 600;'
-    elif val < 0: return 'color: #dc2626; font-weight: 600;'
-    return ''
+def fmt_volume(v):
+    try:
+        v = float(v)
+        if v >= 1_000_000: return f"{v/1_000_000:.1f}M"
+        if v >= 100_000:   return f"{v/100_000:.1f}L"
+        if v >= 1_000:     return f"{v/1_000:.1f}K"
+        return str(int(v))
+    except: return str(v)
 
-def color_relvol(val):
-    if val >= 3:     return 'background-color: #fef9c3; font-weight: 600;'
-    elif val >= 1.5: return 'background-color: #dcfce7;'
-    return ''
+def fmt_chg(v):
+    try:
+        v = float(v)
+        color = "#16a34a" if v > 0 else "#dc2626"
+        return f'<span style="color:{color};font-weight:600;">{v:+.2f}%</span>'
+    except: return str(v)
 
-def color_gap(val):
-    """Color Gap column based on % value"""
-    if val == '—' or not isinstance(val, str):
-        return 'color: #9ca3af;'
-    if val.startswith('↑'):
-        pct = float(val.replace('↑ +', '').replace('%', ''))
-        if pct >= 5:    return 'color: #14532d; font-weight: 700;'  # dark green
-        elif pct >= 2:  return 'color: #16a34a; font-weight: 600;'  # medium green
-        else:           return 'color: #4ade80; font-weight: 500;'  # light green
-    elif val.startswith('↓'):
-        return 'color: #dc2626; font-weight: 600;'  # red
-    return ''
+def fmt_relvol(v):
+    try:
+        v = float(v)
+        if v >= 3:   bg = "#fef9c3"
+        elif v >= 1.5: bg = "#dcfce7"
+        else: bg = "transparent"
+        return f'<span style="background:{bg};padding:2px 6px;border-radius:4px;font-weight:600;">{v:.2f}x</span>'
+    except: return str(v)
 
-# Column order — Sector last
-col_order = ['Symbol', 'Price ₹', 'Chg %', 'Volume', 'Rel Vol', 'Mkt Cap (B)', 'ATP', 'Gap', '9:40', '9:45', '9:50', 'Sector']
-col_order = [c for c in col_order if c in df.columns]
-display_df = df[col_order].copy()
+def fmt_gap(v):
+    if not isinstance(v, str) or v == "—": return '<span style="color:#9ca3af;">—</span>'
+    if v.startswith("↑"):
+        try:
+            pct = float(v.replace("↑ +","").replace("%",""))
+            if pct >= 5:   color = "#14532d"
+            elif pct >= 2: color = "#16a34a"
+            else:          color = "#4ade80"
+        except: color = "#16a34a"
+        return f'<span style="color:{color};font-weight:700;">{v}</span>'
+    elif v.startswith("↓"):
+        return f'<span style="color:#dc2626;font-weight:600;">{v}</span>'
+    return v
 
-# Format ATP
-display_df['ATP'] = display_df['ATP'].apply(
-    lambda x: f"₹{x:,.2f}" if isinstance(x, (int, float)) else x
-)
+def fmt_atp(v):
+    try: return f"₹{float(v):,.2f}"
+    except: return str(v)
 
-styled_df = (
-    display_df.style
-    .applymap(color_chg, subset=['Chg %'])
-    .applymap(color_relvol, subset=['Rel Vol'])
-    .applymap(color_gap, subset=['Gap'])
-    .format({
-        'Price ₹'    : '₹{:.2f}',
-        'Chg %'      : '{:+.2f}%',
-        'Volume'     : '{:,.0f}',
-        'Rel Vol'    : '{:.2f}x',
-        'Mkt Cap (B)': '₹{:.1f}B',
-    })
-)
+def fmt_mktcap(v):
+    try: return f"₹{float(v):.1f}B"
+    except: return str(v)
 
-st.dataframe(styled_df, use_container_width=True, height=620, hide_index=True)
+# ─────────────────────────────────────────────────────────────
+# HTML TABLE
+# ─────────────────────────────────────────────────────────────
+headers = ["Symbol", "Price ₹", "Chg %", "Volume", "Rel Vol", "ATP", "Gap", "9:40", "9:45", "9:50", "Mkt Cap (B)", "Sector"]
+
+th_style = "padding:8px 10px;text-align:center;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap;"
+th_left  = "padding:8px 10px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;"
+td_style = "padding:7px 10px;text-align:center;font-size:12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"
+td_left  = "padding:7px 10px;text-align:left;font-size:12px;border-bottom:1px solid #f3f4f6;font-weight:600;"
+
+rows_html = ""
+for i, (_, row) in enumerate(df.iterrows()):
+    sym     = row.get("Symbol", "")
+    price   = row.get("Price ₹", "")
+    chg     = row.get("Chg %", "")
+    vol     = row.get("Volume", "")
+    relvol  = row.get("Rel Vol", "")
+    atp     = row.get("ATP", "")
+    gap     = row.get("Gap", "—")
+    c940    = row.get("9:40", "")
+    c945    = row.get("9:45", "")
+    c950    = row.get("9:50", "")
+    mktcap  = row.get("Mkt Cap (B)", "")
+    sector  = row.get("Sector", "")
+
+    bg = "#f9fafb" if i % 2 == 0 else "#ffffff"
+
+    rows_html += f"""
+    <tr style="background:{bg};">
+        <td style="{td_left}">
+            <span id="sym_{i}" onclick="
+                navigator.clipboard.writeText('{sym}');
+                var el = document.getElementById('sym_{i}');
+                var orig = el.innerHTML;
+                el.innerHTML = '<span style=\'color:#16a34a;font-size:10px;\'>✓ Copied</span>';
+                setTimeout(function(){{ el.innerHTML = orig; }}, 1000);
+            " style="cursor:pointer;color:#1e40af;font-weight:700;">{sym}</span>
+        </td>
+        <td style="{td_style}">₹{float(price):.2f}</td>
+        <td style="{td_style}">{fmt_chg(chg)}</td>
+        <td style="{td_style}">{fmt_volume(vol)}</td>
+        <td style="{td_style}">{fmt_relvol(relvol)}</td>
+        <td style="{td_style}">{fmt_atp(atp)}</td>
+        <td style="{td_style}">{fmt_gap(gap)}</td>
+        <td style="{td_style}">{c940}</td>
+        <td style="{td_style}">{c945}</td>
+        <td style="{td_style}">{c950}</td>
+        <td style="{td_style}">{fmt_mktcap(mktcap)}</td>
+        <td style="{td_style};color:#6b7280;font-size:11px;">{sector}</td>
+    </tr>"""
+
+table_html = f"""
+<div style="overflow-x:auto; border:1px solid #e5e7eb; border-radius:8px; margin-top:8px;">
+<table style="width:100%; border-collapse:collapse; font-family:sans-serif;">
+    <thead style="background:#f9fafb;">
+        <tr>
+            <th style="{th_left}">Symbol</th>
+            <th style="{th_style}">Price ₹</th>
+            <th style="{th_style}">Chg %</th>
+            <th style="{th_style}">Volume</th>
+            <th style="{th_style}">Rel Vol</th>
+            <th style="{th_style}">ATP</th>
+            <th style="{th_style}">Gap</th>
+            <th style="{th_style}">9:40</th>
+            <th style="{th_style}">9:45</th>
+            <th style="{th_style}">9:50</th>
+            <th style="{th_style}">Mkt Cap</th>
+            <th style="{th_style}">Sector</th>
+        </tr>
+    </thead>
+    <tbody>{rows_html}</tbody>
+</table>
+</div>
+"""
+
+st.markdown(table_html, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
 # FOOTER
