@@ -126,7 +126,7 @@ def fetch_tv_data():
             .select(
                 'name', 'close', 'change', 'volume',
                 'relative_volume', 'market_cap_basic', 'sector',
-                'High.1M', 'high', 'open', 'prev_close_price'
+                'High.1M', 'high', 'open', 'close[1]'
             )
             .set_markets('india')
             .where(
@@ -162,7 +162,7 @@ if df.empty:
 def calc_gap_pct(row):
     try:
         open_price = float(row.get('open', 0) or 0)
-        prev_close = float(row.get('prev_close_price', 0) or 0)
+        prev_close = float(row.get('close[1]', 0) or 0)  # close[1] = previous day close ✅
         if prev_close == 0:
             return 0
         return ((open_price - prev_close) / prev_close) * 100
@@ -176,7 +176,7 @@ df = df[df['_opening_gap'].abs() <= 2.0].head(15)  # Gap filter + top 15
 # CLEAN DATA
 # ─────────────────────────────────────────────────────────────
 df = df.copy()
-df = df.drop(columns=['high', 'High.1M', 'open', 'prev_close_price', '_opening_gap'], errors='ignore')
+df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', '_opening_gap'], errors='ignore')
 df['change']           = df['change'].round(2)
 df['relative_volume']  = df['relative_volume'].round(2)
 df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
