@@ -50,19 +50,12 @@ IST = pytz.timezone("Asia/Kolkata")
 # ─────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────
-def get_last_trading_day():
+def get_trading_day_before(date):
     """
-    TV screener jis din ka data dikh raha hai us din se
-    1 trading day peeche ka ATP date return karta hai.
-    yfinance se check karta hai — weekend + NSE holidays automatic skip.
+    Given a date, return the trading day just before it.
+    yfinance NIFTY se check karo — weekend + NSE holidays skip.
     """
-    # Step 1: TV ka reference date pata karo
-    # Agar market open hai → aaj, warna last trading day
-    d = datetime.now(IST).date()
-
-    # Step 2: TV reference date se 1 trading day peeche jaao
-    # yfinance se NIFTY data check karo — empty = holiday/weekend
-    candidate = d - timedelta(days=1)
+    candidate = date - timedelta(days=1)
     attempts = 0
     while attempts < 10:
         if candidate.weekday() >= 5:
@@ -79,17 +72,31 @@ def get_last_trading_day():
                 auto_adjust=True
             )
             if not test_df.empty:
-                return candidate  # Yeh valid trading day hai ✅
+                return candidate  # Valid trading day ✅
         except:
             pass
         candidate -= timedelta(days=1)
         attempts += 1
+    # Fallback
+    candidate = date - timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
 
-    # Fallback — simple weekday logic
-    d = datetime.now(IST).date() - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
+def get_last_trading_day():
+    """
+    ATP date = TV reference day se 1 trading day peeche.
+    TV reference day = last trading day (aaj market open ho ya band).
+    """
+    today = datetime.now(IST).date()
+
+    # Step 1: TV ka reference day = last trading day
+    tv_ref = get_trading_day_before(today + timedelta(days=1))  # aaj se last trading day
+
+    # Step 2: TV reference se 1 aur trading day peeche = ATP date
+    atp_date = get_trading_day_before(tv_ref)
+
+    return atp_date
 
 def get_current_ist_time():
     return datetime.now(IST)
