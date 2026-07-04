@@ -51,6 +51,41 @@ IST = pytz.timezone("Asia/Kolkata")
 # HELPERS
 # ─────────────────────────────────────────────────────────────
 def get_last_trading_day():
+    """
+    TV screener jis din ka data dikh raha hai us din se
+    1 trading day peeche ka ATP date return karta hai.
+    yfinance se check karta hai — weekend + NSE holidays automatic skip.
+    """
+    # Step 1: TV ka reference date pata karo
+    # Agar market open hai → aaj, warna last trading day
+    d = datetime.now(IST).date()
+
+    # Step 2: TV reference date se 1 trading day peeche jaao
+    # yfinance se NIFTY data check karo — empty = holiday/weekend
+    candidate = d - timedelta(days=1)
+    attempts = 0
+    while attempts < 10:
+        if candidate.weekday() >= 5:
+            candidate -= timedelta(days=1)
+            attempts += 1
+            continue
+        try:
+            test_df = yf.download(
+                "^NSEI",
+                start=candidate,
+                end=candidate + timedelta(days=1),
+                interval="1d",
+                progress=False,
+                auto_adjust=True
+            )
+            if not test_df.empty:
+                return candidate  # Yeh valid trading day hai ✅
+        except:
+            pass
+        candidate -= timedelta(days=1)
+        attempts += 1
+
+    # Fallback — simple weekday logic
     d = datetime.now(IST).date() - timedelta(days=1)
     while d.weekday() >= 5:
         d -= timedelta(days=1)
