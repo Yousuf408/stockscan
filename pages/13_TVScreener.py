@@ -191,7 +191,15 @@ def screener_fragment():
         except:
             return None
 
+    def get_prev_high_val(row):
+        try:
+            v = float(row.get('high[1]', 0) or 0)
+            return v if v > 0 else None
+        except:
+            return None
+
     df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
+    df['PrevHighVal']  = df.apply(get_prev_high_val, axis=1)
     df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'high[1]', '_opening_gap'], errors='ignore')
     df['change']           = df['change'].round(2)
     df['relative_volume']  = df['relative_volume'].round(2)
@@ -371,16 +379,18 @@ def screener_fragment():
             gap_str = f'<span style="color:#dc2626;font-weight:600;">↓ {gap_pct:.1f}%</span>'
         return f'<div style="font-size:12px;font-weight:500;">{atp_str}</div><div style="font-size:11px;">{gap_str}</div>'
 
-    def fmt_prev_high(dist):
-        if dist is None:
+    def fmt_prev_high(dist, val):
+        if dist is None or val is None:
             return '<span style="color:#9ca3af;">N/A</span>'
+        val_str = f"₹{val:,.2f}"
         if dist >= 0:
             if dist >= 3:   color = "#14532d"
             elif dist >= 1: color = "#16a34a"
             else:           color = "#4ade80"
-            return f'<span style="color:{color};font-weight:700;">↑ +{dist:.1f}%</span>'
+            pct_str = f'<span style="color:{color};font-weight:700;">↑ +{dist:.1f}%</span>'
         else:
-            return f'<span style="color:#dc2626;font-weight:600;">↓ {dist:.1f}%</span>'
+            pct_str = f'<span style="color:#dc2626;font-weight:600;">↓ {dist:.1f}%</span>'
+        return f'<div style="font-size:12px;font-weight:500;">{val_str}</div><div style="font-size:11px;">{pct_str}</div>'
 
     # ─────────────────────────────────────────────────────────────
     # HTML TABLE — merged columns
@@ -400,6 +410,7 @@ def screener_fragment():
         atp    = row.get("ATP", None)
         gappct = row.get("GapPct", None)
         prevhd = row.get("PrevHighDist", None)
+        prevhv = row.get("PrevHighVal", None)
         c940   = row.get("c940", "")
         c945   = row.get("c945", "")
         c950   = row.get("c950", "")
@@ -426,7 +437,7 @@ def screener_fragment():
             <td style="{TD}">{fmt_relvol(relvol)}</td>
             <td style="{TD}">{fmt_atp_gap(atp, gappct)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
-            <td style="{TD}">{fmt_prev_high(prevhd)}</td>
+            <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
 
