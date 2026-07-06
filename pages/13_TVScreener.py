@@ -126,7 +126,7 @@ def fetch_tv_data():
             .select(
                 'name', 'close', 'change', 'volume',
                 'relative_volume', 'market_cap_basic', 'sector',
-                'High.1M', 'high', 'open', 'close[1]', 'High.1D'
+                'High.1M', 'high', 'open', 'close[1]', 'high[1]'
             )
             .set_markets('india')
             .where(
@@ -184,7 +184,7 @@ def screener_fragment():
     def calc_prev_high_dist(row):
         try:
             price    = float(row.get('close', 0) or 0)
-            prev_high = float(row.get('High.1D', 0) or 0)
+            prev_high = float(row.get('high[1]', 0) or 0)
             if prev_high == 0:
                 return None
             return round(((price - prev_high) / prev_high) * 100, 2)
@@ -192,7 +192,7 @@ def screener_fragment():
             return None
 
     df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
-    df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'High.1D', '_opening_gap'], errors='ignore')
+    df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'high[1]', '_opening_gap'], errors='ignore')
     df['change']           = df['change'].round(2)
     df['relative_volume']  = df['relative_volume'].round(2)
     df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
