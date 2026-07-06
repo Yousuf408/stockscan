@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
+import time
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -60,16 +62,47 @@ def get_trading_day_before(date):
 def get_last_trading_day():
     today = datetime.now(IST).date()
     tv_ref = get_trading_day_before(today + timedelta(days=1))
-    atp_date = get_trading_day_before(tv_ref)
-    return atp_date
+    poc_date = get_trading_day_before(tv_ref)
+    return poc_date
 
 def get_current_ist_time():
     return datetime.now(IST)
 
 # ─────────────────────────────────────────────────────────────
-# ATP — kal ka full day 5min VWAP
+# POC (Point of Control) — kal ka Fixed Range Volume Profile
+# Bins-based approach: har candle ka volume price-bins mein
+# distribute karo, jis bin mein sabse zyada volume ho wahi POC
 # ─────────────────────────────────────────────────────────────
-def get_yesterday_atp(symbol):
+def calculate_poc_from_df(df_day, num_bins=50):
+    price_min = df_day['Low'].min()
+    price_max = df_day['High'].max()
+    if price_max <= price_min:
+        return None
+
+    bins = np.linspace(price_min, price_max, num_bins + 1)
+    bin_volumes = np.zeros(num_bins)
+
+    for _, row in df_day.iterrows():
+        low, high, vol = row['Low'], row['High'], row['Volume']
+        if high == low:
+            idx = np.digitize(low, bins) - 1
+            idx = min(max(idx, 0), num_bins - 1)
+            bin_volumes[idx] += vol
+            continue
+        for i in range(num_bins):
+            bin_low, bin_high = bins[i], bins[i+1]
+            overlap = min(high, bin_high) - max(low, bin_low)
+            if overlap > 0:
+                proportion = overlap / (high - low)
+                bin_volumes[i] += vol * proportion
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    poc_idx = np.argmax(bin_volumes)
+    return round(float(bin_centers[poc_idx]), 2)
+
+
+def fetch_poc_once(symbol, num_bins=50):
+    """Ek single POC fetch attempt — kal ke poore din ka data leke."""
     try:
         last_day = get_last_trading_day()
         ticker = symbol + ".NS"
@@ -81,15 +114,36 @@ def get_yesterday_atp(symbol):
         df = df.between_time("09:15", "15:30")
         if df.empty:
             return None
-        close  = df['Close'].values.flatten()
-        volume = df['Volume'].values.flatten()
-        atp = (close * volume).sum() / volume.sum()
-        return round(float(atp), 2)
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        return calculate_poc_from_df(df, num_bins=num_bins)
     except:
         return None
 
+
+def get_yesterday_poc(symbol, num_bins=50, max_attempts=3, tolerance_pct=0.5):
+    """
+    Retry-and-verify POC fetch — kabhi kabhi yfinance ka historical
+    data thoda shift ho jata hai fetch-to-fetch. Isliye 2 consecutive
+    fetches lete hain, agar match karein (tolerance ke andar) tabhi
+    accept karte hain — warna retry karte hain max_attempts tak.
+    """
+    prev_val = None
+    for attempt in range(max_attempts):
+        current_val = fetch_poc_once(symbol, num_bins=num_bins)
+        if current_val is None:
+            return None
+        if prev_val is not None:
+            diff_pct = abs(current_val - prev_val) / prev_val * 100 if prev_val else 0
+            if diff_pct <= tolerance_pct:
+                return current_val  # Do consecutive fetches match — stable value
+        prev_val = current_val
+        if attempt < max_attempts - 1:
+            time.sleep(2)  # thoda ruk ke dobara try karo
+    return prev_val  # Match nahi hua, but jo aakhri mila woh return karo
+
 # ─────────────────────────────────────────────────────────────
-# CANDLE CHECK
+# CANDLE CHECK — Entry Signal (STANDALONE — POC/ATP pe depend nahi karta)
+# Sirf aaj ki specific 5min candle ka Close > Open check karta hai
 # ─────────────────────────────────────────────────────────────
 def get_candle_signal(symbol, candle_time_str):
     try:
@@ -217,38 +271,42 @@ def screener_fragment():
     })
 
     # ─────────────────────────────────────────────────────────────
-    # ATP FETCH — session_state cache
+    # POC FETCH — session_state cache + retry-verify built into
+    # get_yesterday_poc(). Naya stock aane pe hi fetch hoga,
+    # baaki refresh pe cache se instant milega.
     # ─────────────────────────────────────────────────────────────
-    if 'atp_cache' not in st.session_state:
-        st.session_state['atp_cache'] = {}
+    if 'poc_cache' not in st.session_state:
+        st.session_state['poc_cache'] = {}
 
-    new_symbols = [s for s in df['Symbol'] if s not in st.session_state['atp_cache']]
+    new_symbols = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
     if new_symbols:
-        with st.spinner(f"Fetching ATP for {len(new_symbols)} new stocks..."):
+        with st.spinner(f"Calculating POC for {len(new_symbols)} new stocks..."):
             for symbol in new_symbols:
-                st.session_state['atp_cache'][symbol] = get_yesterday_atp(symbol)
+                st.session_state['poc_cache'][symbol] = get_yesterday_poc(symbol)
 
-    atp_vals, gap_vals = [], []
+    poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
         symbol = row['Symbol']
         price  = row['Price']
-        atp    = st.session_state['atp_cache'].get(symbol)
-        if atp is None:
-            atp_vals.append(None)
+        poc    = st.session_state['poc_cache'].get(symbol)
+        if poc is None:
+            poc_vals.append(None)
             gap_vals.append(None)
-        elif price > atp:
-            pct = ((price - atp) / atp) * 100
-            atp_vals.append(atp)
+        elif price > poc:
+            pct = ((price - poc) / poc) * 100
+            poc_vals.append(poc)
             gap_vals.append(pct)
         else:
-            pct = ((atp - price) / atp) * 100
-            atp_vals.append(atp)
+            pct = ((poc - price) / poc) * 100
+            poc_vals.append(poc)
             gap_vals.append(-pct)
-    df['ATP']     = atp_vals
+    df['POC']     = poc_vals
     df['GapPct']  = gap_vals
 
     # ─────────────────────────────────────────────────────────────
-    # CANDLE COLUMNS — session_state cache
+    # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
+    # Kisi bhi price-comparison (POC/ATP) pe depend nahi karta —
+    # sirf candle ka Close > Open check karta hai.
     # ─────────────────────────────────────────────────────────────
     now_ist  = get_current_ist_time()
     now_time = now_ist.strftime('%H:%M:%S')
@@ -319,7 +377,7 @@ def screener_fragment():
                 <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
             </div>
             <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">ATP DATE</div>
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
                 <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
             </div>
         </div>
@@ -364,12 +422,12 @@ def screener_fragment():
                 return f'<span style="color:#d1d5db;font-size:11px;padding:2px 5px;">{label}</span>'
         return f'{badge("9:40", c940)}&nbsp;{badge("9:45", c945)}&nbsp;{badge("9:50", c950)}'
 
-    def fmt_atp_gap(atp, gap_pct):
-        if atp is None:
+    def fmt_poc_gap(poc, gap_pct):
+        if poc is None:
             return '<span style="color:#9ca3af;">N/A</span>'
-        atp_str = f"₹{float(atp):,.2f}"
+        poc_str = f"₹{float(poc):,.2f}"
         if gap_pct is None:
-            return f'<div style="font-size:12px;">{atp_str}</div>'
+            return f'<div style="font-size:12px;">{poc_str}</div>'
         if gap_pct > 0:
             if gap_pct >= 5:   color = "#14532d"
             elif gap_pct >= 2: color = "#16a34a"
@@ -377,7 +435,7 @@ def screener_fragment():
             gap_str = f'<span style="color:{color};font-weight:700;">↑ +{gap_pct:.1f}%</span>'
         else:
             gap_str = f'<span style="color:#dc2626;font-weight:600;">↓ {gap_pct:.1f}%</span>'
-        return f'<div style="font-size:12px;font-weight:500;">{atp_str}</div><div style="font-size:11px;">{gap_str}</div>'
+        return f'<div style="font-size:12px;font-weight:500;">{poc_str}</div><div style="font-size:11px;">{gap_str}</div>'
 
     def fmt_prev_high(dist, val):
         if dist is None or val is None:
@@ -407,7 +465,7 @@ def screener_fragment():
         chg    = row.get("Chg", 0)
         vol    = row.get("Volume", 0)
         relvol = row.get("RelVol", 0)
-        atp    = row.get("ATP", None)
+        poc    = row.get("POC", None)
         gappct = row.get("GapPct", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
@@ -435,7 +493,7 @@ def screener_fragment():
             </td>
             <td style="{TD}">{fmt_volume(vol)}</td>
             <td style="{TD}">{fmt_relvol(relvol)}</td>
-            <td style="{TD}">{fmt_atp_gap(atp, gappct)}</td>
+            <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
@@ -478,7 +536,7 @@ def screener_fragment():
           <th style="{TH}">Price / Chg%</th>
           <th style="{TH}">Volume</th>
           <th style="{TH}">Rel Vol</th>
-          <th style="{TH}">ATP / Gap</th>
+          <th style="{TH}">POC / Gap</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">Mkt Cap</th>
@@ -494,7 +552,7 @@ def screener_fragment():
 
     st.markdown("""
     <div style="margin-top:6px;font-size:10px;color:#9ca3af;text-align:center;">
-        TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Gap filter ±2% · Sorted by Chg% ↓ · ATP = Yesterday VWAP
+        TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Gap filter ±2% · Sorted by Chg% ↓ · POC = Yesterday Volume Profile Point of Control
     </div>
     """, unsafe_allow_html=True)
 
