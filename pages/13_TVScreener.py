@@ -5,6 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
 import time
+from supabase import create_client
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -33,6 +34,19 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 """, unsafe_allow_html=True)
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# ─────────────────────────────────────────────────────────────
+# SUPABASE CLIENT — same project/keys jo Momentum/Breakout Scanner
+# mein use ho rahe hain
+# ─────────────────────────────────────────────────────────────
+SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+
+@st.cache_resource
+def get_supabase():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = get_supabase()
 
 # ─────────────────────────────────────────────────────────────
 # HELPERS
@@ -67,6 +81,49 @@ def get_last_trading_day():
 
 def get_current_ist_time():
     return datetime.now(IST)
+
+# ─────────────────────────────────────────────────────────────
+# SUPABASE CACHE — read/write for tv_screener_cache table
+# Persistent version of session_state cache: same pattern
+# (symbol + calc_date → poc/prev_high/ema), but survives across
+# app restarts / new sessions.
+# ─────────────────────────────────────────────────────────────
+def supabase_get_cached_row(symbol, calc_date):
+    """
+    Supabase se ek row fetch karo agar (symbol, calc_date) already save hai.
+    Returns dict with poc_value/prev_high_val/ema_coil_pct, ya None agar nahi mila.
+    """
+    try:
+        result = (supabase.table("tv_screener_cache")
+                  .select("poc_value, prev_high_val, ema_coil_pct")
+                  .eq("symbol", symbol)
+                  .eq("calc_date", calc_date.isoformat())
+                  .limit(1)
+                  .execute())
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+    except:
+        return None
+
+
+def supabase_save_row(symbol, signal_date, calc_date, poc_value, prev_high_val, ema_coil_pct):
+    """
+    (symbol, calc_date) ke liye row upsert karo — agar already hai toh
+    update, warna naya insert. None values bhi save hoti hain (failed
+    calculation cache karne ke liye, taaki dobara-dobara retry na ho).
+    """
+    try:
+        supabase.table("tv_screener_cache").upsert({
+            "symbol"        : symbol,
+            "signal_date"   : signal_date.isoformat(),
+            "calc_date"     : calc_date.isoformat(),
+            "poc_value"     : poc_value,
+            "prev_high_val" : prev_high_val,
+            "ema_coil_pct"  : ema_coil_pct,
+        }, on_conflict="symbol,calc_date").execute()
+    except:
+        pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
 
 # ─────────────────────────────────────────────────────────────
 # POC (Point of Control) — kal ka Fixed Range Volume Profile
@@ -266,7 +323,7 @@ def screener_fragment():
             return 0
 
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
-    df = df[df['_opening_gap'].abs() <= 2.0].head(15)  # Gap filter + top 15
+    df = df[df['_opening_gap'].abs() <= 2.0].head(30)  # Gap filter + top 30 (calculation ke liye) — display sirf top 15 hoga baad mein
 
     # ─────────────────────────────────────────────────────────────
     # CLEAN DATA
@@ -309,18 +366,50 @@ def screener_fragment():
     })
 
     # ─────────────────────────────────────────────────────────────
-    # POC FETCH — session_state cache + retry-verify built into
-    # get_yesterday_poc(). Naya stock aane pe hi fetch hoga,
-    # baaki refresh pe cache se instant milega.
+    # POC + PREV HIGH + EMA — Supabase persistent cache pehle,
+    # session_state cache doosra layer (speed ke liye), yfinance
+    # sirf tab jab dono jagah miss ho. Naye results Supabase mein
+    # bhi save hote hain taaki agli baar (naya session/restart bhi)
+    # instant milein — jab tak calc_date same hai.
     # ─────────────────────────────────────────────────────────────
+    calc_date   = get_last_trading_day()
+    signal_date = datetime.now(IST).date()
+
     if 'poc_cache' not in st.session_state:
         st.session_state['poc_cache'] = {}
+    if 'ema_cache' not in st.session_state:
+        st.session_state['ema_cache'] = {}
+    if 'prevhigh_cache' not in st.session_state:
+        st.session_state['prevhigh_cache'] = {}
 
-    new_symbols = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
-    if new_symbols:
-        with st.spinner(f"Calculating POC for {len(new_symbols)} new stocks..."):
-            for symbol in new_symbols:
-                st.session_state['poc_cache'][symbol] = get_yesterday_poc(symbol)
+    # Pehle: kaunse symbols session cache mein already hain? (fastest)
+    # Baaki: Supabase check karo (medium speed, persists across restarts)
+    # Aakhri mein: yfinance calculate karo (slowest, sirf jab kahin nahi mila)
+    need_check = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
+
+    if need_check:
+        with st.spinner(f"Checking cache for {len(need_check)} stocks..."):
+            for symbol in need_check:
+                cached_row = supabase_get_cached_row(symbol, calc_date)
+                if cached_row is not None:
+                    # Supabase mein mil gaya — yfinance calculate NAHI karna
+                    st.session_state['poc_cache'][symbol]      = cached_row.get('poc_value')
+                    st.session_state['ema_cache'][symbol]      = cached_row.get('ema_coil_pct')
+                    st.session_state['prevhigh_cache'][symbol] = cached_row.get('prev_high_val')
+                else:
+                    # Kahin nahi mila — yfinance se fresh calculate karo
+                    poc_val      = get_yesterday_poc(symbol)
+                    ema_val      = get_ema_consolidation_pct(symbol)
+                    # Prev High value already TV se aa raha hai df mein (PrevHighVal column) —
+                    # yahan hum sirf Supabase mein persist karne ke liye us row ko use karenge
+                    st.session_state['poc_cache'][symbol] = poc_val
+                    st.session_state['ema_cache'][symbol] = ema_val
+                    # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
+                    row_match = df[df['Symbol'] == symbol]
+                    prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
+                    st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+                    # Naya calculation Supabase mein save karo (agle session/restart ke liye)
+                    supabase_save_row(symbol, signal_date, calc_date, poc_val, prevhigh_val, ema_val)
 
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
@@ -340,19 +429,6 @@ def screener_fragment():
             gap_vals.append(-pct)
     df['POC']     = poc_vals
     df['GapPct']  = gap_vals
-
-    # ─────────────────────────────────────────────────────────────
-    # EMA CONSOLIDATION FETCH — session_state cache
-    # Naya stock aane pe hi fetch hoga, baaki refresh pe cache se instant.
-    # ─────────────────────────────────────────────────────────────
-    if 'ema_cache' not in st.session_state:
-        st.session_state['ema_cache'] = {}
-
-    new_ema_symbols = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
-    if new_ema_symbols:
-        with st.spinner(f"Checking EMA consolidation for {len(new_ema_symbols)} new stocks..."):
-            for symbol in new_ema_symbols:
-                st.session_state['ema_cache'][symbol] = get_ema_consolidation_pct(symbol)
 
     df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
@@ -400,6 +476,12 @@ def screener_fragment():
     df['c940'] = c940_list
     df['c945'] = c945_list
     df['c950'] = c950_list
+
+    # ─────────────────────────────────────────────────────────────
+    # DISPLAY SLICE — calculation 30 stocks pe hui (backend/Supabase
+    # ke liye), lekin display sirf top 15 (Chg% wise, already sorted)
+    # ─────────────────────────────────────────────────────────────
+    df = df.head(15)
 
     # ─────────────────────────────────────────────────────────────
     # HEADER ROW
