@@ -169,6 +169,44 @@ def get_candle_signal(symbol, candle_time_str):
         return ""
 
 # ─────────────────────────────────────────────────────────────
+# EMA CONSOLIDATION — "EMA Coil" check
+# Kal ke poore din (5min candles) mein kitne % candles ka
+# Close, 20 EMA ke ±0.5% range ke andar tha. 2 din ka data
+# (kal + parso) lekar EMA warm-up karte hain, phir sirf
+# kal ke candles pe % nikalte hain.
+# ─────────────────────────────────────────────────────────────
+def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
+    try:
+        last_day = get_last_trading_day()
+        day_before = get_trading_day_before(last_day)
+        ticker = symbol + ".NS"
+        df = yf.download(ticker, start=day_before, end=last_day + timedelta(days=1),
+                         interval="5m", progress=False, auto_adjust=True)
+        if df.empty:
+            return None
+        df.index = pd.to_datetime(df.index)
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        df = df.between_time("09:15", "15:30")
+        if df.empty:
+            return None
+
+        df['EMA'] = df['Close'].ewm(span=ema_span, adjust=False).mean()
+
+        # Sirf "last_day" (kal) ke candles filter karo — day_before sirf warm-up ke liye tha
+        df_yesterday = df[df.index.normalize() == pd.Timestamp(last_day)]
+        if df_yesterday.empty:
+            return None
+
+        diff_pct = ((df_yesterday['Close'] - df_yesterday['EMA']).abs() / df_yesterday['EMA']) * 100
+        near_ema_count = (diff_pct <= tolerance_pct).sum()
+        total_count = len(df_yesterday)
+        if total_count == 0:
+            return None
+        return round((near_ema_count / total_count) * 100, 1)
+    except:
+        return None
+
+# ─────────────────────────────────────────────────────────────
 # TV SCREENER FETCH — open + prev_close added for gap filter
 # ─────────────────────────────────────────────────────────────
 def fetch_tv_data():
@@ -302,6 +340,21 @@ def screener_fragment():
             gap_vals.append(-pct)
     df['POC']     = poc_vals
     df['GapPct']  = gap_vals
+
+    # ─────────────────────────────────────────────────────────────
+    # EMA CONSOLIDATION FETCH — session_state cache
+    # Naya stock aane pe hi fetch hoga, baaki refresh pe cache se instant.
+    # ─────────────────────────────────────────────────────────────
+    if 'ema_cache' not in st.session_state:
+        st.session_state['ema_cache'] = {}
+
+    new_ema_symbols = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
+    if new_ema_symbols:
+        with st.spinner(f"Checking EMA consolidation for {len(new_ema_symbols)} new stocks..."):
+            for symbol in new_ema_symbols:
+                st.session_state['ema_cache'][symbol] = get_ema_consolidation_pct(symbol)
+
+    df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
     # ─────────────────────────────────────────────────────────────
     # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
@@ -450,6 +503,11 @@ def screener_fragment():
             pct_str = f'<span style="color:#dc2626;font-weight:600;">↓ {dist:.1f}%</span>'
         return f'<div style="font-size:12px;font-weight:500;">{val_str}</div><div style="font-size:11px;">{pct_str}</div>'
 
+    def fmt_ema_coil(pct, min_threshold=70):
+        if pct is None or pct < min_threshold:
+            return '<span style="color:#9ca3af;">—</span>'
+        return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:600;">✓ {pct:.0f}%</span>'
+
     # ─────────────────────────────────────────────────────────────
     # HTML TABLE — merged columns
     # ─────────────────────────────────────────────────────────────
@@ -469,6 +527,7 @@ def screener_fragment():
         gappct = row.get("GapPct", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
+        emacoil = row.get("EmaCoilPct", None)
         c940   = row.get("c940", "")
         c945   = row.get("c945", "")
         c950   = row.get("c950", "")
@@ -496,6 +555,7 @@ def screener_fragment():
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
+            <td style="{TD}">{fmt_ema_coil(emacoil)}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
 
@@ -539,6 +599,7 @@ def screener_fragment():
           <th style="{TH}">POC / Gap</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
+          <th style="{TH}">EMA Coil</th>
           <th style="{TH}">Mkt Cap</th>
         </tr>
       </thead>
