@@ -193,7 +193,7 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
         df['EMA'] = df['Close'].ewm(span=ema_span, adjust=False).mean()
 
         # Sirf "last_day" (kal) ke candles filter karo — day_before sirf warm-up ke liye tha
-        df_yesterday = df[df.index.normalize() == pd.Timestamp(last_day)]
+        df_yesterday = df[df.index.date == last_day]
         if df_yesterday.empty:
             return None
 
