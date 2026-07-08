@@ -374,12 +374,102 @@ def scanner_table():
         scrolling = True,
     )
 
-    # ── Trade log — shown below the scanner table ─────────────
+    # ─────────────────────────────────────────────────────────
+    # MANUAL BUY BUTTONS — one row per stock
+    # ─────────────────────────────────────────────────────────
+    import math
+
+    auth      = st.session_state.get("angel_auth")
+    smart_api = auth.get("smart_api") if auth else None
+
+    capital_per_trade = total_capital / 4
+
+    st.markdown("#### 🖐 Manual Trade")
+    st.caption("Capital ÷ 4 se qty auto-calculate hogi. Already bought stocks skip honge.")
+
+    # Header row
+    h1, h2, h3, h4, h5, h6 = st.columns([2, 1.2, 1.2, 1.2, 1.5, 1.5])
+    h1.markdown("**Symbol**")
+    h2.markdown("**LTP**")
+    h3.markdown("**Prev Close**")
+    h4.markdown("**Chg %**")
+    h5.markdown("**Qty (auto)**")
+    h6.markdown("**Action**")
+
+    st.divider()
+
+    for _, row in df.iterrows():
+        symbol     = row["Symbol"]
+        ltp        = float(row["LTP"])
+        prev_close = float(row["Prev Close"])
+        chg_pct    = float(row.get("chg_vs_prev", 0)) if "chg_vs_prev" in row else round(((ltp - prev_close) / prev_close) * 100, 2)
+        qty        = max(math.floor(capital_per_trade / ltp), 1) if ltp > 0 else 1
+        est_value  = round(qty * ltp, 0)
+        already    = symbol in st.session_state["already_bought"]
+
+        c1, c2, c3, c4, c5, c6 = st.columns([2, 1.2, 1.2, 1.2, 1.5, 1.5])
+
+        c1.markdown(f"**{symbol}**")
+        c2.markdown(f"₹{ltp:,.2f}")
+        c3.markdown(f"₹{prev_close:,.2f}")
+
+        chg_color = "green" if chg_pct >= 0 else "red"
+        c4.markdown(f"<span style='color:{chg_color};font-weight:600'>{chg_pct:+.2f}%</span>", unsafe_allow_html=True)
+
+        c5.markdown(f"x{qty} &nbsp;≈ ₹{est_value:,.0f}", unsafe_allow_html=True)
+
+        with c6:
+            if already:
+                st.markdown(
+                    "<span style='color:#16a34a;font-weight:600'>✅ Bought</span>",
+                    unsafe_allow_html=True
+                )
+            elif not smart_api:
+                st.button(
+                    "BUY",
+                    key      = f"manual_buy_{symbol}",
+                    disabled = True,
+                    help     = "Angel One session not found",
+                )
+            else:
+                if st.button(
+                    f"BUY x{qty}",
+                    key  = f"manual_buy_{symbol}",
+                    type = "primary",
+                ):
+                    token = SYMBOL_TO_TOKEN.get(symbol)
+                    if not token:
+                        st.error(f"Token not found for {symbol}")
+                    else:
+                        from momentum.auto_trader import place_buy_order
+                        result = place_buy_order(smart_api, symbol, token, qty)
+                        if result["success"]:
+                            st.session_state["already_bought"].add(symbol)
+                            st.session_state["trade_log"].append({
+                                "time"        : datetime.now(IST).strftime("%H:%M:%S"),
+                                "symbol"      : symbol,
+                                "qty"         : qty,
+                                "ltp"         : ltp,
+                                "move_pct"    : chg_pct,
+                                "capital_used": est_value,
+                                "success"     : True,
+                                "order_id"    : result["order_id"],
+                                "error"       : None,
+                                "type"        : "MANUAL",
+                            })
+                            st.success(f"✅ BUY {symbol} x{qty} @ ₹{ltp} | Order: {result['order_id']}")
+                            st.toast(f"✅ {symbol} x{qty} order placed!", icon="🚀")
+                        else:
+                            st.error(f"❌ Order failed: {result['error']}")
+
+        st.divider()
+
+    # ── Trade log — shown below manual buttons ────────────────
     if st.session_state.get("trade_log"):
         import pandas as pd
-        st.markdown("#### 📋 Today's Auto Trades")
+        st.markdown("#### 📋 Today's Trades")
         log_df    = pd.DataFrame(st.session_state["trade_log"])
-        want_cols = ["time", "symbol", "qty", "ltp", "move_pct", "capital_used", "success", "order_id", "error"]
+        want_cols = ["time", "type", "symbol", "qty", "ltp", "move_pct", "capital_used", "success", "order_id", "error"]
         show_cols = [c for c in want_cols if c in log_df.columns]
         st.dataframe(log_df[show_cols], use_container_width=True, hide_index=True)
 
