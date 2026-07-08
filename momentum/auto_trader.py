@@ -21,7 +21,7 @@ def get_2pct_trigger_stocks(df, already_bought: set) -> list:
             prev_close = float(row["Prev Close"])
             if prev_close <= 0: continue
             move_pct = ((ltp - prev_close) / prev_close) * 100
-            if move_pct >= 2.0:
+            if move_pct >= 5.0:
                 triggers.append({"symbol": symbol, "ltp": ltp, "move_pct": round(move_pct, 2)})
         except Exception: continue
     return triggers
