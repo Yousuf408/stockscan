@@ -91,11 +91,11 @@ def get_current_ist_time():
 def supabase_get_cached_row(symbol, calc_date):
     """
     Supabase se ek row fetch karo agar (symbol, calc_date) already save hai.
-    Returns dict with poc_value/prev_high_val/ema_coil_pct, ya None agar nahi mila.
+    Returns dict with poc_value/prev_high_val/ema_coil_pct/vol5d_median, ya None agar nahi mila.
     """
     try:
         result = (supabase.table("tv_screener_cache")
-                  .select("poc_value, prev_high_val, ema_coil_pct")
+                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median")
                   .eq("symbol", symbol)
                   .eq("calc_date", calc_date.isoformat())
                   .limit(1)
@@ -107,7 +107,7 @@ def supabase_get_cached_row(symbol, calc_date):
         return None
 
 
-def supabase_save_row(symbol, signal_date, calc_date, poc_value, prev_high_val, ema_coil_pct):
+def supabase_save_row(symbol, signal_date, calc_date, poc_value, prev_high_val, ema_coil_pct, vol5d_median):
     """
     (symbol, calc_date) ke liye row upsert karo — agar already hai toh
     update, warna naya insert. None values bhi save hoti hain (failed
@@ -121,6 +121,7 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value, prev_high_val, 
             "poc_value"     : poc_value,
             "prev_high_val" : prev_high_val,
             "ema_coil_pct"  : ema_coil_pct,
+            "vol5d_median"  : vol5d_median,
         }, on_conflict="symbol,calc_date").execute()
     except:
         pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
@@ -264,6 +265,32 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
         return None
 
 # ─────────────────────────────────────────────────────────────
+# 5-DAY MEDIAN VOLUME — Rel Vol (5D) ka baseline
+# Yahoo Finance se peechle 5 COMPLETE trading days ka daily
+# volume leke median nikalte hain. Aaj ka (incomplete/live) din
+# explicitly exclude karte hain — warna self-referencing error
+# ho jata hai (aaj ka volume khud denominator mein aa jata hai).
+# Median use kiya hai average ki jagah — outlier-proof hai.
+# ─────────────────────────────────────────────────────────────
+def get_5day_median_volume(symbol, days=5):
+    try:
+        ticker = symbol + ".NS"
+        df = yf.download(ticker, period="15d", interval="1d", progress=False, auto_adjust=True)
+        if df.empty:
+            return None
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        # Aaj ka incomplete row (Close = NaN hota hai jab din chal raha ho) exclude karo
+        df = df.dropna(subset=['Close'])
+        if df.empty:
+            return None
+        last_n = df['Volume'].tail(days)
+        if last_n.empty:
+            return None
+        return round(float(last_n.median()), 0)
+    except:
+        return None
+
+# ─────────────────────────────────────────────────────────────
 # TV SCREENER FETCH — open + prev_close added for gap filter
 # ─────────────────────────────────────────────────────────────
 def fetch_tv_data():
@@ -381,6 +408,8 @@ def screener_fragment():
         st.session_state['ema_cache'] = {}
     if 'prevhigh_cache' not in st.session_state:
         st.session_state['prevhigh_cache'] = {}
+    if 'vol5d_cache' not in st.session_state:
+        st.session_state['vol5d_cache'] = {}
 
     # Pehle: kaunse symbols session cache mein already hain? (fastest)
     # Baaki: Supabase check karo (medium speed, persists across restarts)
@@ -396,10 +425,12 @@ def screener_fragment():
                     st.session_state['poc_cache'][symbol]      = cached_row.get('poc_value')
                     st.session_state['ema_cache'][symbol]      = cached_row.get('ema_coil_pct')
                     st.session_state['prevhigh_cache'][symbol] = cached_row.get('prev_high_val')
+                    st.session_state['vol5d_cache'][symbol]    = cached_row.get('vol5d_median')
                 else:
                     # Kahin nahi mila — yfinance se fresh calculate karo
                     poc_val      = get_yesterday_poc(symbol)
                     ema_val      = get_ema_consolidation_pct(symbol)
+                    vol5d_val    = get_5day_median_volume(symbol)
                     # Prev High value already TV se aa raha hai df mein (PrevHighVal column) —
                     # yahan hum sirf Supabase mein persist karne ke liye us row ko use karenge
                     st.session_state['poc_cache'][symbol] = poc_val
@@ -408,8 +439,9 @@ def screener_fragment():
                     row_match = df[df['Symbol'] == symbol]
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+                    st.session_state['vol5d_cache'][symbol] = vol5d_val
                     # Naya calculation Supabase mein save karo (agle session/restart ke liye)
-                    supabase_save_row(symbol, signal_date, calc_date, poc_val, prevhigh_val, ema_val)
+                    supabase_save_row(symbol, signal_date, calc_date, poc_val, prevhigh_val, ema_val, vol5d_val)
 
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
@@ -431,6 +463,22 @@ def screener_fragment():
     df['GapPct']  = gap_vals
 
     df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
+
+    # ─────────────────────────────────────────────────────────────
+    # REL VOL (5D) — LIVE calculation, cache NAHI hoga
+    # Aaj ka volume (TV se, real-time) ÷ 5-day median (cached, historical)
+    # ─────────────────────────────────────────────────────────────
+    def calc_rel_vol_5d(row):
+        try:
+            today_vol = float(row.get('Volume', 0) or 0)
+            median_vol = st.session_state['vol5d_cache'].get(row['Symbol'])
+            if median_vol is None or median_vol == 0:
+                return None
+            return round(today_vol / median_vol, 2)
+        except:
+            return None
+
+    df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
     # ─────────────────────────────────────────────────────────────
     # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
@@ -541,13 +589,15 @@ def screener_fragment():
         except: return str(v)
 
     def fmt_relvol(v):
+        if v is None:
+            return '<span style="color:#9ca3af;">N/A</span>'
         try:
             v = float(v)
             if v >= 3:     bg, color = "#fef9c3", "#854f0b"
             elif v >= 1.5: bg, color = "#dcfce7", "#166534"
             else:          bg, color = "transparent", "#374151"
             return f'<span style="background:{bg};color:{color};padding:2px 7px;border-radius:4px;font-weight:600;">{v:.2f}x</span>'
-        except: return str(v)
+        except: return '<span style="color:#9ca3af;">N/A</span>'
 
     def fmt_entry_badges(c940, c945, c950):
         def badge(label, active):
@@ -604,7 +654,7 @@ def screener_fragment():
         price  = row.get("Price", 0)
         chg    = row.get("Chg", 0)
         vol    = row.get("Volume", 0)
-        relvol = row.get("RelVol", 0)
+        relvol = row.get("RelVol5D", 0)
         poc    = row.get("POC", None)
         gappct = row.get("GapPct", None)
         prevhd = row.get("PrevHighDist", None)
