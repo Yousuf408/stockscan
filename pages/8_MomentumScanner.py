@@ -27,18 +27,17 @@ from momentum.backend import (
     IST,
 )
 from momentum.renderer import render_html_table
-# ── For Notification ─────────────────────────────────────────────
-
 from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
 from momentum.delivery import get_latest_available_delivery_pct
 from momentum.first_candle import fetch_body_ratio_for_stocks
+from momentum.auto_trader import build_symbol_to_token, run_auto_trade
 
 # ── Display cutoff — stocks whose FIRST signal was after this time ──
-# ── are excluded from the table (still saved to Supabase though)   ──
 SIGNAL_CUTOFF_TIME = "11:00:00"   # HH:MM:SS IST
 
 # ── Token lookups ─────────────────────────────────────────────
-TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
+TOKEN_TO_NAME    = {token: name for name, token, kind in STOCKS_WATCHLIST}
+SYMBOL_TO_TOKEN  = build_symbol_to_token(STOCKS_WATCHLIST)
 
 # ── Auto-connect WebSocket ────────────────────────────────────
 if not angel_ws.is_connected():
@@ -64,12 +63,10 @@ st.set_page_config(
     page_icon="🚀",
     layout="wide"
 )
-# ── STYLES & SIDEBAR ──────────────────────────────────────────
+
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
 sidebar_brand("MomentumScanner")
-
-# ── STYLES & SIDEBAR end here ──────────────────────────────────
 
 st.markdown("""
     <style>
@@ -103,7 +100,7 @@ def get_ema20_status(df) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# BODY RATIO SESSION-STATE CACHE (first 5-min candle, 9:15-9:20)
+# BODY RATIO SESSION-STATE CACHE
 # ─────────────────────────────────────────────────────────────
 def get_body_ratio_cache(df) -> dict:
     if "body_ratio_cache" not in st.session_state:
@@ -134,7 +131,7 @@ if "momentum_historical" not in st.session_state:
 
 historical = st.session_state["momentum_historical"]
 
-# ── DELIVERY % — fetched once per session, cached for the whole day ──
+# ── DELIVERY % ────────────────────────────────────────────────
 if "delivery_pct_map" not in st.session_state:
     delivery_map, delivery_date = get_latest_available_delivery_pct()
     st.session_state["delivery_pct_map"]  = delivery_map
@@ -146,6 +143,54 @@ if (
 ):
     st.session_state["signal_data"]      = fetch_signal_data_from_supabase(get_supabase(), today_str)
     st.session_state["signal_data_date"] = today_str
+
+# ─────────────────────────────────────────────────────────────
+# AUTO-TRADE SESSION STATE INIT
+# ─────────────────────────────────────────────────────────────
+if "auto_trade_enabled" not in st.session_state:
+    st.session_state["auto_trade_enabled"] = False
+if "already_bought" not in st.session_state:
+    st.session_state["already_bought"] = set()
+if "trade_log" not in st.session_state:
+    st.session_state["trade_log"] = []
+
+# ─────────────────────────────────────────────────────────────
+# SIDEBAR — AUTO TRADER CONTROLS
+# ─────────────────────────────────────────────────────────────
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚡ Auto Trader")
+
+total_capital = st.sidebar.number_input(
+    "Capital (₹)",
+    min_value  = 10000,
+    max_value  = 1000000,
+    value      = 100000,
+    step       = 5000,
+    help       = "Per trade = Capital ÷ 4  |  Max 3 positions",
+)
+per_trade = total_capital / 4
+st.sidebar.caption(f"Per trade: ₹{per_trade:,.0f}  |  Max 3 positions")
+
+st.session_state["auto_trade_enabled"] = st.sidebar.toggle(
+    "🤖 Auto Buy",
+    value = st.session_state["auto_trade_enabled"],
+    key   = "auto_trade_toggle",
+)
+
+# Positions counter
+bought_count = len(st.session_state["already_bought"])
+st.sidebar.caption(f"Positions open: {bought_count} / 3")
+
+# Show bought stocks
+if st.session_state["already_bought"]:
+    for sym in st.session_state["already_bought"]:
+        st.sidebar.markdown(f"✅ {sym}")
+
+# Manual reset
+if st.sidebar.button("🔄 Reset Positions"):
+    st.session_state["already_bought"] = set()
+    st.session_state["trade_log"]      = []
+    st.sidebar.success("Positions cleared!")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -167,16 +212,15 @@ def scanner_table():
     now_ist    = datetime.now(IST).strftime("%H:%M:%S")
     tick_count = len(angel_ws.latest_ticks)
 
-    # ── Market hours check (9:15–15:30 IST) ────────────────────
+    # ── Market hours check (9:15–15:30 IST) ──────────────────
     current_t   = datetime.now(IST).time()
     market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
 
-    # ── Outside market hours: only show stocks already saved in DB ──
-    # (drops brand-new symbols that only appeared from stale ticks)
+    # ── Outside market hours: only show stocks already saved ──
     if not market_open and not df.empty:
         df = df[df["Symbol"].isin(signal_data.keys())].reset_index(drop=True)
 
-    # ── Status bar + Body Ratio toggle + Reload button — always visible ──
+    # ── Status bar + toggle + reload ─────────────────────────
     col_info, col_toggle, col_btn = st.columns([4, 2, 1])
     with col_info:
         stock_count = len(df) if not df.empty else 0
@@ -192,7 +236,7 @@ def scanner_table():
     with col_btn:
         if st.button("🔄 Reload", use_container_width=True):
             del st.session_state["momentum_historical"]
-            st.session_state.pop("ema20_cache",    None)
+            st.session_state.pop("ema20_cache",      None)
             st.session_state.pop("body_ratio_cache", None)
             st.rerun()
 
@@ -200,26 +244,25 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── BODY RATIO — hard filter driven by the native Streamlit toggle. ──
-    # ── No JS/localStorage involved, so no flicker on fragment refresh.  ──
+    # ── Body ratio filter ─────────────────────────────────────
     if hide_low_body:
         body_cache_pre = get_body_ratio_cache(df)
-        df = df[df["Symbol"].apply(lambda s: (body_cache_pre.get(s) or 0) >= 75)].reset_index(drop=True)
+        df = df[df["Symbol"].apply(
+            lambda s: (body_cache_pre.get(s) or 0) >= 75
+        )].reset_index(drop=True)
 
     if df.empty:
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Save / update signals — ONLY during market hours (9:15–15:30 IST) ──
-    # Outside market hours, stale WebSocket/Yahoo ticks can falsely look like
-    # new signals. Table is already filtered above to drop those.
+    # ── Save / update signals ─────────────────────────────────
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
             if not market_open:
-                continue   # skip saving a brand-new signal outside market hours
+                continue
             signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
@@ -256,22 +299,18 @@ def scanner_table():
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
 
-    # ── BODY RATIO — first 5-min candle (9:15-9:20), toggle-filter only ──
+    # ── Body ratio ────────────────────────────────────────────
     body_cache = get_body_ratio_cache(df)
     df["Body Ratio"] = df["Symbol"].apply(lambda s: body_cache.get(s, None))
 
-    # ── HARD FILTER — stocks below yesterday's 20 EMA are dropped ──
-    # ── completely from the list (not just badged ❌). Stocks whose ──
-    # ── EMA status hasn't loaded yet ("⏳") are kept until resolved. ──
+    # ── Hard EMA20 filter ─────────────────────────────────────
     df = df[~df["EMA20 Status"].astype(str).str.startswith("❌")].reset_index(drop=True)
 
-    # ── DELIVERY % — from cached NSE EOD data (yesterday's session) ──
+    # ── Delivery % ────────────────────────────────────────────
     delivery_map = st.session_state.get("delivery_pct_map", {})
     df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
 
-    # ── TIME CUTOFF — hide stocks whose first signal was AFTER ──
-    # ── SIGNAL_CUTOFF_TIME from the table. They stay saved in   ──
-    # ── Supabase (saved above) for records / future reference.  ──
+    # ── Time cutoff ───────────────────────────────────────────
     df = df[df["Signal Time"].apply(
         lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
     )].reset_index(drop=True)
@@ -280,9 +319,45 @@ def scanner_table():
         st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
         return
 
-   # ── Notification ─────────────────────────────────────
+    # ── Notifications ─────────────────────────────────────────
     init_notif_state()
     process_notifications(df)
+
+    # ─────────────────────────────────────────────────────────
+    # AUTO-TRADE TRIGGER
+    # ─────────────────────────────────────────────────────────
+    if st.session_state.get("auto_trade_enabled") and market_open:
+        auth      = st.session_state.get("angel_auth")
+        smart_api = auth.get("smart_api") if auth else None
+
+        if smart_api:
+            trade_results = run_auto_trade(
+                df              = df,
+                smart_api       = smart_api,
+                symbol_to_token = SYMBOL_TO_TOKEN,
+                total_capital   = total_capital,
+                already_bought  = st.session_state["already_bought"],  # mutated in-place
+                max_positions   = 3,
+            )
+            for r in trade_results:
+                st.session_state["trade_log"].append(r)
+                if r["success"]:
+                    st.toast(
+                        f"✅ BUY {r['symbol']} x{r['qty']} @ ₹{r['ltp']} "
+                        f"| +{r['move_pct']}% | ₹{r['capital_used']} used",
+                        icon="🚀",
+                    )
+                else:
+                    st.toast(
+                        f"❌ {r['symbol']} failed: {r['error']}",
+                        icon="⚠️",
+                    )
+        else:
+            st.warning(
+                "⚠️ Auto Trade ON but `smart_api` not found in session. "
+                "Update angel_auth.py to return `smart_api` object.",
+                icon="⚠️",
+            )
 
     # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
@@ -295,9 +370,18 @@ def scanner_table():
 
     st.components.v1.html(
         html,
-        height   = max(500, 160 + len(df) * 90),
+        height    = max(500, 160 + len(df) * 90),
         scrolling = True,
     )
+
+    # ── Trade log — shown below the scanner table ─────────────
+    if st.session_state.get("trade_log"):
+        import pandas as pd
+        st.markdown("#### 📋 Today's Auto Trades")
+        log_df    = pd.DataFrame(st.session_state["trade_log"])
+        want_cols = ["time", "symbol", "qty", "ltp", "move_pct", "capital_used", "success", "order_id", "error"]
+        show_cols = [c for c in want_cols if c in log_df.columns]
+        st.dataframe(log_df[show_cols], use_container_width=True, hide_index=True)
 
 
 request_permission_js()
