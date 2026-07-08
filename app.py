@@ -3,14 +3,14 @@ import pyotp
 import json
 import pandas as pd
 import yfinance as yf
-import requests  # Direct API communication ke liye
+import requests  
 import plotly.graph_objects as go
 
 # Page configuration
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Direct HTTP Request System applied. Isme SDK payload loss bypass ho jayega.")
+st.write("Headers error patched (`X-SourceID` added). Ready to run live testing.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -37,22 +37,24 @@ TOP_STOCKS = [
     {"name": "LT", "symbol": "LT-EQ", "token": "11483", "yf_ticker": "LT.NS"}
 ]
 
-# Order Placement using direct HTTP requests to bypass SDK limitations
+# Order Placement using direct HTTP requests with all mandatory headers
 def place_market_order_direct(tradingsymbol, symboltoken):
     if not password:
         return {"status": "Failed", "error": "Please enter your Password in sidebar!"}
         
     try:
-        # 1. Session Login REST Endpoint
+        # Generate current TOTP token
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
         login_url = "https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword"
         
+        # FIXED: Added 'X-SourceID': 'WEB' inside headers
         headers = {
             "Content-Type": "application/json",
             "X-ClientLocalIP": "192.168.1.1",
             "X-ClientPublicIP": "106.10.10.10",
             "X-MACAddress": "fe80::216:3eff:fe13:8807",
-            "X-PrivateKey": api_key
+            "X-PrivateKey": api_key,
+            "X-SourceID": "WEB"  # Crucial mandatory field for AngelOne REST API
         }
         
         login_payload = {
@@ -61,12 +63,13 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "totp": totp
         }
         
-        login_response = requests.post(login_url, headers=headers, json=login_payload).json()
+        response_raw = requests.post(login_url, headers=headers, json=login_payload)
+        login_response = response_raw.json()
         
         if not login_response.get('status'):
             return {"status": "Failed", "error": f"Login Error: {login_response.get('message')}"}
             
-        # Extract JwtToken for Authorization
+        # Extract JwtToken
         jwt_token = login_response['data']['jwtToken']
         
         # 2. Order Placement REST Endpoint
@@ -78,10 +81,11 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "X-ClientLocalIP": "192.168.1.1",
             "X-ClientPublicIP": "106.10.10.10",
             "X-MACAddress": "fe80::216:3eff:fe13:8807",
-            "X-PrivateKey": api_key
+            "X-PrivateKey": api_key,
+            "X-SourceID": "WEB"  # Added here as well for safety
         }
         
-        # We use AMO + DELIVERY for post-market hours safe testing
+        # Using AMO for market-closed safe responses
         order_payload = {
             "variety": "AMO",
             "tradingsymbol": str(tradingsymbol),
@@ -137,7 +141,7 @@ for stock in TOP_STOCKS:
     with col_action:
         st.write("") 
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
-            with st.spinner("Processing REST Order..."):
+            with st.spinner("Processing HTTP REST Order..."):
                 res = place_market_order_direct(stock['symbol'], stock['token'])
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
