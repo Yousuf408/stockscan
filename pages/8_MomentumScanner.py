@@ -424,43 +424,44 @@ def scanner_table():
                     "<span style='color:#16a34a;font-weight:600'>✅ Bought</span>",
                     unsafe_allow_html=True
                 )
-            elif not smart_api:
-                st.button(
-                    "BUY",
-                    key      = f"manual_buy_{symbol}",
-                    disabled = True,
-                    help     = "Angel One session not found",
-                )
             else:
                 if st.button(
                     f"BUY x{qty}",
                     key  = f"manual_buy_{symbol}",
                     type = "primary",
                 ):
-                    token = SYMBOL_TO_TOKEN.get(symbol)
-                    if not token:
-                        st.error(f"Token not found for {symbol}")
+                    # smart_api check at click time — not before
+                    if not smart_api:
+                        st.error(
+                            "Angel One session nahi mila. "
+                            "angel_auth.py mein smart_api object return karo — updated file deploy karo.",
+                            icon="warning",
+                        )
                     else:
-                        from momentum.auto_trader import place_buy_order
-                        result = place_buy_order(smart_api, symbol, token, qty)
-                        if result["success"]:
-                            st.session_state["already_bought"].add(symbol)
-                            st.session_state["trade_log"].append({
-                                "time"        : datetime.now(IST).strftime("%H:%M:%S"),
-                                "symbol"      : symbol,
-                                "qty"         : qty,
-                                "ltp"         : ltp,
-                                "move_pct"    : chg_pct,
-                                "capital_used": est_value,
-                                "success"     : True,
-                                "order_id"    : result["order_id"],
-                                "error"       : None,
-                                "type"        : "MANUAL",
-                            })
-                            st.success(f"✅ BUY {symbol} x{qty} @ ₹{ltp} | Order: {result['order_id']}")
-                            st.toast(f"✅ {symbol} x{qty} order placed!", icon="🚀")
+                        token = SYMBOL_TO_TOKEN.get(symbol)
+                        if not token:
+                            st.error(f"Token not found for {symbol}")
                         else:
-                            st.error(f"❌ Order failed: {result['error']}")
+                            from momentum.auto_trader import place_buy_order
+                            result = place_buy_order(smart_api, symbol, token, qty)
+                            if result["success"]:
+                                st.session_state["already_bought"].add(symbol)
+                                st.session_state["trade_log"].append({
+                                    "time"        : datetime.now(IST).strftime("%H:%M:%S"),
+                                    "symbol"      : symbol,
+                                    "qty"         : qty,
+                                    "ltp"         : ltp,
+                                    "move_pct"    : chg_pct,
+                                    "capital_used": est_value,
+                                    "success"     : True,
+                                    "order_id"    : result["order_id"],
+                                    "error"       : None,
+                                    "type"        : "MANUAL",
+                                })
+                                st.success(f"BUY {symbol} x{qty} @ {ltp} | Order: {result['order_id']}")
+                                st.toast(f"{symbol} x{qty} order placed!", icon="rocket")
+                            else:
+                                st.error(f"Order failed: {result['error']}")
 
         st.divider()
 
