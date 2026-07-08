@@ -10,16 +10,14 @@ from SmartApi import SmartConnect
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Aapke credentials default set kar diye gaye hain. Bas password enter karke test karein.")
+st.write("Typo fixed! Ab aap bina kisi error ke live order test kar sakte hain.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
-    # App-level hardcoded defaults as requested
     DEFAULT_CLIENT_ID = "IIRA29771"
     DEFAULT_API_KEY = "QFectj5C"
     DEFAULT_TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"
     
-    # Inputs (Using Secrets if available, otherwise using the hardcoded default)
     api_key = st.secrets.get("ANGEL_API_KEY", st.text_input("API Key", value=DEFAULT_API_KEY, type="password"))
     client_id = st.secrets.get("ANGEL_CLIENT_ID", st.text_input("Client ID", value=DEFAULT_CLIENT_ID))
     
@@ -51,7 +49,6 @@ def place_market_order(tradingsymbol, symboltoken):
     
     obj = SmartConnect(api_key=api_key)
     try:
-        # Generate dynamic 6-digit TOTP token using the secret key
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
         data = obj.generateSession(client_id, password, totp)
         
@@ -122,8 +119,9 @@ for stock in TOP_STOCKS:
         
     with col_action:
         st.write("") # Padding
+        # FIXED: Changed St.spinner to st.spinner
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
-            with St.spinner("Executing Order..."):
+            with st.spinner("Executing Order..."):
                 res = place_market_order(stock['symbol'], stock['token'])
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
