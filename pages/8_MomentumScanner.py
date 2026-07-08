@@ -381,26 +381,33 @@ def scanner_table():
     from SmartApi import SmartConnect
 
     # ── Get smart_api — from session or create fresh ──────────
+    # Credentials hardcoded here — no import dependency
+    _API_KEY    = "QFectj5C"
+    _CLIENT_ID  = "IIRA29771"
+    _PASSWORD   = "1993"
+    _TOTP_SEC   = "JFTG3DYADWLYSW6FC6RVV4THWM"
+    _PROXY      = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
+
     def get_smart_api():
         auth = st.session_state.get("angel_auth")
         # Try session first
         if auth and auth.get("smart_api"):
             return auth["smart_api"]
-        # Fallback: create fresh SmartConnect with proxy
+        # Fresh login with proxy
         try:
-            from angel_auth import API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET, PROXY_URL
-            obj = SmartConnect(api_key=API_KEY)
-            obj.proxy = {"http": PROXY_URL, "https": PROXY_URL}
-            totp = pyotp.TOTP(TOTP_SECRET).now()
-            data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+            obj = SmartConnect(api_key=_API_KEY)
+            obj.proxy = {"http": _PROXY, "https": _PROXY}
+            totp = pyotp.TOTP(_TOTP_SEC).now()
+            data = obj.generateSession(_CLIENT_ID, _PASSWORD, totp)
             if data and data.get("status"):
-                # Save back to session
                 if auth:
                     auth["smart_api"] = obj
                     st.session_state["angel_auth"] = auth
                 return obj
+            else:
+                st.error(f"Login failed: {data.get('message') if data else 'No response'}")
         except Exception as e:
-            st.error(f"Angel One login failed: {e}")
+            st.error(f"Angel One login error: {e}")
         return None
 
     capital_per_trade = total_capital / 4
