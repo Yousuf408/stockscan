@@ -74,7 +74,12 @@ def get_trading_day_before(date):
     return candidate
 
 def get_last_trading_day():
-    today = datetime.now(IST).date()
+    now = datetime.now(IST)
+    today = now.date()
+    # Market abhi khula nahi (9:15 AM se pehle) — toh "aaj" ko bhi
+    # "not yet trading" treat karo, ek din peeche shift karo
+    if now.hour < 9 or (now.hour == 9 and now.minute < 15):
+        today = today - timedelta(days=1)
     tv_ref = get_trading_day_before(today + timedelta(days=1))
     poc_date = get_trading_day_before(tv_ref)
     return poc_date
