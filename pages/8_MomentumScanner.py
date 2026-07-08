@@ -6,6 +6,12 @@ All logic lives in momentum/backend.py and momentum/renderer.py.
 
 import sys
 import os
+
+# ── Proxy — must be set via env vars for SmartAPI to route correctly ──
+_PROXY = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
+os.environ["HTTP_PROXY"]  = _PROXY
+os.environ["HTTPS_PROXY"] = _PROXY
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
