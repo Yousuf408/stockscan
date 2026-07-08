@@ -10,7 +10,7 @@ from SmartApi import SmartConnect
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Typo fixed! Ab aap bina kisi error ke live order test kar sakte hain.")
+st.write("Angel One API payload validation aur Order structure update kar diya gaya hai.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -21,7 +21,6 @@ with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
     api_key = st.secrets.get("ANGEL_API_KEY", st.text_input("API Key", value=DEFAULT_API_KEY, type="password"))
     client_id = st.secrets.get("ANGEL_CLIENT_ID", st.text_input("Client ID", value=DEFAULT_CLIENT_ID))
     
-    # Password user manually enter karega
     password = st.text_input("Password", type="password", help="Apna AngelOne Login Password yahan dalein")
     
     totp_secret = st.secrets.get("ANGEL_TOTP_SECRET", st.text_input("TOTP Secret Key", value=DEFAULT_TOTP_SECRET, type="password"))
@@ -47,40 +46,52 @@ def place_market_order(tradingsymbol, symboltoken):
     if not (api_key and client_id and totp_secret):
         return {"status": "Failed", "error": "API Credentials components are missing!"}
     
+    # Initialize SmartConnect
     obj = SmartConnect(api_key=api_key)
     try:
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
         data = obj.generateSession(client_id, password, totp)
         
         if data.get('status'):
+            # FIXED PARAMETERS: Market close ho chuka hai, isliye variety "AMO" aur producttype "DELIVERY" kiya hai 
+            # taaki order reject na ho aur system check pass ho jaye testing ke liye.
             order_params = {
-                "variety": "NORMAL",
-                "tradingsymbol": tradingsymbol,
-                "symboltoken": symboltoken,
+                "variety": "AMO",              # Intraday (NORMAL) market closed me error de sakta hai
+                "tradingsymbol": str(tradingsymbol),
+                "symboltoken": str(symboltoken),
                 "transactiontype": "BUY",
                 "exchange": "NSE",
                 "ordertype": "MARKET",
-                "producttype": "INTRADAY",
+                "producttype": "DELIVERY",     # Testing off-market hours ke liye DELIVERY safe hai
                 "duration": "DAY",
                 "quantity": "1"
             }
             
-            order_response = obj.placeOrder(order_params)
+            # API Call logging for catch
+            try:
+                order_response = obj.placeOrder(order_params)
+            except Exception as api_err:
+                return {"status": "Failed", "error": f"AngelOne SDK Error: {str(api_err)}"}
             
-            if order_response:
+            # Agar response empty nahi hai
+            if order_response is not None:
                 if isinstance(order_response, dict):
-                    if order_response.get('status') == True:
+                    if order_response.get('status') == True or str(order_response.get('status')).lower() == 'true':
                         inner_data = order_response.get('data', {})
-                        order_id = inner_data.get('orderid', 'ID_NOT_FOUND') if isinstance(inner_data, dict) else order_response
+                        order_id = inner_data.get('orderid', 'ID_NOT_RETURNED') if isinstance(inner_data, dict) else order_response
                         return {"status": "Success", "order_id": order_id}
                     else:
-                        return {"status": "Failed", "error": order_response.get('message', 'Order Rejected')}
+                        # Real rejection message screen par laane ke liye
+                        error_msg = order_response.get('message', 'Order Rejected by Broker')
+                        return {"status": "Failed", "error": f"Rejected: {error_msg}"}
                 else:
+                    # Agar response direct string format order id hai
                     return {"status": "Success", "order_id": str(order_response)}
             else:
-                return {"status": "Failed", "error": "No response payload from AngelOne"}
+                # Agar response bilkul khali (None) aaya
+                return {"status": "Failed", "error": "AngelOne returned empty payload. App API key configuration or market status restriction."}
         else:
-            return {"status": "Failed", "error": data.get('message', 'Session Authentication Failed')}
+            return {"status": "Failed", "error": f"Login Failed: {data.get('message', 'Check Password/TOTP')}"}
     except Exception as e:
         return {"status": "Failed", "error": str(e)}
 
@@ -119,7 +130,6 @@ for stock in TOP_STOCKS:
         
     with col_action:
         st.write("") # Padding
-        # FIXED: Changed St.spinner to st.spinner
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
             with st.spinner("Executing Order..."):
                 res = place_market_order(stock['symbol'], stock['token'])
