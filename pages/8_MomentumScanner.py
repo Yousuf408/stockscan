@@ -360,13 +360,11 @@ def scanner_table():
 
     # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
-        df                = df,
-        data_source       = data_source,
-        target_date       = historical["target_date"],
-        prev_date         = historical["prev_date"],
-        tick_count        = tick_count,
-        already_bought    = st.session_state.get("already_bought", set()),
-        capital_per_trade = total_capital / 4,
+        df          = df,
+        data_source = data_source,
+        target_date = historical["target_date"],
+        prev_date   = historical["prev_date"],
+        tick_count  = tick_count,
     )
 
     st.components.v1.html(
@@ -375,53 +373,89 @@ def scanner_table():
         scrolling = True,
     )
 
-    # ── postMessage listener — BUY button from HTML table ───────
-    st.components.v1.html(
-        """<script>
-        window.addEventListener('message', function(e) {
-            if (e.data && e.data.type === 'ts_manual_buy') {
-                window.parent.postMessage(
-                    {isStreamlitMessage: true, type: 'streamlit:setComponentValue',
-                     value: {action:'buy', symbol: e.data.symbol, qty: e.data.qty, ltp: e.data.ltp}},
-                    '*'
-                );
-            }
-        });
-        </script>""",
-        height=0,
+    # ─────────────────────────────────────────────────────────
+    # OPTION B — Slim BUY strip (Streamlit native, guaranteed)
+    # ─────────────────────────────────────────────────────────
+    import math
+
+    auth      = st.session_state.get("angel_auth")
+    smart_api = auth.get("smart_api") if auth else None
+    capital_per_trade = total_capital / 4
+
+    st.markdown(
+        '<div style="background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;'
+        'padding:6px 14px 2px 14px;margin-top:4px;">'
+        '<span style="font-size:11px;font-weight:700;color:#64748b;'
+        'text-transform:uppercase;letter-spacing:0.5px;">Quick Buy</span></div>',
+        unsafe_allow_html=True,
     )
 
-    # ── Pending buy from query_params ────────────────────────
-    pending = st.query_params.get("ts_buy", None)
-    if pending:
-        import json
-        try:
-            data      = json.loads(pending)
-            symbol    = data.get("symbol")
-            qty       = int(data.get("qty", 1))
-            ltp       = float(data.get("ltp", 0))
-            auth      = st.session_state.get("angel_auth")
-            smart_api = auth.get("smart_api") if auth else None
-            if smart_api and symbol and symbol not in st.session_state["already_bought"]:
-                token = SYMBOL_TO_TOKEN.get(symbol)
-                if token:
-                    from momentum.auto_trader import place_buy_order
-                    result = place_buy_order(smart_api, symbol, token, qty)
-                    if result["success"]:
-                        st.session_state["already_bought"].add(symbol)
-                        st.session_state["trade_log"].append({
-                            "time": datetime.now(IST).strftime("%H:%M:%S"),
-                            "symbol": symbol, "qty": qty, "ltp": ltp,
-                            "capital_used": round(qty * ltp, 0),
-                            "success": True, "order_id": result["order_id"],
-                            "error": None, "type": "MANUAL",
-                        })
-                        st.toast(f"✅ {symbol} x{qty} order placed!", icon="🚀")
+    for _, row in df.iterrows():
+        symbol  = str(row["Symbol"])
+        ltp     = float(row["LTP"])
+        qty     = max(math.floor(capital_per_trade / ltp), 1) if ltp > 0 else 1
+        est     = round(qty * ltp, 0)
+        already = symbol in st.session_state["already_bought"]
+
+        c1, c2, c3 = st.columns([1, 2, 1])
+
+        c1.markdown(
+            f'<div style="padding:6px 0;">'
+            f'<span style="font-size:13px;font-weight:800;color:#0f172a;">{symbol}</span><br>'
+            f'<span style="font-size:11px;color:#94a3b8;">x{qty} &nbsp;≈ ₹{int(est):,}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        c2.markdown(
+            f'<div style="padding:6px 0;font-size:12px;color:#64748b;">'
+            f'LTP: <b style="color:#0f172a;">₹{ltp:,.2f}</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        with c3:
+            if already:
+                st.markdown(
+                    '<span style="color:#16a34a;font-weight:700;font-size:13px;">✅ Bought</span>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                if st.button(
+                    f"BUY x{qty}",
+                    key  = f"strip_buy_{symbol}",
+                    type = "primary",
+                    use_container_width=True,
+                ):
+                    if not smart_api:
+                        st.error("Angel One session nahi mila. angel_auth.py update karo.")
                     else:
-                        st.toast(f"❌ {symbol} failed: {result['error']}", icon="⚠️")
-        except Exception:
-            pass
-        st.query_params.clear()
+                        token = SYMBOL_TO_TOKEN.get(symbol)
+                        if not token:
+                            st.error(f"Token not found: {symbol}")
+                        else:
+                            from momentum.auto_trader import place_buy_order
+                            with st.spinner(f"Placing {symbol}..."):
+                                result = place_buy_order(smart_api, symbol, token, qty)
+                            if result["success"]:
+                                st.session_state["already_bought"].add(symbol)
+                                st.session_state["trade_log"].append({
+                                    "time"        : datetime.now(IST).strftime("%H:%M:%S"),
+                                    "type"        : "MANUAL",
+                                    "symbol"      : symbol,
+                                    "qty"         : qty,
+                                    "ltp"         : ltp,
+                                    "capital_used": int(est),
+                                    "success"     : True,
+                                    "order_id"    : result["order_id"],
+                                    "error"       : None,
+                                })
+                                st.toast(f"✅ {symbol} x{qty} @ ₹{ltp}", icon="🚀")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {result['error']}")
+
+        st.divider()
 
     # ── Trade log ─────────────────────────────────────────────
     if st.session_state.get("trade_log"):
