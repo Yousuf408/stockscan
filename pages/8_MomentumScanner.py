@@ -377,9 +377,32 @@ def scanner_table():
     # OPTION B — Slim BUY strip (Streamlit native, guaranteed)
     # ─────────────────────────────────────────────────────────
     import math
+    import pyotp
+    from SmartApi import SmartConnect
 
-    auth      = st.session_state.get("angel_auth")
-    smart_api = auth.get("smart_api") if auth else None
+    # ── Get smart_api — from session or create fresh ──────────
+    def get_smart_api():
+        auth = st.session_state.get("angel_auth")
+        # Try session first
+        if auth and auth.get("smart_api"):
+            return auth["smart_api"]
+        # Fallback: create fresh SmartConnect with proxy
+        try:
+            from angel_auth import API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET, PROXY_URL
+            obj = SmartConnect(api_key=API_KEY)
+            obj.proxy = {"http": PROXY_URL, "https": PROXY_URL}
+            totp = pyotp.TOTP(TOTP_SECRET).now()
+            data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+            if data and data.get("status"):
+                # Save back to session
+                if auth:
+                    auth["smart_api"] = obj
+                    st.session_state["angel_auth"] = auth
+                return obj
+        except Exception as e:
+            st.error(f"Angel One login failed: {e}")
+        return None
+
     capital_per_trade = total_capital / 4
 
     st.markdown(
@@ -427,33 +450,34 @@ def scanner_table():
                     type = "primary",
                     use_container_width=True,
                 ):
-                    if not smart_api:
-                        st.error("Angel One session nahi mila. angel_auth.py update karo.")
+                    token = SYMBOL_TO_TOKEN.get(symbol)
+                    if not token:
+                        st.error(f"Token not found: {symbol}")
                     else:
-                        token = SYMBOL_TO_TOKEN.get(symbol)
-                        if not token:
-                            st.error(f"Token not found: {symbol}")
-                        else:
-                            from momentum.auto_trader import place_buy_order
-                            with st.spinner(f"Placing {symbol}..."):
-                                result = place_buy_order(smart_api, symbol, token, qty)
-                            if result["success"]:
-                                st.session_state["already_bought"].add(symbol)
-                                st.session_state["trade_log"].append({
-                                    "time"        : datetime.now(IST).strftime("%H:%M:%S"),
-                                    "type"        : "MANUAL",
-                                    "symbol"      : symbol,
-                                    "qty"         : qty,
-                                    "ltp"         : ltp,
-                                    "capital_used": int(est),
-                                    "success"     : True,
-                                    "order_id"    : result["order_id"],
-                                    "error"       : None,
-                                })
-                                st.toast(f"✅ {symbol} x{qty} @ ₹{ltp}", icon="🚀")
-                                st.rerun()
+                        with st.spinner(f"Connecting & placing {symbol}..."):
+                            smart_api = get_smart_api()
+                            if not smart_api:
+                                st.error("Angel One login failed. Credentials check karo.")
                             else:
-                                st.error(f"❌ {result['error']}")
+                                from momentum.auto_trader import place_buy_order
+                                result = place_buy_order(smart_api, symbol, token, qty)
+                                if result["success"]:
+                                    st.session_state["already_bought"].add(symbol)
+                                    st.session_state["trade_log"].append({
+                                        "time"        : datetime.now(IST).strftime("%H:%M:%S"),
+                                        "type"        : "MANUAL",
+                                        "symbol"      : symbol,
+                                        "qty"         : qty,
+                                        "ltp"         : ltp,
+                                        "capital_used": int(est),
+                                        "success"     : True,
+                                        "order_id"    : result["order_id"],
+                                        "error"       : None,
+                                    })
+                                    st.toast(f"✅ {symbol} x{qty} @ ₹{ltp}", icon="🚀")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Order failed: {result['error']}")
 
         st.divider()
 
