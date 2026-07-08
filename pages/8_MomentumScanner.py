@@ -6,12 +6,6 @@ All logic lives in momentum/backend.py and momentum/renderer.py.
 
 import sys
 import os
-
-# ── Proxy — must be set via env vars for SmartAPI to route correctly ──
-_PROXY = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
-os.environ["HTTP_PROXY"]  = _PROXY
-os.environ["HTTPS_PROXY"] = _PROXY
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
@@ -395,14 +389,19 @@ def scanner_table():
     _PROXY      = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
 
     def get_smart_api():
+        import requests
         auth = st.session_state.get("angel_auth")
         # Try session first
         if auth and auth.get("smart_api"):
             return auth["smart_api"]
-        # Fresh login with proxy
+        # Fresh login — inject proxy via requests Session directly into SmartConnect
         try:
             obj = SmartConnect(api_key=_API_KEY)
-            obj.proxy = {"http": _PROXY, "https": _PROXY}
+            # Patch the internal session to use proxy
+            session = requests.Session()
+            session.proxies = {"http": _PROXY, "https": _PROXY}
+            obj.session = session          # SmartConnect uses self.session internally
+            obj.proxy   = {"http": _PROXY, "https": _PROXY}  # belt + suspenders
             totp = pyotp.TOTP(_TOTP_SEC).now()
             data = obj.generateSession(_CLIENT_ID, _PASSWORD, totp)
             if data and data.get("status"):
