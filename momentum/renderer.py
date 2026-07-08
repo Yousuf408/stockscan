@@ -411,14 +411,8 @@ def _expand_card(label: str, value: str, sub: str, color: str = "") -> str:
 
 
 def render_html_table(df, data_source: str = "", target_date: str = "",
-                      prev_date: str = "", tick_count: int = 0,
-                      already_bought: set = None,
-                      capital_per_trade: float = 25000.0) -> str:
+                      prev_date: str = "", tick_count: int = 0) -> str:
 
-    if already_bought is None:
-        already_bought = set()
-
-    import math
     rows_html = ""
     total     = len(df)
 
@@ -433,10 +427,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
         intraday_pct  = float(row.get("intraday_pct", 0) or 0)
         delivery_pct  = row.get("Delivery %", None)
-
-        # BUY qty calculation
-        qty         = max(math.floor(capital_per_trade / ltp), 1) if ltp > 0 else 1
-        is_bought   = symbol in already_bought
 
         move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100 \
                      if signal_price and float(signal_price) > 0 else 0.0
@@ -476,7 +466,6 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         <tr class="ts-row {mom_cls}" id="tsm-{symbol}" data-sym="{symbol}"
             data-mom="{momentum_str.lower()}" data-ema="{ema_status or ''}"
             onclick="tsToggle('{symbol}')">
-          <td class="td-buy" onclick="event.stopPropagation()">{_buy_btn_cell(symbol, qty, ltp, is_bought)}</td>
           <td><div class="ts-symbol-cell">
             <div class="ts-expand-btn">+</div>
             <button class="ts-copy-btn" onclick="tsCopy(event, this, '{symbol}')">
@@ -493,7 +482,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
           <td>{_delivery_cell(delivery_pct)}</td>
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="9"><div class="ts-expand-panel">{expand_cards}</div></td>
+          <td colspan="8"><div class="ts-expand-panel">{expand_cards}</div></td>
         </tr>"""
 
     meta = f"📅 {target_date} vs {prev_date} &nbsp;|&nbsp; Ticks: {tick_count}" \
@@ -531,8 +520,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 <div class="ts-table-wrap">
 <table>
   <thead><tr>
-    <th style="width:90px;">Action</th>
-    <th onclick="tsColHighlight(1)">Symbol</th>
+    <th onclick="tsColHighlight(0)">Symbol</th>
     <th onclick="tsColHighlight(2)">Signal Price</th>
     <th onclick="tsColHighlight(3)">LTP</th>
     <th onclick="tsColHighlight(4)">Vol Ratio</th>
