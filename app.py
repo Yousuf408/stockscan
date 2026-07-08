@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Headers error patched (`X-SourceID` added). Ready to run live testing.")
+st.write("Google Apps Script Tunnel (Proxy) successfully configured. Testing ke liye ready hai.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -37,24 +37,26 @@ TOP_STOCKS = [
     {"name": "LT", "symbol": "LT-EQ", "token": "11483", "yf_ticker": "LT.NS"}
 ]
 
-# Order Placement using direct HTTP requests with all mandatory headers
+# Order Placement using Google Apps Script URL as a Free Trusted Proxy Tunnel
 def place_market_order_direct(tradingsymbol, symboltoken):
     if not password:
         return {"status": "Failed", "error": "Please enter your Password in sidebar!"}
         
     try:
-        # Generate current TOTP token
+        # Aapka provide kiya hua permanent web app url
+        GOOGLE_PROXY_URL = "https://script.google.com/macros/s/AKfycbzmFzgRRF3UTP1hd8X6NzZjLTe9h1mEUSKpZuMnesyijbSWa0Ja7l324APwXqaCOsCd/exec"
+
+        # Generate current TOTP token dynamically
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
         login_url = "https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword"
         
-        # FIXED: Added 'X-SourceID': 'WEB' inside headers
         headers = {
             "Content-Type": "application/json",
             "X-ClientLocalIP": "192.168.1.1",
             "X-ClientPublicIP": "106.10.10.10",
             "X-MACAddress": "fe80::216:3eff:fe13:8807",
             "X-PrivateKey": api_key,
-            "X-SourceID": "WEB"  # Crucial mandatory field for AngelOne REST API
+            "X-SourceID": "WEB"
         }
         
         login_payload = {
@@ -63,16 +65,23 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "totp": totp
         }
         
-        response_raw = requests.post(login_url, headers=headers, json=login_payload)
+        # Packing login requests for Google Script
+        google_login_payload = {
+            "url": login_url,
+            "headers": headers,
+            "payload": login_payload
+        }
+        
+        response_raw = requests.post(GOOGLE_PROXY_URL, json=google_login_payload)
         login_response = response_raw.json()
         
         if not login_response.get('status'):
             return {"status": "Failed", "error": f"Login Error: {login_response.get('message')}"}
             
-        # Extract JwtToken
+        # Extract JWT Token from trusted response
         jwt_token = login_response['data']['jwtToken']
         
-        # 2. Order Placement REST Endpoint
+        # 2. Order Placement Endpoint Setup
         order_url = "https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder"
         
         order_headers = {
@@ -82,10 +91,10 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "X-ClientPublicIP": "106.10.10.10",
             "X-MACAddress": "fe80::216:3eff:fe13:8807",
             "X-PrivateKey": api_key,
-            "X-SourceID": "WEB"  # Added here as well for safety
+            "X-SourceID": "WEB"
         }
         
-        # Using AMO for market-closed safe responses
+        # Variety "AMO" and Product "DELIVERY" ensures post-market hour system passes safely
         order_payload = {
             "variety": "AMO",
             "tradingsymbol": str(tradingsymbol),
@@ -98,7 +107,14 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "quantity": "1"
         }
         
-        res = requests.post(order_url, headers=order_headers, json=order_payload).json()
+        # Packing order data for Google Script routing
+        google_order_payload = {
+            "url": order_url,
+            "headers": order_headers,
+            "payload": order_payload
+        }
+        
+        res = requests.post(GOOGLE_PROXY_URL, json=google_order_payload).json()
         
         if res.get('status') == True:
             order_id = res.get('data', {}).get('orderid', 'ID_NOT_PARSED')
@@ -141,7 +157,7 @@ for stock in TOP_STOCKS:
     with col_action:
         st.write("") 
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
-            with st.spinner("Processing HTTP REST Order..."):
+            with st.spinner("Processing via Google Script..."):
                 res = place_market_order_direct(stock['symbol'], stock['token'])
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
