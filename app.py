@@ -1,7 +1,8 @@
 import streamlit as st
 import pyotp
 import json
-import yfinance as yf  # Changed alias to standard 'yf'
+import pandas as pd
+import yfinance as yf
 import plotly.graph_objects as go
 from SmartApi import SmartConnect
 
@@ -9,14 +10,23 @@ from SmartApi import SmartConnect
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Aapke requirements.txt ke hisab se designed dashboard. Bug fixes applied.")
+st.write("Aapke credentials default set kar diye gaye hain. Bas password enter karke test karein.")
 
-# 1. Sidebar for Angel One Credentials
+# 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
-    api_key = st.secrets.get("ANGEL_API_KEY", st.text_input("API Key", type="password"))
-    client_id = st.secrets.get("ANGEL_CLIENT_ID", st.text_input("Client ID"))
-    password = st.secrets.get("ANGEL_PASSWORD", st.text_input("Password", type="password"))
-    totp_secret = st.secrets.get("ANGEL_TOTP_SECRET", st.text_input("TOTP Secret Key", type="password"))
+    # App-level hardcoded defaults as requested
+    DEFAULT_CLIENT_ID = "IIRA29771"
+    DEFAULT_API_KEY = "QFectj5C"
+    DEFAULT_TOTP_SECRET = "JFTG3DYADWLYSW6FC6RVV4THWM"
+    
+    # Inputs (Using Secrets if available, otherwise using the hardcoded default)
+    api_key = st.secrets.get("ANGEL_API_KEY", st.text_input("API Key", value=DEFAULT_API_KEY, type="password"))
+    client_id = st.secrets.get("ANGEL_CLIENT_ID", st.text_input("Client ID", value=DEFAULT_CLIENT_ID))
+    
+    # Password user manually enter karega
+    password = st.text_input("Password", type="password", help="Apna AngelOne Login Password yahan dalein")
+    
+    totp_secret = st.secrets.get("ANGEL_TOTP_SECRET", st.text_input("TOTP Secret Key", value=DEFAULT_TOTP_SECRET, type="password"))
 
 # Top 10 Stocks with Yahoo Finance tickers and AngelOne Tokens
 TOP_STOCKS = [
@@ -34,12 +44,15 @@ TOP_STOCKS = [
 
 # Order Placement Function
 def place_market_order(tradingsymbol, symboltoken):
-    if not (api_key and client_id and password and totp_secret):
-        return {"status": "Failed", "error": "Credentials missing in sidebar/Secrets!"}
+    if not password:
+        return {"status": "Failed", "error": "Please enter your AngelOne Password in the sidebar!"}
+    if not (api_key and client_id and totp_secret):
+        return {"status": "Failed", "error": "API Credentials components are missing!"}
     
     obj = SmartConnect(api_key=api_key)
     try:
-        totp = pyotp.TOTP(totp_secret).now()
+        # Generate dynamic 6-digit TOTP token using the secret key
+        totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
         data = obj.generateSession(client_id, password, totp)
         
         if data.get('status'):
@@ -54,15 +67,23 @@ def place_market_order(tradingsymbol, symboltoken):
                 "duration": "DAY",
                 "quantity": "1"
             }
-            # AngelOne sometimes returns response dictionary directly or as string/int
+            
             order_response = obj.placeOrder(order_params)
             
             if order_response:
-                return {"status": "Success", "order_id": order_response}
+                if isinstance(order_response, dict):
+                    if order_response.get('status') == True:
+                        inner_data = order_response.get('data', {})
+                        order_id = inner_data.get('orderid', 'ID_NOT_FOUND') if isinstance(inner_data, dict) else order_response
+                        return {"status": "Success", "order_id": order_id}
+                    else:
+                        return {"status": "Failed", "error": order_response.get('message', 'Order Rejected')}
+                else:
+                    return {"status": "Success", "order_id": str(order_response)}
             else:
-                return {"status": "Failed", "error": "No Order ID received from AngelOne API"}
+                return {"status": "Failed", "error": "No response payload from AngelOne"}
         else:
-            return {"status": "Failed", "error": data.get('message', 'Login Failed')}
+            return {"status": "Failed", "error": data.get('message', 'Session Authentication Failed')}
     except Exception as e:
         return {"status": "Failed", "error": str(e)}
 
@@ -78,12 +99,10 @@ for stock in TOP_STOCKS:
         
     with col_chart:
         try:
-            # Fixing the multi-index data bug of yfinance
             df = yf.download(stock['yf_ticker'], period="5d", interval="15m", progress=False)
             if not df.empty:
-                # If dataframe has MultiIndex columns, drop the ticker level
                 if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.dropdown(1)
+                    df.columns = df.columns.droplevel(1)
                 
                 fig = go.Figure(data=[go.Candlestick(
                     x=df.index, 
@@ -95,7 +114,7 @@ for stock in TOP_STOCKS:
                 fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=120, xaxis_rangeslider_visible=False, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True, key=f"chart_{stock['name']}")
         except Exception as chart_err:
-            st.caption(f"Chart error or data loading...")
+            st.caption("Chart loading...")
             
     with col_status:
         st.markdown("### :green[BUY SIGNAL]")
@@ -104,12 +123,12 @@ for stock in TOP_STOCKS:
     with col_action:
         st.write("") # Padding
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
-            with st.spinner("Executing..."):
+            with St.spinner("Executing Order..."):
                 res = place_market_order(stock['symbol'], stock['token'])
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
                     st.balloons()
                 else:
-                    st.error(f"Error: {res['error'] if res else 'Unknown API Error'}")
+                    st.error(f"{res['error'] if res else 'Unknown API Error'}")
                     
     st.write("---")
