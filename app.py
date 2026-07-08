@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("New Google Apps Script Tunnel URL configured successfully.")
+st.write("🔒 Cloudflare Secure Tunnel Active. No IP or Bot restrictions.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -37,14 +37,14 @@ TOP_STOCKS = [
     {"name": "LT", "symbol": "LT-EQ", "token": "11483", "yf_ticker": "LT.NS"}
 ]
 
-# Order Placement using Updated Google Apps Script Tunnel
+# Order Placement using your Cloudflare Worker URL
 def place_market_order_direct(tradingsymbol, symboltoken):
     if not password:
         return {"status": "Failed", "error": "Please enter your Password in sidebar!"}
         
     try:
-        # Aapka naya fresh Web App URL
-        GOOGLE_PROXY_URL = "https://script.google.com/macros/s/AKfycbxDh9jjzHSHMoid2dVuMqpKpB5iABDtGsJeG4Cl_g84mmaVljlmbvvCr5d2aklUYa40/exec"
+        # Aapka fresh Cloudflare live proxy link mapped here
+        CLOUDFLARE_PROXY_URL = "https://long-mountain-01b4.yousufshaikh420.workers.dev"
 
         # Generate current TOTP token dynamically
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
@@ -65,27 +65,26 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "totp": totp
         }
         
-        google_login_payload = {
+        # Packaging credentials request data for Cloudflare Worker routing
+        cf_login_payload = {
             "url": login_url,
             "headers": headers,
             "payload": login_payload
         }
         
-        # Requests configured with allow_redirects=True to seamlessly follow Google Script routing
-        response_raw = requests.post(GOOGLE_PROXY_URL, json=google_login_payload, allow_redirects=True)
+        response_raw = requests.post(CLOUDFLARE_PROXY_URL, json=cf_login_payload)
         
-        # Crash-proof JSON decoding fallback
         try:
-            login_response = json.loads(response_raw.text)
+            login_response = response_raw.json()
         except Exception:
-            return {"status": "Failed", "error": f"Google Tunnel Login Error Response: {response_raw.text[:200]}"}
+            return {"status": "Failed", "error": f"Cloudflare Proxy Connection Error: {response_raw.text[:200]}"}
         
         if not login_response.get('status'):
             return {"status": "Failed", "error": f"Login Error: {login_response.get('message')}"}
             
         jwt_token = login_response['data']['jwtToken']
         
-        # 2. Order Placement Endpoint Mapping
+        # 2. Secure Order Routing Execution
         order_url = "https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder"
         
         order_headers = {
@@ -110,18 +109,18 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "quantity": "1"
         }
         
-        google_order_payload = {
+        cf_order_payload = {
             "url": order_url,
             "headers": order_headers,
             "payload": order_payload
         }
         
-        res_raw = requests.post(GOOGLE_PROXY_URL, json=google_order_payload, allow_redirects=True)
+        res_raw = requests.post(CLOUDFLARE_PROXY_URL, json=cf_order_payload)
         
         try:
-            res = json.loads(res_raw.text)
+            res = res_raw.json()
         except Exception:
-            return {"status": "Failed", "error": f"Google Order Tunnel Error: {res_raw.text[:200]}"}
+            return {"status": "Failed", "error": f"Cloudflare Proxy Order Error: {res_raw.text[:200]}"}
         
         if res.get('status') == True:
             order_id = res.get('data', {}).get('orderid', 'ID_NOT_PARSED')
@@ -164,7 +163,7 @@ for stock in TOP_STOCKS:
     with col_action:
         st.write("") 
         if st.button(f"🚀 Buy 1 Qty", key=f"btn_{stock['name']}", use_container_width=True):
-            with st.spinner("Processing via Google Script..."):
+            with st.spinner("Processing via Cloudflare Tunnel..."):
                 res = place_market_order_direct(stock['symbol'], stock['token'])
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
