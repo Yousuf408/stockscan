@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Google Apps Script Tunnel (Proxy) successfully configured. Testing ke liye ready hai.")
+st.write("New Google Apps Script Tunnel URL configured successfully.")
 
 # 1. Sidebar for Angel One Credentials with Defaults
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -37,14 +37,14 @@ TOP_STOCKS = [
     {"name": "LT", "symbol": "LT-EQ", "token": "11483", "yf_ticker": "LT.NS"}
 ]
 
-# Order Placement using Google Apps Script URL as a Free Trusted Proxy Tunnel
+# Order Placement using Updated Google Apps Script Tunnel
 def place_market_order_direct(tradingsymbol, symboltoken):
     if not password:
         return {"status": "Failed", "error": "Please enter your Password in sidebar!"}
         
     try:
-        # Aapka provide kiya hua permanent web app url
-        GOOGLE_PROXY_URL = "https://script.google.com/macros/s/AKfycbzmFzgRRF3UTP1hd8X6NzZjLTe9h1mEUSKpZuMnesyijbSWa0Ja7l324APwXqaCOsCd/exec"
+        # Aapka naya fresh Web App URL
+        GOOGLE_PROXY_URL = "https://script.google.com/macros/s/AKfycbxDh9jjzHSHMoid2dVuMqpKpB5iABDtGsJeG4Cl_g84mmaVljlmbvvCr5d2aklUYa40/exec"
 
         # Generate current TOTP token dynamically
         totp = pyotp.TOTP(totp_secret.replace(" ", "")).now()
@@ -65,23 +65,27 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "totp": totp
         }
         
-        # Packing login requests for Google Script
         google_login_payload = {
             "url": login_url,
             "headers": headers,
             "payload": login_payload
         }
         
-        response_raw = requests.post(GOOGLE_PROXY_URL, json=google_login_payload)
-        login_response = response_raw.json()
+        # Requests configured with allow_redirects=True to seamlessly follow Google Script routing
+        response_raw = requests.post(GOOGLE_PROXY_URL, json=google_login_payload, allow_redirects=True)
+        
+        # Crash-proof JSON decoding fallback
+        try:
+            login_response = json.loads(response_raw.text)
+        except Exception:
+            return {"status": "Failed", "error": f"Google Tunnel Login Error Response: {response_raw.text[:200]}"}
         
         if not login_response.get('status'):
             return {"status": "Failed", "error": f"Login Error: {login_response.get('message')}"}
             
-        # Extract JWT Token from trusted response
         jwt_token = login_response['data']['jwtToken']
         
-        # 2. Order Placement Endpoint Setup
+        # 2. Order Placement Endpoint Mapping
         order_url = "https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder"
         
         order_headers = {
@@ -94,7 +98,6 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "X-SourceID": "WEB"
         }
         
-        # Variety "AMO" and Product "DELIVERY" ensures post-market hour system passes safely
         order_payload = {
             "variety": "AMO",
             "tradingsymbol": str(tradingsymbol),
@@ -107,14 +110,18 @@ def place_market_order_direct(tradingsymbol, symboltoken):
             "quantity": "1"
         }
         
-        # Packing order data for Google Script routing
         google_order_payload = {
             "url": order_url,
             "headers": order_headers,
             "payload": order_payload
         }
         
-        res = requests.post(GOOGLE_PROXY_URL, json=google_order_payload).json()
+        res_raw = requests.post(GOOGLE_PROXY_URL, json=google_order_payload, allow_redirects=True)
+        
+        try:
+            res = json.loads(res_raw.text)
+        except Exception:
+            return {"status": "Failed", "error": f"Google Order Tunnel Error: {res_raw.text[:200]}"}
         
         if res.get('status') == True:
             order_id = res.get('data', {}).get('orderid', 'ID_NOT_PARSED')
