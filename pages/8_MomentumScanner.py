@@ -310,14 +310,13 @@ def scanner_table():
     delivery_map = st.session_state.get("delivery_pct_map", {})
     df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
 
-    # ── Time cutoff ───────────────────────────────────────────
-    df = df[df["Signal Time"].apply(
-        lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
-    )].reset_index(drop=True)
-
-    if df.empty:
-        st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
-        return
+    # ── Time cutoff (temporarily disabled) ──────────────────────
+    # df = df[df["Signal Time"].apply(
+    #     lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
+    # )].reset_index(drop=True)
+    # if df.empty:
+    #     st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
+    #     return
 
     # ── Notifications ─────────────────────────────────────────
     init_notif_state()
