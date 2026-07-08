@@ -93,9 +93,24 @@ def place_buy_order(smart_api, symbol: str, token: str, qty: int) -> dict:
             "duration"       : "DAY",
             "quantity"       : str(qty),
         }
-        order_id = smart_api.placeOrder(params)
-        logger.info(f"Order placed: {symbol} x{qty} | ID: {order_id}")
-        return {"success": True, "order_id": order_id, "error": None}
+        order_res = smart_api.placeOrder(params)
+
+        # placeOrder returns order_id string directly (working code confirmed)
+        # Handle both string and dict response just in case
+        if isinstance(order_res, dict):
+            order_id = order_res.get("data", {}).get("orderid") or order_res.get("orderid")
+            success  = bool(order_res.get("status")) and bool(order_id)
+        else:
+            order_id = order_res  # direct string ID like "0708face4beaAO"
+            success  = bool(order_id)
+
+        if success:
+            logger.info(f"Order placed: {symbol} x{qty} | ID: {order_id}")
+            return {"success": True, "order_id": order_id, "error": None}
+        else:
+            err = f"No order ID returned: {order_res}"
+            logger.error(err)
+            return {"success": False, "order_id": None, "error": err}
 
     except Exception as e:
         logger.error(f"Order failed for {symbol}: {e}")
