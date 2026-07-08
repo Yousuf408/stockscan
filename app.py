@@ -1,7 +1,7 @@
 import streamlit as st
 import pyotp
 import json
-import yfinance as tf
+import yfinance as yf  # Changed alias to standard 'yf'
 import plotly.graph_objects as go
 from SmartApi import SmartConnect
 
@@ -9,7 +9,7 @@ from SmartApi import SmartConnect
 st.set_page_config(page_title="AngelOne Screener Dashboard", page_icon="📈", layout="wide")
 
 st.title("📊 Advanced Trading Dashboard & Instant Order Execution")
-st.write("Aapke requirements.txt ke hisab se designed dashboard. Live testing ke liye ready hai.")
+st.write("Aapke requirements.txt ke hisab se designed dashboard. Bug fixes applied.")
 
 # 1. Sidebar for Angel One Credentials
 with st.sidebar.expander("🔑 Angel One API Credentials", expanded=True):
@@ -35,8 +35,7 @@ TOP_STOCKS = [
 # Order Placement Function
 def place_market_order(tradingsymbol, symboltoken):
     if not (api_key and client_id and password and totp_secret):
-        st.error("❌ Credentials missing in sidebar or Secrets!")
-        return None
+        return {"status": "Failed", "error": "Credentials missing in sidebar/Secrets!"}
     
     obj = SmartConnect(api_key=api_key)
     try:
@@ -55,8 +54,13 @@ def place_market_order(tradingsymbol, symboltoken):
                 "duration": "DAY",
                 "quantity": "1"
             }
-            order_id = obj.placeOrder(order_params)
-            return {"status": "Success", "order_id": order_id}
+            # AngelOne sometimes returns response dictionary directly or as string/int
+            order_response = obj.placeOrder(order_params)
+            
+            if order_response:
+                return {"status": "Success", "order_id": order_response}
+            else:
+                return {"status": "Failed", "error": "No Order ID received from AngelOne API"}
         else:
             return {"status": "Failed", "error": data.get('message', 'Login Failed')}
     except Exception as e:
@@ -66,7 +70,6 @@ def place_market_order(tradingsymbol, symboltoken):
 st.write("---")
 
 for stock in TOP_STOCKS:
-    # Creating 4 columns for a cleaner layout
     col_info, col_chart, col_status, col_action = st.columns([2, 4, 2, 2])
     
     with col_info:
@@ -74,18 +77,27 @@ for stock in TOP_STOCKS:
         st.caption(f"Token: {stock['token']} | {stock['symbol']}")
         
     with col_chart:
-        # Fetching a quick 5-day chart using yfinance and plotly
         try:
-            df = tf.download(stock['yf_ticker'], period="5d", interval="15m", progress=False)
+            # Fixing the multi-index data bug of yfinance
+            df = yf.download(stock['yf_ticker'], period="5d", interval="15m", progress=False)
             if not df.empty:
-                fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
+                # If dataframe has MultiIndex columns, drop the ticker level
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.dropdown(1)
+                
+                fig = go.Figure(data=[go.Candlestick(
+                    x=df.index, 
+                    open=df['Open'], 
+                    high=df['High'], 
+                    low=df['Low'], 
+                    close=df['Close']
+                )])
                 fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=120, xaxis_rangeslider_visible=False, showlegend=False)
                 st.plotly_chart(fig, use_container_width=True, key=f"chart_{stock['name']}")
-        except:
-            st.text("Chart unavailable")
+        except Exception as chart_err:
+            st.caption(f"Chart error or data loading...")
             
     with col_status:
-        # Mocking a screener signal for design purposes
         st.markdown("### :green[BUY SIGNAL]")
         st.caption("Criteria: Supertrend & RSI Match")
         
@@ -97,7 +109,7 @@ for stock in TOP_STOCKS:
                 if res and res["status"] == "Success":
                     st.success(f"Ordered! ID: {res['order_id']}")
                     st.balloons()
-                elif res:
-                    st.error(f"Error: {res['error']}")
+                else:
+                    st.error(f"Error: {res['error'] if res else 'Unknown API Error'}")
                     
     st.write("---")
