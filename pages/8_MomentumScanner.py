@@ -434,8 +434,7 @@ def scanner_table():
                     if not smart_api:
                         st.error(
                             "Angel One session nahi mila. "
-                            "angel_auth.py mein smart_api object return karo — updated file deploy karo.",
-                            icon="warning",
+                            "angel_auth.py mein smart_api object return karo — updated file deploy karo."
                         )
                     else:
                         token = SYMBOL_TO_TOKEN.get(symbol)
