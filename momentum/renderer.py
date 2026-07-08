@@ -1,6 +1,7 @@
 """
 momentum/renderer.py — Compressed version. Same logic/output as original, fewer lines.
 Clean white TradeSentry style. Volume column in expand dropdown.
+BUY button added as first column — postMessage to Streamlit parent.
 """
 
 _GREY = '<span style="color:#94a3b8;font-size:13px">{}</span>'
@@ -33,7 +34,7 @@ def _ema9_cell(status: str, ema9_value) -> str:
     return f'{val_html}<div style="color:{color};font-weight:600;font-size:12px;margin-top:2px">{s}</div>'
 
 
-_PHASES = {  # keyword: (color, bg, border, icon)
+_PHASES = {
     "BUILDING": ("#15803d", "#f0fdf4", "#bbf7d0", "🚀"),
     "PULLBACK": ("#b45309", "#fffbeb", "#fde68a", "⚠️"),
     "REVERSAL": ("#be123c", "#fff1f2", "#fecdd3", "🔴"),
@@ -77,7 +78,6 @@ def _vol_emoji(vm: str) -> str:
 
 
 def _delivery_cell(delivery_pct) -> str:
-    """Delivery % (yesterday EOD, NSE). >=60 green, >=40 amber, <40 grey, '—' if NA."""
     if delivery_pct is None or delivery_pct == "" or str(delivery_pct).upper() == "NA":
         return _GREY.format("—")
     try: val = float(delivery_pct)
@@ -152,6 +152,30 @@ def _signal_price_html(signal_price_str: str, move_since: float) -> str:
     )
 
 
+def _buy_btn_cell(symbol: str, qty: int, ltp: float, already_bought: bool) -> str:
+    """BUY button cell — postMessage to Streamlit parent on click."""
+    if already_bought:
+        return (
+            '<div style="display:flex;align-items:center;justify-content:center;">'
+            '<span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;'
+            'padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap;">'
+            '✅ Bought</span></div>'
+        )
+    est = int(qty * ltp)
+    return (
+        f'<div style="display:flex;flex-direction:column;align-items:center;gap:3px;">'
+        f'<button onclick="tsBuy(event,\'{symbol}\',{qty},{ltp})" '
+        f'style="background:#16a34a;color:#fff;border:none;border-radius:6px;'
+        f'padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;'
+        f'white-space:nowrap;transition:background 0.15s;width:100%;" '
+        f'onmouseover="this.style.background=\'#15803d\'" '
+        f'onmouseout="this.style.background=\'#16a34a\'">'
+        f'BUY x{qty}</button>'
+        f'<span style="font-size:10px;color:#94a3b8;">≈ ₹{est:,}</span>'
+        f'</div>'
+    )
+
+
 _STYLES = """
 <style>
 *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
@@ -196,8 +220,9 @@ tbody tr.ts-row.mom-build   { border-left-color:#22c55e; }
 tbody tr.ts-row.mom-stable  { border-left-color:#3b82f6; }
 tbody tr.ts-row.mom-cooling { border-left-color:#f59e0b; }
 tbody tr.ts-row.mom-weak    { border-left-color:#ef4444; }
-td { padding:14px 16px; vertical-align:middle; font-size:14px; color:#374151; border-right:1px solid #f8faff; white-space:nowrap; }
+td { padding:10px 16px; vertical-align:middle; font-size:14px; color:#374151; border-right:1px solid #f8faff; white-space:nowrap; }
 td:last-child { border-right:none; }
+td.td-buy { padding:8px 10px; width:90px; min-width:90px; }
 .ts-symbol-cell { display:flex; align-items:center; gap:10px; }
 .ts-expand-btn { width:20px; height:20px; border-radius:4px; background:#f1f5f9; color:#64748b; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0; transition:all 0.15s; border:1px solid #e2e8f0; }
 tr.expanded .ts-expand-btn { background:#00a854; color:#fff; border-color:#00a854; }
@@ -261,6 +286,26 @@ function tsToggle(sym) {
   var btn = main.querySelector('.ts-expand-btn');
   if (btn) btn.textContent = open ? '+' : '−';
 }
+
+/* ── BUY button → postMessage to Streamlit ── */
+function tsBuy(e, symbol, qty, ltp) {
+  e.stopPropagation();
+  var btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = '⏳ Placing...';
+  btn.style.background = '#94a3b8';
+  window.parent.postMessage(
+    { type: 'ts_manual_buy', symbol: symbol, qty: qty, ltp: ltp },
+    '*'
+  );
+  /* Visual feedback — Streamlit will handle actual result */
+  setTimeout(function() {
+    btn.textContent = 'BUY x' + qty;
+    btn.style.background = '#16a34a';
+    btn.disabled = false;
+  }, 3000);
+}
+
 var tsActiveCol = -1;
 function tsColHighlight(col) {
   document.querySelectorAll('th').forEach(function(th) { th.classList.remove('sorted'); });
@@ -366,8 +411,14 @@ def _expand_card(label: str, value: str, sub: str, color: str = "") -> str:
 
 
 def render_html_table(df, data_source: str = "", target_date: str = "",
-                      prev_date: str = "", tick_count: int = 0) -> str:
+                      prev_date: str = "", tick_count: int = 0,
+                      already_bought: set = None,
+                      capital_per_trade: float = 25000.0) -> str:
 
+    if already_bought is None:
+        already_bought = set()
+
+    import math
     rows_html = ""
     total     = len(df)
 
@@ -382,6 +433,10 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         vol_ratio_raw = float(str(row.get("Vol Ratio", "0")).replace("x", "") or 0)
         intraday_pct  = float(row.get("intraday_pct", 0) or 0)
         delivery_pct  = row.get("Delivery %", None)
+
+        # BUY qty calculation
+        qty         = max(math.floor(capital_per_trade / ltp), 1) if ltp > 0 else 1
+        is_bought   = symbol in already_bought
 
         move_since = ((ltp - float(signal_price)) / float(signal_price)) * 100 \
                      if signal_price and float(signal_price) > 0 else 0.0
@@ -421,6 +476,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
         <tr class="ts-row {mom_cls}" id="tsm-{symbol}" data-sym="{symbol}"
             data-mom="{momentum_str.lower()}" data-ema="{ema_status or ''}"
             onclick="tsToggle('{symbol}')">
+          <td class="td-buy" onclick="event.stopPropagation()">{_buy_btn_cell(symbol, qty, ltp, is_bought)}</td>
           <td><div class="ts-symbol-cell">
             <div class="ts-expand-btn">+</div>
             <button class="ts-copy-btn" onclick="tsCopy(event, this, '{symbol}')">
@@ -437,7 +493,7 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
           <td>{_delivery_cell(delivery_pct)}</td>
         </tr>
         <tr class="ts-expand-row" id="tse-{symbol}" style="display:none">
-          <td colspan="8"><div class="ts-expand-panel">{expand_cards}</div></td>
+          <td colspan="9"><div class="ts-expand-panel">{expand_cards}</div></td>
         </tr>"""
 
     meta = f"📅 {target_date} vs {prev_date} &nbsp;|&nbsp; Ticks: {tick_count}" \
@@ -475,14 +531,15 @@ def render_html_table(df, data_source: str = "", target_date: str = "",
 <div class="ts-table-wrap">
 <table>
   <thead><tr>
-    <th onclick="tsColHighlight(0)">Symbol</th>
-    <th onclick="tsColHighlight(1)">Signal Price</th>
-    <th onclick="tsColHighlight(2)">LTP</th>
-    <th onclick="tsColHighlight(3)">Vol Ratio</th>
-    <th onclick="tsColHighlight(4)">Prev Day Move %</th>
-    <th onclick="tsColHighlight(5)">Momentum</th>
-    <th onclick="tsColHighlight(6)">EMA20 Status</th>
-    <th onclick="tsColHighlight(7)">Delivery %</th>
+    <th style="width:90px;">Action</th>
+    <th onclick="tsColHighlight(1)">Symbol</th>
+    <th onclick="tsColHighlight(2)">Signal Price</th>
+    <th onclick="tsColHighlight(3)">LTP</th>
+    <th onclick="tsColHighlight(4)">Vol Ratio</th>
+    <th onclick="tsColHighlight(5)">Prev Day Move %</th>
+    <th onclick="tsColHighlight(6)">Momentum</th>
+    <th onclick="tsColHighlight(7)">EMA20 Status</th>
+    <th onclick="tsColHighlight(8)">Delivery %</th>
   </tr></thead>
   <tbody>{rows_html}</tbody>
 </table>
