@@ -337,12 +337,12 @@ def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
 
         # A) 9:15 candle — strict close-wait + body>=70% check
         if check_candle("09:15", require_body_check=True):
-            return "✓"
+            return "09:15"
 
         # B) 9:20 candle — flexible, jo bhi latest data mile (closed ya forming)
         #    Body-check yahan NAHI hota, sirf 9:15 ke liye hai
         if check_candle("09:20", require_body_check=False):
-            return "✓"
+            return "09:20"
 
         return ""
     except:
@@ -560,16 +560,17 @@ def screener_fragment():
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
     # ─────────────────────────────────────────────────────────────
-    # CROSSOVER — 9EMA crossing above 20EMA AND 9:15 close > POC.
+    # CROSSOVER — 9EMA crossing above 20EMA AND candle close > POC.
     # POC already poc_cache mein hai (POC section se) — reuse karte hain.
-    # Session cache — ek baar ✓ mil jaye toh permanent rahega.
+    # Session cache — value "09:15" ya "09:20" store hoti hai (jis
+    # candle se match mila), permanent rahega ek baar mil jaye.
     # ─────────────────────────────────────────────────────────────
     if 'crossover_cache' not in st.session_state:
         st.session_state['crossover_cache'] = {}
 
     crossover_symbols_to_check = [
         s for s in df['Symbol']
-        if st.session_state['crossover_cache'].get(s, "") != "✓"
+        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
     ]
 
     if crossover_symbols_to_check:
@@ -581,8 +582,8 @@ def screener_fragment():
             for future in as_completed(futures):
                 sym = futures[future]
                 result = future.result()
-                if result == "✓":  # Sirf ✓ hone pe update karo — permanent rahega
-                    st.session_state['crossover_cache'][sym] = "✓"
+                if result in ("09:15", "09:20"):  # Match mila — permanent rahega
+                    st.session_state['crossover_cache'][sym] = result
                 elif sym not in st.session_state['crossover_cache']:
                     st.session_state['crossover_cache'][sym] = ""
 
@@ -752,6 +753,14 @@ def screener_fragment():
             return '<span style="color:#9ca3af;">—</span>'
         return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:600;">✓ {pct:.0f}%</span>'
 
+    def fmt_crossover(matched_candle):
+        if matched_candle == "09:15":
+            return '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
+        elif matched_candle == "09:20":
+            return '<span style="background:#fce7f3;color:#9d174d;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
+        else:
+            return ''
+
     # ─────────────────────────────────────────────────────────────
     # HTML TABLE — merged columns
     # ─────────────────────────────────────────────────────────────
@@ -801,7 +810,7 @@ def screener_fragment():
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_ema_coil(emacoil)}</td>
-            <td style="{TD};font-size:14px;color:#16a34a;font-weight:700;">{crossover}</td>
+            <td style="{TD}">{fmt_crossover(crossover)}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
 
