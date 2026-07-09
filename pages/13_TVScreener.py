@@ -360,18 +360,17 @@ def screener_fragment():
     need_check = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
     if need_check:
-        with st.spinner(f"Calculating for {len(need_check)} new stocks..."):
-            for symbol in need_check:
-                poc_val      = get_yesterday_poc(symbol)
-                ema_val      = get_ema_consolidation_pct(symbol)
-                vol5d_val    = get_5day_median_volume(symbol)
-                st.session_state['poc_cache'][symbol] = poc_val
-                st.session_state['ema_cache'][symbol] = ema_val
-                # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
-                row_match = df[df['Symbol'] == symbol]
-                prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
-                st.session_state['prevhigh_cache'][symbol] = prevhigh_val
-                st.session_state['vol5d_cache'][symbol] = vol5d_val
+        for symbol in need_check:
+            poc_val      = get_yesterday_poc(symbol)
+            ema_val      = get_ema_consolidation_pct(symbol)
+            vol5d_val    = get_5day_median_volume(symbol)
+            st.session_state['poc_cache'][symbol] = poc_val
+            st.session_state['ema_cache'][symbol] = ema_val
+            # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
+            row_match = df[df['Symbol'] == symbol]
+            prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
+            st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+            st.session_state['vol5d_cache'][symbol] = vol5d_val
 
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
@@ -441,9 +440,8 @@ def screener_fragment():
         if show and f"{row['Symbol']}_{t}" not in st.session_state['candle_cache']
     ]
     if new_candles:
-        with st.spinner(f"Fetching {len(new_candles)} new candles..."):
-            for sym, t in new_candles:
-                st.session_state['candle_cache'][f"{sym}_{t}"] = get_candle_signal(sym, t)
+        for sym, t in new_candles:
+            st.session_state['candle_cache'][f"{sym}_{t}"] = get_candle_signal(sym, t)
 
     c940_list, c945_list, c950_list = [], [], []
     for _, row in df.iterrows():
