@@ -175,6 +175,45 @@ def get_candle_signal(symbol, candle_time_str):
         return ""
 
 # ─────────────────────────────────────────────────────────────
+# CANDLE CHECK — Entry Signal, OPTIMIZED (single fetch for all 3)
+# Same logic jaisa get_candle_signal() — Close > Open check —
+# bas ek hi yfinance call se 9:40/9:45/9:50 teeno nikalta hai,
+# har candle ke liye alag call karne ki jagah. Poora din ka data
+# ek baar fetch hota hai, phir teeno candles usi se filter hoti hain.
+# ─────────────────────────────────────────────────────────────
+def get_all_candle_signals(symbol):
+    """
+    Returns dict: {"09:40": "green"/"", "09:45": "green"/"", "09:50": "green"/""}
+    Ek hi yfinance call se saare teen candle-checks — 3x fetches ki
+    jagah sirf 1x fetch per stock.
+    """
+    result = {"09:40": "", "09:45": "", "09:50": ""}
+    try:
+        today = datetime.now(IST).date()
+        ticker = symbol + ".NS"
+        df = yf.download(ticker, start=today, end=today + timedelta(days=1),
+                         interval="5m", progress=False, auto_adjust=True)
+        if df.empty:
+            return result
+        df.index = pd.to_datetime(df.index)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+
+        for candle_time_str in ["09:40", "09:45", "09:50"]:
+            df_candle = df.between_time(candle_time_str, candle_time_str)
+            if df_candle.empty:
+                continue
+            row = df_candle.iloc[0]
+            open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
+            close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
+            result[candle_time_str] = "green" if close_ > open_ else ""
+        return result
+    except:
+        return result
+
+# ─────────────────────────────────────────────────────────────
 # EMA CONSOLIDATION — "EMA Coil" check
 # Kal ke poore din (5min candles) mein kitne % candles ka
 # Close, 20 EMA ke ±0.5% range ke andar tha. 2 din ka data
@@ -443,23 +482,30 @@ def screener_fragment():
         if not should_show:
             return ""
         key = f"{symbol}_{candle_time}"
-        if key not in st.session_state['candle_cache']:
-            st.session_state['candle_cache'][key] = get_candle_signal(symbol, candle_time)
-        return st.session_state['candle_cache'][key]
+        return st.session_state['candle_cache'].get(key, "")
 
-    new_candles = [
-        (row['Symbol'], t)
-        for _, row in df.iterrows()
-        for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
-        if show and f"{row['Symbol']}_{t}" not in st.session_state['candle_cache']
-    ]
-    if new_candles:
-        with st.spinner(f"Fetching {len(new_candles)} new candles..."):
+    # Har stock ke liye — jitni candles abhi "should_show" (time aa chuka hai)
+    # hain aur cache mein nahi hain, unko ek hi optimized call se nikal lo
+    # (get_all_candle_signals ek hi yfinance fetch se teeno candles deta hai)
+    symbols_needing_fetch = []
+    for _, row in df.iterrows():
+        sym = row['Symbol']
+        missing_needed = any(
+            show and f"{sym}_{t}" not in st.session_state['candle_cache']
+            for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
+        )
+        if missing_needed:
+            symbols_needing_fetch.append(sym)
+
+    if symbols_needing_fetch:
+        with st.spinner(f"Fetching candles for {len(symbols_needing_fetch)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {executor.submit(get_candle_signal, sym, t): (sym, t) for sym, t in new_candles}
+                futures = {executor.submit(get_all_candle_signals, sym): sym for sym in symbols_needing_fetch}
                 for future in as_completed(futures):
-                    sym, t = futures[future]
-                    st.session_state['candle_cache'][f"{sym}_{t}"] = future.result()
+                    sym = futures[future]
+                    all_signals = future.result()
+                    for t in ["09:40", "09:45", "09:50"]:
+                        st.session_state['candle_cache'][f"{sym}_{t}"] = all_signals[t]
 
     c940_list, c945_list, c950_list = [], [], []
     for _, row in df.iterrows():
