@@ -27,20 +27,15 @@ from momentum.backend import (
     IST,
 )
 from momentum.renderer import render_html_table
-# ── For Notification ─────────────────────────────────────────────
 
 from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
 from momentum.delivery import get_latest_available_delivery_pct
 from momentum.first_candle import fetch_body_ratio_for_stocks
 
-# ── Display cutoff — stocks whose FIRST signal was after this time ──
-# ── are excluded from the table (still saved to Supabase though)   ──
-SIGNAL_CUTOFF_TIME = "11:00:00"   # HH:MM:SS IST
+SIGNAL_CUTOFF_TIME = "11:00:00"
 
-# ── Token lookups ─────────────────────────────────────────────
 TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
 
-# ── Auto-connect WebSocket ────────────────────────────────────
 if not angel_ws.is_connected():
     if "ws_init" not in st.session_state:
         st.session_state["ws_init"] = True
@@ -56,20 +51,15 @@ if not angel_ws.is_connected():
                 feed_token = auth["feed_token"],
             )
 
-# ─────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Momentum Scanner",
     page_icon="🚀",
     layout="wide"
 )
-# ── STYLES & SIDEBAR ──────────────────────────────────────────
+
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
 sidebar_brand("MomentumScanner")
-
-# ── STYLES & SIDEBAR end here ──────────────────────────────────
 
 st.markdown("""
     <style>
@@ -78,17 +68,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────
-# SUPABASE CLIENT
-# ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# ─────────────────────────────────────────────────────────────
-# EMA20 SESSION-STATE CACHE
-# ─────────────────────────────────────────────────────────────
 def get_ema20_status(df) -> dict:
     if "ema20_cache" not in st.session_state:
         st.session_state["ema20_cache"] = {}
@@ -102,9 +86,6 @@ def get_ema20_status(df) -> dict:
     return cache
 
 
-# ─────────────────────────────────────────────────────────────
-# BODY RATIO SESSION-STATE CACHE (first 5-min candle, 9:15-9:20)
-# ─────────────────────────────────────────────────────────────
 def get_body_ratio_cache(df) -> dict:
     if "body_ratio_cache" not in st.session_state:
         st.session_state["body_ratio_cache"] = {}
@@ -118,9 +99,6 @@ def get_body_ratio_cache(df) -> dict:
     return cache
 
 
-# ─────────────────────────────────────────────────────────────
-# HISTORICAL DATA LOAD
-# ─────────────────────────────────────────────────────────────
 today_str = datetime.now(IST).strftime("%Y-%m-%d")
 
 if "momentum_historical" not in st.session_state:
@@ -134,7 +112,6 @@ if "momentum_historical" not in st.session_state:
 
 historical = st.session_state["momentum_historical"]
 
-# ── DELIVERY % — fetched once per session, cached for the whole day ──
 if "delivery_pct_map" not in st.session_state:
     delivery_map, delivery_date = get_latest_available_delivery_pct()
     st.session_state["delivery_pct_map"]  = delivery_map
@@ -148,9 +125,6 @@ if (
     st.session_state["signal_data_date"] = today_str
 
 
-# ─────────────────────────────────────────────────────────────
-# AUTO-REFRESH FRAGMENT
-# ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=5)
 def scanner_table():
     supabase    = get_supabase()
@@ -167,16 +141,12 @@ def scanner_table():
     now_ist    = datetime.now(IST).strftime("%H:%M:%S")
     tick_count = len(angel_ws.latest_ticks)
 
-    # ── Market hours check (9:15–15:30 IST) ────────────────────
     current_t   = datetime.now(IST).time()
     market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
 
-    # ── Outside market hours: only show stocks already saved in DB ──
-    # (drops brand-new symbols that only appeared from stale ticks)
     if not market_open and not df.empty:
         df = df[df["Symbol"].isin(signal_data.keys())].reset_index(drop=True)
 
-    # ── Status bar + Body Ratio toggle + Reload button — always visible ──
     col_info, col_toggle, col_btn = st.columns([4, 2, 1])
     with col_info:
         stock_count = len(df) if not df.empty else 0
@@ -192,7 +162,7 @@ def scanner_table():
     with col_btn:
         if st.button("🔄 Reload", use_container_width=True):
             del st.session_state["momentum_historical"]
-            st.session_state.pop("ema20_cache",    None)
+            st.session_state.pop("ema20_cache",      None)
             st.session_state.pop("body_ratio_cache", None)
             st.rerun()
 
@@ -200,8 +170,6 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── BODY RATIO — hard filter driven by the native Streamlit toggle. ──
-    # ── No JS/localStorage involved, so no flicker on fragment refresh.  ──
     if hide_low_body:
         body_cache_pre = get_body_ratio_cache(df)
         df = df[df["Symbol"].apply(lambda s: (body_cache_pre.get(s) or 0) >= 75)].reset_index(drop=True)
@@ -210,16 +178,13 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Save / update signals — ONLY during market hours (9:15–15:30 IST) ──
-    # Outside market hours, stale WebSocket/Yahoo ticks can falsely look like
-    # new signals. Table is already filtered above to drop those.
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
             if not market_open:
-                continue   # skip saving a brand-new signal outside market hours
+                continue
             signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
@@ -247,31 +212,21 @@ def scanner_table():
                 update_peak_ltp_in_supabase(supabase, symbol, today, ltp)
                 signal_data[symbol]["peak_ltp"] = ltp
 
-    # ── EMA20 ─────────────────────────────────────────────────
     ema_cache = get_ema20_status(df)
 
-    # ── Assign display columns ────────────────────────────────
     df["Signal Time"]       = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_time",  "-"))
     df["Signal Price"]      = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("signal_price", None))
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
 
-    # ── BODY RATIO — first 5-min candle (9:15-9:20), toggle-filter only ──
     body_cache = get_body_ratio_cache(df)
     df["Body Ratio"] = df["Symbol"].apply(lambda s: body_cache.get(s, None))
 
-    # ── HARD FILTER — stocks below yesterday's 20 EMA are dropped ──
-    # ── completely from the list (not just badged ❌). Stocks whose ──
-    # ── EMA status hasn't loaded yet ("⏳") are kept until resolved. ──
     df = df[~df["EMA20 Status"].astype(str).str.startswith("❌")].reset_index(drop=True)
 
-    # ── DELIVERY % — from cached NSE EOD data (yesterday's session) ──
     delivery_map = st.session_state.get("delivery_pct_map", {})
     df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
 
-    # ── TIME CUTOFF — hide stocks whose first signal was AFTER ──
-    # ── SIGNAL_CUTOFF_TIME from the table. They stay saved in   ──
-    # ── Supabase (saved above) for records / future reference.  ──
     df = df[df["Signal Time"].apply(
         lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
     )].reset_index(drop=True)
@@ -280,11 +235,9 @@ def scanner_table():
         st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
         return
 
-   # ── Notification ─────────────────────────────────────
     init_notif_state()
     process_notifications(df)
 
-    # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
         df          = df,
         data_source = data_source,
