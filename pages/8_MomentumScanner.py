@@ -27,17 +27,18 @@ from momentum.backend import (
     IST,
 )
 from momentum.renderer import render_html_table
+# ── For Notification ─────────────────────────────────────────────
+
 from momentum.notification_helper import init_notif_state, process_notifications, request_permission_js
 from momentum.delivery import get_latest_available_delivery_pct
 from momentum.first_candle import fetch_body_ratio_for_stocks
-from momentum.auto_trader import build_symbol_to_token, run_auto_trade
 
 # ── Display cutoff — stocks whose FIRST signal was after this time ──
+# ── are excluded from the table (still saved to Supabase though)   ──
 SIGNAL_CUTOFF_TIME = "11:00:00"   # HH:MM:SS IST
 
 # ── Token lookups ─────────────────────────────────────────────
-TOKEN_TO_NAME    = {token: name for name, token, kind in STOCKS_WATCHLIST}
-SYMBOL_TO_TOKEN  = build_symbol_to_token(STOCKS_WATCHLIST)
+TOKEN_TO_NAME = {token: name for name, token, kind in STOCKS_WATCHLIST}
 
 # ── Auto-connect WebSocket ────────────────────────────────────
 if not angel_ws.is_connected():
@@ -63,10 +64,12 @@ st.set_page_config(
     page_icon="🚀",
     layout="wide"
 )
-
+# ── STYLES & SIDEBAR ──────────────────────────────────────────
 from styles import apply_styles, sidebar_brand, page_header
 apply_styles()
 sidebar_brand("MomentumScanner")
+
+# ── STYLES & SIDEBAR end here ──────────────────────────────────
 
 st.markdown("""
     <style>
@@ -100,7 +103,7 @@ def get_ema20_status(df) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# BODY RATIO SESSION-STATE CACHE
+# BODY RATIO SESSION-STATE CACHE (first 5-min candle, 9:15-9:20)
 # ─────────────────────────────────────────────────────────────
 def get_body_ratio_cache(df) -> dict:
     if "body_ratio_cache" not in st.session_state:
@@ -131,7 +134,7 @@ if "momentum_historical" not in st.session_state:
 
 historical = st.session_state["momentum_historical"]
 
-# ── DELIVERY % ────────────────────────────────────────────────
+# ── DELIVERY % — fetched once per session, cached for the whole day ──
 if "delivery_pct_map" not in st.session_state:
     delivery_map, delivery_date = get_latest_available_delivery_pct()
     st.session_state["delivery_pct_map"]  = delivery_map
@@ -143,54 +146,6 @@ if (
 ):
     st.session_state["signal_data"]      = fetch_signal_data_from_supabase(get_supabase(), today_str)
     st.session_state["signal_data_date"] = today_str
-
-# ─────────────────────────────────────────────────────────────
-# AUTO-TRADE SESSION STATE INIT
-# ─────────────────────────────────────────────────────────────
-if "auto_trade_enabled" not in st.session_state:
-    st.session_state["auto_trade_enabled"] = False
-if "already_bought" not in st.session_state:
-    st.session_state["already_bought"] = set()
-if "trade_log" not in st.session_state:
-    st.session_state["trade_log"] = []
-
-# ─────────────────────────────────────────────────────────────
-# SIDEBAR — AUTO TRADER CONTROLS
-# ─────────────────────────────────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚡ Auto Trader")
-
-total_capital = st.sidebar.number_input(
-    "Capital (₹)",
-    min_value  = 10000,
-    max_value  = 1000000,
-    value      = 100000,
-    step       = 5000,
-    help       = "Per trade = Capital ÷ 4  |  Max 3 positions",
-)
-per_trade = total_capital / 4
-st.sidebar.caption(f"Per trade: ₹{per_trade:,.0f}  |  Max 3 positions")
-
-st.session_state["auto_trade_enabled"] = st.sidebar.toggle(
-    "🤖 Auto Buy",
-    value = st.session_state["auto_trade_enabled"],
-    key   = "auto_trade_toggle",
-)
-
-# Positions counter
-bought_count = len(st.session_state["already_bought"])
-st.sidebar.caption(f"Positions open: {bought_count} / 3")
-
-# Show bought stocks
-if st.session_state["already_bought"]:
-    for sym in st.session_state["already_bought"]:
-        st.sidebar.markdown(f"✅ {sym}")
-
-# Manual reset
-if st.sidebar.button("🔄 Reset Positions"):
-    st.session_state["already_bought"] = set()
-    st.session_state["trade_log"]      = []
-    st.sidebar.success("Positions cleared!")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -212,15 +167,16 @@ def scanner_table():
     now_ist    = datetime.now(IST).strftime("%H:%M:%S")
     tick_count = len(angel_ws.latest_ticks)
 
-    # ── Market hours check (9:15–15:30 IST) ──────────────────
+    # ── Market hours check (9:15–15:30 IST) ────────────────────
     current_t   = datetime.now(IST).time()
     market_open = current_t >= dt_time(9, 15) and current_t <= dt_time(15, 30)
 
-    # ── Outside market hours: only show stocks already saved ──
+    # ── Outside market hours: only show stocks already saved in DB ──
+    # (drops brand-new symbols that only appeared from stale ticks)
     if not market_open and not df.empty:
         df = df[df["Symbol"].isin(signal_data.keys())].reset_index(drop=True)
 
-    # ── Status bar + toggle + reload ─────────────────────────
+    # ── Status bar + Body Ratio toggle + Reload button — always visible ──
     col_info, col_toggle, col_btn = st.columns([4, 2, 1])
     with col_info:
         stock_count = len(df) if not df.empty else 0
@@ -236,7 +192,7 @@ def scanner_table():
     with col_btn:
         if st.button("🔄 Reload", use_container_width=True):
             del st.session_state["momentum_historical"]
-            st.session_state.pop("ema20_cache",      None)
+            st.session_state.pop("ema20_cache",    None)
             st.session_state.pop("body_ratio_cache", None)
             st.rerun()
 
@@ -244,25 +200,26 @@ def scanner_table():
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Body ratio filter ─────────────────────────────────────
+    # ── BODY RATIO — hard filter driven by the native Streamlit toggle. ──
+    # ── No JS/localStorage involved, so no flicker on fragment refresh.  ──
     if hide_low_body:
         body_cache_pre = get_body_ratio_cache(df)
-        df = df[df["Symbol"].apply(
-            lambda s: (body_cache_pre.get(s) or 0) >= 75
-        )].reset_index(drop=True)
+        df = df[df["Symbol"].apply(lambda s: (body_cache_pre.get(s) or 0) >= 75)].reset_index(drop=True)
 
     if df.empty:
         st.info("No stocks matching momentum criteria right now.")
         return
 
-    # ── Save / update signals ─────────────────────────────────
+    # ── Save / update signals — ONLY during market hours (9:15–15:30 IST) ──
+    # Outside market hours, stale WebSocket/Yahoo ticks can falsely look like
+    # new signals. Table is already filtered above to drop those.
     for _, row in df.iterrows():
         symbol = row["Symbol"]
         ltp    = float(row["LTP"])
 
         if symbol not in signal_data:
             if not market_open:
-                continue
+                continue   # skip saving a brand-new signal outside market hours
             signal_time_ist = datetime.now(IST).strftime("%H:%M:%S")
             save_signal_to_supabase(
                 supabase     = supabase,
@@ -299,64 +256,33 @@ def scanner_table():
     df["High Since Signal"] = df["Symbol"].apply(lambda s: signal_data.get(s, {}).get("peak_ltp",     None))
     df["EMA20 Status"]      = df["Symbol"].apply(lambda s: ema_cache.get(s, {}).get("status",         "⏳"))
 
-    # ── Body ratio ────────────────────────────────────────────
+    # ── BODY RATIO — first 5-min candle (9:15-9:20), toggle-filter only ──
     body_cache = get_body_ratio_cache(df)
     df["Body Ratio"] = df["Symbol"].apply(lambda s: body_cache.get(s, None))
 
-    # ── Hard EMA20 filter ─────────────────────────────────────
+    # ── HARD FILTER — stocks below yesterday's 20 EMA are dropped ──
+    # ── completely from the list (not just badged ❌). Stocks whose ──
+    # ── EMA status hasn't loaded yet ("⏳") are kept until resolved. ──
     df = df[~df["EMA20 Status"].astype(str).str.startswith("❌")].reset_index(drop=True)
 
-    # ── Delivery % ────────────────────────────────────────────
+    # ── DELIVERY % — from cached NSE EOD data (yesterday's session) ──
     delivery_map = st.session_state.get("delivery_pct_map", {})
     df["Delivery %"] = df["Symbol"].apply(lambda s: delivery_map.get(s.upper(), None))
 
-    # ── Time cutoff (temporarily disabled) ──────────────────────
-    # df = df[df["Signal Time"].apply(
-    #     lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
-    # )].reset_index(drop=True)
-    # if df.empty:
-    #     st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
-    #     return
+    # ── TIME CUTOFF — hide stocks whose first signal was AFTER ──
+    # ── SIGNAL_CUTOFF_TIME from the table. They stay saved in   ──
+    # ── Supabase (saved above) for records / future reference.  ──
+    df = df[df["Signal Time"].apply(
+        lambda t: True if t in (None, "-", "") else str(t) <= SIGNAL_CUTOFF_TIME
+    )].reset_index(drop=True)
 
-    # ── Notifications ─────────────────────────────────────────
+    if df.empty:
+        st.info(f"No stocks matching momentum criteria before {SIGNAL_CUTOFF_TIME} cutoff.")
+        return
+
+   # ── Notification ─────────────────────────────────────
     init_notif_state()
     process_notifications(df)
-
-    # ─────────────────────────────────────────────────────────
-    # AUTO-TRADE TRIGGER
-    # ─────────────────────────────────────────────────────────
-    if st.session_state.get("auto_trade_enabled") and market_open:
-        auth      = st.session_state.get("angel_auth")
-        smart_api = auth.get("smart_api") if auth else None
-
-        if smart_api:
-            trade_results = run_auto_trade(
-                df              = df,
-                smart_api       = smart_api,
-                symbol_to_token = SYMBOL_TO_TOKEN,
-                total_capital   = total_capital,
-                already_bought  = st.session_state["already_bought"],  # mutated in-place
-                max_positions   = 3,
-            )
-            for r in trade_results:
-                st.session_state["trade_log"].append(r)
-                if r["success"]:
-                    st.toast(
-                        f"✅ BUY {r['symbol']} x{r['qty']} @ ₹{r['ltp']} "
-                        f"| +{r['move_pct']}% | ₹{r['capital_used']} used",
-                        icon="🚀",
-                    )
-                else:
-                    st.toast(
-                        f"❌ {r['symbol']} failed: {r['error']}",
-                        icon="⚠️",
-                    )
-        else:
-            st.warning(
-                "⚠️ Auto Trade ON but `smart_api` not found in session. "
-                "Update angel_auth.py to return `smart_api` object.",
-                icon="⚠️",
-            )
 
     # ── Render HTML table ─────────────────────────────────────
     html = render_html_table(
@@ -369,133 +295,9 @@ def scanner_table():
 
     st.components.v1.html(
         html,
-        height    = max(500, 160 + len(df) * 90),
+        height   = max(500, 160 + len(df) * 90),
         scrolling = True,
     )
-
-    # ─────────────────────────────────────────────────────────
-    # OPTION B — Slim BUY strip (Streamlit native, guaranteed)
-    # ─────────────────────────────────────────────────────────
-    import math
-    import pyotp
-    from SmartApi import SmartConnect
-
-    # ── Get smart_api — from session or create fresh ──────────
-    # Credentials hardcoded here — no import dependency
-    _API_KEY    = "QFectj5C"
-    _CLIENT_ID  = "IIRA29771"
-    _PASSWORD   = "1993"
-    _TOTP_SEC   = "JFTG3DYADWLYSW6FC6RVV4THWM"
-    _PROXY      = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
-
-    def get_smart_api():
-        auth = st.session_state.get("angel_auth")
-        # Try session first
-        if auth and auth.get("smart_api"):
-            return auth["smart_api"]
-        # Fresh login with proxy
-        try:
-            obj = SmartConnect(api_key=_API_KEY)
-            obj.proxy = {"http": _PROXY, "https": _PROXY}
-            totp = pyotp.TOTP(_TOTP_SEC).now()
-            data = obj.generateSession(_CLIENT_ID, _PASSWORD, totp)
-            if data and data.get("status"):
-                if auth:
-                    auth["smart_api"] = obj
-                    st.session_state["angel_auth"] = auth
-                return obj
-            else:
-                st.error(f"Login failed: {data.get('message') if data else 'No response'}")
-        except Exception as e:
-            st.error(f"Angel One login error: {e}")
-        return None
-
-    capital_per_trade = total_capital / 4
-
-    st.markdown(
-        '<div style="background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;'
-        'padding:6px 14px 2px 14px;margin-top:4px;">'
-        '<span style="font-size:11px;font-weight:700;color:#64748b;'
-        'text-transform:uppercase;letter-spacing:0.5px;">Quick Buy</span></div>',
-        unsafe_allow_html=True,
-    )
-
-    for _, row in df.iterrows():
-        symbol  = str(row["Symbol"])
-        ltp     = float(row["LTP"])
-        qty     = max(math.floor(capital_per_trade / ltp), 1) if ltp > 0 else 1
-        est     = round(qty * ltp, 0)
-        already = symbol in st.session_state["already_bought"]
-
-        c1, c2, c3 = st.columns([1, 2, 1])
-
-        c1.markdown(
-            f'<div style="padding:6px 0;">'
-            f'<span style="font-size:13px;font-weight:800;color:#0f172a;">{symbol}</span><br>'
-            f'<span style="font-size:11px;color:#94a3b8;">x{qty} &nbsp;≈ ₹{int(est):,}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        c2.markdown(
-            f'<div style="padding:6px 0;font-size:12px;color:#64748b;">'
-            f'LTP: <b style="color:#0f172a;">₹{ltp:,.2f}</b>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        with c3:
-            if already:
-                st.markdown(
-                    '<span style="color:#16a34a;font-weight:700;font-size:13px;">✅ Bought</span>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                if st.button(
-                    f"BUY x{qty}",
-                    key  = f"strip_buy_{symbol}",
-                    type = "primary",
-                    use_container_width=True,
-                ):
-                    token = SYMBOL_TO_TOKEN.get(symbol)
-                    if not token:
-                        st.error(f"Token not found: {symbol}")
-                    else:
-                        with st.spinner(f"Connecting & placing {symbol}..."):
-                            smart_api = get_smart_api()
-                            if not smart_api:
-                                st.error("Angel One login failed. Credentials check karo.")
-                            else:
-                                from momentum.auto_trader import place_buy_order
-                                result = place_buy_order(smart_api, symbol, token, qty)
-                                if result["success"]:
-                                    st.session_state["already_bought"].add(symbol)
-                                    st.session_state["trade_log"].append({
-                                        "time"        : datetime.now(IST).strftime("%H:%M:%S"),
-                                        "type"        : "MANUAL",
-                                        "symbol"      : symbol,
-                                        "qty"         : qty,
-                                        "ltp"         : ltp,
-                                        "capital_used": int(est),
-                                        "success"     : True,
-                                        "order_id"    : result["order_id"],
-                                        "error"       : None,
-                                    })
-                                    st.toast(f"✅ {symbol} x{qty} @ ₹{ltp}", icon="🚀")
-                                    st.rerun()
-                                else:
-                                    st.error(f"❌ Order failed: {result['error']}")
-
-        st.divider()
-
-    # ── Trade log ─────────────────────────────────────────────
-    if st.session_state.get("trade_log"):
-        import pandas as pd
-        st.markdown("#### 📋 Today's Trades")
-        log_df    = pd.DataFrame(st.session_state["trade_log"])
-        want_cols = ["time", "type", "symbol", "qty", "ltp", "capital_used", "success", "order_id", "error"]
-        show_cols = [c for c in want_cols if c in log_df.columns]
-        st.dataframe(log_df[show_cols], use_container_width=True, hide_index=True)
 
 
 request_permission_js()
