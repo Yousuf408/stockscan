@@ -252,20 +252,23 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
         return None
 
 # ─────────────────────────────────────────────────────────────
-# CROSSOVER SIGNAL — 9 EMA cross 20 EMA (bullish) + 9:15 candle
-# close > POC. Dono conditions milni chahiye tabhi ✓.
-# 9:15 candle ka CLOSE hone ka wait karte hain (matlab check sirf
-# 9:20 baje ke baad hoga) — stable/reliable approach.
+# CROSSOVER SIGNAL — 9 EMA cross 20 EMA (bullish) + candle close
+# > POC. Dono conditions milni chahiye tabhi ✓.
+# 9:15 candle CLOSE hone ka strict wait karte hain pehle.
+# Agar 9:15 pe match nahi hua, toh 9:20 candle ka jo bhi LATEST
+# data available ho (partial ya closed, wait nahi karna) usse
+# bhi try karte hain — thoda flexible, taaki fast-moving stocks
+# miss na hon.
 # Ek baar True mil jaye toh session cache mein permanent rahega.
 # ─────────────────────────────────────────────────────────────
 def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
     """
-    Returns "✓" if:
-      1. Bullish crossover — 9EMA was below 20EMA at yesterday's
-         close, and is above 20EMA as of today's CLOSED 9:15 candle.
-      2. Today's 9:15 candle CLOSE > poc_value.
-    Returns "" otherwise (including if 9:15 candle hasn't closed yet,
-    or poc_value is None).
+    Returns "✓" if either:
+      A) 9:15 candle (CLOSED) — 9EMA was below 20EMA yesterday,
+         is above 20EMA at 9:15 close, AND 9:15 close > poc_value.
+      B) 9:20 candle (ANY available data, closed or still forming) —
+         same conditions checked against 9:20's latest data.
+    Returns "" if neither condition set is met yet.
     """
     try:
         if poc_value is None:
@@ -298,27 +301,32 @@ def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
         if df_yesterday.empty or df_today.empty:
             return ""
 
-        # Sirf 9:15 candle ki row chahiye — aur woh CLOSED honi chahiye.
-        # yfinance mein candle tabhi milti hai jab woh close ho chuki ho
-        # (agar abhi live/forming hai, woh row hi nahi milegi is interval mein),
-        # isliye "9:15 row exist karna" hi close-hone ka proxy hai.
-        df_915 = df_today.between_time("09:15", "09:15")
-        if df_915.empty:
-            return ""  # 9:15 candle abhi close nahi hui
-
-        row_915 = df_915.iloc[0]
-        close_915      = float(row_915['Close'])
-        fast_at_915    = float(row_915['EMA_fast'])
-        slow_at_915    = float(row_915['EMA_slow'])
-
         yesterday_last_fast = df_yesterday['EMA_fast'].iloc[-1]
         yesterday_last_slow = df_yesterday['EMA_slow'].iloc[-1]
-
         was_below = yesterday_last_fast < yesterday_last_slow
-        is_above  = fast_at_915 > slow_at_915
-        above_poc = close_915 > poc_value
 
-        return "✓" if (was_below and is_above and above_poc) else ""
+        if not was_below:
+            return ""  # Kal hi upar tha — "crossover" ka koi matlab nahi
+
+        def check_candle(candle_time_str):
+            df_candle = df_today.between_time(candle_time_str, candle_time_str)
+            if df_candle.empty:
+                return False
+            row = df_candle.iloc[0]
+            close_ = float(row['Close'])
+            fast_  = float(row['EMA_fast'])
+            slow_  = float(row['EMA_slow'])
+            return (fast_ > slow_) and (close_ > poc_value)
+
+        # A) 9:15 candle — strict close-wait (row exist karna hi close-hone ka proxy hai)
+        if check_candle("09:15"):
+            return "✓"
+
+        # B) 9:20 candle — flexible, jo bhi latest data mile (closed ya forming)
+        if check_candle("09:20"):
+            return "✓"
+
+        return ""
     except:
         return ""
 
@@ -383,7 +391,7 @@ def fetch_tv_data():
 @st.fragment(run_every=60)
 def screener_fragment():
     # ── FETCH TV DATA ──
-    with st.spinner("Fetching from TradingView..."):
+    with st.spinner("Fetching Top Gainer stocks from TradingView..."):
         count, df, error = fetch_tv_data()
 
     if error:
