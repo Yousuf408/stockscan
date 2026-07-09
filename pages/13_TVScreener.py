@@ -252,20 +252,25 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
         return None
 
 # ─────────────────────────────────────────────────────────────
-# CROSSOVER SIGNAL — 9 EMA ne 20 EMA ko cross kiya (bullish)
-# Kal ke end (last available candle) pe 9EMA < 20EMA tha,
-# aur aaj ki live/pehli candle(s) tak 9EMA > 20EMA ho gaya —
-# bina candle close hone ka wait kiye, jo bhi latest data
-# available hai usi se check karta hai.
+# CROSSOVER SIGNAL — 9 EMA cross 20 EMA (bullish) + 9:15 candle
+# close > POC. Dono conditions milni chahiye tabhi ✓.
+# 9:15 candle ka CLOSE hone ka wait karte hain (matlab check sirf
+# 9:20 baje ke baad hoga) — stable/reliable approach.
 # Ek baar True mil jaye toh session cache mein permanent rahega.
 # ─────────────────────────────────────────────────────────────
-def get_crossover_signal(symbol, fast_span=9, slow_span=20):
+def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
     """
-    Returns "✓" if bullish crossover detected (9EMA was below 20EMA
-    at yesterday's close, and is now above 20EMA as of latest
-    available data today), "" otherwise.
+    Returns "✓" if:
+      1. Bullish crossover — 9EMA was below 20EMA at yesterday's
+         close, and is above 20EMA as of today's CLOSED 9:15 candle.
+      2. Today's 9:15 candle CLOSE > poc_value.
+    Returns "" otherwise (including if 9:15 candle hasn't closed yet,
+    or poc_value is None).
     """
     try:
+        if poc_value is None:
+            return ""
+
         last_day = get_last_trading_day()
         today = datetime.now(IST).date()
         ticker = symbol + ".NS"
@@ -293,15 +298,27 @@ def get_crossover_signal(symbol, fast_span=9, slow_span=20):
         if df_yesterday.empty or df_today.empty:
             return ""
 
+        # Sirf 9:15 candle ki row chahiye — aur woh CLOSED honi chahiye.
+        # yfinance mein candle tabhi milti hai jab woh close ho chuki ho
+        # (agar abhi live/forming hai, woh row hi nahi milegi is interval mein),
+        # isliye "9:15 row exist karna" hi close-hone ka proxy hai.
+        df_915 = df_today.between_time("09:15", "09:15")
+        if df_915.empty:
+            return ""  # 9:15 candle abhi close nahi hui
+
+        row_915 = df_915.iloc[0]
+        close_915      = float(row_915['Close'])
+        fast_at_915    = float(row_915['EMA_fast'])
+        slow_at_915    = float(row_915['EMA_slow'])
+
         yesterday_last_fast = df_yesterday['EMA_fast'].iloc[-1]
         yesterday_last_slow = df_yesterday['EMA_slow'].iloc[-1]
-        today_latest_fast   = df_today['EMA_fast'].iloc[-1]
-        today_latest_slow   = df_today['EMA_slow'].iloc[-1]
 
         was_below = yesterday_last_fast < yesterday_last_slow
-        is_above  = today_latest_fast > today_latest_slow
+        is_above  = fast_at_915 > slow_at_915
+        above_poc = close_915 > poc_value
 
-        return "✓" if (was_below and is_above) else ""
+        return "✓" if (was_below and is_above and above_poc) else ""
     except:
         return ""
 
@@ -517,8 +534,8 @@ def screener_fragment():
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
     # ─────────────────────────────────────────────────────────────
-    # CROSSOVER — 9EMA crossing above 20EMA (aaj, live data se).
-    # Standalone hai — kisi POC/EMA-Coil pe depend nahi karta.
+    # CROSSOVER — 9EMA crossing above 20EMA AND 9:15 close > POC.
+    # POC already poc_cache mein hai (POC section se) — reuse karte hain.
     # Session cache — ek baar ✓ mil jaye toh permanent rahega.
     # ─────────────────────────────────────────────────────────────
     if 'crossover_cache' not in st.session_state:
@@ -531,7 +548,10 @@ def screener_fragment():
 
     if crossover_symbols_to_check:
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(get_crossover_signal, sym): sym for sym in crossover_symbols_to_check}
+            futures = {
+                executor.submit(get_crossover_signal, sym, st.session_state['poc_cache'].get(sym)): sym
+                for sym in crossover_symbols_to_check
+            }
             for future in as_completed(futures):
                 sym = futures[future]
                 result = future.result()
