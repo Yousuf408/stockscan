@@ -253,21 +253,22 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
 
 # ─────────────────────────────────────────────────────────────
 # CROSSOVER SIGNAL — 9 EMA cross 20 EMA (bullish) + candle close
-# > POC. Dono conditions milni chahiye tabhi ✓.
+# > POC. 9:15 candle mein teesri condition bhi hai: candle body
+# >= 70% honi chahiye (strong directional candle, na ki doji).
 # 9:15 candle CLOSE hone ka strict wait karte hain pehle.
 # Agar 9:15 pe match nahi hua, toh 9:20 candle ka jo bhi LATEST
 # data available ho (partial ya closed, wait nahi karna) usse
-# bhi try karte hain — thoda flexible, taaki fast-moving stocks
-# miss na hon.
+# bhi try karte hain — bina body-check ke, sirf 9:15 ke liye hai.
 # Ek baar True mil jaye toh session cache mein permanent rahega.
 # ─────────────────────────────────────────────────────────────
 def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
     """
     Returns "✓" if either:
       A) 9:15 candle (CLOSED) — 9EMA was below 20EMA yesterday,
-         is above 20EMA at 9:15 close, AND 9:15 close > poc_value.
+         is above 20EMA at 9:15 close, 9:15 close > poc_value,
+         AND candle body >= 70% of (High - Low).
       B) 9:20 candle (ANY available data, closed or still forming) —
-         same conditions checked against 9:20's latest data.
+         EMA + POC conditions checked (no body-check) against 9:20's latest data.
     Returns "" if neither condition set is met yet.
     """
     try:
@@ -308,22 +309,39 @@ def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
         if not was_below:
             return ""  # Kal hi upar tha — "crossover" ka koi matlab nahi
 
-        def check_candle(candle_time_str):
+        def check_candle(candle_time_str, require_body_check=False, min_body_pct=70):
             df_candle = df_today.between_time(candle_time_str, candle_time_str)
             if df_candle.empty:
                 return False
             row = df_candle.iloc[0]
+            open_  = float(row['Open'])
+            high_  = float(row['High'])
+            low_   = float(row['Low'])
             close_ = float(row['Close'])
             fast_  = float(row['EMA_fast'])
             slow_  = float(row['EMA_slow'])
-            return (fast_ > slow_) and (close_ > poc_value)
 
-        # A) 9:15 candle — strict close-wait (row exist karna hi close-hone ka proxy hai)
-        if check_candle("09:15"):
+            basic_ok = (fast_ > slow_) and (close_ > poc_value)
+            if not basic_ok:
+                return False
+
+            if require_body_check:
+                candle_range = high_ - low_
+                if candle_range <= 0:
+                    return False  # Doji/flat candle — body % undefined, reject
+                body_pct = abs(close_ - open_) / candle_range * 100
+                if body_pct < min_body_pct:
+                    return False
+
+            return True
+
+        # A) 9:15 candle — strict close-wait + body>=70% check
+        if check_candle("09:15", require_body_check=True):
             return "✓"
 
         # B) 9:20 candle — flexible, jo bhi latest data mile (closed ya forming)
-        if check_candle("09:20"):
+        #    Body-check yahan NAHI hota, sirf 9:15 ke liye hai
+        if check_candle("09:20", require_body_check=False):
             return "✓"
 
         return ""
