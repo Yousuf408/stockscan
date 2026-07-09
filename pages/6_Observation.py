@@ -55,9 +55,10 @@ def do_angel_login():
         os.environ["HTTP_PROXY"]  = PROXY_URL
         os.environ["HTTPS_PROXY"] = PROXY_URL
 
-        obj  = SmartConnect(api_key=API_KEY)
-        totp = pyotp.TOTP(TOTP_SECRET).now()
-        data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+        obj       = SmartConnect(api_key=API_KEY)
+        obj.proxy = {"http": PROXY_URL, "https": PROXY_URL}
+        totp      = pyotp.TOTP(TOTP_SECRET).now()
+        data      = obj.generateSession(CLIENT_ID, PASSWORD, totp)
 
         os.environ.pop("HTTP_PROXY",  None)
         os.environ.pop("HTTPS_PROXY", None)
@@ -111,7 +112,7 @@ def place_buy_order(smart_api, symbol: str, qty: int) -> dict:
 
     order_params = {
         "variety"         : "NORMAL",
-        "tradingsymbol"   : symbol,
+        "tradingsymbol"   : f"{symbol}-EQ",
         "symboltoken"     : token,
         "transactiontype" : "BUY",
         "exchange"        : "NSE",
