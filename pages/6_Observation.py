@@ -17,14 +17,14 @@ from SmartApi import SmartConnect
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
-from angel_auth import API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET, PROXY_URL
+from angel_auth import API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET
 from config import STOCKS_WATCHLIST
 
 SUPABASE_URL = "https://pzdwmqjyuruxbfbkswib.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6ZHdtcWp5dXJ1eGJmYmtzd2liIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgyNTM3MTIsImV4cCI6MjA2MzgyOTcxMn0.ia1QfFMvQgqTRkOcODIZ3BKxPBKB0-kxCTkJ5sQXv5Y"
 
-IST          = timezone(timedelta(hours=5, minutes=30))
-PROXIES      = {"http": PROXY_URL, "https": PROXY_URL}
+IST      = timezone(timedelta(hours=5, minutes=30))
+PROXY_URL = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
 
 # Token lookup from config
 NAME_TO_TOKEN = {name: token for name, token, kind in STOCKS_WATCHLIST}
@@ -74,15 +74,17 @@ def get_smart_api():
 
     # Fresh login with proxy
     try:
-        obj = SmartConnect(api_key=API_KEY)
+        # ✅ os.environ — sirf login ke waqt set, turant hata do
+        os.environ["HTTP_PROXY"]  = PROXY_URL
+        os.environ["HTTPS_PROXY"] = PROXY_URL
 
-        # ✅ Proxy sirf SmartAPI ke liye — os.environ mat set karo
-        session = requests.Session()
-        session.proxies.update(PROXIES)
-        obj.reqsession = session
-
+        obj  = SmartConnect(api_key=API_KEY)
         totp = pyotp.TOTP(TOTP_SECRET).now()
         data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+
+        # ✅ Turant hata do — Supabase affect na ho
+        os.environ.pop("HTTP_PROXY",  None)
+        os.environ.pop("HTTPS_PROXY", None)
 
         if not data or data.get("status") == False:
             return None, f"Login failed: {data}"
@@ -95,6 +97,8 @@ def get_smart_api():
         return obj, None
 
     except Exception as e:
+        os.environ.pop("HTTP_PROXY",  None)
+        os.environ.pop("HTTPS_PROXY", None)
         return None, str(e)
 
 # ─────────────────────────────────────────────────────────────
@@ -128,7 +132,7 @@ def place_buy_order(smart_api, symbol: str, qty: int) -> dict:
             "symboltoken"     : token,
             "transactiontype" : "BUY",
             "exchange"        : "NSE",
-            "ordertype"       : "MARKET",   # Speed ke liye MARKET
+            "ordertype"       : "MARKET",
             "producttype"     : "INTRADAY",
             "duration"        : "DAY",
             "quantity"        : str(qty),
@@ -137,9 +141,16 @@ def place_buy_order(smart_api, symbol: str, qty: int) -> dict:
             "squareoff"       : "0",
             "stoploss"        : "0",
         }
+
+        # ✅ Proxy set karo sirf placeOrder ke liye
+        os.environ["HTTP_PROXY"]  = PROXY_URL
+        os.environ["HTTPS_PROXY"] = PROXY_URL
+
         response = smart_api.placeOrder(order_params)
 
-        # Response string ya dict dono handle karo
+        os.environ.pop("HTTP_PROXY",  None)
+        os.environ.pop("HTTPS_PROXY", None)
+
         if isinstance(response, dict):
             order_id = response.get("data", {}).get("orderid") or response.get("orderid")
         else:
@@ -151,6 +162,8 @@ def place_buy_order(smart_api, symbol: str, qty: int) -> dict:
             return {"status": "error", "msg": f"No order ID returned: {response}"}
 
     except Exception as e:
+        os.environ.pop("HTTP_PROXY",  None)
+        os.environ.pop("HTTPS_PROXY", None)
         return {"status": "error", "msg": str(e)}
 
 # ─────────────────────────────────────────────────────────────
