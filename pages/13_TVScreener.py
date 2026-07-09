@@ -5,6 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -258,7 +259,7 @@ def fetch_tv_data():
                 col('high') >= col('High.1M'),
             )
             .order_by('change', ascending=False)
-            .limit(30)  # Extra fetch — gap filter ke baad 15 reh jayenge
+            .limit(20)  # Chhota buffer — gap filter ke baad top 15 reh jayenge
             .get_scanner_data()
         )
         return count, df, None
@@ -297,7 +298,7 @@ def screener_fragment():
             return 0
 
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
-    df = df[df['_opening_gap'].abs() <= 2.0].head(30)  # Gap filter + top 30 (calculation ke liye) — display sirf top 15 hoga baad mein
+    df = df[df['_opening_gap'].abs() <= 2.0].head(15)  # Gap filter + top 15 (calculation aur display dono isi pe)
 
     # ─────────────────────────────────────────────────────────────
     # CLEAN DATA
@@ -359,19 +360,31 @@ def screener_fragment():
     # pe cache se instant milega (usi session ke andar).
     need_check = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
+    def calculate_all_for_symbol(symbol):
+        """
+        Ek stock ke liye POC, EMA, aur Vol5D calculate karta hai —
+        bilkul wahi 3 function calls jo pehle sequential loop mein
+        the, sirf ab yeh function alag threads mein parallel chalega
+        alag-alag stocks ke liye. Per-stock logic bilkul same hai.
+        """
+        poc_val   = get_yesterday_poc(symbol)
+        ema_val   = get_ema_consolidation_pct(symbol)
+        vol5d_val = get_5day_median_volume(symbol)
+        return symbol, poc_val, ema_val, vol5d_val
+
     if need_check:
         with st.spinner(f"Calculating for {len(need_check)} new stocks..."):
-            for symbol in need_check:
-                poc_val      = get_yesterday_poc(symbol)
-                ema_val      = get_ema_consolidation_pct(symbol)
-                vol5d_val    = get_5day_median_volume(symbol)
-                st.session_state['poc_cache'][symbol] = poc_val
-                st.session_state['ema_cache'][symbol] = ema_val
-                # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
-                row_match = df[df['Symbol'] == symbol]
-                prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
-                st.session_state['prevhigh_cache'][symbol] = prevhigh_val
-                st.session_state['vol5d_cache'][symbol] = vol5d_val
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(calculate_all_for_symbol, s) for s in need_check]
+                for future in as_completed(futures):
+                    symbol, poc_val, ema_val, vol5d_val = future.result()
+                    st.session_state['poc_cache'][symbol] = poc_val
+                    st.session_state['ema_cache'][symbol] = ema_val
+                    # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
+                    row_match = df[df['Symbol'] == symbol]
+                    prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
+                    st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+                    st.session_state['vol5d_cache'][symbol] = vol5d_val
 
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
@@ -442,8 +455,11 @@ def screener_fragment():
     ]
     if new_candles:
         with st.spinner(f"Fetching {len(new_candles)} new candles..."):
-            for sym, t in new_candles:
-                st.session_state['candle_cache'][f"{sym}_{t}"] = get_candle_signal(sym, t)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(get_candle_signal, sym, t): (sym, t) for sym, t in new_candles}
+                for future in as_completed(futures):
+                    sym, t = futures[future]
+                    st.session_state['candle_cache'][f"{sym}_{t}"] = future.result()
 
     c940_list, c945_list, c950_list = [], [], []
     for _, row in df.iterrows():
@@ -454,11 +470,6 @@ def screener_fragment():
     df['c940'] = c940_list
     df['c945'] = c945_list
     df['c950'] = c950_list
-
-    # ─────────────────────────────────────────────────────────────
-    # DISPLAY SLICE — calculation 30 stocks pe hui, lekin display sirf top 15 (Chg% wise, already sorted)
-    # ─────────────────────────────────────────────────────────────
-    df = df.head(15)
 
     # ─────────────────────────────────────────────────────────────
     # HEADER ROW
