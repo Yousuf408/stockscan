@@ -252,6 +252,60 @@ def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
         return None
 
 # ─────────────────────────────────────────────────────────────
+# CROSSOVER SIGNAL — 9 EMA ne 20 EMA ko cross kiya (bullish)
+# Kal ke end (last available candle) pe 9EMA < 20EMA tha,
+# aur aaj ki live/pehli candle(s) tak 9EMA > 20EMA ho gaya —
+# bina candle close hone ka wait kiye, jo bhi latest data
+# available hai usi se check karta hai.
+# Ek baar True mil jaye toh session cache mein permanent rahega.
+# ─────────────────────────────────────────────────────────────
+def get_crossover_signal(symbol, fast_span=9, slow_span=20):
+    """
+    Returns "✓" if bullish crossover detected (9EMA was below 20EMA
+    at yesterday's close, and is now above 20EMA as of latest
+    available data today), "" otherwise.
+    """
+    try:
+        last_day = get_last_trading_day()
+        today = datetime.now(IST).date()
+        ticker = symbol + ".NS"
+        # Kal ka poora din + aaj ka abhi tak ka data — EMA continuity ke liye
+        df = yf.download(ticker, start=last_day, end=today + timedelta(days=1),
+                         interval="5m", progress=False, auto_adjust=True)
+        if df.empty:
+            return ""
+        df.index = pd.to_datetime(df.index)
+        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+        df = df.between_time("09:15", "15:30")
+        if df.empty:
+            return ""
+
+        df['EMA_fast'] = df['Close'].ewm(span=fast_span, adjust=False).mean()
+        df['EMA_slow'] = df['Close'].ewm(span=slow_span, adjust=False).mean()
+
+        df_yesterday = df[df.index.date == last_day]
+        df_today     = df[df.index.date == today]
+
+        if df_yesterday.empty or df_today.empty:
+            return ""
+
+        yesterday_last_fast = df_yesterday['EMA_fast'].iloc[-1]
+        yesterday_last_slow = df_yesterday['EMA_slow'].iloc[-1]
+        today_latest_fast   = df_today['EMA_fast'].iloc[-1]
+        today_latest_slow   = df_today['EMA_slow'].iloc[-1]
+
+        was_below = yesterday_last_fast < yesterday_last_slow
+        is_above  = today_latest_fast > today_latest_slow
+
+        return "✓" if (was_below and is_above) else ""
+    except:
+        return ""
+
+# ─────────────────────────────────────────────────────────────
 # 5-DAY MEDIAN VOLUME — Rel Vol (5D) ka baseline
 # Yahoo Finance se peechle 5 COMPLETE trading days ka daily
 # volume leke median nikalte hain. Aaj ka (incomplete/live) din
@@ -463,6 +517,32 @@ def screener_fragment():
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
     # ─────────────────────────────────────────────────────────────
+    # CROSSOVER — 9EMA crossing above 20EMA (aaj, live data se).
+    # Standalone hai — kisi POC/EMA-Coil pe depend nahi karta.
+    # Session cache — ek baar ✓ mil jaye toh permanent rahega.
+    # ─────────────────────────────────────────────────────────────
+    if 'crossover_cache' not in st.session_state:
+        st.session_state['crossover_cache'] = {}
+
+    crossover_symbols_to_check = [
+        s for s in df['Symbol']
+        if st.session_state['crossover_cache'].get(s, "") != "✓"
+    ]
+
+    if crossover_symbols_to_check:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(get_crossover_signal, sym): sym for sym in crossover_symbols_to_check}
+            for future in as_completed(futures):
+                sym = futures[future]
+                result = future.result()
+                if result == "✓":  # Sirf ✓ hone pe update karo — permanent rahega
+                    st.session_state['crossover_cache'][sym] = "✓"
+                elif sym not in st.session_state['crossover_cache']:
+                    st.session_state['crossover_cache'][sym] = ""
+
+    df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
+
+    # ─────────────────────────────────────────────────────────────
     # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
     # Kisi bhi price-comparison (POC/ATP) pe depend nahi karta —
     # sirf candle ka Close > Open check karta hai.
@@ -646,6 +726,7 @@ def screener_fragment():
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
         emacoil = row.get("EmaCoilPct", None)
+        crossover = row.get("Crossover", "")
         c940   = row.get("c940", "")
         c945   = row.get("c945", "")
         c950   = row.get("c950", "")
@@ -674,6 +755,7 @@ def screener_fragment():
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_ema_coil(emacoil)}</td>
+            <td style="{TD};font-size:14px;color:#16a34a;font-weight:700;">{crossover}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
 
@@ -718,6 +800,7 @@ def screener_fragment():
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">EMA Coil</th>
+          <th style="{TH}">Crossover</th>
           <th style="{TH}">Mkt Cap</th>
         </tr>
       </thead>
