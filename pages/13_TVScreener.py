@@ -477,51 +477,65 @@ def screener_fragment():
     })
 
     # ─────────────────────────────────────────────────────────────
-    # POC + PREV HIGH + EMA + REL VOL(5D) — session_state cache.
-    # Naya stock aane pe hi yfinance se fetch hoga, baaki refresh
-    # pe cache se instant milega (usi session ke andar).
+    # STEP 1: CROSSOVER CHECK — sabse pehle, saare gap-filtered
+    # stocks pe. Yeh function apna POC khud calculate karta hai
+    # andar hi (get_yesterday_poc via poc_cache) — taaki POC bhi
+    # sirf ek baar calculate ho, aur jo stocks pass karein unke
+    # liye POC already cache mein ready rahe.
     # ─────────────────────────────────────────────────────────────
     calc_date   = get_last_trading_day()
 
     if 'poc_cache' not in st.session_state:
         st.session_state['poc_cache'] = {}
-    if 'ema_cache' not in st.session_state:
-        st.session_state['ema_cache'] = {}
-    if 'prevhigh_cache' not in st.session_state:
-        st.session_state['prevhigh_cache'] = {}
-    if 'vol5d_cache' not in st.session_state:
-        st.session_state['vol5d_cache'] = {}
+    if 'crossover_cache' not in st.session_state:
+        st.session_state['crossover_cache'] = {}
 
-    # Session cache — naya stock aane pe hi fetch hoga, baaki refresh
-    # pe cache se instant milega (usi session ke andar).
-    need_check = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
+    def get_poc_cached(symbol):
+        if symbol not in st.session_state['poc_cache']:
+            st.session_state['poc_cache'][symbol] = get_yesterday_poc(symbol)
+        return st.session_state['poc_cache'][symbol]
 
-    def calculate_all_for_symbol(symbol):
-        """
-        Ek stock ke liye POC, EMA, aur Vol5D calculate karta hai —
-        bilkul wahi 3 function calls jo pehle sequential loop mein
-        the, sirf ab yeh function alag threads mein parallel chalega
-        alag-alag stocks ke liye. Per-stock logic bilkul same hai.
-        """
-        poc_val   = get_yesterday_poc(symbol)
-        ema_val   = get_ema_consolidation_pct(symbol)
-        vol5d_val = get_5day_median_volume(symbol)
-        return symbol, poc_val, ema_val, vol5d_val
+    def crossover_with_poc(symbol):
+        """POC (cache-aware) nikaal ke crossover-check karta hai — ek hi jagah dono."""
+        poc_val = get_poc_cached(symbol)
+        result = get_crossover_signal(symbol, poc_val)
+        return symbol, result
 
-    if need_check:
-        with st.spinner(f"Calculating for {len(need_check)} new stocks..."):
+    crossover_symbols_to_check = [
+        s for s in df['Symbol']
+        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
+    ]
+
+    if crossover_symbols_to_check:
+        with st.spinner(f"Checking crossover for {len(crossover_symbols_to_check)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(calculate_all_for_symbol, s) for s in need_check]
+                futures = [executor.submit(crossover_with_poc, s) for s in crossover_symbols_to_check]
                 for future in as_completed(futures):
-                    symbol, poc_val, ema_val, vol5d_val = future.result()
-                    st.session_state['poc_cache'][symbol] = poc_val
-                    st.session_state['ema_cache'][symbol] = ema_val
-                    # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
-                    row_match = df[df['Symbol'] == symbol]
-                    prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
-                    st.session_state['prevhigh_cache'][symbol] = prevhigh_val
-                    st.session_state['vol5d_cache'][symbol] = vol5d_val
+                    sym, result = future.result()
+                    if result in ("09:15", "09:20"):  # Match mila — permanent rahega
+                        st.session_state['crossover_cache'][sym] = result
+                    elif sym not in st.session_state['crossover_cache']:
+                        st.session_state['crossover_cache'][sym] = ""
 
+    df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
+
+    # ─────────────────────────────────────────────────────────────
+    # STEP 2: FINAL FILTER — sirf woh stocks aage badhein jinka
+    # Crossover 9:15 (strict) confirm hua ho. Baaki sab yahi drop
+    # ho jate hain — unke liye EMA-Coil/Vol5D/Entry-Signal calculate
+    # hi nahi honge (waste-calculation avoid hota hai).
+    # ─────────────────────────────────────────────────────────────
+    df = df[df['Crossover'] == "09:15"]
+
+    if df.empty:
+        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya. Refresh karte rahiye.")
+        return
+
+    # ─────────────────────────────────────────────────────────────
+    # STEP 3: POC/GapPct display-values — sirf FILTERED stocks ke
+    # liye (POC already crossover-step mein calculate ho chuka hai,
+    # cache se instant milega).
+    # ─────────────────────────────────────────────────────────────
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
         symbol = row['Symbol']
@@ -541,6 +555,39 @@ def screener_fragment():
     df['POC']     = poc_vals
     df['GapPct']  = gap_vals
 
+    # ─────────────────────────────────────────────────────────────
+    # STEP 4: EMA-COIL + VOL5D — sirf FILTERED (Crossover-passed)
+    # stocks ke liye calculate. session_state cache — naya stock
+    # aane pe hi fetch hoga.
+    # ─────────────────────────────────────────────────────────────
+    if 'ema_cache' not in st.session_state:
+        st.session_state['ema_cache'] = {}
+    if 'prevhigh_cache' not in st.session_state:
+        st.session_state['prevhigh_cache'] = {}
+    if 'vol5d_cache' not in st.session_state:
+        st.session_state['vol5d_cache'] = {}
+
+    need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
+
+    def calculate_ema_and_vol5d(symbol):
+        """Sirf EMA-Coil aur Vol5D — POC ab yahan nahi (already ho chuka hai)."""
+        ema_val   = get_ema_consolidation_pct(symbol)
+        vol5d_val = get_5day_median_volume(symbol)
+        return symbol, ema_val, vol5d_val
+
+    if need_check:
+        with st.spinner(f"Calculating EMA Coil & Volume for {len(need_check)} qualified stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(calculate_ema_and_vol5d, s) for s in need_check]
+                for future in as_completed(futures):
+                    symbol, ema_val, vol5d_val = future.result()
+                    st.session_state['ema_cache'][symbol] = ema_val
+                    # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
+                    row_match = df[df['Symbol'] == symbol]
+                    prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
+                    st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+                    st.session_state['vol5d_cache'][symbol] = vol5d_val
+
     df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
     # ─────────────────────────────────────────────────────────────
@@ -558,48 +605,6 @@ def screener_fragment():
             return None
 
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
-
-    # ─────────────────────────────────────────────────────────────
-    # CROSSOVER — 9EMA crossing above 20EMA AND candle close > POC.
-    # POC already poc_cache mein hai (POC section se) — reuse karte hain.
-    # Session cache — value "09:15" ya "09:20" store hoti hai (jis
-    # candle se match mila), permanent rahega ek baar mil jaye.
-    # ─────────────────────────────────────────────────────────────
-    if 'crossover_cache' not in st.session_state:
-        st.session_state['crossover_cache'] = {}
-
-    crossover_symbols_to_check = [
-        s for s in df['Symbol']
-        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
-    ]
-
-    if crossover_symbols_to_check:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {
-                executor.submit(get_crossover_signal, sym, st.session_state['poc_cache'].get(sym)): sym
-                for sym in crossover_symbols_to_check
-            }
-            for future in as_completed(futures):
-                sym = futures[future]
-                result = future.result()
-                if result in ("09:15", "09:20"):  # Match mila — permanent rahega
-                    st.session_state['crossover_cache'][sym] = result
-                elif sym not in st.session_state['crossover_cache']:
-                    st.session_state['crossover_cache'][sym] = ""
-
-    df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
-
-    # ─────────────────────────────────────────────────────────────
-    # FINAL FILTER — sirf woh stocks table mein rakho jinka Crossover
-    # 9:15 (strict) confirm hua ho. 9:20 wala (fallback) abhi filter
-    # ke liye consider nahi hota — sirf display ke liye tha, filter
-    # ke liye "hold" pe hai.
-    # ─────────────────────────────────────────────────────────────
-    df = df[df['Crossover'] == "09:15"]
-
-    if df.empty:
-        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya. Refresh karte rahiye.")
-        return
 
     # ─────────────────────────────────────────────────────────────
     # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
