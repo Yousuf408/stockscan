@@ -390,12 +390,12 @@ def fetch_tv_data():
             )
             .set_markets('india')
             .where(
-                col('market_cap_basic') > 51_000_000_000,
+                col('market_cap_basic') > 41_000_000_000,
                 col('exchange') == 'NSE',
                 col('high') >= col('High.1M'),
             )
             .order_by('change', ascending=False)
-            .limit(20)  # Chhota buffer — gap filter ke baad top 15 reh jayenge
+            .limit(100)  # Bada buffer — koi hard cap nahi, jitne bhi filters pass karein sab aayenge
             .get_scanner_data()
         )
         return count, df, None
@@ -434,7 +434,7 @@ def screener_fragment():
             return 0
 
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
-    df = df[df['_opening_gap'].abs() <= 2.0].head(15)  # Gap filter + top 15 (calculation aur display dono isi pe)
+    df = df[df['_opening_gap'].abs() <= 2.0]  # Gap filter — koi count-limit nahi, jitne bhi pass karein
 
     # ─────────────────────────────────────────────────────────────
     # CLEAN DATA
@@ -590,6 +590,18 @@ def screener_fragment():
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
     # ─────────────────────────────────────────────────────────────
+    # FINAL FILTER — sirf woh stocks table mein rakho jinka Crossover
+    # 9:15 (strict) confirm hua ho. 9:20 wala (fallback) abhi filter
+    # ke liye consider nahi hota — sirf display ke liye tha, filter
+    # ke liye "hold" pe hai.
+    # ─────────────────────────────────────────────────────────────
+    df = df[df['Crossover'] == "09:15"]
+
+    if df.empty:
+        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya. Refresh karte rahiye.")
+        return
+
+    # ─────────────────────────────────────────────────────────────
     # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
     # Kisi bhi price-comparison (POC/ATP) pe depend nahi karta —
     # sirf candle ka Close > Open check karta hai.
@@ -649,7 +661,7 @@ def screener_fragment():
     # ─────────────────────────────────────────────────────────────
     sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
-    max_chg    = df['Chg'].max()
+    max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
 
     c1, c2, c3 = st.columns([3, 5, 2])
