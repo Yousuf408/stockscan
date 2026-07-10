@@ -877,15 +877,6 @@ def render_market_closed_view():
 # ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=60)
 def screener_fragment():
-    # ─────────────────────────────────────────────────────────────
-    # MARKET-HOURS GATE — market band hai toh koi bhi TV-fetch ya
-    # calculation NAHI hoga. Sirf Supabase mein jo aaj (last trading
-    # session) ka data already save hai, wahi as-is dikhega.
-    # ─────────────────────────────────────────────────────────────
-    if not is_market_hours():
-        render_market_closed_view()
-        return
-
     # ── FETCH TV DATA ──
     with st.spinner("Fetching Top Gainer stocks from TradingView..."):
         count, df, error = fetch_tv_data()
@@ -1015,8 +1006,7 @@ def screener_fragment():
                     sym = futures[future]
                     poc_val = future.result()
                     st.session_state['poc_cache'][sym] = poc_val  # Main-thread pe cache-write
-                    if is_market_hours():
-                        supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
+                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
 
     def crossover_pure(symbol, poc_val):
         """Pure calculation — session_state touch nahi karta, thread-safe hai."""
@@ -1039,8 +1029,7 @@ def screener_fragment():
                     sym, result = future.result()
                     if result in ("09:15", "09:20"):  # Match mila — permanent rahega
                         st.session_state['crossover_cache'][sym] = result
-                        if is_market_hours():
-                            supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
+                        supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
                     elif sym not in st.session_state['crossover_cache']:
                         st.session_state['crossover_cache'][sym] = ""
 
@@ -1114,13 +1103,12 @@ def screener_fragment():
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
                     st.session_state['vol5d_cache'][symbol] = vol5d_val
-                    if is_market_hours():
-                        supabase_save_row(
-                            symbol, signal_date, calc_date,
-                            prev_high_val=prevhigh_val,
-                            ema_coil_pct=ema_val,
-                            vol5d_median=vol5d_val,
-                        )
+                    supabase_save_row(
+                        symbol, signal_date, calc_date,
+                        prev_high_val=prevhigh_val,
+                        ema_coil_pct=ema_val,
+                        vol5d_median=vol5d_val,
+                    )
 
     df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
