@@ -147,9 +147,8 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
                        ema_coil_pct=None, vol5d_median=None, crossover_status=None):
     """
     (symbol, calc_date) ke liye row upsert karo — agar already hai toh
-    update, warna naya insert. Sirf market-hours mein call hota hai
-    (caller responsibility) — market-band mein yeh function hi call
-    nahi hoga.
+    update, warna naya insert. Ab hamesha call hoti hai (market-hours-
+    gate hata diya gaya hai), chahe market khula ho ya band.
 
     IMPORTANT: Supabase ka upsert() poori row REPLACE karta hai un
     columns ke liye jo payload mein missing hain (merge nahi karta
@@ -192,7 +191,13 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
         }
 
         supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
-    except:
+        if 'supabase_save_success_count' not in st.session_state:
+            st.session_state['supabase_save_success_count'] = 0
+        st.session_state['supabase_save_success_count'] += 1
+    except Exception as e:
+        if 'supabase_save_errors' not in st.session_state:
+            st.session_state['supabase_save_errors'] = []
+        st.session_state['supabase_save_errors'].append(f"{symbol}: {e}")
         pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
 
 # ─────────────────────────────────────────────────────────────
@@ -1234,12 +1239,21 @@ def screener_fragment():
     # ─────────────────────────────────────────────────────────────
     render_stock_table(df)
 
+    # ── TEMP DIAGNOSTIC — Supabase save status, ek line mein ──
+    success_count = st.session_state.get('supabase_save_success_count', 0)
+    errors = st.session_state.get('supabase_save_errors', [])
+    if success_count or errors:
+        st.caption(f"🔍 Supabase saves this session: {success_count} successful, {len(errors)} failed")
+        if errors:
+            with st.expander("⚠️ Show Supabase errors"):
+                for e in errors[-10:]:  # sirf aakhri 10 dikhao
+                    st.text(e)
+
     st.markdown("""
     <div style="margin-top:6px;font-size:10px;color:#9ca3af;text-align:center;">
         TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Gap filter ±2% · Sorted by Chg% ↓ · POC = Yesterday Volume Profile Point of Control
     </div>
     """, unsafe_allow_html=True)
-
 
 # ─────────────────────────────────────────────────────────────
 # RUN FRAGMENT
