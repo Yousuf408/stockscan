@@ -150,23 +150,46 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
     update, warna naya insert. Sirf market-hours mein call hota hai
     (caller responsibility) — market-band mein yeh function hi call
     nahi hoga.
+
+    IMPORTANT: Supabase ka upsert() poori row REPLACE karta hai un
+    columns ke liye jo payload mein missing hain (merge nahi karta
+    apne-aap) — isliye pehle EXISTING row fetch karke merge karte
+    hain, taaki partial-save se dusre fields accidentally NULL na
+    ho jayein.
     """
     try:
+        # Pehle existing row fetch karo (agar hai) — taaki merge kar sakein
+        existing = None
+        try:
+            result = (supabase.table("tv_screener_cache")
+                      .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                      .eq("symbol", symbol)
+                      .eq("calc_date", calc_date.isoformat())
+                      .limit(1)
+                      .execute())
+            if result.data and len(result.data) > 0:
+                existing = result.data[0]
+        except:
+            existing = None
+
+        # Merge: naya value diya gaya hai toh woh use karo, warna existing (agar hai) rakho
+        def merged(new_val, key):
+            if new_val is not None:
+                return new_val
+            if existing is not None:
+                return existing.get(key)
+            return None
+
         payload = {
-            "symbol"      : symbol,
-            "signal_date" : signal_date.isoformat(),
-            "calc_date"   : calc_date.isoformat(),
+            "symbol"          : symbol,
+            "signal_date"      : signal_date.isoformat(),
+            "calc_date"        : calc_date.isoformat(),
+            "poc_value"        : merged(poc_value, "poc_value"),
+            "prev_high_val"    : merged(prev_high_val, "prev_high_val"),
+            "ema_coil_pct"     : merged(ema_coil_pct, "ema_coil_pct"),
+            "vol5d_median"     : merged(vol5d_median, "vol5d_median"),
+            "crossover_status" : merged(crossover_status, "crossover_status"),
         }
-        if poc_value is not None:
-            payload["poc_value"] = poc_value
-        if prev_high_val is not None:
-            payload["prev_high_val"] = prev_high_val
-        if ema_coil_pct is not None:
-            payload["ema_coil_pct"] = ema_coil_pct
-        if vol5d_median is not None:
-            payload["vol5d_median"] = vol5d_median
-        if crossover_status is not None:
-            payload["crossover_status"] = crossover_status
 
         supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
     except:
