@@ -478,10 +478,14 @@ def screener_fragment():
 
     # ─────────────────────────────────────────────────────────────
     # STEP 1: CROSSOVER CHECK — sabse pehle, saare gap-filtered
-    # stocks pe. Yeh function apna POC khud calculate karta hai
-    # andar hi (get_yesterday_poc via poc_cache) — taaki POC bhi
-    # sirf ek baar calculate ho, aur jo stocks pass karein unke
-    # liye POC already cache mein ready rahe.
+    # stocks pe. POC bhi isi step mein calculate hota hai (jinke
+    # POC missing hain unke liye), taaki POC bhi ek hi baar ho aur
+    # jo stocks pass karein unke liye already cache mein ready rahe.
+    #
+    # IMPORTANT: session_state ko worker-threads ke andar access
+    # NAHI karte (thread-safety issue) — sirf main-thread mein
+    # cache-check aur cache-write hota hai, threads sirf pure
+    # calculation (get_yesterday_poc, get_crossover_signal) karte hain.
     # ─────────────────────────────────────────────────────────────
     calc_date   = get_last_trading_day()
 
@@ -490,14 +494,20 @@ def screener_fragment():
     if 'crossover_cache' not in st.session_state:
         st.session_state['crossover_cache'] = {}
 
-    def get_poc_cached(symbol):
-        if symbol not in st.session_state['poc_cache']:
-            st.session_state['poc_cache'][symbol] = get_yesterday_poc(symbol)
-        return st.session_state['poc_cache'][symbol]
+    # Main-thread pe hi decide karo kaunse symbols ka POC missing hai
+    symbols_needing_poc = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
-    def crossover_with_poc(symbol):
-        """POC (cache-aware) nikaal ke crossover-check karta hai — ek hi jagah dono."""
-        poc_val = get_poc_cached(symbol)
+    if symbols_needing_poc:
+        with st.spinner(f"Calculating POC for {len(symbols_needing_poc)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Worker thread sirf pure calculation karta hai — session_state touch nahi
+                futures = {executor.submit(get_yesterday_poc, s): s for s in symbols_needing_poc}
+                for future in as_completed(futures):
+                    sym = futures[future]
+                    st.session_state['poc_cache'][sym] = future.result()  # Main-thread pe cache-write
+
+    def crossover_pure(symbol, poc_val):
+        """Pure calculation — session_state touch nahi karta, thread-safe hai."""
         result = get_crossover_signal(symbol, poc_val)
         return symbol, result
 
@@ -509,7 +519,10 @@ def screener_fragment():
     if crossover_symbols_to_check:
         with st.spinner(f"Checking crossover for {len(crossover_symbols_to_check)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(crossover_with_poc, s) for s in crossover_symbols_to_check]
+                futures = [
+                    executor.submit(crossover_pure, s, st.session_state['poc_cache'].get(s))
+                    for s in crossover_symbols_to_check
+                ]
                 for future in as_completed(futures):
                     sym, result = future.result()
                     if result in ("09:15", "09:20"):  # Match mila — permanent rahega
