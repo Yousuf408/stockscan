@@ -169,7 +169,8 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
                       .execute())
             if result.data and len(result.data) > 0:
                 existing = result.data[0]
-        except:
+        except Exception as e_select:
+            st.warning(f"⚠️ Supabase SELECT failed for {symbol}: {e_select}")
             existing = None
 
         # Merge: naya value diya gaya hai toh woh use karo, warna existing (agar hai) rakho
@@ -191,9 +192,12 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
             "crossover_status" : merged(crossover_status, "crossover_status"),
         }
 
-        supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
-    except:
-        pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
+        st.warning(f"🔍 DEBUG payload for {symbol}: {payload}")
+
+        upsert_result = supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
+        st.warning(f"🔍 DEBUG upsert response for {symbol}: {upsert_result.data}")
+    except Exception as e:
+        st.warning(f"⚠️ Supabase save failed for {symbol}: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # POC (Point of Control) — kal ka Fixed Range Volume Profile
