@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from supabase import create_client
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -34,6 +35,30 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 """, unsafe_allow_html=True)
 
 IST = pytz.timezone("Asia/Kolkata")
+
+# ─────────────────────────────────────────────────────────────
+# SUPABASE CLIENT — same project/keys jo Momentum/Breakout Scanner
+# mein use ho rahe hain
+# ─────────────────────────────────────────────────────────────
+SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+
+@st.cache_resource
+def get_supabase():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = get_supabase()
+
+# ─────────────────────────────────────────────────────────────
+# MARKET HOURS GATE — 9:15 AM - 3:30 PM IST
+# Jaisa Momentum Scanner mein hai: naya calculation/save sirf
+# market-hours ke andar, market band hone pe poori tarah read-only.
+# ─────────────────────────────────────────────────────────────
+def is_market_hours():
+    now = datetime.now(IST)
+    market_open  = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return market_open <= now <= market_close
 
 # ─────────────────────────────────────────────────────────────
 # HELPERS
@@ -73,6 +98,79 @@ def get_last_trading_day():
 
 def get_current_ist_time():
     return datetime.now(IST)
+
+# ─────────────────────────────────────────────────────────────
+# SUPABASE CACHE — read/write for tv_screener_cache table
+# Persistent version of session_state cache: (symbol + calc_date)
+# → poc/prev_high/ema/vol5d/crossover, survives across app restarts.
+# ─────────────────────────────────────────────────────────────
+def supabase_get_cached_row(symbol, calc_date):
+    """
+    Supabase se ek row fetch karo agar (symbol, calc_date) already save hai.
+    Returns dict, ya None agar nahi mila.
+    """
+    try:
+        result = (supabase.table("tv_screener_cache")
+                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                  .eq("symbol", symbol)
+                  .eq("calc_date", calc_date.isoformat())
+                  .limit(1)
+                  .execute())
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+    except:
+        return None
+
+
+def supabase_get_all_for_date(calc_date):
+    """
+    Saare stocks ka data ek saath fetch karo ek calc_date ke liye —
+    market-band read-only mode mein use hota hai (poori table ek
+    hi Supabase call mein mil jati hai, per-symbol calls nahi).
+    Returns dict: {symbol: {poc_value, prev_high_val, ema_coil_pct,
+                             vol5d_median, crossover_status}, ...}
+    """
+    try:
+        result = (supabase.table("tv_screener_cache")
+                  .select("symbol, poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                  .eq("calc_date", calc_date.isoformat())
+                  .execute())
+        if result.data:
+            return {row['symbol']: row for row in result.data}
+        return {}
+    except:
+        return {}
+
+
+def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_val=None,
+                       ema_coil_pct=None, vol5d_median=None, crossover_status=None):
+    """
+    (symbol, calc_date) ke liye row upsert karo — agar already hai toh
+    update, warna naya insert. Sirf market-hours mein call hota hai
+    (caller responsibility) — market-band mein yeh function hi call
+    nahi hoga.
+    """
+    try:
+        payload = {
+            "symbol"      : symbol,
+            "signal_date" : signal_date.isoformat(),
+            "calc_date"   : calc_date.isoformat(),
+        }
+        if poc_value is not None:
+            payload["poc_value"] = poc_value
+        if prev_high_val is not None:
+            payload["prev_high_val"] = prev_high_val
+        if ema_coil_pct is not None:
+            payload["ema_coil_pct"] = ema_coil_pct
+        if vol5d_median is not None:
+            payload["vol5d_median"] = vol5d_median
+        if crossover_status is not None:
+            payload["crossover_status"] = crossover_status
+
+        supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
+    except:
+        pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
 
 # ─────────────────────────────────────────────────────────────
 # POC (Point of Control) — kal ka Fixed Range Volume Profile
@@ -403,11 +501,95 @@ def fetch_tv_data():
         return 0, pd.DataFrame(), str(e)
 
 # ─────────────────────────────────────────────────────────────
+# MARKET-CLOSED VIEW — read-only, koi calculation/fetch nahi.
+# Supabase se aaj (calc_date) ka jo bhi data save hua tha,
+# wahi as-is dikhata hai.
+# ─────────────────────────────────────────────────────────────
+def render_market_closed_view():
+    calc_date = get_last_trading_day()
+    saved_data = supabase_get_all_for_date(calc_date)
+
+    st.markdown(f"""
+    <div style="background:#fefce8;border:1px solid #fef08a;border-radius:8px;padding:10px 16px;margin-bottom:10px;">
+        <span style="color:#854f0b;font-weight:600;font-size:13px;">🔒 Market Closed</span>
+        <span style="color:#6b7280;font-size:12px;"> — showing last saved data for {calc_date.strftime('%d %b %Y')}. No live calculation happening.</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not saved_data:
+        st.info("Is trading day ke liye abhi tak koi data save nahi hua.")
+        return
+
+    TH = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap;text-align:center;"
+    TH_L = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;text-align:left;"
+    TD = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:center;vertical-align:middle;"
+    TD_L = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;text-align:left;vertical-align:middle;"
+
+    rows_html = ""
+    for i, (symbol, row) in enumerate(sorted(saved_data.items())):
+        poc      = row.get('poc_value')
+        prevhigh = row.get('prev_high_val')
+        emacoil  = row.get('ema_coil_pct')
+        vol5d    = row.get('vol5d_median')
+        crossover = row.get('crossover_status', '')
+
+        bg = "#f9fafb" if i % 2 == 0 else "#ffffff"
+        poc_str      = f"₹{poc:,.2f}" if poc is not None else "—"
+        prevhigh_str = f"₹{prevhigh:,.2f}" if prevhigh is not None else "—"
+        emacoil_str  = f"✓ {emacoil:.0f}%" if emacoil is not None and emacoil >= 70 else "—"
+        vol5d_str    = f"{vol5d:,.0f}" if vol5d is not None else "—"
+        crossover_html = ""
+        if crossover == "09:15":
+            crossover_html = '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
+        elif crossover == "09:20":
+            crossover_html = '<span style="background:#fce7f3;color:#9d174d;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
+
+        rows_html += f"""
+        <tr style="background:{bg};">
+            <td style="{TD_L}"><span style="color:#1e40af;font-weight:700;">{symbol}</span></td>
+            <td style="{TD}">{poc_str}</td>
+            <td style="{TD}">{prevhigh_str}</td>
+            <td style="{TD}">{emacoil_str}</td>
+            <td style="{TD}">{crossover_html}</td>
+            <td style="{TD}">{vol5d_str}</td>
+        </tr>"""
+
+    table_html = f"""
+    <div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;margin-top:8px;">
+    <table style="width:100%;border-collapse:collapse;font-family:sans-serif;">
+      <thead style="background:#f9fafb;">
+        <tr>
+          <th style="{TH_L}">Symbol</th>
+          <th style="{TH}">POC</th>
+          <th style="{TH}">Prev High</th>
+          <th style="{TH}">EMA Coil</th>
+          <th style="{TH}">Crossover</th>
+          <th style="{TH}">Vol 5D Median</th>
+        </tr>
+      </thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    </div>
+    """
+
+    import streamlit.components.v1 as components
+    components.html(table_html, height=len(saved_data) * 42 + 60, scrolling=False)
+
+# ─────────────────────────────────────────────────────────────
 # AUTO-REFRESH FRAGMENT — har 60s sirf yeh section re-run hoga
 # Poora page reload NAHI hoga — sidebar/header stable rahenge
 # ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=60)
 def screener_fragment():
+    # ─────────────────────────────────────────────────────────────
+    # MARKET-HOURS GATE — market band hai toh koi bhi TV-fetch ya
+    # calculation NAHI hoga. Sirf Supabase mein jo aaj (last trading
+    # session) ka data already save hai, wahi as-is dikhega.
+    # ─────────────────────────────────────────────────────────────
+    if not is_market_hours():
+        render_market_closed_view()
+        return
+
     # ── FETCH TV DATA ──
     with st.spinner("Fetching Top Gainer stocks from TradingView..."):
         count, df, error = fetch_tv_data()
@@ -482,29 +664,63 @@ def screener_fragment():
     # POC missing hain unke liye), taaki POC bhi ek hi baar ho aur
     # jo stocks pass karein unke liye already cache mein ready rahe.
     #
+    # Cache priority: session_state (fastest) → Supabase (persists
+    # across restarts) → yfinance (slowest, sirf tab jab dono jagah
+    # miss ho). Naya calculation Supabase mein save hota hai (agli
+    # baar/naya-session ke liye instant mile) — market-hours mein hi.
+    #
     # IMPORTANT: session_state ko worker-threads ke andar access
     # NAHI karte (thread-safety issue) — sirf main-thread mein
     # cache-check aur cache-write hota hai, threads sirf pure
     # calculation (get_yesterday_poc, get_crossover_signal) karte hain.
     # ─────────────────────────────────────────────────────────────
     calc_date   = get_last_trading_day()
+    signal_date = datetime.now(IST).date()
 
     if 'poc_cache' not in st.session_state:
         st.session_state['poc_cache'] = {}
     if 'crossover_cache' not in st.session_state:
         st.session_state['crossover_cache'] = {}
 
-    # Main-thread pe hi decide karo kaunse symbols ka POC missing hai
+    # Main-thread pe hi decide karo kaunse symbols ka POC missing hai (session-cache mein)
     symbols_needing_poc = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
-    if symbols_needing_poc:
-        with st.spinner(f"Calculating POC for {len(symbols_needing_poc)} stocks..."):
+    # In mein se, pehle Supabase check karo — agar mila, seedha cache mein daal do
+    still_missing_poc = []
+    for symbol in symbols_needing_poc:
+        cached_row = supabase_get_cached_row(symbol, calc_date)
+        if cached_row is not None and cached_row.get('poc_value') is not None:
+            st.session_state['poc_cache'][symbol] = cached_row['poc_value']
+            # Baaki cheezein bhi mil gayi Supabase se — cache kar do, baad mein re-calc na ho
+            if cached_row.get('ema_coil_pct') is not None:
+                if 'ema_cache' not in st.session_state:
+                    st.session_state['ema_cache'] = {}
+                st.session_state['ema_cache'][symbol] = cached_row['ema_coil_pct']
+            if cached_row.get('vol5d_median') is not None:
+                if 'vol5d_cache' not in st.session_state:
+                    st.session_state['vol5d_cache'] = {}
+                st.session_state['vol5d_cache'][symbol] = cached_row['vol5d_median']
+            if cached_row.get('prev_high_val') is not None:
+                if 'prevhigh_cache' not in st.session_state:
+                    st.session_state['prevhigh_cache'] = {}
+                st.session_state['prevhigh_cache'][symbol] = cached_row['prev_high_val']
+            if cached_row.get('crossover_status'):
+                st.session_state['crossover_cache'][symbol] = cached_row['crossover_status']
+        else:
+            still_missing_poc.append(symbol)
+
+    # Ab sirf woh bache hain jo Supabase mein bhi nahi mile — yfinance se calculate karo
+    if still_missing_poc:
+        with st.spinner(f"Calculating POC for {len(still_missing_poc)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
                 # Worker thread sirf pure calculation karta hai — session_state touch nahi
-                futures = {executor.submit(get_yesterday_poc, s): s for s in symbols_needing_poc}
+                futures = {executor.submit(get_yesterday_poc, s): s for s in still_missing_poc}
                 for future in as_completed(futures):
                     sym = futures[future]
-                    st.session_state['poc_cache'][sym] = future.result()  # Main-thread pe cache-write
+                    poc_val = future.result()
+                    st.session_state['poc_cache'][sym] = poc_val  # Main-thread pe cache-write
+                    if is_market_hours():
+                        supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
 
     def crossover_pure(symbol, poc_val):
         """Pure calculation — session_state touch nahi karta, thread-safe hai."""
@@ -527,6 +743,8 @@ def screener_fragment():
                     sym, result = future.result()
                     if result in ("09:15", "09:20"):  # Match mila — permanent rahega
                         st.session_state['crossover_cache'][sym] = result
+                        if is_market_hours():
+                            supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
                     elif sym not in st.session_state['crossover_cache']:
                         st.session_state['crossover_cache'][sym] = ""
 
@@ -600,6 +818,13 @@ def screener_fragment():
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
                     st.session_state['vol5d_cache'][symbol] = vol5d_val
+                    if is_market_hours():
+                        supabase_save_row(
+                            symbol, signal_date, calc_date,
+                            prev_high_val=prevhigh_val,
+                            ema_coil_pct=ema_val,
+                            vol5d_median=vol5d_val,
+                        )
 
     df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
