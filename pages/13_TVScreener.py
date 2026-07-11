@@ -14,8 +14,8 @@ from supabase import create_client
 import requests
 
 ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
-ALGOMOJO_API_KEY = "your_api_key_here"
-ALGOMOJO_API_SECRET = "your_api_secret_here"
+ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
+ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
 
 def place_buy_order(symbol, quantity=1, broker="TC", exchange="NSE"):
     try:
