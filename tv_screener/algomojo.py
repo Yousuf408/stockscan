@@ -1,116 +1,92 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# STRICT INTRADAY (MIS) ALGOMOJO PIPELINE
-# ═══════════════════════════════════════════════════════════════════════════════
-
 import requests
 import time
+import streamlit as st
 
-# Official API Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURATION BLOCK (SCREENSHOT SE SET KIYA HUA)
+# ─────────────────────────────────────────────────────────────────────────────
 ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
 ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
-ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
+
+# ⚠️ FIXED: Aapka account simulation mode me hai, isliye SIMULATION ENDPOINT use hoga
+ALGOMOJO_API_URL = "https://simapi.algomojo.com/v1/PlaceOrder"
+
+# ⚠️ FIXED: Aapka actual Client ID jo screenshot me top par dikh raha hai
+MY_CLIENT_ID = "1102302753" 
 
 def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE"):
-    """
-    Strictly follows official AlgoMojo REST API structure for INTRADAY (MIS) orders.
-    All parameter values are properly cast as strings.
-    """
-    
-    # ─── SYMBOL COMPLIANCE CHECK ───
-    # AlgoMojo standard requires "-EQ" suffix for NSE Cash/Equity orders (e.g. RELIANCE-EQ)
+    """Strictly maps paper-trading simulation parameters with Client ID."""
     clean_symbol = str(symbol).split('-')[0].strip().upper()
     if exchange.upper() == "NSE" and not clean_symbol.endswith("-EQ"):
         formatted_symbol = f"{clean_symbol}-EQ"
     else:
         formatted_symbol = clean_symbol
 
-    # Official JSON structure EXACTLY matching documentation names but optimized for Intraday
     payload = {
         "api_key": str(ALGOMOJO_API_KEY),
         "api_secret": str(ALGOMOJO_API_SECRET),
         "data": {
             "broker": str(broker).upper(),            # "DHANHQ"
-            "strategy": "TV_Screener",                # Identifier
+            "brokerid": str(MY_CLIENT_ID),            # 💡 CRITICAL: Aapki Client ID data ke andar jayegi
+            "strategy": "TV_Screener",
             "exchange": str(exchange).upper(),        # "NSE"
             "symbol": str(formatted_symbol),          # e.g., "GAIL-EQ"
-            "action": "BUY",                          # "BUY" or "SELL"
-            
-            # ─── FIXED FOR INTRADAY EXECUTION ───
-            "product": "MIS",                         # Explicitly set to MIS for Intraday margin
-            
-            "pricetype": "MARKET",                    # MARKET execution
-            "quantity": str(int(quantity)),           # Strict string required
-            "price": "0",                             # Market ignores price, but string needed
-            "disclosed_quantity": "0",                # Required field as string
-            "trigger_price": "0",                     # Required field as string
-            "amo": "NO",                              # "NO" for normal market hours
-            "splitorder": "NO",                       # "NO"
-            "split_quantity": "1"                     # Required field as string
+            "action": "BUY",
+            "product": "MIS",                         # Strict Intraday
+            "pricetype": "MARKET",
+            "quantity": str(int(quantity)),
+            "price": "0",
+            "disclosed_quantity": "0",
+            "trigger_price": "0",
+            "amo": "NO",
+            "splitorder": "NO",
+            "split_quantity": "1"
         }
     }
     
-    headers = {
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Content-Type": "application/json"}
     try:
         response = requests.post(ALGOMOJO_API_URL, json=payload, headers=headers, timeout=10)
-        
         if response.status_code != 200:
-            return {
-                "success": False, 
-                "error": f"HTTP Gateway Error: {response.status_code}", 
-                "symbol": clean_symbol
-            }
+            return {"success": False, "error": f"HTTP Error: {response.status_code}", "symbol": clean_symbol}
             
         result = response.json()
-        
-        # Verify success criteria exactly per response docs
         if result.get("status") == "success" or result.get("status") == "true":
             data_payload = result.get("data", {})
             order_id = data_payload.get("orderid") or data_payload.get("order_id") or "SUCCESS"
             return {"success": True, "order_id": order_id, "symbol": clean_symbol}
             
-        error_reason = result.get("error_msg") or result.get("message") or "Parameters Validation Failed"
-        return {"success": False, "error": error_reason, "symbol": clean_symbol}
-        
+        return {"success": False, "error": result.get("error_msg", "Validation Failed"), "symbol": clean_symbol}
     except Exception as e:
         return {"success": False, "error": str(e), "symbol": clean_symbol}
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION: DYNAMIC PIPELINE FOR DASHBOARD SCANNED DATA
-# ─────────────────────────────────────────────────────────────────────────────
+def execute_dashboard_trades(df, quantity_per_stock=1):
+    if df is None or df.empty:
+        st.warning("Dashboard table empty hai, koi trade available nahi hai!")
+        return
 
-def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
-    """
-    Takes live symbols from the dashboard table and processes them for Intraday.
-    """
+    scanned_symbols = df['Symbol'].tolist()
+    st.info(f"Sending orders for {len(scanned_symbols)} stocks via AlgoMojo Paper Trading...")
+    
     results = []
-    for symbol in symbols_list:
-        if not symbol or str(symbol).strip() == "": 
-            continue
-            
-        res = place_buy_order(
-            symbol=symbol, 
-            quantity=quantity_per_stock, 
-            broker="DHANHQ", 
-            exchange="NSE"
-        )
+    for symbol in scanned_symbols:
+        if not symbol or str(symbol).strip() == "": continue
+        res = place_buy_order(symbol, quantity_per_stock)
         results.append(res)
+        time.sleep(0.4)
         
-        # 0.4s safe pacing interval to avoid rate throttling
-        time.sleep(0.4)  
-    return results
-
-def summarize_order_results(results):
     successful = [r for r in results if r.get("success")]
     failed = [r for r in results if not r.get("success")]
+    errors = {r["symbol"]: r.get("error", "Unknown details") for r in failed}
     
-    return {
-        "total": len(results),
-        "successful": len(successful),
-        "failed": len(failed),
-        "success_symbols": [r["symbol"] for r in successful],
-        "failed_symbols": [r["symbol"] for r in failed],
-        "errors": {r["symbol"]: r.get("error", "Unknown details") for r in failed}
-    }
+    if len(failed) == 0 and len(successful) > 0:
+        st.success(f"🚀 All Paper Orders Executed! {len(successful)} Stocks Sent to AlgoMojo Sandbox.")
+    elif len(successful) > 0 and len(failed) > 0:
+        st.warning(f"⚠️ Partial Success! Sent: {len(successful)} | Failed: {len(failed)}")
+        st.write("Errors:", errors)
+    else:
+        st.error("❌ Execution Failed! Verification Rejected.")
+        if errors: st.write("Error Logs:", errors)
+            
+    time.sleep(3.0)
+    st.rerun()
