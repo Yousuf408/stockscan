@@ -1,0 +1,105 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# TV SCREENER PACKAGE
+# Multi-module architecture for TradingView-based stock screening
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+TV Screener Package — Streamlit-based multi-page trading dashboard module.
+
+Modules:
+  - algomojo:     AlgoMojo API integration for order placement
+  - backend:      TradingView data fetch and orchestration
+  - calculations: Data calculations (POC, EMA, Crossover, Candles, Vol5D)
+  - database:     Supabase cache management
+  - filters:      Data filtering logic (gap, sector, previous high)
+  - frontend:     UI formatting and table rendering
+"""
+
+__version__ = "1.0.0"
+__author__ = "TradeSentry"
+
+# Import main modules for easy access
+from .algomojo import place_buy_order, place_bulk_buy_orders, summarize_order_results
+from .backend import fetch_tv_data, clean_tv_data, enrich_tv_data
+from .calculations import (
+    get_yesterday_poc,
+    get_ema_consolidation_pct,
+    get_crossover_signal,
+    get_all_candle_signals,
+    get_5day_median_volume,
+    get_last_trading_day,
+    is_market_hours
+)
+from .database import (
+    get_supabase,
+    supabase_get_cached_row,
+    supabase_get_all_for_date,
+    supabase_save_row,
+    init_session_caches,
+    get_supabase_stats
+)
+from .filters import (
+    apply_gap_filter,
+    apply_sector_filter,
+    apply_crossover_filter,
+    apply_ema_coil_filter,
+    apply_relvol_filter,
+    apply_all_filters
+)
+from .frontend import (
+    render_stock_table,
+    render_market_closed_view,
+    fmt_volume,
+    fmt_relvol,
+    fmt_poc_gap,
+    fmt_prev_high,
+    fmt_ema_coil,
+    fmt_crossover
+)
+
+__all__ = [
+    # AlgoMojo
+    'place_buy_order',
+    'place_bulk_buy_orders',
+    'summarize_order_results',
+    
+    # Backend
+    'fetch_tv_data',
+    'clean_tv_data',
+    'enrich_tv_data',
+    
+    # Calculations
+    'get_yesterday_poc',
+    'get_ema_consolidation_pct',
+    'get_crossover_signal',
+    'get_all_candle_signals',
+    'get_5day_median_volume',
+    'get_last_trading_day',
+    'is_market_hours',
+    
+    # Database
+    'get_supabase',
+    'supabase_get_cached_row',
+    'supabase_get_all_for_date',
+    'supabase_save_row',
+    'init_session_caches',
+    'get_supabase_stats',
+    
+    # Filters
+    'apply_gap_filter',
+    'apply_sector_filter',
+    'apply_crossover_filter',
+    'apply_ema_coil_filter',
+    'apply_relvol_filter',
+    'apply_all_filters',
+    
+    # Frontend
+    'render_stock_table',
+    'render_market_closed_view',
+    'fmt_volume',
+    'fmt_relvol',
+    'fmt_poc_gap',
+    'fmt_prev_high',
+    'fmt_ema_coil',
+    'fmt_crossover',
+]
