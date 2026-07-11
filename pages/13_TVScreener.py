@@ -8,58 +8,87 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from supabase import create_client
 
-# ─────────────────────────────────────────────────────────────
-# ALGOMOJO ORDER PLACEMENT
-# ─────────────────────────────────────────────────────────────
+import time
 import requests
 
-ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
-
-# Your actual AlgoMojo credentials (from dashboard)
+# ─────────────────────────────────────────────────────────────
+# ALGOMOJO PRODUCTION CONFIGURATION
+# ─────────────────────────────────────────────────────────────
+# Note: Ensure these exactly match your AlgoMojo Developer Console values
 ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
 ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
 
+# Multi-broker unified place order endpoint
+ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
+
 def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
     """
-    Place a single BUY order via AlgoMojo API.
-    - broker default is "DHAN" (your broker)
-    - symbol is passed as is (no -EQ suffix)
+    Places a standard Delivery (CNC) Market BUY order via AlgoMojo.
     """
-    try:
-        payload = {
-            "api_key": ALGOMOJO_API_KEY,
-            "api_secret": ALGOMOJO_API_SECRET,
-            "data": {
-                "broker": broker,          # "DHAN"
-                "strategy": "TV_Screener",
-                "exchange": exchange,       # "NSE"
-                "symbol": symbol,           # e.g., "RELIANCE" (no suffix)
-                "action": "BUY",
-                "product": "CNC",
-                "pricetype": "MARKET",
-                "quantity": str(quantity),
-                "price": "0",
-                "disclosed_quantity": "0",
-                "trigger_price": "0",
-                "amo": "NO",
-                "splitorder": "NO",
-                "split_quantity": "1"
-            }
+    # AlgoMojo expects root level authentication alongside the nested data wrapper
+    payload = {
+        "api_key": ALGOMOJO_API_KEY,
+        "api_secret": ALGOMOJO_API_SECRET,
+        "data": {
+            "broker": str(broker).upper(),        # e.g., "DHAN"
+            "strategy": "TV_Screener",
+            "exchange": str(exchange).upper(),    # e.g., "NSE"
+            "symbol": str(symbol).upper(),        # e.g., "RELIANCE"
+            "action": "BUY",
+            "product": "CNC",                     # Cash and Carry / Delivery
+            "pricetype": "MARKET",
+            "quantity": str(quantity),
+            "price": "0",
+            "disclosed_quantity": "0",
+            "trigger_price": "0",
+            "amo": "NO",
+            "splitorder": "NO",
+            "split_quantity": "1"
         }
-        response = requests.post(ALGOMOJO_API_URL, json=payload, timeout=10)
+    }
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(ALGOMOJO_API_URL, json=payload, headers=headers, timeout=10)
+        
+        # Guard rail for non-200 server HTTP status codes
+        if response.status_code != 200:
+            return {
+                "success": False, 
+                "error": f"HTTP Server Error: {response.status_code}", 
+                "symbol": symbol
+            }
+            
         result = response.json()
-        if result.get("status") == "success":
-            return {"success": True, "order_id": result['data']['orderid'], "symbol": symbol}
-        return {"success": False, "error": result.get('error_msg', 'Unknown'), "symbol": symbol}
+        
+        # Verify both common variants of success responses from AlgoMojo endpoints
+        if result.get("status") == "success" or result.get("status") == "true":
+            # Extract order ID securely across alternative response key conventions
+            data_payload = result.get("data", {})
+            order_id = data_payload.get("orderid") or data_payload.get("order_id") or "SUCCESS_NO_ID"
+            return {"success": True, "order_id": order_id, "symbol": symbol}
+            
+        # Catch explicit API level validation errors (e.g., "invalid user API key")
+        error_reason = result.get("error_msg") or result.get("message") or "Validation Rejected"
+        return {"success": False, "error": error_reason, "symbol": symbol}
+        
     except Exception as e:
         return {"success": False, "error": str(e), "symbol": symbol}
 
 def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
-    """Place orders for multiple symbols (with a small delay)."""
+    """
+    Iterates through a list of stock symbols to batch order placements safely.
+    """
     results = []
     for symbol in symbols_list:
-        results.append(place_buy_order(symbol, quantity_per_stock))
-        time.sleep(0.3)   # avoid rate limit
+        if not symbol: 
+            continue
+        res = place_buy_order(symbol, quantity_per_stock)
+        results.append(res)
+        time.sleep(0.4)  # Rate limiter to safely prevent parallel thread request blocks
     return results
 
 # ─────────────────────────────────────────────────────────────
