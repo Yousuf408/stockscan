@@ -1272,8 +1272,8 @@ screener_fragment()
 st.markdown("---")
 st.subheader("🧪 AlgoMojo Test (Manual Trigger Only)")
 
-ALGOMOJO_API_KEY    = "b9a4a6c79371870b9b5d34dd47b8d26b"
-ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
+ALGOMOJO_API_KEY    = "d8dce8b5"
+ALGOMOJO_API_SECRET = "9dbf184f-59cc-4da8-b16e-fc0872f2a9f0"
 ALGOMOJO_BROKER     = "DHANHQ"
 
 def algomojo_place_test_order(symbol, exchange, action, quantity):
