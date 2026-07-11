@@ -20,7 +20,7 @@ ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 # Valid keys typically look like:
 ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"  # Your actual key from dashboard
 ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"  # Your actual secret from dashboard
-def place_buy_order(symbol, quantity=1, broker="TC", exchange="NSE"):
+def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
     try:
         payload = {
             "api_key": ALGOMOJO_API_KEY,
