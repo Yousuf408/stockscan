@@ -18,23 +18,31 @@ ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 # !!! REPLACE THESE WITH YOUR ACTUAL ALGOMOJO CREDENTIALS !!!
 # Login to AlgoMojo Dashboard -> Profile -> API Keys
 # Valid keys typically look like:
-curl -X POST https://amapi.algomojo.com/v1/PlaceOrder \
-  -H "Content-Type: application/json" \
-  -d '{
-    "api_key": "b9a4a6c79371870b9b5d34dd47b8d26b",
-    "api_secret": "d50dbbac39c8aba0d0495205d3933c2b",
-    "data": {
-      "broker": "DHAN",
-      "strategy": "Test",
-      "exchange": "NSE",
-      "symbol": "RELIANCE",
-      "action": "BUY",
-      "product": "CNC",
-      "pricetype": "MARKET",
-      "quantity": "1",
-      "price": "0"
-    }
-  }'        response = requests.post(ALGOMOJO_API_URL, json=payload, timeout=10)
+ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"  # Your actual key from dashboard
+ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"  # Your actual secret from dashboard
+def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
+    try:
+        payload = {
+            "api_key": ALGOMOJO_API_KEY,
+            "api_secret": ALGOMOJO_API_SECRET,
+            "data": {
+                "broker": broker,
+                "strategy": "TV_Screener",
+                "exchange": exchange,
+                "symbol": f"{symbol}-EQ",
+                "action": "BUY",
+                "product": "CNC",
+                "pricetype": "MARKET",
+                "quantity": str(quantity),
+                "price": "0",
+                "disclosed_quantity": "0",
+                "trigger_price": "0",
+                "amo": "NO",
+                "splitorder": "NO",
+                "split_quantity": "1"
+            }
+        }
+        response = requests.post(ALGOMOJO_API_URL, json=payload, timeout=10)
         result = response.json()
         if result.get("status") == "success":
             return {"success": True, "order_id": result['data']['orderid'], "symbol": symbol}
