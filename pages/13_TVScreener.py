@@ -1259,3 +1259,75 @@ def screener_fragment():
 # RUN FRAGMENT
 # ─────────────────────────────────────────────────────────────
 screener_fragment()
+
+# ─────────────────────────────────────────────────────────────
+# ALGOMOJO TEST SECTION — ISOLATED, MANUAL-TRIGGER-ONLY
+# Yeh poori-tarah alag hai upar ke screener-logic se — koi
+# existing-function/cache touch nahi karta. Sirf button-dabane
+# pe hi chalega, auto-refresh (fragment) ke through NAHI.
+#
+# Abhi koi crossover/timing-condition NAHI hai — sirf yeh test
+# karna hai ki AlgoMojo API-connection kaam karta hai ya nahi.
+# ─────────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("🧪 AlgoMojo Test (Manual Trigger Only)")
+
+ALGOMOJO_API_KEY    = "b9a4a6c79371870b9b5d34dd47b8d26b"
+ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
+ALGOMOJO_BROKER     = "DHANHQ"
+
+def algomojo_place_test_order(symbol, exchange, action, quantity):
+    """
+    AlgoMojo PlaceOrder API ko call karta hai — MARKET order,
+    documented-payload-format ke saath (docs.algomojo.com verified).
+    """
+    import requests
+
+    url = "https://amapi.algomojo.com/v1/PlaceOrder"
+    payload = {
+        "api_key": ALGOMOJO_API_KEY,
+        "api_secret": ALGOMOJO_API_SECRET,
+        "data": {
+            "broker": ALGOMOJO_BROKER,
+            "strategy": "TV_Screener_Test",
+            "exchange": exchange,
+            "symbol": symbol,
+            "action": action,
+            "product": "CNC",
+            "pricetype": "MARKET",
+            "quantity": str(quantity),
+            "price": "0",
+            "disclosed_quantity": "0",
+            "trigger_price": "0",
+            "amo": "NO",
+            "splitorder": "NO",
+            "split_quantity": "1",
+        }
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=15)
+        return response.status_code, response.json()
+    except Exception as e:
+        return None, {"error": str(e)}
+
+
+with st.form("algomojo_test_form"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        test_symbol = st.text_input("Symbol", value="YESBANK-EQ")
+    with col2:
+        test_exchange = st.selectbox("Exchange", ["NSE", "BSE"], index=0)
+    with col3:
+        test_action = st.selectbox("Action", ["BUY", "SELL"], index=0)
+    test_quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
+
+    submitted = st.form_submit_button("🚀 Place Test Order")
+
+    if submitted:
+        with st.spinner("Calling AlgoMojo..."):
+            status_code, response_data = algomojo_place_test_order(
+                test_symbol, test_exchange, test_action, test_quantity
+            )
+        st.write(f"**HTTP Status:** {status_code}")
+        st.json(response_data)
