@@ -43,7 +43,7 @@ from tv_screener.strategy import (
     fetch_tv_data, clean_tv_data, prepare_tv_data_for_processing,
     get_yesterday_poc, get_crossover_signal, calc_gap_pct
 )
-from tv_screener.strategy importt (
+from tv_screener.strategy import (
     get_last_trading_day, get_current_ist_time, is_market_hours,
     get_ema_consolidation_pct, get_all_candle_signals, get_5day_median_volume,
     calc_prev_high_dist, get_prev_high_val
