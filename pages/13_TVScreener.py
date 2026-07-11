@@ -15,21 +15,25 @@ import requests
 
 ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 
-# !!! REPLACE THESE WITH YOUR ACTUAL ALGOMOJO CREDENTIALS !!!
-# Login to AlgoMojo Dashboard -> Profile -> API Keys
-# Valid keys typically look like:
-ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"  # Your actual key from dashboard
-ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"  # Your actual secret from dashboard
+# Your actual AlgoMojo credentials (from dashboard)
+ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
+ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
+
 def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
+    """
+    Place a single BUY order via AlgoMojo API.
+    - broker default is "DHAN" (your broker)
+    - symbol is passed as is (no -EQ suffix)
+    """
     try:
         payload = {
             "api_key": ALGOMOJO_API_KEY,
             "api_secret": ALGOMOJO_API_SECRET,
             "data": {
-                "broker": broker,
+                "broker": broker,          # "DHAN"
                 "strategy": "TV_Screener",
-                "exchange": exchange,
-                "symbol": f"{symbol}-EQ",
+                "exchange": exchange,       # "NSE"
+                "symbol": symbol,           # e.g., "RELIANCE" (no suffix)
                 "action": "BUY",
                 "product": "CNC",
                 "pricetype": "MARKET",
@@ -51,10 +55,11 @@ def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
         return {"success": False, "error": str(e), "symbol": symbol}
 
 def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
+    """Place orders for multiple symbols (with a small delay)."""
     results = []
     for symbol in symbols_list:
         results.append(place_buy_order(symbol, quantity_per_stock))
-        time.sleep(0.3)
+        time.sleep(0.3)   # avoid rate limit
     return results
 
 # ─────────────────────────────────────────────────────────────
