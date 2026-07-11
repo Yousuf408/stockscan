@@ -39,17 +39,19 @@ IST = pytz.timezone("Asia/Kolkata")
 # SECTION: IMPORTS FROM TV_SCREENER PACKAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
-from tv_screener.backend import fetch_tv_data, clean_tv_data, prepare_tv_data_for_processing
-from tv_screener.calculations import (
-    get_yesterday_poc, get_ema_consolidation_pct, get_crossover_signal,
-    get_all_candle_signals, get_5day_median_volume, get_last_trading_day,
-    get_current_ist_time, is_market_hours
+from tv_screener.strategy import (
+    fetch_tv_data, clean_tv_data, prepare_tv_data_for_processing,
+    get_yesterday_poc, get_crossover_signal, calc_gap_pct
+)
+from tv_screener.backend import (
+    get_last_trading_day, get_current_ist_time, is_market_hours,
+    get_ema_consolidation_pct, get_all_candle_signals, get_5day_median_volume,
+    calc_prev_high_dist, get_prev_high_val
 )
 from tv_screener.database import (
     get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
     supabase_save_row, init_session_caches, get_supabase_stats
 )
-from tv_screener.filters import calc_gap_pct, calc_prev_high_dist, get_prev_high_val
 from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
 from tv_screener.algomojo import place_buy_order
 
@@ -149,7 +151,13 @@ def screener_fragment():
         else:
             still_missing_poc.append(symbol)
 
-    # Fetch POC for remaining symbols (parallel)
+    # Fetch POC for remaining symbols (parallel) — sirf market open mein.
+    # Market band hone ke baad naya POC calculate nahi karna (already
+    # missing hai toh agle trading-day mein hi milega, retry se koi
+    # fayda nahi — sirf waste API calls).
+    if still_missing_poc and not is_market_hours():
+        still_missing_poc = []
+
     if still_missing_poc:
         with st.spinner(f"Calculating POC for {len(still_missing_poc)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
@@ -166,10 +174,16 @@ def screener_fragment():
         result = get_crossover_signal(symbol, poc_val)
         return symbol, result
 
-    crossover_symbols_to_check = [
-        s for s in df['Symbol']
-        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
-    ]
+    # Market band hone ke baad naya crossover-check attempt nahi karna —
+    # jo stocks abhi tak unconfirmed hain ("") woh har 60s refresh pe
+    # dobara check hote rehte, chahe market band ho ya khula. Yahi
+    # "fetching keeps happening after close" ka root-cause tha.
+    crossover_symbols_to_check = []
+    if is_market_hours():
+        crossover_symbols_to_check = [
+            s for s in df['Symbol']
+            if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
+        ]
 
     if crossover_symbols_to_check:
         with st.spinner(f"Checking crossover for {len(crossover_symbols_to_check)} stocks..."):
@@ -226,7 +240,11 @@ def screener_fragment():
     if 'vol5d_cache' not in st.session_state:
         st.session_state['vol5d_cache'] = {}
 
-    need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
+    # Market band hone ke baad naya EMA-Coil/Vol5D calculate nahi
+    # karna — same reasoning: retry se koi fayda nahi, sirf waste calls.
+    need_check = []
+    if is_market_hours():
+        need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
 
     def calculate_ema_and_vol5d(symbol):
         """Parallel calculation."""
@@ -284,15 +302,21 @@ def screener_fragment():
         key = f"{symbol}_{candle_time}"
         return st.session_state['candle_cache'].get(key, "")
 
+    # Market band hone ke baad naya candle-fetch attempt NAHI karna —
+    # warna har 60s refresh pe wahi "Fetching candles..." spinner aata
+    # rahega bina kisi naye data ke (waste API calls). Sirf market
+    # open hone par hi missing candles fetch honge; band hone ke baad
+    # jo cache mein hai wahi use hoga (missing wale blank/"" rahenge).
     symbols_needing_fetch = []
-    for _, row in df.iterrows():
-        sym = row['Symbol']
-        missing_needed = any(
-            show and f"{sym}_{t}" not in st.session_state['candle_cache']
-            for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
-        )
-        if missing_needed:
-            symbols_needing_fetch.append(sym)
+    if is_market_hours():
+        for _, row in df.iterrows():
+            sym = row['Symbol']
+            missing_needed = any(
+                show and f"{sym}_{t}" not in st.session_state['candle_cache']
+                for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
+            )
+            if missing_needed:
+                symbols_needing_fetch.append(sym)
 
     if symbols_needing_fetch:
         with st.spinner(f"Fetching candles for {len(symbols_needing_fetch)} stocks..."):
