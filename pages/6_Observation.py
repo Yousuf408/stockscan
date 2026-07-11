@@ -72,10 +72,14 @@ def screener_fragment():
     Complete calculations: POC, Crossover, EMA-Coil, Vol5D, Entry signals.
     """
     
-    # ── STEP 0: Check market hours ──
-    if not is_market_hours():
-        render_market_closed_view(pd.DataFrame())
-        return
+    # ── STEP 0: Market hours check — DISABLED FOR TESTING ──
+    # Testing ke dauraan hamesha live calculation chalega, chahe market
+    # khula ho ya band. Production mein wapas enable karna ho toh neeche
+    # wale 3 lines uncomment karo.
+    #
+    # if not is_market_hours():
+    #     render_market_closed_view(pd.DataFrame())
+    #     return
 
     # ── STEP 1: FETCH TV DATA ──
     with st.spinner("Fetching Top Gainer stocks from TradingView..."):
