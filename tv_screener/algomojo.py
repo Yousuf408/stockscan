@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# DOCUMENTATION MATCHED ALGOMOJO PIPELINE (100% STRICT PARAMETERS)
+# STRICT INTRADAY (MIS) ALGOMOJO PIPELINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import requests
@@ -10,10 +10,10 @@ ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
 ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
 ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 
-def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE", product="MIS"):
+def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE"):
     """
-    Strictly follows official AlgoMojo REST API structure.
-    All parameter fields in data are strictly typed as Strings.
+    Strictly follows official AlgoMojo REST API structure for INTRADAY (MIS) orders.
+    All parameter values are properly cast as strings.
     """
     
     # ─── SYMBOL COMPLIANCE CHECK ───
@@ -24,20 +24,23 @@ def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE", product
     else:
         formatted_symbol = clean_symbol
 
-    # Official JSON structure exactly matching the API docs
+    # Official JSON structure EXACTLY matching documentation names but optimized for Intraday
     payload = {
         "api_key": str(ALGOMOJO_API_KEY),
         "api_secret": str(ALGOMOJO_API_SECRET),
         "data": {
             "broker": str(broker).upper(),            # "DHANHQ"
-            "strategy": "TV_Screener",                # Custom identifier string
+            "strategy": "TV_Screener",                # Identifier
             "exchange": str(exchange).upper(),        # "NSE"
-            "symbol": str(formatted_symbol),          # Checked formatted string (e.g. "GAIL-EQ")
+            "symbol": str(formatted_symbol),          # e.g., "GAIL-EQ"
             "action": "BUY",                          # "BUY" or "SELL"
-            "product": str(product).upper(),          # "MIS" for Intraday, "CNC" for Delivery
-            "pricetype": "MARKET",                    # "MARKET" execution
-            "quantity": str(int(quantity)),           # CRITICAL: Must be string format
-            "price": "0",                             # Market ignores price, but parameter string required
+            
+            # ─── FIXED FOR INTRADAY EXECUTION ───
+            "product": "MIS",                         # Explicitly set to MIS for Intraday margin
+            
+            "pricetype": "MARKET",                    # MARKET execution
+            "quantity": str(int(quantity)),           # Strict string required
+            "price": "0",                             # Market ignores price, but string needed
             "disclosed_quantity": "0",                # Required field as string
             "trigger_price": "0",                     # Required field as string
             "amo": "NO",                              # "NO" for normal market hours
@@ -68,7 +71,6 @@ def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE", product
             order_id = data_payload.get("orderid") or data_payload.get("order_id") or "SUCCESS"
             return {"success": True, "order_id": order_id, "symbol": clean_symbol}
             
-        # Parse exact failure message forwarded by the server
         error_reason = result.get("error_msg") or result.get("message") or "Parameters Validation Failed"
         return {"success": False, "error": error_reason, "symbol": clean_symbol}
         
@@ -79,27 +81,24 @@ def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE", product
 # SECTION: DYNAMIC PIPELINE FOR DASHBOARD SCANNED DATA
 # ─────────────────────────────────────────────────────────────────────────────
 
-def place_bulk_buy_orders(symbols_list, quantity_per_stock=1, product="MIS"):
+def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
     """
-    Takes live symbols from the dashboard table and maps them via the correct 
-    documentation constraints.
+    Takes live symbols from the dashboard table and processes them for Intraday.
     """
     results = []
     for symbol in symbols_list:
         if not symbol or str(symbol).strip() == "": 
             continue
             
-        # Place single strict order
         res = place_buy_order(
             symbol=symbol, 
             quantity=quantity_per_stock, 
             broker="DHANHQ", 
-            exchange="NSE", 
-            product=product
+            exchange="NSE"
         )
         results.append(res)
         
-        # 0.4s safe pacing interval
+        # 0.4s safe pacing interval to avoid rate throttling
         time.sleep(0.4)  
     return results
 
