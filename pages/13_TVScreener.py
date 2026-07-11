@@ -9,6 +9,52 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from supabase import create_client
 
 # ─────────────────────────────────────────────────────────────
+# ALGOMOJO ORDER PLACEMENT
+# ─────────────────────────────────────────────────────────────
+import requests
+
+ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
+ALGOMOJO_API_KEY = "your_api_key_here"
+ALGOMOJO_API_SECRET = "your_api_secret_here"
+
+def place_buy_order(symbol, quantity=1, broker="TC", exchange="NSE"):
+    try:
+        payload = {
+            "api_key": ALGOMOJO_API_KEY,
+            "api_secret": ALGOMOJO_API_SECRET,
+            "data": {
+                "broker": broker,
+                "strategy": "TV_Screener",
+                "exchange": exchange,
+                "symbol": f"{symbol}-EQ",
+                "action": "BUY",
+                "product": "CNC",
+                "pricetype": "MARKET",
+                "quantity": str(quantity),
+                "price": "0",
+                "disclosed_quantity": "0",
+                "trigger_price": "0",
+                "amo": "NO",
+                "splitorder": "NO",
+                "split_quantity": "1"
+            }
+        }
+        response = requests.post(ALGOMOJO_API_URL, json=payload, timeout=10)
+        result = response.json()
+        if result.get("status") == "success":
+            return {"success": True, "order_id": result['data']['orderid'], "symbol": symbol}
+        return {"success": False, "error": result.get('error_msg', 'Unknown'), "symbol": symbol}
+    except Exception as e:
+        return {"success": False, "error": str(e), "symbol": symbol}
+
+def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
+    results = []
+    for symbol in symbols_list:
+        results.append(place_buy_order(symbol, quantity_per_stock))
+        time.sleep(0.3)
+    return results
+
+# ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1237,7 +1283,31 @@ def screener_fragment():
     # TABLE RENDER — shared render_stock_table() use karta hai
     # (module-level, market-closed view ke saath bhi share hota hai)
     # ─────────────────────────────────────────────────────────────
-    render_stock_table(df)
+
+        render_stock_table(df)
+
+    # ─────────────────────────────────────────────────────────────
+    # ALGOMOJO MANUAL BUY BUTTONS
+    # ─────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("📊 Buy Orders")
+    
+    # Create buy buttons for each stock
+    cols = st.columns(min(4, len(df)))
+    for idx, (_, row) in enumerate(df.iterrows()):
+        col_idx = idx % len(cols)
+        with cols[col_idx]:
+            symbol = row['Symbol']
+            price = row['Price']
+            
+            if st.button(f"Buy {symbol}", key=f"buy_{symbol}_{idx}"):
+                with st.spinner(f"Placing order for {symbol}..."):
+                    result = place_buy_order(symbol, quantity=1)
+                    if result['success']:
+                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+                    else:
+                        st.error(f"❌ {symbol}: {result['error']}")
+                st.rerun()
 
     # ── TEMP DIAGNOSTIC — Supabase save status, ek line mein ──
     success_count = st.session_state.get('supabase_save_success_count', 0)
