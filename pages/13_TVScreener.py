@@ -14,9 +14,12 @@ from supabase import create_client
 import requests
 
 ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
-ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
-ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
 
+# !!! REPLACE THESE WITH YOUR ACTUAL ALGOMOJO CREDENTIALS !!!
+# Login to AlgoMojo Dashboard -> Profile -> API Keys
+# Valid keys typically look like:
+ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"  # Your actual key from dashboard
+ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"  # Your actual secret from dashboard
 def place_buy_order(symbol, quantity=1, broker="TC", exchange="NSE"):
     try:
         payload = {
@@ -1283,8 +1286,7 @@ def screener_fragment():
     # TABLE RENDER — shared render_stock_table() use karta hai
     # (module-level, market-closed view ke saath bhi share hota hai)
     # ─────────────────────────────────────────────────────────────
-
-        render_stock_table(df)
+    render_stock_table(df)
 
     # ─────────────────────────────────────────────────────────────
     # ALGOMOJO MANUAL BUY BUTTONS
