@@ -1,272 +1,404 @@
-"""
-13_AutoTrader.py
-Auto Trader — Reads today's signals from momentum_signal_times
-and places buy orders via Angel One SmartAPI.
-"""
-
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# ═══════════════════════════════════════════════════════════════════════════════
+# TV SCREENER PAGE (9_TVScreener.py)
+# Main orchestration: Fragment-based live market view + market-closed fallback
+# ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
-import pyotp
-import requests
-from datetime import datetime, timezone, timedelta
-from supabase import create_client
-from SmartApi import SmartConnect
+import pandas as pd
+from datetime import datetime
+import pytz
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ─────────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────────
-from angel_auth import API_KEY, CLIENT_ID, PASSWORD, TOTP_SECRET
-from config import STOCKS_WATCHLIST
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: PAGE CONFIGURATION & STYLES
+# ─────────────────────────────────────────────────────────────────────────────
 
-SUPABASE_URL = "https://pzdwmqjyuruxbfbkswib.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6ZHdtcWp5dXJ1eGJmYmtzd2liIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgyNTM3MTIsImV4cCI6MjA2MzgyOTcxMn0.ia1QfFMvQgqTRkOcODIZ3BKxPBKB0-kxCTkJ5sQXv5Y"
+st.set_page_config(
+    page_title="TV Screener · TradeSentry",
+    page_icon="📺",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-IST       = timezone(timedelta(hours=5, minutes=30))
-PROXY_URL = "http://yousufshaikh420:cVTbJi6VVA@151.242.178.149:50100"
-
-NAME_TO_TOKEN = {name: token for name, token, kind in STOCKS_WATCHLIST}
-
-# ─────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Auto Trader", page_icon="⚡", layout="wide")
+from styles import apply_styles, sidebar_brand
+apply_styles()
+sidebar_brand("TVScreener")
 
 st.markdown("""
 <style>
-.status-ok  { color: #00c851; font-weight: 700; }
-.status-err { color: #ff4444; font-weight: 700; }
+.block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+div[data-testid="stSelectbox"] { margin-top: 0 !important; margin-bottom: 0 !important; }
+div[data-testid="stButton"] button { padding: 4px 12px !important; font-size: 12px !important; height: 32px !important; }
+div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────
-# SUPABASE
-# ─────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+IST = pytz.timezone("Asia/Kolkata")
 
-# ─────────────────────────────────────────────────────────────
-# FRESH LOGIN — always fresh SmartConnect with proxy
-# ─────────────────────────────────────────────────────────────
-def do_angel_login():
-    try:
-        os.environ["HTTP_PROXY"]  = PROXY_URL
-        os.environ["HTTPS_PROXY"] = PROXY_URL
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: IMPORTS FROM TV_SCREENER PACKAGE
+# ─────────────────────────────────────────────────────────────────────────────
 
-        obj       = SmartConnect(api_key=API_KEY)
-        obj.proxy = {"http": PROXY_URL, "https": PROXY_URL}
-        totp      = pyotp.TOTP(TOTP_SECRET).now()
-        data      = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+from tv_screener.backend import fetch_tv_data, clean_tv_data, prepare_tv_data_for_processing
+from tv_screener.calculations import (
+    get_yesterday_poc, get_ema_consolidation_pct, get_crossover_signal,
+    get_all_candle_signals, get_5day_median_volume, get_last_trading_day,
+    get_current_ist_time, is_market_hours
+)
+from tv_screener.database import (
+    get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
+    supabase_save_row, init_session_caches, get_supabase_stats
+)
+from tv_screener.filters import calc_gap_pct, calc_prev_high_dist, get_prev_high_val
+from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
+from tv_screener.algomojo import place_buy_order
 
-        os.environ.pop("HTTP_PROXY",  None)
-        os.environ.pop("HTTPS_PROXY", None)
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: SESSION STATE INITIALIZATION
+# ─────────────────────────────────────────────────────────────────────────────
 
-        if not data or data.get("status") == False:
-            return None, f"Login failed: {data}"
+init_session_caches()
 
-        return obj, None
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    except Exception as e:
-        os.environ.pop("HTTP_PROXY",  None)
-        os.environ.pop("HTTPS_PROXY", None)
-        return None, str(e)
+@st.fragment(run_every=60)
+def screener_fragment():
+    """
+    Live market screening fragment — runs every 60 seconds.
+    
+    Only executes when market is open (9:15 AM - 3:30 PM IST).
+    Complete calculations: POC, Crossover, EMA-Coil, Vol5D, Entry signals.
+    """
+    
+    # ── STEP 0: Check market hours ──
+    if not is_market_hours():
+        render_market_closed_view(pd.DataFrame())
+        return
 
-# ─────────────────────────────────────────────────────────────
-# GET SMART API — login once per session
-# ─────────────────────────────────────────────────────────────
-def get_smart_api():
-    # Already logged in this session?
-    if "at_smart_api" in st.session_state and st.session_state["at_smart_api"]:
-        return st.session_state["at_smart_api"], None
+    # ── STEP 1: FETCH TV DATA ──
+    with st.spinner("Fetching Top Gainer stocks from TradingView..."):
+        count, df, error = fetch_tv_data()
 
-    obj, err = do_angel_login()
-    if obj:
-        st.session_state["at_smart_api"] = obj
-    return obj, err
+    if error:
+        st.error(f"❌ Error: {error}")
+        return
 
-# ─────────────────────────────────────────────────────────────
-# FETCH TODAY'S SIGNALS
-# ─────────────────────────────────────────────────────────────
-def fetch_today_signals():
-    today_str = datetime.now(IST).strftime("%Y-%m-%d")
-    try:
-        resp = get_supabase().table("momentum_signal_times") \
-            .select("stock, signal_time, signal_price, vol_ratio, vol_momentum, momentum, score, peak_ltp") \
-            .eq("signal_date", today_str) \
-            .order("signal_time", desc=False) \
-            .execute()
-        return resp.data or []
-    except Exception as e:
-        st.error(f"Supabase fetch error: {e}")
-        return []
+    if df.empty:
+        st.warning("No stocks found.")
+        return
 
-# ─────────────────────────────────────────────────────────────
-# PLACE ORDER
-# ─────────────────────────────────────────────────────────────
-def place_buy_order(smart_api, symbol: str, qty: int) -> dict:
-    token = NAME_TO_TOKEN.get(symbol)
-    if not token:
-        return {"status": "error", "msg": f"Token not found for {symbol}"}
+    # ── STEP 2: CLEAN DATA ──
+    df = clean_tv_data(df)
 
-    order_params = {
-        "variety"         : "NORMAL",
-        "tradingsymbol"   : f"{symbol}-EQ",
-        "symboltoken"     : token,
-        "transactiontype" : "BUY",
-        "exchange"        : "NSE",
-        "ordertype"       : "MARKET",
-        "producttype"     : "INTRADAY",
-        "duration"        : "DAY",
-        "quantity"        : str(qty),
-        "price"           : "0",
-        "triggerprice"    : "0",
-        "squareoff"       : "0",
-        "stoploss"        : "0",
-    }
+    # ── STEP 3: GAP FILTER (±2%) ──
+    df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
+    df = df[df['_opening_gap'].abs() <= 2.0]
+    df = df.drop(columns=['_opening_gap'], errors='ignore')
 
-    try:
-        os.environ["HTTP_PROXY"]  = PROXY_URL
-        os.environ["HTTPS_PROXY"] = PROXY_URL
+    if df.empty:
+        st.warning("No stocks passed gap filter.")
+        return
 
-        response = smart_api.placeOrder(order_params)
+    # ── STEP 4: CALCULATE PREV HIGH DISTANCE ──
+    df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
+    df['PrevHighVal']  = df.apply(get_prev_high_val, axis=1)
+    df = prepare_tv_data_for_processing(df)
 
-        os.environ.pop("HTTP_PROXY",  None)
-        os.environ.pop("HTTPS_PROXY", None)
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 5: CROSSOVER CHECK (CRITICAL FILTER)
+    # 
+    # Cache priority: session_state (fastest) → Supabase (persistent) 
+    # → yfinance (slowest)
+    # 
+    # Key: crossover confirmation is permanent (once matched, cache preserves it)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    calc_date   = get_last_trading_day()
+    signal_date = datetime.now(IST).date()
 
-        # ── Debug: raw response dikhao ──
-        st.caption(f"🔍 Raw response: `{response}`")
+    # Find symbols still needing POC (for crossover check)
+    symbols_needing_poc = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
-        # ── Extract order ID ──
-        order_id = None
-        if isinstance(response, dict):
-            order_id = (response.get("data") or {}).get("orderid") \
-                    or response.get("orderid")
-        elif isinstance(response, str) and len(response) > 5:
-            order_id = response  # SmartAPI kabhi kabhi direct string deta hai
-
-        if order_id:
-            return {"status": "success", "order_id": order_id}
+    # Check Supabase for cached POC values
+    still_missing_poc = []
+    for symbol in symbols_needing_poc:
+        cached_row = supabase_get_cached_row(symbol, calc_date)
+        if cached_row is not None and cached_row.get('poc_value') is not None:
+            st.session_state['poc_cache'][symbol] = cached_row['poc_value']
+            # Also cache related fields
+            if cached_row.get('ema_coil_pct') is not None:
+                if 'ema_cache' not in st.session_state:
+                    st.session_state['ema_cache'] = {}
+                st.session_state['ema_cache'][symbol] = cached_row['ema_coil_pct']
+            if cached_row.get('vol5d_median') is not None:
+                if 'vol5d_cache' not in st.session_state:
+                    st.session_state['vol5d_cache'] = {}
+                st.session_state['vol5d_cache'][symbol] = cached_row['vol5d_median']
+            if cached_row.get('prev_high_val') is not None:
+                if 'prevhigh_cache' not in st.session_state:
+                    st.session_state['prevhigh_cache'] = {}
+                st.session_state['prevhigh_cache'][symbol] = cached_row['prev_high_val']
+            if cached_row.get('crossover_status'):
+                st.session_state['crossover_cache'][symbol] = cached_row['crossover_status']
         else:
-            return {"status": "error", "msg": f"No order ID. Full response: {response}"}
+            still_missing_poc.append(symbol)
 
-    except Exception as e:
-        os.environ.pop("HTTP_PROXY",  None)
-        os.environ.pop("HTTPS_PROXY", None)
-        return {"status": "error", "msg": str(e)}
+    # Fetch POC for remaining symbols (parallel)
+    if still_missing_poc:
+        with st.spinner(f"Calculating POC for {len(still_missing_poc)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(get_yesterday_poc, s): s for s in still_missing_poc}
+                for future in as_completed(futures):
+                    sym = futures[future]
+                    poc_val = future.result()
+                    st.session_state['poc_cache'][sym] = poc_val
+                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
 
-# ─────────────────────────────────────────────────────────────
-# MAIN UI
-# ─────────────────────────────────────────────────────────────
-st.title("⚡ Auto Trader")
-st.caption("Reads today's Momentum Scanner signals → Places Angel One orders")
+    # Check crossover signals (only for stocks not yet confirmed)
+    def crossover_pure(symbol, poc_val):
+        """Pure calculation for threading."""
+        result = get_crossover_signal(symbol, poc_val)
+        return symbol, result
 
-# ── Angel One Connection ──
-smart_api, err = get_smart_api()
-if smart_api:
-    st.success("🟢 Angel One Connected")
-else:
-    st.error(f"🔴 Angel One Not Connected — {err}")
-    if st.button("🔁 Retry Login"):
-        st.session_state.pop("at_smart_api", None)
-        st.rerun()
-    st.stop()
+    crossover_symbols_to_check = [
+        s for s in df['Symbol']
+        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
+    ]
 
-# ── Capital Settings ──
-st.divider()
-col1, col2, col3 = st.columns([2, 1, 1])
-with col1:
-    capital = st.number_input(
-        "💰 Total Capital (₹)",
-        min_value=10000, max_value=1000000,
-        value=100000, step=5000, format="%d"
-    )
-with col2:
-    splits    = st.selectbox("Split into", [2, 3, 4, 5], index=1)
-    per_trade = int(capital / splits)
-    st.metric("Per Trade", f"₹{per_trade:,}")
-with col3:
-    st.metric("Max Positions", splits)
+    if crossover_symbols_to_check:
+        with st.spinner(f"Checking crossover for {len(crossover_symbols_to_check)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(crossover_pure, s, st.session_state['poc_cache'].get(s))
+                    for s in crossover_symbols_to_check
+                ]
+                for future in as_completed(futures):
+                    sym, result = future.result()
+                    if result in ("09:15", "09:20"):
+                        st.session_state['crossover_cache'][sym] = result
+                        supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
+                    elif sym not in st.session_state['crossover_cache']:
+                        st.session_state['crossover_cache'][sym] = ""
 
-# ── Signals ──
-st.divider()
-col_h, col_r = st.columns([4, 1])
-with col_h:
-    st.subheader("📊 Today's Signals")
-with col_r:
-    if st.button("🔄 Refresh", use_container_width=True):
-        st.rerun()
+    df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-signals = fetch_today_signals()
+    # ── STEP 6: FINAL FILTER (only 09:15 crossover confirmed) ──
+    df = df[df['Crossover'] == "09:15"]
 
-if not signals:
-    st.info("No signals today yet. MomentumScanner pe signal aane ka wait karo.")
-    st.stop()
+    if df.empty:
+        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya.")
+        return
 
-# ── Order Tracking ──
-if "orders_placed" not in st.session_state:
-    st.session_state["orders_placed"] = {}
+    # ── STEP 7: POC & GAP DISPLAY ──
+    poc_vals, gap_vals = [], []
+    for _, row in df.iterrows():
+        symbol = row['Symbol']
+        price  = row['Price']
+        poc    = st.session_state['poc_cache'].get(symbol)
+        if poc is None:
+            poc_vals.append(None)
+            gap_vals.append(None)
+        elif price > poc:
+            pct = ((price - poc) / poc) * 100
+            poc_vals.append(poc)
+            gap_vals.append(pct)
+        else:
+            pct = ((poc - price) / poc) * 100
+            poc_vals.append(poc)
+            gap_vals.append(-pct)
+    df['POC']     = poc_vals
+    df['GapPct']  = gap_vals
 
-# ── Live ticks ──
-try:
-    import angel_ws
-    ticks = angel_ws.latest_ticks
-except Exception:
-    ticks = {}
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 8: EMA-COIL + VOL5D (only for crossover-passed stocks)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if 'ema_cache' not in st.session_state:
+        st.session_state['ema_cache'] = {}
+    if 'prevhigh_cache' not in st.session_state:
+        st.session_state['prevhigh_cache'] = {}
+    if 'vol5d_cache' not in st.session_state:
+        st.session_state['vol5d_cache'] = {}
 
-# ── Signals Table ──
-for sig in signals:
-    stock        = sig["stock"]
-    signal_price = sig.get("signal_price") or 0
-    vol_ratio    = sig.get("vol_ratio") or 0
-    vol_momentum = sig.get("vol_momentum") or "-"
-    signal_time  = sig.get("signal_time") or "-"
+    need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
 
-    token = NAME_TO_TOKEN.get(stock)
-    ltp   = ticks.get(token, {}).get("ltp", signal_price) if token else signal_price
-    qty   = max(1, int(per_trade / ltp)) if ltp > 0 else 1
-    move_pct = ((ltp - signal_price) / signal_price * 100) if signal_price > 0 else 0
-    already_ordered = stock in st.session_state["orders_placed"]
+    def calculate_ema_and_vol5d(symbol):
+        """Parallel calculation."""
+        ema_val   = get_ema_consolidation_pct(symbol)
+        vol5d_val = get_5day_median_volume(symbol)
+        return symbol, ema_val, vol5d_val
 
-    with st.container():
-        c1, c2, c3, c4, c5, c6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1.5])
+    if need_check:
+        with st.spinner(f"Calculating EMA Coil & Volume for {len(need_check)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(calculate_ema_and_vol5d, s) for s in need_check]
+                for future in as_completed(futures):
+                    symbol, ema_val, vol5d_val = future.result()
+                    st.session_state['ema_cache'][symbol] = ema_val
+                    row_match = df[df['Symbol'] == symbol]
+                    prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
+                    st.session_state['prevhigh_cache'][symbol] = prevhigh_val
+                    st.session_state['vol5d_cache'][symbol] = vol5d_val
+                    supabase_save_row(
+                        symbol, signal_date, calc_date,
+                        prev_high_val=prevhigh_val,
+                        ema_coil_pct=ema_val,
+                        vol5d_median=vol5d_val,
+                    )
 
-        with c1:
-            st.markdown(f"**{stock}**")
-            st.caption(f"Signal: {signal_time}")
-        with c2:
-            st.metric("Signal Price", f"₹{signal_price:.2f}")
-        with c3:
-            st.metric("LTP", f"₹{ltp:.2f}",
-                      delta=f"{move_pct:+.2f}%",
-                      delta_color="normal" if move_pct >= 0 else "inverse")
-        with c4:
-            st.metric("Vol Ratio", f"{vol_ratio:.1f}x")
-            st.caption(vol_momentum)
-        with c5:
-            st.metric("Qty", f"{qty}")
-            st.caption(f"~₹{qty * ltp:,.0f}")
-        with c6:
-            if already_ordered:
-                oid = st.session_state["orders_placed"][stock]
-                st.markdown(f'<span class="status-ok">✅ Placed<br><small>{oid}</small></span>',
-                            unsafe_allow_html=True)
-            else:
-                if st.button(f"🚀 BUY {stock}", key=f"buy_{stock}", use_container_width=True):
-                    with st.spinner(f"Placing order for {stock}..."):
-                        result = place_buy_order(smart_api, stock, qty)
-                    if result["status"] == "success":
-                        st.session_state["orders_placed"][stock] = result["order_id"]
-                        st.success(f"✅ Order placed! ID: {result['order_id']}")
-                        st.rerun()
+    df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
+
+    # ── STEP 9: RELATIVE VOLUME (5D) ──
+    def calc_rel_vol_5d(row):
+        try:
+            today_vol = float(row.get('Volume', 0) or 0)
+            median_vol = st.session_state['vol5d_cache'].get(row['Symbol'])
+            if median_vol is None or median_vol == 0:
+                return None
+            return round(today_vol / median_vol, 2)
+        except:
+            return None
+
+    df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
+
+    # ── STEP 10: CANDLE SIGNALS (9:40, 9:45, 9:50) ──
+    now_ist  = get_current_ist_time()
+    now_hhmm = now_ist.hour * 60 + now_ist.minute
+
+    show_940 = now_hhmm >= (9 * 60 + 45)
+    show_945 = now_hhmm >= (9 * 60 + 50)
+    show_950 = now_hhmm >= (9 * 60 + 55)
+
+    if 'candle_cache' not in st.session_state:
+        st.session_state['candle_cache'] = {}
+
+    def get_candle_cached(symbol, candle_time, should_show):
+        if not should_show:
+            return ""
+        key = f"{symbol}_{candle_time}"
+        return st.session_state['candle_cache'].get(key, "")
+
+    symbols_needing_fetch = []
+    for _, row in df.iterrows():
+        sym = row['Symbol']
+        missing_needed = any(
+            show and f"{sym}_{t}" not in st.session_state['candle_cache']
+            for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
+        )
+        if missing_needed:
+            symbols_needing_fetch.append(sym)
+
+    if symbols_needing_fetch:
+        with st.spinner(f"Fetching candles for {len(symbols_needing_fetch)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(get_all_candle_signals, sym): sym for sym in symbols_needing_fetch}
+                for future in as_completed(futures):
+                    sym = futures[future]
+                    all_signals = future.result()
+                    for t in ["09:40", "09:45", "09:50"]:
+                        st.session_state['candle_cache'][f"{sym}_{t}"] = all_signals[t]
+
+    c940_list, c945_list, c950_list = [], [], []
+    for _, row in df.iterrows():
+        sym = row['Symbol']
+        c940_list.append(get_candle_cached(sym, "09:40", show_940))
+        c945_list.append(get_candle_cached(sym, "09:45", show_945))
+        c950_list.append(get_candle_cached(sym, "09:50", show_950))
+    df['c940'] = c940_list
+    df['c945'] = c945_list
+    df['c950'] = c950_list
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 11: HEADER DISPLAY
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
+    top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
+    max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
+    last_day   = get_last_trading_day()
+    now_time   = now_ist.strftime('%H:%M:%S')
+
+    c1, c2, c3 = st.columns([3, 5, 2])
+    with c1:
+        st.markdown(f"""
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
+                <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
+                <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
+                <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
+            </div>
+            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
+                <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
+            </div>
+            <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
+                <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        selected_sector = st.selectbox("", sectors, index=0, label_visibility="collapsed")
+
+    with c3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun(scope="fragment")
+
+    if selected_sector != 'All':
+        df = df[df['Sector'] == selected_sector]
+
+    # ── STEP 12: RENDER TABLE ──
+    render_stock_table(df)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 13: BUY ORDER BUTTONS
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    st.markdown("---")
+    st.subheader("📊 Buy Orders (Manual)")
+    
+    cols = st.columns(min(4, len(df)))
+    for idx, (_, row) in enumerate(df.iterrows()):
+        col_idx = idx % len(cols)
+        with cols[col_idx]:
+            symbol = row['Symbol']
+            
+            if st.button(f"Buy {symbol}", key=f"buy_{symbol}_{idx}"):
+                with st.spinner(f"Placing order for {symbol}..."):
+                    result = place_buy_order(symbol, quantity=1)
+                    if result['success']:
+                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
                     else:
-                        st.error(f"❌ {result['msg']}")
-        st.divider()
+                        st.error(f"❌ {symbol}: {result['error']}")
+                st.rerun()
 
-# ── Summary ──
-if st.session_state["orders_placed"]:
-    st.success(f"✅ {len(st.session_state['orders_placed'])} order(s) placed today")
-    with st.expander("Order Log"):
-        for stk, oid in st.session_state["orders_placed"].items():
-            st.write(f"• **{stk}** → `{oid}`")
+    # ── DIAGNOSTICS ──
+    success_count, errors = get_supabase_stats()
+    if success_count or errors:
+        st.caption(f"🔍 Supabase: {success_count} saves, {len(errors)} errors")
+        if errors:
+            with st.expander("⚠️ Show errors"):
+                for e in errors[-10:]:
+                    st.text(e)
+
+    st.markdown("""
+    <div style="margin-top:6px;font-size:10px;color:#9ca3af;text-align:center;">
+        TradingView Screener · NSE · Mkt Cap > ₹41B · Near 1M High · Gap ±2% · Sorted by Chg% · POC = Yesterday's Volume Profile
+    </div>
+    """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: MAIN PAGE EXECUTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+screener_fragment()
