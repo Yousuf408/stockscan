@@ -64,7 +64,7 @@ from tv_screener.quantity_calculator import calculate_max_quantity_column, get_q
 init_session_caches()
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 200000.0
+    st.session_state['user_capital'] = 100000.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
