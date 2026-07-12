@@ -424,39 +424,47 @@ def screener_fragment():
         st.json(debug_info.get('per_symbol', {}))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 13: BUY ORDER BUTTONS
+    # STEP 13: BUY ORDER BUTTONS — TWO SEPARATE SECTIONS
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     st.markdown("---")
-    st.subheader("📊 Buy Orders (Manual)")
-    
-    cols = st.columns(min(4, len(df)))
+
+    # ── SECTION A: ALGOMOJO BUY ORDERS ──
+    st.subheader("📊 Buy Orders — AlgoMojo (Manual)")
+
+    algomojo_cols = st.columns(min(4, len(df)))
     for idx, (_, row) in enumerate(df.iterrows()):
-        col_idx = idx % len(cols)
-        with cols[col_idx]:
+        col_idx = idx % len(algomojo_cols)
+        with algomojo_cols[col_idx]:
+            symbol = row['Symbol']
+            if st.button(f"Buy {symbol}", key=f"buy_algomojo_{symbol}_{idx}"):
+                with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
+                    result = place_buy_order(symbol, quantity=1)
+                    if result['success']:
+                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+                    else:
+                        st.error(f"❌ {symbol}: {result['error']}")
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── SECTION B: DHAN BUY ORDERS (Direct, with Max Qty) ──
+    st.subheader("📊 Buy Orders — Dhan Direct (Max Qty)")
+
+    dhan_cols = st.columns(min(4, len(df)))
+    for idx, (_, row) in enumerate(df.iterrows()):
+        col_idx = idx % len(dhan_cols)
+        with dhan_cols[col_idx]:
             symbol = row['Symbol']
             max_qty = row.get('MaxQty', 0)
-
-            btn_col1, btn_col2 = st.columns(2)
-            with btn_col1:
-                if st.button(f"Buy {symbol} (AlgoMojo)", key=f"buy_algomojo_{symbol}_{idx}"):
-                    with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
-                        result = place_buy_order(symbol, quantity=1)
-                        if result['success']:
-                            st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                        else:
-                            st.error(f"❌ {symbol}: {result['error']}")
-                    st.rerun()
-
-            with btn_col2:
-                if st.button(f"Buy {symbol} (Dhan, {int(max_qty)})", key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
-                    with st.spinner(f"Placing order for {symbol} via Dhan..."):
-                        result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
-                        if result['success']:
-                            st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                        else:
-                            st.error(f"❌ {symbol}: {result['error']}")
-                    st.rerun()
+            if st.button(f"Buy {symbol} ({int(max_qty)})", key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
+                with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                    result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
+                    if result['success']:
+                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+                    else:
+                        st.error(f"❌ {symbol}: {result['error']}")
+                st.rerun()
 
     # ── DIAGNOSTICS ──
     success_count, errors = get_supabase_stats()
