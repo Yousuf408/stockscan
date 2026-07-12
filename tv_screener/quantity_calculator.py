@@ -34,12 +34,24 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHAN_CLIENT_ID = "1102302753"
-DHAN_PIN = "786786"                  # 4/6-digit trading PIN
+DHAN_PIN = "YOUR_DHAN_PIN"                  # 4/6-digit trading PIN
 DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
 
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
 DHAN_TOKEN_GENERATE_URL = "https://auth.dhan.co/app/generateAccessToken"
+DHAN_FUND_LIMIT_URL = "https://api.dhan.co/v2/fundlimit"
+
+# Token generation MUST come from the same whitelisted static IP used for
+# order placement — Dhan's own guidance: "if IPs has been added post
+# [token generation], regenerate access token" — so route this call
+# through the same proxy as dhan_orders.py to keep the source IP consistent.
+DHAN_PROXY_HOST = "151.242.178.149"
+DHAN_PROXY_PORT = "50100"
+DHAN_PROXY_USERNAME = "yousufshaikh420"
+DHAN_PROXY_PASSWORD = "cVTbJi6VVA"
+DHAN_PROXY_URL = f"http://{DHAN_PROXY_USERNAME}:{DHAN_PROXY_PASSWORD}@{DHAN_PROXY_HOST}:{DHAN_PROXY_PORT}"
+DHAN_PROXIES = {"http": DHAN_PROXY_URL, "https": DHAN_PROXY_URL}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO ACCESS TOKEN GENERATION (via TOTP — no manual daily login)
@@ -79,7 +91,7 @@ def get_access_token(force_refresh=False):
             "pin": DHAN_PIN,
             "totp": totp_code,
         }
-        response = requests.post(DHAN_TOKEN_GENERATE_URL, params=params, timeout=10)
+        response = requests.post(DHAN_TOKEN_GENERATE_URL, params=params, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code != 200:
             _log_debug('token_error', f"HTTP {response.status_code}: {response.text[:200]}")
@@ -138,6 +150,48 @@ def get_qty_calc_debug():
     """Return the debug info dict for display in a UI expander."""
     _init_debug()
     return st.session_state['qty_calc_debug']
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: FETCH AVAILABLE BALANCE DIRECTLY FROM BROKER (Fund Limit API)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_available_balance():
+    """
+    Fetch current available trading balance directly from DhanHQ account
+    (Fund Limit API) — so the user doesn't have to manually type capital.
+
+    Returns:
+        tuple: (balance: float or None, error_message: str or None)
+    """
+    access_token = get_access_token()
+    if not access_token:
+        return None, "Could not obtain access token (check TOTP/PIN/client_id)"
+
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "access-token": access_token,
+        }
+        response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+
+        if response.status_code == 401:
+            access_token = get_access_token(force_refresh=True)
+            if not access_token:
+                return None, "401 Unauthorized, and token refresh also failed"
+            headers["access-token"] = access_token
+            response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return None, f"HTTP {response.status_code}: {response.text[:200]}"
+
+        data = response.json()
+        # Note: Dhan's API has a typo in this field name — "availabelBalance"
+        balance = data.get("availabelBalance", data.get("availableBalance"))
+        if balance is None:
+            return None, f"No balance field in response: {data}"
+        return float(balance), None
+    except Exception as e:
+        return None, f"Exception: {str(e)}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SYMBOL -> SECURITY ID MAP (Dhan's public instrument master)
