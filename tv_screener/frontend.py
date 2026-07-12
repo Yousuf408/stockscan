@@ -6,6 +6,51 @@
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
+import json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: ORDER RESULT DISPLAY (clean short message, expandable full details)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def display_order_result(symbol, result, max_inline_length=100):
+    """
+    Show order placement result cleanly:
+      - Success: short green message with order ID
+      - Failure: try to extract a clean human-readable error (Dhan/AlgoMojo
+        errors are usually JSON with an 'errorMessage'/'message' field).
+        If the clean message is short, show it inline. If it's still long
+        (or extraction failed), show a short summary inline + full raw
+        error in a collapsed expander — instead of dumping everything
+        into one long red message box.
+
+    Args:
+        symbol (str): Stock symbol (for the message prefix)
+        result (dict): {"success": bool, "order_id": str, "error": str}
+        max_inline_length (int): Threshold above which details move to expander
+    """
+    if result.get('success'):
+        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+        return
+
+    raw_error = str(result.get('error', 'Unknown error'))
+    clean_msg = raw_error
+
+    # Try to pull out just the human-readable error message from a JSON
+    # blob embedded in the raw error string (e.g. Dhan's errorMessage field)
+    try:
+        if '{' in raw_error:
+            json_str = raw_error[raw_error.index('{'):].split('| Payload sent:')[0].strip()
+            parsed = json.loads(json_str)
+            clean_msg = parsed.get('errorMessage') or parsed.get('message') or clean_msg
+    except Exception:
+        pass
+
+    if len(clean_msg) <= max_inline_length:
+        st.error(f"❌ {symbol}: {clean_msg}")
+    else:
+        st.error(f"❌ {symbol}: {clean_msg[:max_inline_length]}...")
+        with st.expander("Show full error details"):
+            st.code(raw_error)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE STYLING CONSTANTS
