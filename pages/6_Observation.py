@@ -437,14 +437,26 @@ def screener_fragment():
             symbol = row['Symbol']
             max_qty = row.get('MaxQty', 0)
 
-            if st.button(f"Buy {symbol} ({int(max_qty)})", key=f"buy_{symbol}_{idx}", disabled=(max_qty <= 0)):
-                with st.spinner(f"Placing order for {symbol}..."):
-                    result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
-                    if result['success']:
-                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                    else:
-                        st.error(f"❌ {symbol}: {result['error']}")
-                st.rerun()
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button(f"Buy {symbol} (AlgoMojo)", key=f"buy_algomojo_{symbol}_{idx}"):
+                    with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
+                        result = place_buy_order(symbol, quantity=1)
+                        if result['success']:
+                            st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+                        else:
+                            st.error(f"❌ {symbol}: {result['error']}")
+                    st.rerun()
+
+            with btn_col2:
+                if st.button(f"Buy {symbol} (Dhan, {int(max_qty)})", key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
+                    with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                        result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
+                        if result['success']:
+                            st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
+                        else:
+                            st.error(f"❌ {symbol}: {result['error']}")
+                    st.rerun()
 
     # ── DIAGNOSTICS ──
     success_count, errors = get_supabase_stats()
