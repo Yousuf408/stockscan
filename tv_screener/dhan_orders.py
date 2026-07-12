@@ -23,7 +23,12 @@ from .quantity_calculator import get_access_token, get_security_id_map, DHAN_CLI
 # SECTION: PROXY CONFIGURATION (Static IP requirement for Order APIs)
 # ─────────────────────────────────────────────────────────────────────────────
 
-DHAN_PROXY = "http://151.242.178.149:50100"
+DHAN_PROXY_HOST = "151.242.178.149"
+DHAN_PROXY_PORT = "50100"
+DHAN_PROXY_USERNAME = "yousufshaikh420"
+DHAN_PROXY_PASSWORD = "cVTbJi6VVA"
+
+DHAN_PROXY = f"http://{DHAN_PROXY_USERNAME}:{DHAN_PROXY_PASSWORD}@{DHAN_PROXY_HOST}:{DHAN_PROXY_PORT}"
 PROXIES = {
     "http": DHAN_PROXY,
     "https": DHAN_PROXY,
