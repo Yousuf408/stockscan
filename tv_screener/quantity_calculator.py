@@ -37,9 +37,27 @@ DHAN_CLIENT_ID = "1102302753"
 DHAN_PIN = "786786"                  # 4/6-digit trading PIN
 DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
 
+# TEMPORARY MANUAL OVERRIDE — paste a token generated via Dhan dashboard's
+# "Generate new Access Token" button here to bypass the TOTP flow entirely
+# while it's rate-limited. Leave as "" to use automatic TOTP generation.
+# This token is valid for 24 hours from when you generate it on Dhan Web.
+DHAN_MANUAL_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgzOTE2NzIwLCJpYXQiOjE3ODM4MzAzMjAsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAyMzAyNzUzIn0.qXQv-6lx9yQeRLSEGIK2cRiKwO2pjuI9nqVFNPLp103w4AU2jpuLvwPayHAqV_4KoG3kwFYx7WBLolFV3YluHg"
+
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
 DHAN_TOKEN_GENERATE_URL = "https://auth.dhan.co/app/generateAccessToken"
+DHAN_FUND_LIMIT_URL = "https://api.dhan.co/v2/fundlimit"
+
+# Token generation MUST come from the same whitelisted static IP used for
+# order placement — Dhan's own guidance: "if IPs has been added post
+# [token generation], regenerate access token" — so route this call
+# through the same proxy as dhan_orders.py to keep the source IP consistent.
+DHAN_PROXY_HOST = "151.242.178.149"
+DHAN_PROXY_PORT = "50100"
+DHAN_PROXY_USERNAME = "yousufshaikh420"
+DHAN_PROXY_PASSWORD = "cVTbJi6VVA"
+DHAN_PROXY_URL = f"http://{DHAN_PROXY_USERNAME}:{DHAN_PROXY_PASSWORD}@{DHAN_PROXY_HOST}:{DHAN_PROXY_PORT}"
+DHAN_PROXIES = {"http": DHAN_PROXY_URL, "https": DHAN_PROXY_URL}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO ACCESS TOKEN GENERATION (via TOTP — no manual daily login)
@@ -67,6 +85,17 @@ def get_access_token(force_refresh=False):
              (check get_qty_calc_debug()['token_error'] for the reason)
     """
     now = datetime.now()
+
+    # Manual override — bypass TOTP entirely if a token was pasted in
+    if DHAN_MANUAL_ACCESS_TOKEN:
+        st.session_state['dhan_access_token_data'] = {
+            "token": DHAN_MANUAL_ACCESS_TOKEN,
+            "expiry": now + timedelta(hours=23),
+        }
+        _log_debug('token_error', None)
+        _log_debug('token_last_generated', "MANUAL OVERRIDE (pasted from Dhan dashboard)")
+        return DHAN_MANUAL_ACCESS_TOKEN
+
     cached = st.session_state.get('dhan_access_token_data')
 
     if not force_refresh and cached and cached.get('expiry') and cached['expiry'] > now:
@@ -79,7 +108,7 @@ def get_access_token(force_refresh=False):
             "pin": DHAN_PIN,
             "totp": totp_code,
         }
-        response = requests.post(DHAN_TOKEN_GENERATE_URL, params=params, timeout=10)
+        response = requests.post(DHAN_TOKEN_GENERATE_URL, params=params, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code != 200:
             _log_debug('token_error', f"HTTP {response.status_code}: {response.text[:200]}")
@@ -138,6 +167,48 @@ def get_qty_calc_debug():
     """Return the debug info dict for display in a UI expander."""
     _init_debug()
     return st.session_state['qty_calc_debug']
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: FETCH AVAILABLE BALANCE DIRECTLY FROM BROKER (Fund Limit API)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_available_balance():
+    """
+    Fetch current available trading balance directly from DhanHQ account
+    (Fund Limit API) — so the user doesn't have to manually type capital.
+
+    Returns:
+        tuple: (balance: float or None, error_message: str or None)
+    """
+    access_token = get_access_token()
+    if not access_token:
+        return None, "Could not obtain access token (check TOTP/PIN/client_id)"
+
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "access-token": access_token,
+        }
+        response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+
+        if response.status_code == 401:
+            access_token = get_access_token(force_refresh=True)
+            if not access_token:
+                return None, "401 Unauthorized, and token refresh also failed"
+            headers["access-token"] = access_token
+            response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return None, f"HTTP {response.status_code}: {response.text[:200]}"
+
+        data = response.json()
+        # Note: Dhan's API has a typo in this field name — "availabelBalance"
+        balance = data.get("availabelBalance", data.get("availableBalance"))
+        if balance is None:
+            return None, f"No balance field in response: {data}"
+        return float(balance), None
+    except Exception as e:
+        return None, f"Exception: {str(e)}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SYMBOL -> SECURITY ID MAP (Dhan's public instrument master)
@@ -289,6 +360,11 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
     (total_capital / num_parts) as the budget for that single stock,
     accounting for real intraday margin/leverage via DhanHQ.
 
+    IMPORTANT: Margin-per-share is CACHED in session_state per symbol —
+    it does NOT change based on capital, so once fetched it's reused across
+    every rerun (fragment refresh, button click, capital box change).
+    Only NEW symbols (not yet cached) trigger a fresh Dhan API call.
+
     Args:
         df (pd.DataFrame): Must have 'Symbol' and 'Price' columns
         total_capital (float): User's total trading capital
@@ -301,6 +377,9 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
     """
     _init_debug()
 
+    if 'margin_cache' not in st.session_state:
+        st.session_state['margin_cache'] = {}  # symbol -> margin_per_share (float)
+
     if total_capital is None or total_capital <= 0 or df.empty:
         return pd.Series([0] * len(df), index=df.index)
 
@@ -312,19 +391,27 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
         symbol = str(row.get("Symbol", "")).strip().upper()
         price = row.get("Price", 0)
 
-        security_id = security_map.get(symbol)
-        if not security_id:
-            _log_symbol_debug(symbol, security_id=None, margin_error="Symbol not found in Dhan instrument master")
-            max_qty_list.append(0)
-            continue
+        # Reuse cached margin if we already fetched it this session —
+        # avoids re-calling Dhan's Margin API on every rerun/button-click.
+        if symbol in st.session_state['margin_cache']:
+            margin_per_share = st.session_state['margin_cache'][symbol]
+        else:
+            security_id = security_map.get(symbol)
+            if not security_id:
+                _log_symbol_debug(symbol, security_id=None, margin_error="Symbol not found in Dhan instrument master")
+                max_qty_list.append(0)
+                continue
 
-        if not price or price <= 0:
-            _log_symbol_debug(symbol, security_id=security_id, margin_error="Invalid price")
-            max_qty_list.append(0)
-            continue
+            if not price or price <= 0:
+                _log_symbol_debug(symbol, security_id=security_id, margin_error="Invalid price")
+                max_qty_list.append(0)
+                continue
 
-        margin_per_share, error = get_margin_per_share(security_id, price)
-        _log_symbol_debug(symbol, security_id=security_id, margin_error=error, margin_value=margin_per_share)
+            margin_per_share, error = get_margin_per_share(security_id, price)
+            _log_symbol_debug(symbol, security_id=security_id, margin_error=error, margin_value=margin_per_share)
+
+            if margin_per_share is not None and margin_per_share > 0:
+                st.session_state['margin_cache'][symbol] = margin_per_share
 
         if margin_per_share is None or margin_per_share <= 0:
             max_qty_list.append(0)
