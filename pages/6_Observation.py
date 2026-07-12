@@ -54,6 +54,7 @@ from tv_screener.database import (
 )
 from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
 from tv_screener.algomojo import place_buy_order
+from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -434,10 +435,11 @@ def screener_fragment():
         col_idx = idx % len(cols)
         with cols[col_idx]:
             symbol = row['Symbol']
-            
-            if st.button(f"Buy {symbol}", key=f"buy_{symbol}_{idx}"):
+            max_qty = row.get('MaxQty', 0)
+
+            if st.button(f"Buy {symbol} ({int(max_qty)})", key=f"buy_{symbol}_{idx}", disabled=(max_qty <= 0)):
                 with st.spinner(f"Placing order for {symbol}..."):
-                    result = place_buy_order(symbol, quantity=1)
+                    result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
                     if result['success']:
                         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
                     else:
