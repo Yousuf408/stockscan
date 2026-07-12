@@ -34,7 +34,7 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHAN_CLIENT_ID = "1102302753"
-DHAN_PIN = "1993"                  # 4/6-digit trading PIN
+DHAN_PIN = "786786"                  # 4/6-digit trading PIN
 DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
 
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
