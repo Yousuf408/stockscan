@@ -54,7 +54,7 @@ from tv_screener.database import (
 )
 from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
 from tv_screener.algomojo import place_buy_order
-from tv_screener.quantity_calculator import calculate_max_quantity_column
+from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SESSION STATE INITIALIZATION
@@ -410,6 +410,15 @@ def screener_fragment():
 
     # ── STEP 12: RENDER TABLE ──
     render_stock_table(df)
+
+    # ── QTY CALCULATOR DEBUG (temporary — shows why Max Qty might be blank) ──
+    with st.expander("🔍 Debug: Max Qty calculation"):
+        debug_info = get_qty_calc_debug()
+        st.write("**Security map size:**", debug_info.get('security_map_size'))
+        st.write("**Security map error:**", debug_info.get('security_map_error'))
+        st.write("**Columns detected in Dhan CSV:**", debug_info.get('security_map_columns_found'))
+        st.write("**Per-symbol results:**")
+        st.json(debug_info.get('per_symbol', {}))
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 13: BUY ORDER BUTTONS
