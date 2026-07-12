@@ -64,7 +64,7 @@ from tv_screener.quantity_calculator import calculate_max_quantity_column, get_q
 init_session_caches()
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000.0
+    st.session_state['user_capital'] = 200000.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
@@ -444,7 +444,12 @@ def screener_fragment():
                         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
                     else:
                         st.error(f"❌ {symbol}: {result['error']}")
-                st.rerun()
+                # NOTE: no st.rerun() here on purpose — Streamlit already
+                # reruns automatically on button click. An explicit rerun()
+                # right after would instantly wipe this message before it's
+                # readable (especially now that cached margin data makes
+                # reruns very fast). The message stays until the next
+                # natural interaction or the fragment's 60s auto-refresh.
 
     st.markdown("---")
 
@@ -474,7 +479,9 @@ def screener_fragment():
                         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
                     else:
                         st.error(f"❌ {symbol}: {result['error']}")
-                st.rerun()
+                # NOTE: no st.rerun() here — same reasoning as AlgoMojo button
+                # above. Keeps the success/error message readable instead of
+                # it flashing for a fraction of a second.
 
     # ── DIAGNOSTICS ──
     success_count, errors = get_supabase_stats()
