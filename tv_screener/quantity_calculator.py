@@ -86,17 +86,24 @@ def get_security_id_map():
         df = pd.read_csv(io.StringIO(response.text), low_memory=False)
 
         # Column names can vary slightly across Dhan CSV versions — find them
-        # defensively by substring match instead of hardcoding exact names.
-        symbol_col = next((c for c in df.columns if "TRADING_SYMBOL" in c.upper()), None)
+        # defensively. Dhan's actual columns are SYMBOL_NAME (equity trading
+        # symbol), DISPLAY_NAME (full name), UNDERLYING_SYMBOL (for F&O).
+        # Priority: SYMBOL_NAME first (matches TV screener symbols directly).
+        symbol_col = next(
+            (c for c in df.columns if c.upper() in ("SYMBOL_NAME", "TRADING_SYMBOL", "UNDERLYING_SYMBOL")),
+            None
+        )
         security_id_col = next((c for c in df.columns if "SECURITY_ID" in c.upper()), None)
         exch_col = next((c for c in df.columns if c.upper() in ("SEM_EXM_EXCH_ID", "EXCH_ID")), None)
-        instrument_col = next((c for c in df.columns if "INSTRUMENT" in c.upper() and "EXCH" not in c.upper()), None)
+        segment_col = next((c for c in df.columns if c.upper() == "SEGMENT"), None)
+        instrument_col = next((c for c in df.columns if "INSTRUMENT" in c.upper() and "EXCH" not in c.upper() and "UNDERLYING" not in c.upper()), None)
 
         _log_debug('security_map_columns_found', {
             'all_columns': list(df.columns),
             'symbol_col': symbol_col,
             'security_id_col': security_id_col,
             'exch_col': exch_col,
+            'segment_col': segment_col,
             'instrument_col': instrument_col,
         })
 
@@ -105,11 +112,13 @@ def get_security_id_map():
             return {}
 
         # Filter to NSE Equity only (avoid F&O/currency/commodity duplicates
-        # of the same symbol name)
+        # of the same symbol name). Equity cash rows have SEGMENT == "E".
         filtered = df
         if exch_col:
             filtered = filtered[filtered[exch_col].astype(str).str.upper() == "NSE"]
-        if instrument_col:
+        if segment_col:
+            filtered = filtered[filtered[segment_col].astype(str).str.upper() == "E"]
+        elif instrument_col:
             filtered = filtered[filtered[instrument_col].astype(str).str.upper().isin(["EQUITY", "ES"])]
 
         security_map = {}
