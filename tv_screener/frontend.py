@@ -212,6 +212,27 @@ def fmt_crossover(matched_candle):
         return ''
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION: FORMATTING HELPERS — MAX QUANTITY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fmt_max_qty(qty):
+    """
+    Format max-quantity value (from DhanHQ margin-based calculation).
+
+    Shows "—" if quantity couldn't be determined (0 or None) — e.g. symbol
+    not found in Dhan's instrument master, or margin API call failed.
+
+    Args:
+        qty: Max quantity value (int or None)
+
+    Returns:
+        str: HTML-formatted quantity badge
+    """
+    if qty is None or qty <= 0:
+        return '<span style="color:#9ca3af;">—</span>'
+    return f'<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:4px;font-weight:700;">{int(qty)}</span>'
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE RENDERING
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -233,6 +254,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
     rows_html = ""
     for i, (_, row) in enumerate(df.iterrows()):
         sym    = row.get("Symbol", "")
+        maxqty = row.get("MaxQty", None)
         price  = row.get("Price", 0)
         chg    = row.get("Chg", 0)
         vol    = row.get("Volume", 0)
@@ -261,6 +283,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
                 </span>
                 <div style="font-size:10px;color:#9ca3af;margin-top:1px;">{sector}</div>
             </td>
+            <td style="{TD}">{fmt_max_qty(maxqty)}</td>
             <td style="{TD}">
                 <div style="font-weight:600;color:#111827;">₹{float(price):.2f}</div>
                 <div style="font-size:11px;color:{chg_col};font-weight:600;">{chg_sgn}{float(chg):.2f}%</div>
@@ -309,6 +332,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
       <thead style="background:#f9fafb;">
         <tr>
           <th style="{TH_L}">Symbol</th>
+          <th style="{TH}">Max Qty</th>
           <th style="{TH}">Price / Chg%</th>
           <th style="{TH}">Volume</th>
           <th style="{TH}">Rel Vol</th>
