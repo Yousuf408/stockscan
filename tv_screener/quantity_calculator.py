@@ -22,15 +22,92 @@ import pandas as pd
 import requests
 import io
 import math
+import pyotp
+from datetime import datetime, timedelta
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: DHAN CREDENTIALS (fill in your own client_id + access_token)
+# SECTION: DHAN CREDENTIALS
+#
+# DHAN_ACCESS_TOKEN is NO LONGER used directly — access tokens are now
+# auto-generated daily via TOTP (see get_access_token() below), since Dhan
+# access tokens expire every 24 hours and manual regeneration is impractical.
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHAN_CLIENT_ID = "1102302753"
-DHAN_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgzOTE2NzIwLCJpYXQiOjE3ODM4MzAzMjAsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAyMzAyNzUzIn0.qXQv-6lx9yQeRLSEGIK2cRiKwO2pjuI9nqVFNPLp103w4AU2jpuLvwPayHAqV_4KoG3kwFYx7WBLolFV3YluHg"
+DHAN_PIN = "786786"                  # 4/6-digit trading PIN
+DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
+
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
+DHAN_TOKEN_GENERATE_URL = "https://auth.dhan.co/app/generateAccessToken"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: AUTO ACCESS TOKEN GENERATION (via TOTP — no manual daily login)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _generate_totp_code():
+    """Generate the current 6-digit TOTP code from the stored secret."""
+    return pyotp.TOTP(DHAN_TOTP_SECRET).now()
+
+
+def get_access_token(force_refresh=False):
+    """
+    Return a valid DhanHQ access token, auto-generating a fresh one via
+    TOTP if the cached token is missing or expired.
+
+    Cached in session_state so it's reused across reruns/fragment refreshes
+    within the day — not regenerated on every single call (avoids hitting
+    Dhan's token-generation rate limits).
+
+    Args:
+        force_refresh (bool): If True, ignore cache and generate a new token
+
+    Returns:
+        str: Valid access token, or None if generation failed
+             (check get_qty_calc_debug()['token_error'] for the reason)
+    """
+    now = datetime.now()
+    cached = st.session_state.get('dhan_access_token_data')
+
+    if not force_refresh and cached and cached.get('expiry') and cached['expiry'] > now:
+        return cached['token']
+
+    try:
+        totp_code = _generate_totp_code()
+        params = {
+            "dhanClientId": DHAN_CLIENT_ID,
+            "pin": DHAN_PIN,
+            "totp": totp_code,
+        }
+        response = requests.post(DHAN_TOKEN_GENERATE_URL, params=params, timeout=10)
+
+        if response.status_code != 200:
+            _log_debug('token_error', f"HTTP {response.status_code}: {response.text[:200]}")
+            return None
+
+        data = response.json()
+        token = data.get("accessToken")
+        if not token:
+            _log_debug('token_error', f"No accessToken in response: {data}")
+            return None
+
+        expiry_str = data.get("expiryTime")
+        try:
+            expiry = datetime.fromisoformat(expiry_str) if expiry_str else now + timedelta(hours=23)
+        except Exception:
+            expiry = now + timedelta(hours=23)
+
+        # Keep a 5-minute safety buffer before actual expiry
+        st.session_state['dhan_access_token_data'] = {
+            "token": token,
+            "expiry": expiry - timedelta(minutes=5),
+        }
+        _log_debug('token_error', None)
+        _log_debug('token_last_generated', now.strftime("%Y-%m-%d %H:%M:%S"))
+        return token
+    except Exception as e:
+        _log_debug('token_error', f"Exception: {str(e)}")
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: DEBUG TRACKING HELPERS
@@ -42,6 +119,8 @@ def _init_debug():
             'security_map_size': 0,
             'security_map_columns_found': None,
             'security_map_error': None,
+            'token_error': None,
+            'token_last_generated': None,
             'per_symbol': {},  # symbol -> {"security_id": ..., "margin_error": ...}
         }
 
@@ -147,6 +226,9 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
     required to buy 1 share of a stock (accounts for actual leverage —
     most stocks are 5x, some are 2x or other custom ratios).
 
+    Uses get_access_token() internally — token is auto-generated/refreshed
+    via TOTP, no manual daily login needed.
+
     Args:
         security_id (str): Dhan's internal security ID for the symbol
         price (float): Current market price of the stock
@@ -156,6 +238,10 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
     Returns:
         tuple: (margin_per_share: float or None, error_message: str or None)
     """
+    access_token = get_access_token()
+    if not access_token:
+        return None, "Could not obtain access token (check TOTP/PIN/client_id)"
+
     try:
         payload = {
             "dhanClientId": str(DHAN_CLIENT_ID),
@@ -170,9 +256,17 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "access-token": DHAN_ACCESS_TOKEN,
+            "access-token": access_token,
         }
         response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, timeout=10)
+
+        if response.status_code == 401:
+            # Token might have just expired — force a one-time refresh and retry
+            access_token = get_access_token(force_refresh=True)
+            if not access_token:
+                return None, "401 Unauthorized, and token refresh also failed"
+            headers["access-token"] = access_token
+            response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, timeout=10)
 
         if response.status_code != 200:
             return None, f"HTTP {response.status_code}: {response.text[:200]}"
