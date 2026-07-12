@@ -9,7 +9,7 @@ ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
 ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
 
 # ⚠️ FIXED: Aapka account simulation mode me hai, isliye SIMULATION ENDPOINT use hoga
-ALGOMOJO_API_URL = "https://simapi.algomojo.com/v1/PlaceOrder"
+ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 
 # ⚠️ FIXED: Aapka actual Client ID jo screenshot me top par dikh raha hai
 MY_CLIENT_ID = "1102302753" 
