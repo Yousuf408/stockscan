@@ -27,9 +27,8 @@ import math
 # SECTION: DHAN CREDENTIALS (fill in your own client_id + access_token)
 # ─────────────────────────────────────────────────────────────────────────────
 
-DHAN_CLIENT_ID = "YOUR_DHAN_CLIENT_ID"
-DHAN_ACCESS_TOKEN = "YOUR_DHAN_ACCESS_TOKEN"
-
+DHAN_CLIENT_ID = "1102302753"
+DHAN_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzgzOTE2NzIwLCJpYXQiOjE3ODM4MzAzMjAsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAyMzAyNzUzIn0.qXQv-6lx9yQeRLSEGIK2cRiKwO2pjuI9nqVFNPLp103w4AU2jpuLvwPayHAqV_4KoG3kwFYx7WBLolFV3YluHg"
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
 
