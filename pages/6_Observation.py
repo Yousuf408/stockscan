@@ -52,7 +52,7 @@ from tv_screener.database import (
     get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
     supabase_save_row, init_session_caches, get_supabase_stats
 )
-from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
+from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges, display_order_result
 from tv_screener.algomojo import place_buy_order
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
@@ -64,7 +64,7 @@ from tv_screener.quantity_calculator import calculate_max_quantity_column, get_q
 init_session_caches()
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 200000.0
+    st.session_state['user_capital'] = 100000.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
@@ -440,10 +440,7 @@ def screener_fragment():
             if st.button(f"Buy {symbol}", key=f"buy_algomojo_{symbol}_{idx}"):
                 with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
                     result = place_buy_order(symbol, quantity=1)
-                    if result['success']:
-                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                    else:
-                        st.error(f"❌ {symbol}: {result['error']}")
+                    display_order_result(symbol, result)
                 # NOTE: no st.rerun() here on purpose — Streamlit already
                 # reruns automatically on button click. An explicit rerun()
                 # right after would instantly wipe this message before it's
@@ -475,10 +472,7 @@ def screener_fragment():
                         symbol, quantity=int(max_qty), product_type="INTRADAY",
                         after_market_order=amo_test_mode, amo_time="OPEN"
                     )
-                    if result['success']:
-                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                    else:
-                        st.error(f"❌ {symbol}: {result['error']}")
+                    display_order_result(symbol, result)
                 # NOTE: no st.rerun() here — same reasoning as AlgoMojo button
                 # above. Keeps the success/error message readable instead of
                 # it flashing for a fraction of a second.
