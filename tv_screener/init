@@ -44,6 +44,8 @@ from .database import (
     supabase_save_row, init_session_caches, get_supabase_stats
 )
 
+from .quantity_calculator import get_security_id_map, get_margin_per_share, calculate_max_quantity_column
+
 from .frontend import (
     render_stock_table, render_market_closed_view,
     fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_ema_coil, fmt_crossover
@@ -71,6 +73,9 @@ __all__ = [
     # Database
     'get_supabase', 'supabase_get_cached_row', 'supabase_get_all_for_date',
     'supabase_save_row', 'init_session_caches', 'get_supabase_stats',
+
+    # Quantity Calculator
+    'get_security_id_map', 'get_margin_per_share', 'calculate_max_quantity_column',
 
     # Frontend
     'render_stock_table', 'render_market_closed_view',
