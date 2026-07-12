@@ -15,7 +15,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import requests
-import uuid
 
 from .quantity_calculator import get_access_token, get_security_id_map, DHAN_CLIENT_ID
 
@@ -77,23 +76,24 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
         return {"success": False, "error": "Could not obtain access token (check TOTP/PIN)", "symbol": symbol}
 
     # Step 3: Place the order
+    # NOTE ON FIELD TYPES: Dhan's official Python SDK uses native JSON types
+    # (quantity=10, price=0 as numbers), not quoted strings ("10", "0") —
+    # even though some docs examples show quoted strings. Also dropped
+    # boProfitValue/boStopLossValue/amoTime since those are only relevant
+    # for Bracket Orders / After-Market Orders, not a plain MARKET order.
     payload = {
         "dhanClientId": str(DHAN_CLIENT_ID),
-        "correlationId": str(uuid.uuid4())[:20],
         "transactionType": transaction_type,
         "exchangeSegment": "NSE_EQ",
         "productType": product_type,
         "orderType": "MARKET",
         "validity": "DAY",
         "securityId": str(security_id),
-        "quantity": str(int(quantity)),
-        "disclosedQuantity": "",
-        "price": "",
-        "triggerPrice": "",
+        "quantity": int(quantity),
+        "disclosedQuantity": 0,
+        "price": 0,
+        "triggerPrice": 0,
         "afterMarketOrder": False,
-        "amoTime": "",
-        "boProfitValue": "",
-        "boStopLossValue": "",
     }
     headers = {
         "Content-Type": "application/json",
