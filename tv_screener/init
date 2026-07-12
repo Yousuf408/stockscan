@@ -45,6 +45,7 @@ from .database import (
 )
 
 from .quantity_calculator import get_security_id_map, get_margin_per_share, calculate_max_quantity_column
+from .dhan_orders import place_dhan_order
 
 from .frontend import (
     render_stock_table, render_market_closed_view,
@@ -76,6 +77,7 @@ __all__ = [
 
     # Quantity Calculator
     'get_security_id_map', 'get_margin_per_share', 'calculate_max_quantity_column',
+    'place_dhan_order',
 
     # Frontend
     'render_stock_table', 'render_market_closed_view',
