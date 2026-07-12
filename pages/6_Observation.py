@@ -54,12 +54,28 @@ from tv_screener.database import (
 )
 from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges
 from tv_screener.algomojo import place_buy_order
+from tv_screener.quantity_calculator import calculate_max_quantity_column
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SESSION STATE INITIALIZATION
 # ─────────────────────────────────────────────────────────────────────────────
 
 init_session_caches()
+
+if 'user_capital' not in st.session_state:
+    st.session_state['user_capital'] = 200000.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.number_input(
+    "💰 Total Capital (₹)",
+    min_value=0.0,
+    step=1000.0,
+    key="user_capital",
+    help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
@@ -384,6 +400,13 @@ def screener_fragment():
 
     if selected_sector != 'All':
         df = df[df['Sector'] == selected_sector]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 11.5: MAX QUANTITY (based on user capital / 4 parts, via DhanHQ margin)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
     # ── STEP 12: RENDER TABLE ──
     render_stock_table(df)
