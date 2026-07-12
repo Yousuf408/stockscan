@@ -414,6 +414,8 @@ def screener_fragment():
     # ── QTY CALCULATOR DEBUG (temporary — shows why Max Qty might be blank) ──
     with st.expander("🔍 Debug: Max Qty calculation"):
         debug_info = get_qty_calc_debug()
+        st.write("**Token last generated:**", debug_info.get('token_last_generated'))
+        st.write("**Token error:**", debug_info.get('token_error'))
         st.write("**Security map size:**", debug_info.get('security_map_size'))
         st.write("**Security map error:**", debug_info.get('security_map_error'))
         st.write("**Columns detected in Dhan CSV:**", debug_info.get('security_map_columns_found'))
