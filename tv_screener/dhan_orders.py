@@ -88,7 +88,7 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
         "securityId": str(security_id),
         "quantity": str(int(quantity)),
         "disclosedQuantity": "",
-        "price": "0",
+        "price": "",
         "triggerPrice": "",
         "afterMarketOrder": False,
         "amoTime": "",
@@ -116,7 +116,7 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
             )
 
         if response.status_code not in (200, 201, 202):
-            return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}", "symbol": symbol}
+            return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:300]} | Payload sent: {payload}", "symbol": symbol}
 
         data = response.json()
         order_id = data.get("orderId")
