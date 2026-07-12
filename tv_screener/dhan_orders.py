@@ -39,9 +39,10 @@ DHAN_ORDER_URL = "https://api.dhan.co/v2/orders"
 # SECTION: PLACE ORDER (Direct Dhan — no AlgoMojo)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INTRADAY"):
+def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INTRADAY",
+                      after_market_order=False, amo_time="OPEN"):
     """
-    Place a market order directly via DhanHQ Order API (routed through the
+    Place an order directly via DhanHQ Order API (routed through the
     static-IP proxy, since Dhan requires IP whitelisting for order placement).
 
     Args:
@@ -50,6 +51,13 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
         quantity (int): Number of shares to buy
         transaction_type (str): "BUY" or "SELL" (default "BUY")
         product_type (str): "INTRADAY" for MIS (leveraged), "CNC" for delivery
+        after_market_order (bool): True to place as AMO (queued for market
+                                    open) instead of rejecting with "Market
+                                    is Closed" when tested outside trading
+                                    hours. Default False (normal order).
+        amo_time (str): AMO time slot — "OPEN" (market open), "OPEN_30"
+                        (30 min after open), "OPEN_60" (60 min after open).
+                        Only relevant when after_market_order=True.
 
     Returns:
         dict: {
@@ -78,9 +86,8 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
     # Step 3: Place the order
     # NOTE ON FIELD TYPES: Dhan's official Python SDK uses native JSON types
     # (quantity=10, price=0 as numbers), not quoted strings ("10", "0") —
-    # even though some docs examples show quoted strings. Also dropped
-    # boProfitValue/boStopLossValue/amoTime since those are only relevant
-    # for Bracket Orders / After-Market Orders, not a plain MARKET order.
+    # even though some docs examples show quoted strings. boProfitValue/
+    # boStopLossValue are dropped since those are only for Bracket Orders.
     payload = {
         "dhanClientId": str(DHAN_CLIENT_ID),
         "transactionType": transaction_type,
@@ -93,8 +100,13 @@ def place_dhan_order(symbol, quantity, transaction_type="BUY", product_type="INT
         "disclosedQuantity": 0,
         "price": 0,
         "triggerPrice": 0,
-        "afterMarketOrder": False,
+        "afterMarketOrder": bool(after_market_order),
     }
+    # amoTime is only meaningful (and only accepted by Dhan) when
+    # afterMarketOrder is True — omit it entirely for normal orders.
+    if after_market_order:
+        payload["amoTime"] = amo_time
+
     headers = {
         "Content-Type": "application/json",
         "access-token": access_token,
