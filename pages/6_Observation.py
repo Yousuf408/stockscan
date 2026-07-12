@@ -451,15 +451,25 @@ def screener_fragment():
     # ── SECTION B: DHAN BUY ORDERS (Direct, with Max Qty) ──
     st.subheader("📊 Buy Orders — Dhan Direct (Max Qty)")
 
+    amo_test_mode = st.checkbox(
+        "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+        value=False,
+        help="Enable this to test order placement when market is closed. Places an After-Market Order (AMO) that Dhan queues and sends to the exchange at the next market open, instead of rejecting with 'Market is Closed'."
+    )
+
     dhan_cols = st.columns(min(4, len(df)))
     for idx, (_, row) in enumerate(df.iterrows()):
         col_idx = idx % len(dhan_cols)
         with dhan_cols[col_idx]:
             symbol = row['Symbol']
             max_qty = row.get('MaxQty', 0)
-            if st.button(f"Buy {symbol} ({int(max_qty)})", key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
+            btn_label = f"Buy {symbol} ({int(max_qty)})" + (" 🌙AMO" if amo_test_mode else "")
+            if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
                 with st.spinner(f"Placing order for {symbol} via Dhan..."):
-                    result = place_dhan_order(symbol, quantity=int(max_qty), product_type="INTRADAY")
+                    result = place_dhan_order(
+                        symbol, quantity=int(max_qty), product_type="INTRADAY",
+                        after_market_order=amo_test_mode, amo_time="OPEN"
+                    )
                     if result['success']:
                         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
                     else:
