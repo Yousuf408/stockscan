@@ -82,51 +82,12 @@ def is_market_hours():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2: EMA CONSOLIDATION ("EMA COIL") CHECK — SEPARATE ANALYSIS
+# SECTION 2: (removed — EMA Coil check no longer used)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
-    """
-    Calculate % of yesterday's candles where Close is within ±tolerance_pct
-    of the 20 EMA — indicates a tight consolidation/coil phase.
-
-    This is a supporting analysis metric (displayed alongside the entry
-    signal) — NOT part of the core crossover entry decision itself.
-
-    Fetches 2 days (day-before + yesterday) to warm up the EMA, then only
-    measures % on yesterday's candles.
-
-    Returns:
-        float: Percentage (0-100), or None if failed
-    """
-    try:
-        last_day = get_last_trading_day()
-        day_before = get_trading_day_before(last_day)
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, start=day_before, end=last_day + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return None
-        df.index = pd.to_datetime(df.index)
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        df = df.between_time("09:15", "15:30")
-        if df.empty:
-            return None
-
-        df['EMA'] = df['Close'].ewm(span=ema_span, adjust=False).mean()
-
-        df_yesterday = df[df.index.date == last_day]
-        if df_yesterday.empty:
-            return None
-
-        diff_pct = ((df_yesterday['Close'] - df_yesterday['EMA']).abs() / df_yesterday['EMA']) * 100
-        near_ema_count = (diff_pct <= tolerance_pct).sum()
-        total_count = len(df_yesterday)
-        if total_count == 0:
-            return None
-        return round((near_ema_count / total_count) * 100, 1)
-    except:
-        return None
+# EMA Coil (get_ema_consolidation_pct) — REMOVED, not useful for the
+# strategy in practice. If needed again in future, it measured % of
+# yesterday's candles staying within tolerance of the 20 EMA.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -306,19 +267,7 @@ def apply_crossover_filter(df, match_type="09:15"):
     return df[df['Crossover'] == match_type].copy()
 
 
-def apply_ema_coil_filter(df, min_threshold=70.0):
-    """
-    Optional filter: only stocks with EMA coil % >= min_threshold
-    (tight consolidation before the move).
-
-    Args:
-        df (pd.DataFrame): Data with 'EmaCoilPct' column
-        min_threshold (float): Minimum EMA coil % (default 70)
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
-    """
-    return df[df['EmaCoilPct'] >= min_threshold].copy()
+# apply_ema_coil_filter() — REMOVED, EMA Coil column no longer used.
 
 
 def apply_relvol_filter(df, min_relvol=1.0):
@@ -335,10 +284,9 @@ def apply_relvol_filter(df, min_relvol=1.0):
     return df[df['RelVol5D'] >= min_relvol].copy()
 
 
-def apply_all_filters(df, sector='All', crossover_match="09:15",
-                      ema_coil_min=None, relvol_min=None):
+def apply_all_filters(df, sector='All', crossover_match="09:15", relvol_min=None):
     """
-    Apply sector/crossover/ema-coil/relvol filters in sequence.
+    Apply sector/crossover/relvol filters in sequence.
     NOTE: Gap filter is applied separately in strategy.py (it's part of
     the core entry decision, not a supporting filter).
 
@@ -346,7 +294,6 @@ def apply_all_filters(df, sector='All', crossover_match="09:15",
         df (pd.DataFrame): Input data
         sector (str): Sector filter ('All' = no filter)
         crossover_match (str): "09:15", "09:20", or "" for crossover filter
-        ema_coil_min (float, optional): Min EMA coil % (None = skip)
         relvol_min (float, optional): Min RelVol5D (None = skip)
 
     Returns:
@@ -355,8 +302,6 @@ def apply_all_filters(df, sector='All', crossover_match="09:15",
     df = df.copy()
     df = apply_sector_filter(df, sector)
     df = apply_crossover_filter(df, match_type=crossover_match)
-    if ema_coil_min is not None:
-        df = apply_ema_coil_filter(df, min_threshold=ema_coil_min)
     if relvol_min is not None:
         df = apply_relvol_filter(df, min_relvol=relvol_min)
     return df
