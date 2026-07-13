@@ -435,7 +435,7 @@ def screener_fragment():
         for idx, (_, row) in enumerate(df.iterrows()):
             symbol = row['Symbol']
             max_qty = row.get('MaxQty', 0)
-            btn_label = f"Buy {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
+            btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
             if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0), use_container_width=True):
                 with st.spinner(f"Placing order for {symbol} via Dhan..."):
                     result = place_dhan_order(
