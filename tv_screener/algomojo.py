@@ -6,7 +6,7 @@ import streamlit as st
 # CONFIGURATION BLOCK (SCREENSHOT SE SET KIYA HUA)
 # ─────────────────────────────────────────────────────────────────────────────
 ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
-ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
+ALGOMOJO_API_SECRET = "f4ce152c9a705052d856c198e49822a1"
 
 # ⚠️ FIXED: Aapka account simulation mode me hai, isliye SIMULATION ENDPOINT use hoga
 ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
