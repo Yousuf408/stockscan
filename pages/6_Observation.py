@@ -249,13 +249,15 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: CROSSOVER FILTER (dropdown — default "09:15 only") ──
-    crossover_filter_option = st.selectbox(
-        "Crossover Filter",
-        ["09:15 only", "09:20 only", "All (09:15 + 09:20)"],
-        index=0,
-        key="crossover_filter_select"
-    )
+    # ── STEP 6: CROSSOVER FILTER (compact dropdown — default "09:15 only") ──
+    filter_col, _spacer = st.columns([2, 8])
+    with filter_col:
+        crossover_filter_option = st.selectbox(
+            "Crossover Filter",
+            ["09:15 only", "09:20 only", "All (09:15 + 09:20)"],
+            index=0,
+            key="crossover_filter_select"
+        )
 
     if crossover_filter_option == "09:15 only":
         df = df[df['Crossover'] == "09:15"]
@@ -472,7 +474,7 @@ def screener_fragment():
         help="Enable this to test order placement when market is closed. Places an After-Market Order (AMO) that Dhan queues and sends to the exchange at the next market open, instead of rejecting with 'Market is Closed'."
     )
 
-    col_table, col_buttons = st.columns([9, 1])
+    col_table, col_buttons = st.columns([8.5, 1.5])
 
     with col_table:
         render_stock_table(df)  # UNCHANGED — same function, same visual
