@@ -244,13 +244,19 @@ def calc_prev_high_dist(row):
     Negative = still below previous high (consolidating).
 
     Args:
-        row (pd.Series): Must have 'close' and 'high[1]' columns
+        row (pd.Series): Must have 'high[1]' column, and either 'close'
+                         (raw TV data) or 'Price' (after clean_tv_data
+                         renames 'close' -> 'Price') for current price.
+                         Checks both so this works regardless of call-order.
 
     Returns:
         float: Distance % (rounded to 2 decimals), or None if calculation fails
     """
     try:
-        price    = float(row.get('close', 0) or 0)
+        price = row.get('close', None)
+        if price is None:
+            price = row.get('Price', 0)
+        price = float(price or 0)
         prev_high = float(row.get('high[1]', 0) or 0)
         if prev_high == 0:
             return None
