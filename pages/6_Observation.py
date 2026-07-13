@@ -144,6 +144,13 @@ def screener_fragment():
     # Find symbols still needing POC (for crossover check)
     symbols_needing_poc = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
+    # Symbol -> current price lookup (used to capture signal_price the
+    # first time we save a symbol — see supabase_save_row call below)
+    price_lookup = dict(zip(df['Symbol'], df['Price']))
+
+    if 'signalprice_cache' not in st.session_state:
+        st.session_state['signalprice_cache'] = {}
+
     # Check Supabase for cached POC values
     still_missing_poc = []
     for symbol in symbols_needing_poc:
@@ -161,6 +168,8 @@ def screener_fragment():
                 st.session_state['prevhigh_cache'][symbol] = cached_row['prev_high_val']
             if cached_row.get('crossover_status'):
                 st.session_state['crossover_cache'][symbol] = cached_row['crossover_status']
+            if cached_row.get('signal_price') is not None:
+                st.session_state['signalprice_cache'][symbol] = cached_row['signal_price']
         else:
             still_missing_poc.append(symbol)
 
@@ -179,7 +188,13 @@ def screener_fragment():
                     sym = futures[future]
                     poc_val = future.result()
                     st.session_state['poc_cache'][sym] = poc_val
-                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
+                    current_price = price_lookup.get(sym)
+                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val, price=current_price)
+                    # Capture signal_price locally too (first time we see
+                    # this symbol this session) so the live "% Since Signal"
+                    # column works even before next Supabase read-back.
+                    if sym not in st.session_state['signalprice_cache'] and current_price is not None:
+                        st.session_state['signalprice_cache'][sym] = current_price
 
     # Check crossover signals (only for stocks not yet confirmed)
     def crossover_pure(symbol, poc_val):
@@ -260,6 +275,21 @@ def screener_fragment():
             gap_vals.append(-pct)
     df['POC']     = poc_vals
     df['GapPct']  = gap_vals
+
+    # ── LIVE "% Since Signal" — (current_price - signal_price) / signal_price × 100
+    # Purely computed for display, NOT saved to Supabase (changes every
+    # refresh, so persisting it wouldn't mean anything as a static value).
+    def calc_pct_since_signal(row):
+        symbol = row['Symbol']
+        signal_price = st.session_state['signalprice_cache'].get(symbol)
+        if signal_price is None or signal_price == 0:
+            return None
+        try:
+            return round(((row['Price'] - signal_price) / signal_price) * 100, 2)
+        except Exception:
+            return None
+
+    df['PctSinceSignal'] = df.apply(calc_pct_since_signal, axis=1)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 8: VOL5D (only for crossover-passed stocks)
