@@ -14,7 +14,7 @@ ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
 # ⚠️ FIXED: Aapka actual Client ID jo screenshot me top par dikh raha hai
 MY_CLIENT_ID = "1102302753" 
 
-def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE"):
+def place_buy_order(symbol, quantity=1, broker="DH", exchange="NSE"):
     """Strictly maps paper-trading simulation parameters with Client ID."""
     clean_symbol = str(symbol).split('-')[0].strip().upper()
     if exchange.upper() == "NSE" and not clean_symbol.endswith("-EQ"):
@@ -26,7 +26,7 @@ def place_buy_order(symbol, quantity=1, broker="DHANHQ", exchange="NSE"):
         "api_key": str(ALGOMOJO_API_KEY),
         "api_secret": str(ALGOMOJO_API_SECRET),
         "data": {
-            "broker": str(broker).upper(),            # "DHANHQ"
+            "broker": str(broker).upper(),            # "DH"
             "brokerid": str(MY_CLIENT_ID),            # 💡 CRITICAL: Aapki Client ID data ke andar jayegi
             "strategy": "TV_Screener",
             "exchange": str(exchange).upper(),        # "NSE"
