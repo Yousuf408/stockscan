@@ -249,11 +249,23 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: FINAL FILTER (only 09:15 crossover confirmed) ──
-    df = df[df['Crossover'] == "09:15"]
+    # ── STEP 6: CROSSOVER FILTER (dropdown — default "09:15 only") ──
+    crossover_filter_option = st.selectbox(
+        "Crossover Filter",
+        ["09:15 only", "09:20 only", "All (09:15 + 09:20)"],
+        index=0,
+        key="crossover_filter_select"
+    )
+
+    if crossover_filter_option == "09:15 only":
+        df = df[df['Crossover'] == "09:15"]
+    elif crossover_filter_option == "09:20 only":
+        df = df[df['Crossover'] == "09:20"]
+    else:  # All (09:15 + 09:20)
+        df = df[df['Crossover'].isin(["09:15", "09:20"])]
 
     if df.empty:
-        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya.")
+        st.info(f"Abhi tak koi stock '{crossover_filter_option}' criteria confirm nahi kar paaya.")
         return
 
     # ── STEP 7: POC & GAP DISPLAY ──
