@@ -45,7 +45,7 @@ from tv_screener.strategy import (
 )
 from tv_screener.backend import (
     get_last_trading_day, get_current_ist_time, is_market_hours,
-    get_ema_consolidation_pct, get_all_candle_signals, get_5day_median_volume,
+    get_all_candle_signals, get_5day_median_volume,
     calc_prev_high_dist, get_prev_high_val
 )
 from tv_screener.database import (
@@ -151,10 +151,6 @@ def screener_fragment():
         if cached_row is not None and cached_row.get('poc_value') is not None:
             st.session_state['poc_cache'][symbol] = cached_row['poc_value']
             # Also cache related fields
-            if cached_row.get('ema_coil_pct') is not None:
-                if 'ema_cache' not in st.session_state:
-                    st.session_state['ema_cache'] = {}
-                st.session_state['ema_cache'][symbol] = cached_row['ema_coil_pct']
             if cached_row.get('vol5d_median') is not None:
                 if 'vol5d_cache' not in st.session_state:
                     st.session_state['vol5d_cache'] = {}
@@ -195,11 +191,21 @@ def screener_fragment():
     # jo stocks abhi tak unconfirmed hain ("") woh har 60s refresh pe
     # dobara check hote rehte, chahe market band ho ya khula. Yahi
     # "fetching keeps happening after close" ka root-cause tha.
+    #
+    # ALSO: sirf "match" (09:15/09:20) permanent nahi hai — "confirmed
+    # no-match" bhi permanent hona chahiye, taaki jo stock kabhi crossover
+    # nahi karega, uska baar-baar (har 60s) dobara check na ho. Lekin
+    # 9:25 AM se pehle "" ka matlab "abhi candle complete hi nahi hui"
+    # bhi ho sakta hai — isliye "confirmed no-match" sirf 9:25 AM ke
+    # baad hi permanent maana jata hai (jab 9:15 + 9:20 dono candles
+    # ka data available ho chuka ho).
+    NO_MATCH_CUTOFF_HHMM = 9 * 60 + 25  # 9:25 AM IST
+
     crossover_symbols_to_check = []
     if is_market_hours():
         crossover_symbols_to_check = [
             s for s in df['Symbol']
-            if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
+            if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20", "NO_MATCH")
         ]
 
     if crossover_symbols_to_check:
@@ -209,12 +215,21 @@ def screener_fragment():
                     executor.submit(crossover_pure, s, st.session_state['poc_cache'].get(s))
                     for s in crossover_symbols_to_check
                 ]
+                now_hhmm_check = get_current_ist_time().hour * 60 + get_current_ist_time().minute
                 for future in as_completed(futures):
                     sym, result = future.result()
                     if result in ("09:15", "09:20"):
                         st.session_state['crossover_cache'][sym] = result
                         supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
+                    elif now_hhmm_check >= NO_MATCH_CUTOFF_HHMM:
+                        # Confirmed no-match — both candles' data was available
+                        # and neither matched. Cache permanently so this stock
+                        # is never re-checked again today.
+                        st.session_state['crossover_cache'][sym] = "NO_MATCH"
+                        supabase_save_row(sym, signal_date, calc_date, crossover_status="NO_MATCH")
                     elif sym not in st.session_state['crossover_cache']:
+                        # Still before 9:25 — candle data may not be complete
+                        # yet, keep as pending ("") so it gets rechecked
                         st.session_state['crossover_cache'][sym] = ""
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
@@ -247,35 +262,32 @@ def screener_fragment():
     df['GapPct']  = gap_vals
 
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 8: EMA-COIL + VOL5D (only for crossover-passed stocks)
+    # STEP 8: VOL5D (only for crossover-passed stocks)
+    # (EMA Coil removed — wasn't useful for the strategy in practice)
     # ─────────────────────────────────────────────────────────────────────────
-    
-    if 'ema_cache' not in st.session_state:
-        st.session_state['ema_cache'] = {}
+
     if 'prevhigh_cache' not in st.session_state:
         st.session_state['prevhigh_cache'] = {}
     if 'vol5d_cache' not in st.session_state:
         st.session_state['vol5d_cache'] = {}
 
-    # Market band hone ke baad naya EMA-Coil/Vol5D calculate nahi
-    # karna — same reasoning: retry se koi fayda nahi, sirf waste calls.
+    # Market band hone ke baad naya Vol5D calculate nahi karna —
+    # same reasoning: retry se koi fayda nahi, sirf waste calls.
     need_check = []
     if is_market_hours():
-        need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
+        need_check = [s for s in df['Symbol'] if s not in st.session_state['vol5d_cache']]
 
-    def calculate_ema_and_vol5d(symbol):
+    def calculate_vol5d(symbol):
         """Parallel calculation."""
-        ema_val   = get_ema_consolidation_pct(symbol)
         vol5d_val = get_5day_median_volume(symbol)
-        return symbol, ema_val, vol5d_val
+        return symbol, vol5d_val
 
     if need_check:
-        with st.spinner(f"Calculating EMA Coil & Volume for {len(need_check)} stocks..."):
+        with st.spinner(f"Calculating Volume for {len(need_check)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(calculate_ema_and_vol5d, s) for s in need_check]
+                futures = [executor.submit(calculate_vol5d, s) for s in need_check]
                 for future in as_completed(futures):
-                    symbol, ema_val, vol5d_val = future.result()
-                    st.session_state['ema_cache'][symbol] = ema_val
+                    symbol, vol5d_val = future.result()
                     row_match = df[df['Symbol'] == symbol]
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
@@ -283,11 +295,8 @@ def screener_fragment():
                     supabase_save_row(
                         symbol, signal_date, calc_date,
                         prev_high_val=prevhigh_val,
-                        ema_coil_pct=ema_val,
                         vol5d_median=vol5d_val,
                     )
-
-    df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
 
     # ── STEP 9: RELATIVE VOLUME (5D) ──
     def calc_rel_vol_5d(row):
