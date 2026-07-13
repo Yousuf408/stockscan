@@ -271,6 +271,45 @@ def screener_fragment():
         # is the deliberate opt-in cost (extra API calls) the user chose.
         df = df[df['Crossover'] == "NO_MATCH"]
 
+    # ── TOP-20 LOCK MODE (opt-in checkbox) ──
+    # 9:15-9:35 window: live top-20 (by Chg% descending) among confirmed
+    # stocks. At 9:35 AM, whatever is top-20 at that moment gets PERMANENTLY
+    # locked for the rest of the day — no new stocks added after that,
+    # regardless of how many more confirm crossover later.
+    top20_lock_mode = st.checkbox(
+        "🔒 Top-20 Lock Mode (9:15-9:35 window — after 9:35, list freezes to top 20 by Chg%)",
+        value=False,
+        key="top20_lock_checkbox"
+    )
+
+    if top20_lock_mode:
+        # 👉 CHANGE TIME HERE if you want a different lock-window in future
+        # (same concept as Momentum Scanner) — currently locks at 9:35 AM.
+        # Format: hour * 60 + minute. E.g. for 10:00 AM → 10 * 60 + 0
+        TOP20_WINDOW_END_HHMM = 9 * 60 + 35  # 9:35 AM
+        now_hhmm_lock = get_current_ist_time().hour * 60 + get_current_ist_time().minute
+        today_str = signal_date.isoformat()
+
+        # Reset the lock if it's a new trading day (safety, in case session
+        # somehow persists across days)
+        if st.session_state.get('top20_locked_date') != today_str:
+            st.session_state['top20_locked_symbols'] = None
+            st.session_state['top20_locked_date'] = today_str
+
+        if st.session_state.get('top20_locked_symbols') is not None:
+            # Already locked — restrict to the frozen list only
+            df = df[df['Symbol'].isin(st.session_state['top20_locked_symbols'])]
+        else:
+            # Not yet locked — live top-20 by Chg% descending
+            df_sorted = df.sort_values('Chg', ascending=False)
+            top20_symbols = df_sorted['Symbol'].head(20).tolist()
+
+            if now_hhmm_lock >= TOP20_WINDOW_END_HHMM:
+                # 9:35 AM reached — freeze this list permanently for today
+                st.session_state['top20_locked_symbols'] = top20_symbols
+
+            df = df[df['Symbol'].isin(top20_symbols)]
+
     if df.empty:
         st.info(f"Abhi tak koi stock '{crossover_filter_option}' criteria confirm nahi kar paaya.")
         return
