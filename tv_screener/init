@@ -31,12 +31,11 @@ from .strategy import (
 # Backend — supporting/analysis utilities
 from .backend import (
     get_last_trading_day, get_trading_day_before, get_current_ist_time, is_market_hours,
-    get_ema_consolidation_pct,
     get_candle_signal, get_all_candle_signals,
     get_5day_median_volume,
     calc_prev_high_dist, get_prev_high_val,
     apply_sector_filter, apply_crossover_filter,
-    apply_ema_coil_filter, apply_relvol_filter, apply_all_filters
+    apply_relvol_filter, apply_all_filters
 )
 
 from .database import (
@@ -49,7 +48,7 @@ from .dhan_orders import place_dhan_order
 
 from .frontend import (
     render_stock_table, render_market_closed_view,
-    fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_ema_coil, fmt_crossover
+    fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_crossover
 )
 
 __all__ = [
@@ -64,12 +63,11 @@ __all__ = [
 
     # Backend (supporting/analysis)
     'get_last_trading_day', 'get_trading_day_before', 'get_current_ist_time', 'is_market_hours',
-    'get_ema_consolidation_pct',
     'get_candle_signal', 'get_all_candle_signals',
     'get_5day_median_volume',
     'calc_prev_high_dist', 'get_prev_high_val',
     'apply_sector_filter', 'apply_crossover_filter',
-    'apply_ema_coil_filter', 'apply_relvol_filter', 'apply_all_filters',
+    'apply_relvol_filter', 'apply_all_filters',
 
     # Database
     'get_supabase', 'supabase_get_cached_row', 'supabase_get_all_for_date',
@@ -81,5 +79,5 @@ __all__ = [
 
     # Frontend
     'render_stock_table', 'render_market_closed_view',
-    'fmt_volume', 'fmt_relvol', 'fmt_poc_gap', 'fmt_prev_high', 'fmt_ema_coil', 'fmt_crossover',
+    'fmt_volume', 'fmt_relvol', 'fmt_poc_gap', 'fmt_prev_high', 'fmt_crossover',
 ]
