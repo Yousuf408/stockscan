@@ -8,6 +8,8 @@ from supabase import create_client
 from datetime import datetime
 import pytz
 
+IST = pytz.timezone("Asia/Kolkata")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SUPABASE CLIENT INITIALIZATION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ def supabase_get_cached_row(symbol, calc_date):
     """
     try:
         result = (supabase.table("tv_screener_cache")
-                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
                   .eq("symbol", symbol)
                   .eq("calc_date", calc_date.isoformat())
                   .limit(1)
@@ -71,7 +73,7 @@ def supabase_get_all_for_date(calc_date):
     """
     try:
         result = (supabase.table("tv_screener_cache")
-                  .select("symbol, poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                  .select("symbol, poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
                   .eq("calc_date", calc_date.isoformat())
                   .execute())
         if result.data:
@@ -86,7 +88,7 @@ def supabase_get_all_for_date(calc_date):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_val=None,
-                       ema_coil_pct=None, vol5d_median=None, crossover_status=None):
+                       ema_coil_pct=None, vol5d_median=None, crossover_status=None, price=None):
     """
     (symbol, calc_date) ke liye row upsert karo — agar already hai toh update, 
     warna naya insert karo. Partial save bhi support karta hai (sirf jo values diye 
@@ -106,13 +108,17 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
         ema_coil_pct (float, optional): EMA coil percentage
         vol5d_median (float, optional): 5-day median volume
         crossover_status (str, optional): "09:15" / "09:20" / ""
+        price (float, optional): Current price — used ONLY to capture
+                                  signal_price the FIRST time this symbol
+                                  is saved (ignored on later calls once
+                                  signal_price is already set).
     """
     try:
         # Step 1: Pehle existing row fetch karo (agar hai) — taaki merge kar sakein
         existing = None
         try:
             result = (supabase.table("tv_screener_cache")
-                      .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
+                      .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
                       .eq("symbol", symbol)
                       .eq("calc_date", calc_date.isoformat())
                       .limit(1)
@@ -131,6 +137,31 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
                 return existing.get(key)
             return None
 
+        # signal_time: "yeh stock pehli baar kab list mein aaya" — sirf
+        # PEHLI baar save hone par set hota hai (jab existing row nahi tha
+        # ya existing mein signal_time khali tha). Uske baad kabhi bhi
+        # overwrite NAHI hota, chahe row baad mein kitni baar bhi update ho
+        # (POC save, phir crossover save, phir vol5d save — sab alag calls
+        # hain isi symbol ke liye, lekin signal_time hamesha first-seen
+        # time hi rahega).
+        if existing is not None and existing.get('signal_time'):
+            signal_time_value = existing['signal_time']
+        else:
+            signal_time_value = datetime.now(IST).strftime('%H:%M:%S')
+
+        # signal_price: same first-seen-only logic as signal_time — price
+        # jab stock PEHLI baar dekha gaya tha. Sirf tab set hota hai jab
+        # existing row mein already nahi hai AND caller ne `price` diya ho
+        # (kuch save-calls price nahi bhejte, jaise crossover-only save —
+        # unn calls se signal_price capture nahi hota, but jo already set
+        # hai woh preserve rehta hai).
+        if existing is not None and existing.get('signal_price') is not None:
+            signal_price_value = existing['signal_price']
+        elif price is not None:
+            signal_price_value = price
+        else:
+            signal_price_value = None
+
         # Step 3: Build final payload with merged values
         payload = {
             "symbol"          : symbol,
@@ -141,6 +172,8 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
             "ema_coil_pct"    : merged(ema_coil_pct, "ema_coil_pct"),
             "vol5d_median"    : merged(vol5d_median, "vol5d_median"),
             "crossover_status": merged(crossover_status, "crossover_status"),
+            "signal_time"     : signal_time_value,
+            "signal_price"    : signal_price_value,
         }
 
         # Step 4: Upsert karo
