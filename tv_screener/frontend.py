@@ -216,22 +216,7 @@ def fmt_prev_high(dist, val):
 # SECTION: FORMATTING HELPERS — EMA COIL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fmt_ema_coil(pct, min_threshold=70):
-    """
-    Format EMA coil percentage with badge.
-    
-    Green badge if >= min_threshold, else empty.
-    
-    Args:
-        pct (float): EMA consolidation percentage
-        min_threshold (float): Min % for display (default 70)
-    
-    Returns:
-        str: HTML badge or empty
-    """
-    if pct is None or pct < min_threshold:
-        return '<span style="color:#9ca3af;">—</span>'
-    return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:600;">✓ {pct:.0f}%</span>'
+# fmt_ema_coil() — REMOVED, EMA Coil column no longer used in the strategy.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — CROSSOVER SIGNAL
@@ -308,7 +293,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         gappct = row.get("GapPct", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
-        emacoil = row.get("EmaCoilPct", None)
         crossover = row.get("Crossover", "")
         c940   = row.get("c940", "")
         c945   = row.get("c945", "")
@@ -338,7 +322,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
-            <td style="{TD}">{fmt_ema_coil(emacoil)}</td>
             <td style="{TD}">{fmt_crossover(crossover)}</td>
             <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
@@ -384,7 +367,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH}">POC / Gap</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
-          <th style="{TH}">EMA Coil</th>
           <th style="{TH}">Crossover</th>
           <th style="{TH}">Mkt Cap</th>
         </tr>
