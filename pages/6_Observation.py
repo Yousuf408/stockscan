@@ -409,8 +409,43 @@ def screener_fragment():
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
         df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
-    # ── STEP 12: RENDER TABLE ──
-    render_stock_table(df)
+    # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS (side-by-side, 90%/10%) ──
+    # Table itself (render_stock_table) is completely unchanged — same
+    # function, same visual output. Only the surrounding layout wraps it
+    # in a 90/10 column split so native Dhan buy buttons sit right next
+    # to each row, without touching the HTML-table rendering logic at all.
+
+    amo_test_mode = st.checkbox(
+        "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+        value=False,
+        help="Enable this to test order placement when market is closed. Places an After-Market Order (AMO) that Dhan queues and sends to the exchange at the next market open, instead of rejecting with 'Market is Closed'."
+    )
+
+    col_table, col_buttons = st.columns([9, 1])
+
+    with col_table:
+        render_stock_table(df)  # UNCHANGED — same function, same visual
+
+    with col_buttons:
+        # Spacer to roughly line up with the table's header row before the
+        # first data row starts. Row heights inside the HTML table can vary
+        # slightly with content (two-line cells etc.), so this is a close
+        # visual alignment, not pixel-perfect.
+        st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+        for idx, (_, row) in enumerate(df.iterrows()):
+            symbol = row['Symbol']
+            max_qty = row.get('MaxQty', 0)
+            btn_label = f"Buy {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
+            if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0), use_container_width=True):
+                with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                    result = place_dhan_order(
+                        symbol, quantity=int(max_qty), product_type="INTRADAY",
+                        after_market_order=amo_test_mode, amo_time="OPEN"
+                    )
+                    display_order_result(symbol, result)
+                # NOTE: no st.rerun() here — Streamlit already reruns
+                # automatically on button click; an explicit rerun() would
+                # wipe the message before it's readable.
 
     # ── QTY CALCULATOR DEBUG (temporary — shows why Max Qty might be blank) ──
     with st.expander("🔍 Debug: Max Qty calculation"):
@@ -424,12 +459,10 @@ def screener_fragment():
         st.json(debug_info.get('per_symbol', {}))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 13: BUY ORDER BUTTONS — TWO SEPARATE SECTIONS
+    # STEP 13: ALGOMOJO BUY ORDER BUTTONS (unchanged, separate section below)
     # ─────────────────────────────────────────────────────────────────────────
 
     st.markdown("---")
-
-    # ── SECTION A: ALGOMOJO BUY ORDERS ──
     st.subheader("📊 Buy Orders — AlgoMojo (Manual)")
 
     algomojo_cols = st.columns(min(4, len(df)))
@@ -447,35 +480,6 @@ def screener_fragment():
                 # readable (especially now that cached margin data makes
                 # reruns very fast). The message stays until the next
                 # natural interaction or the fragment's 60s auto-refresh.
-
-    st.markdown("---")
-
-    # ── SECTION B: DHAN BUY ORDERS (Direct, with Max Qty) ──
-    st.subheader("📊 Buy Orders — Dhan Direct (Max Qty)")
-
-    amo_test_mode = st.checkbox(
-        "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
-        value=False,
-        help="Enable this to test order placement when market is closed. Places an After-Market Order (AMO) that Dhan queues and sends to the exchange at the next market open, instead of rejecting with 'Market is Closed'."
-    )
-
-    dhan_cols = st.columns(min(4, len(df)))
-    for idx, (_, row) in enumerate(df.iterrows()):
-        col_idx = idx % len(dhan_cols)
-        with dhan_cols[col_idx]:
-            symbol = row['Symbol']
-            max_qty = row.get('MaxQty', 0)
-            btn_label = f"Buy {symbol} ({int(max_qty)})" + (" 🌙AMO" if amo_test_mode else "")
-            if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0)):
-                with st.spinner(f"Placing order for {symbol} via Dhan..."):
-                    result = place_dhan_order(
-                        symbol, quantity=int(max_qty), product_type="INTRADAY",
-                        after_market_order=amo_test_mode, amo_time="OPEN"
-                    )
-                    display_order_result(symbol, result)
-                # NOTE: no st.rerun() here — same reasoning as AlgoMojo button
-                # above. Keeps the success/error message readable instead of
-                # it flashing for a fraction of a second.
 
     # ── DIAGNOSTICS ──
     success_count, errors = get_supabase_stats()
