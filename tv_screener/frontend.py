@@ -302,7 +302,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         df (pd.DataFrame): Data with columns:
                           [Symbol, Price, Chg, Volume, RelVol5D, POC, GapPct,
                            c940, c945, c950, PrevHighDist, PrevHighVal, 
-                           EmaCoilPct, Crossover, MktCap, Sector]
+                           Crossover, Sector] (MaxQty used for button labels, not table col)
         height_per_row (int): Pixels per row (default 52)
         extra_height (int): Extra padding (default 60)
     """
@@ -323,7 +323,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         c940   = row.get("c940", "")
         c945   = row.get("c945", "")
         c950   = row.get("c950", "")
-        mktcap = row.get("MktCap", "")
         sector = row.get("Sector", "")
 
         bg      = "#f9fafb" if i % 2 == 0 else "#ffffff"
@@ -350,7 +349,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_crossover(crossover)}</td>
-            <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
         </tr>"""
 
     table_html = f"""
@@ -396,7 +394,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">Crossover</th>
-          <th style="{TH}">Mkt Cap</th>
         </tr>
       </thead>
       <tbody>{rows_html}</tbody>
