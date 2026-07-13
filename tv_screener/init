@@ -48,7 +48,7 @@ from .dhan_orders import place_dhan_order
 
 from .frontend import (
     render_stock_table, render_market_closed_view,
-    fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_crossover
+    fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_crossover, fmt_pct_since_signal
 )
 
 __all__ = [
@@ -79,5 +79,5 @@ __all__ = [
 
     # Frontend
     'render_stock_table', 'render_market_closed_view',
-    'fmt_volume', 'fmt_relvol', 'fmt_poc_gap', 'fmt_prev_high', 'fmt_crossover',
+    'fmt_volume', 'fmt_relvol', 'fmt_poc_gap', 'fmt_prev_high', 'fmt_crossover', 'fmt_pct_since_signal',
 ]
