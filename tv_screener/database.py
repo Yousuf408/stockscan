@@ -170,8 +170,6 @@ def init_session_caches():
         st.session_state['poc_cache'] = {}
     if 'crossover_cache' not in st.session_state:
         st.session_state['crossover_cache'] = {}
-    if 'ema_cache' not in st.session_state:
-        st.session_state['ema_cache'] = {}
     if 'vol5d_cache' not in st.session_state:
         st.session_state['vol5d_cache'] = {}
     if 'prevhigh_cache' not in st.session_state:
