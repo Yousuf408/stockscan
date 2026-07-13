@@ -263,6 +263,31 @@ def fmt_max_qty(qty):
     return f'<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:4px;font-weight:700;">{int(qty)}</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION: FORMATTING HELPERS — % SINCE SIGNAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fmt_pct_since_signal(pct):
+    """
+    Format the live "% moved since this stock's signal was first detected"
+    value, color-coded (green = up since signal, red = down since signal).
+
+    Args:
+        pct (float): % change since signal_price, or None if not available
+
+    Returns:
+        str: HTML-formatted percentage
+    """
+    if pct is None:
+        return '<span style="color:#9ca3af;">—</span>'
+    if pct >= 0:
+        color = "#16a34a"
+        sign = "+"
+    else:
+        color = "#dc2626"
+        sign = ""
+    return f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE RENDERING
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -291,6 +316,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         relvol = row.get("RelVol5D", 0)
         poc    = row.get("POC", None)
         gappct = row.get("GapPct", None)
+        pct_since_signal = row.get("PctSinceSignal", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
         crossover = row.get("Crossover", "")
@@ -320,6 +346,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
             <td style="{TD}">{fmt_volume(vol)}</td>
             <td style="{TD}">{fmt_relvol(relvol)}</td>
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
+            <td style="{TD}">{fmt_pct_since_signal(pct_since_signal)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_crossover(crossover)}</td>
@@ -365,6 +392,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH}">Volume</th>
           <th style="{TH}">Rel Vol</th>
           <th style="{TH}">POC / Gap</th>
+          <th style="{TH}">% Since Signal</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">Crossover</th>
