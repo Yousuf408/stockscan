@@ -189,7 +189,7 @@ def screener_fragment():
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
     # ── STEP 6: ROW 1 — Capital | Crossover | Sector | 🔑 Key | Refresh ──
-    sectors_early = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
+    sectors_early = ['All Sectors'] + sorted(df['Sector'].dropna().unique().tolist())
 
     r1, r2, r3, r4, r5 = st.columns([2.5, 2.5, 2.5, 0.6, 1.2])
 
@@ -199,15 +199,18 @@ def screener_fragment():
             min_value=0.0,
             step=1000.0,
             key="user_capital",
+            label_visibility="collapsed",
+            placeholder="💰 Capital (₹)",
             help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
         )
 
     with r2:
         crossover_filter_option = st.selectbox(
-            "Crossover Filter",
-            ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
+            "Crossover",
+            ["Select Filter", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
             index=0,
-            key="crossover_filter_select"
+            key="crossover_filter_select",
+            label_visibility="collapsed"
         )
 
     with r3:
@@ -215,7 +218,8 @@ def screener_fragment():
             "Sector",
             sectors_early,
             index=0,
-            key="sector_select"
+            key="sector_select",
+            label_visibility="collapsed"
         )
 
     with r4:
@@ -260,10 +264,10 @@ def screener_fragment():
         )
     with chk4:
         amo_test_mode = st.checkbox(
-            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+            "🌙 After Market Order",
             value=False,
             key="amo_mode_checkbox",
-            help="Enable this to test order placement when market is closed."
+            help="AMO mode: order queues for next market open instead of rejecting. Use to test outside market hours."
         )
 
     # ── APPLY CROSSOVER FILTER ──
@@ -273,10 +277,10 @@ def screener_fragment():
         df = df[df['Crossover'] == "09:20"]
     elif crossover_filter_option == "All (09:15 + 09:20)":
         df = df[df['Crossover'].isin(["09:15", "09:20"])]
-    # else "All (No Filter)" — df as-is
+    # else "Select Filter" — df as-is, no crossover filter applied
 
     # ── APPLY SECTOR FILTER ──
-    if selected_sector != 'All':
+    if selected_sector != 'All Sectors':
         df = df[df['Sector'] == selected_sector]
 
     # ── APPLY TOP20 LOCK ──
