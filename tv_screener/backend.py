@@ -7,6 +7,7 @@
 #   3. Entry Candle Signals (9:40 / 9:45 / 9:50 — post-entry confirmation)
 #   4. 5-Day Median Volume (relative volume baseline)
 #   5. Filters (Sector, Previous High, Crossover-result, EMA Coil, RelVol)
+#   6. ORB Filter (9:15 / 9:20 / 9:40 candle condition check)
 #
 # The actual BUY decision logic (TV+yfinance fetch, POC, Crossover signal
 # with EMA+Body%+Gap) lives in strategy.py — kept separate on purpose.
@@ -183,6 +184,108 @@ def get_all_candle_signals(symbol):
                 "signal":   "green" if close_ > open_ else "",
                 "body_pct": body_pct,
             }
+        return result
+    except:
+        return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3B: ORB FILTER (9:15 / 9:20 / 9:40 CANDLE CONDITIONS)
+#
+# Rule 1 — 9:20 candle: close must be WITHIN 9:15 candle range
+#           i.e. 9:15 low <= 9:20 close <= 9:15 high  (no breakout yet)
+#
+# Rule 2 — 9:40 candle: close must be ABOVE 9:15 candle high
+#           i.e. 9:40 close > 9:15 high  (breakout confirmation)
+#
+# Both conditions must pass for the stock to qualify.
+# Uses same yfinance 5-min data — ONE call fetches all candles needed.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def check_orb_filter(symbol):
+    """
+    Check ORB (Opening Range Breakout) filter conditions for a symbol.
+
+    Conditions (both must be True):
+      1. 9:20 close is WITHIN 9:15 candle range (high & low)
+         → 9:15_low <= 9:20_close <= 9:15_high
+      2. 9:40 close is ABOVE 9:15 candle high
+         → 9:40_close > 9:15_high
+
+    Returns:
+        dict: {
+            "pass":       True/False  — both conditions passed,
+            "c915_high":  float or None,
+            "c915_low":   float or None,
+            "c920_close": float or None,
+            "c940_close": float or None,
+            "rule1":      True/False/None  — None if data unavailable,
+            "rule2":      True/False/None  — None if data unavailable,
+        }
+    """
+    result = {
+        "pass":       False,
+        "c915_high":  None,
+        "c915_low":   None,
+        "c920_close": None,
+        "c940_close": None,
+        "rule1":      None,
+        "rule2":      None,
+    }
+    try:
+        today  = datetime.now(IST).date()
+        ticker = symbol + ".NS"
+        df = yf.download(ticker, start=today, end=today + timedelta(days=1),
+                         interval="5m", progress=False, auto_adjust=True)
+        if df.empty:
+            return result
+
+        df.index = pd.to_datetime(df.index)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+
+        def get_ohlc(time_str):
+            """Extract OHLC for a specific 5-min candle time."""
+            candle = df.between_time(time_str, time_str)
+            if candle.empty:
+                return None
+            r = candle.iloc[0]
+            def val(col):
+                v = r[col]
+                return float(v.values[0] if hasattr(v, 'values') else v)
+            return {
+                "open":  val('Open'),
+                "high":  val('High'),
+                "low":   val('Low'),
+                "close": val('Close'),
+            }
+
+        c915 = get_ohlc("09:15")
+        c920 = get_ohlc("09:20")
+        c940 = get_ohlc("09:40")
+
+        # Need at least 9:15 candle to do anything
+        if c915 is None:
+            return result
+
+        result["c915_high"] = c915["high"]
+        result["c915_low"]  = c915["low"]
+
+        # Rule 1: 9:20 close within 9:15 range
+        if c920 is not None:
+            result["c920_close"] = c920["close"]
+            result["rule1"] = (c915["low"] <= c920["close"] <= c915["high"])
+
+        # Rule 2: 9:40 close above 9:15 high
+        if c940 is not None:
+            result["c940_close"] = c940["close"]
+            result["rule2"] = (c940["close"] > c915["high"])
+
+        # Both rules must be explicitly True (not None) to pass
+        result["pass"] = (result["rule1"] is True) and (result["rule2"] is True)
+
         return result
     except:
         return result
