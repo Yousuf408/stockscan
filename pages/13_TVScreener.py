@@ -204,8 +204,8 @@ def screener_fragment():
 
     with r2:
         crossover_filter_option = st.selectbox(
-            "Crossover Filter",
-            ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
+            
+            ["Select Filter", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
             index=0,
             key="crossover_filter_select"
         )
