@@ -347,7 +347,11 @@ def screener_fragment():
         except Exception:
             return None
 
+    def get_signal_price(row):
+        return st.session_state['signalprice_cache'].get(row['Symbol'])
+
     df['PctSinceSignal'] = df.apply(calc_pct_since_signal, axis=1)
+    df['SignalPrice']    = df.apply(get_signal_price, axis=1)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 8: VOL5D (only for crossover-passed stocks)
