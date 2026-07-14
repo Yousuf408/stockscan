@@ -67,6 +67,52 @@ DHAN_PROXY_URL = f"http://{DHAN_PROXY_USERNAME}:{DHAN_PROXY_PASSWORD}@{DHAN_PROX
 DHAN_PROXIES = {"http": DHAN_PROXY_URL, "https": DHAN_PROXY_URL}
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION: SUPABASE TOKEN HELPERS (aaj ki date ka token save/fetch)
+#
+# Sirf 2 functions — save aur fetch. Baaki koi Supabase logic nahi.
+# Table: dhan_tokens (token_date date UNIQUE, access_token text)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _supabase_save_token(token):
+    """
+    Save today's Dhan access token to Supabase dhan_tokens table.
+    Uses upsert so re-pasting same day overwrites cleanly.
+    Silent fail — token save failure should never block trading.
+    """
+    try:
+        from tv_screener.database import get_supabase
+        sb = get_supabase()
+        if sb is None:
+            return
+        today_str = datetime.now().date().isoformat()
+        sb.table("dhan_tokens").upsert(
+            {"token_date": today_str, "access_token": token},
+            on_conflict="token_date"
+        ).execute()
+    except Exception:
+        pass  # Silent fail — never block trading on save error
+
+
+def _supabase_fetch_token():
+    """
+    Fetch today's Dhan access token from Supabase dhan_tokens table.
+    Returns token string if found for today's date, else None.
+    """
+    try:
+        from tv_screener.database import get_supabase
+        sb = get_supabase()
+        if sb is None:
+            return None
+        today_str = datetime.now().date().isoformat()
+        result = sb.table("dhan_tokens").select("access_token").eq("token_date", today_str).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0].get("access_token")
+        return None
+    except Exception:
+        return None  # Silent fail — fall through to TOTP
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO ACCESS TOKEN GENERATION (via TOTP — no manual daily login)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -80,23 +126,28 @@ def get_access_token(force_refresh=False):
     Return a valid DhanHQ access token, auto-generating a fresh one via
     TOTP if the cached token is missing or expired.
 
-    Cached in session_state so it's reused across reruns/fragment refreshes
-    within the day — not regenerated on every single call (avoids hitting
-    Dhan's token-generation rate limits).
+    Priority order:
+      1. UI-entered token (session_state box) — also saved to Supabase
+      2. Supabase — aaj ki date ka token (persists across page refreshes)
+      3. session_state cache (same session, not yet expired)
+      4. Hardcoded DHAN_MANUAL_ACCESS_TOKEN (backward-compat fallback)
+      5. TOTP auto-generate (slowest, rate-limit risk)
 
     Args:
-        force_refresh (bool): If True, ignore cache and generate a new token
+        force_refresh (bool): If True, skip session cache and re-fetch
 
     Returns:
-        str: Valid access token, or None if generation failed
-             (check get_qty_calc_debug()['token_error'] for the reason)
+        str: Valid access token, or None if all methods failed
     """
     now = datetime.now()
 
-    # Priority 1: UI-entered token (session_state, pasted by user in the app —
-    # no code-edit/redeploy needed). Takes precedence over everything else.
+    # ── Priority 1: UI box — user ne paste kiya ──
+    # Immediately save to Supabase so page refresh pe bhi available rahe
     ui_token = st.session_state.get('user_manual_access_token', '').strip()
     if ui_token:
+        # Save to Supabase (silent fail — never blocks)
+        _supabase_save_token(ui_token)
+        # Cache in session too
         st.session_state['dhan_access_token_data'] = {
             "token": ui_token,
             "expiry": now + timedelta(hours=23),
@@ -105,8 +156,25 @@ def get_access_token(force_refresh=False):
         _log_debug('token_last_generated', "UI OVERRIDE (pasted in app by user)")
         return ui_token
 
-    # Priority 2: Hardcoded manual override (backward-compat fallback —
-    # normally leave this empty now that the UI box exists)
+    # ── Priority 2: Supabase — aaj ki date ka token ──
+    # Page refresh ke baad bhi kaam karega (session clear hone par bhi)
+    if not force_refresh:
+        supabase_token = _supabase_fetch_token()
+        if supabase_token:
+            st.session_state['dhan_access_token_data'] = {
+                "token": supabase_token,
+                "expiry": now + timedelta(hours=23),
+            }
+            _log_debug('token_error', None)
+            _log_debug('token_last_generated', "SUPABASE (aaj ki date ka saved token)")
+            return supabase_token
+
+    # ── Priority 3: Session cache (same session, not expired) ──
+    cached = st.session_state.get('dhan_access_token_data')
+    if not force_refresh and cached and cached.get('expiry') and cached['expiry'] > now:
+        return cached['token']
+
+    # ── Priority 4: Hardcoded manual override (backward-compat) ──
     if DHAN_MANUAL_ACCESS_TOKEN:
         st.session_state['dhan_access_token_data'] = {
             "token": DHAN_MANUAL_ACCESS_TOKEN,
@@ -116,13 +184,7 @@ def get_access_token(force_refresh=False):
         _log_debug('token_last_generated', "MANUAL OVERRIDE (pasted from Dhan dashboard)")
         return DHAN_MANUAL_ACCESS_TOKEN
 
-    # Priority 3: Automatic TOTP-based generation
-
-    cached = st.session_state.get('dhan_access_token_data')
-
-    if not force_refresh and cached and cached.get('expiry') and cached['expiry'] > now:
-        return cached['token']
-
+    # ── Priority 5: TOTP auto-generate (fallback) ──
     try:
         totp_code = _generate_totp_code()
         params = {
@@ -153,8 +215,11 @@ def get_access_token(force_refresh=False):
             "token": token,
             "expiry": expiry - timedelta(minutes=5),
         }
+        # Also save TOTP-generated token to Supabase for next refresh
+        _supabase_save_token(token)
+
         _log_debug('token_error', None)
-        _log_debug('token_last_generated', now.strftime("%Y-%m-%d %H:%M:%S"))
+        _log_debug('token_last_generated', now.strftime("%Y-%m-%d %H:%M:%S") + " (TOTP)")
         return token
     except Exception as e:
         _log_debug('token_error', f"Exception: {str(e)}")
