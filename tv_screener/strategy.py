@@ -3,7 +3,8 @@
 #
 #   1. Data Fetch (TradingView + yfinance)
 #   2. POC (Point of Control) Calculation
-#   3. Crossover Signal — CORE ENTRY (POC + EMA + Body% + Gap)
+#   3. Crossover Signal — CORE ENTRY (POC + EMA + Gap)
+#      NOTE: Body% check removed from 9:15 candle — Close > Open is sufficient.
 #
 # This file answers ONE question: "Should this stock trigger a BUY signal?"
 # Everything else (date helpers, market hours, EMA coil analysis, entry-candle
@@ -68,10 +69,6 @@ def fetch_tv_data():
 def clean_tv_data(df):
     """
     Clean and standardize TradingView screener output into strategy-ready columns.
-
-    Returns:
-        pd.DataFrame: [Symbol, Price, Chg, Volume, RelVol, MktCap, Sector]
-                      (plus raw high/open/close[1]/high[1] retained for gap calc)
     """
     df = df.copy()
     df['change']           = df['change'].round(2)
@@ -92,12 +89,7 @@ def clean_tv_data(df):
 
 
 def prepare_tv_data_for_processing(df):
-    """
-    Drop temporary TV columns after gap/prev-high calculations are done.
-
-    Returns:
-        pd.DataFrame: Ready-for-processing data
-    """
+    """Drop temporary TV columns after gap/prev-high calculations are done."""
     df = df.copy()
     df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'high[1]'], errors='ignore')
     return df
@@ -110,15 +102,7 @@ def prepare_tv_data_for_processing(df):
 def calculate_poc_from_df(df_day, num_bins=50):
     """
     Calculate POC from a day's 5-minute candles using fixed-range volume
-    profile (FRVP): distribute each candle's volume proportionally across
-    the price bins it spans; the bin with max volume = POC.
-
-    Args:
-        df_day (pd.DataFrame): One day's OHLCV data (5min candles)
-        num_bins (int): Number of price bins
-
-    Returns:
-        float: POC price, or None if invalid
+    profile (FRVP).
     """
     price_min = df_day['Low'].min()
     price_max = df_day['High'].max()
@@ -168,12 +152,7 @@ def fetch_poc_once(symbol, num_bins=50):
 
 def get_yesterday_poc(symbol, num_bins=50, max_attempts=3, tolerance_pct=0.5):
     """
-    Robust POC fetch with retry & stability check — yfinance data can shift
-    slightly between fetches. Accept only if two consecutive fetches match
-    within tolerance_pct; retry up to max_attempts otherwise.
-
-    Returns:
-        float: Stable POC value, or None if all fetches failed
+    Robust POC fetch with retry & stability check.
     """
     prev_val = None
     for attempt in range(max_attempts):
@@ -191,18 +170,16 @@ def get_yesterday_poc(symbol, num_bins=50, max_attempts=3, tolerance_pct=0.5):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3: CROSSOVER SIGNAL — CORE ENTRY (POC + EMA + BODY% + GAP)
+# SECTION 3: CROSSOVER SIGNAL — CORE ENTRY (POC + EMA + GAP)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def calc_candle_body_pct(open_, high_, low_, close_):
     """
     Candle body size as % of its total High-Low range.
-    Body % = |Close - Open| / (High - Low) * 100
-
-    High body % (>=70%) = strong directional candle (not a doji).
+    Retained for potential future use — NOT used in entry signal anymore.
 
     Returns:
-        float: Body percentage (0-100), or None if candle is flat (High==Low)
+        float: Body percentage (0-100), or None if candle is flat
     """
     candle_range = high_ - low_
     if candle_range <= 0:
@@ -213,13 +190,6 @@ def calc_candle_body_pct(open_, high_, low_, close_):
 def calc_gap_pct(row):
     """
     Opening gap % — (Open - PrevClose) / PrevClose * 100.
-    Positive = gap up, Negative = gap down.
-
-    Args:
-        row (pd.Series): Must have 'open' and 'close[1]' columns
-
-    Returns:
-        float: Gap percentage, or 0 if calculation fails
     """
     try:
         open_price = float(row.get('open', 0) or 0)
@@ -234,14 +204,6 @@ def calc_gap_pct(row):
 def apply_gap_filter(df, max_gap_pct=2.0):
     """
     STRATEGY RULE: Reject stocks with overnight gap > ±2%.
-    Part of the core entry decision — excessive gaps are excluded upfront.
-
-    Args:
-        df (pd.DataFrame): TV data with 'open' and 'close[1]' columns
-        max_gap_pct (float): Max acceptable gap % (default 2.0)
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
     """
     df = df.copy()
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
@@ -250,31 +212,30 @@ def apply_gap_filter(df, max_gap_pct=2.0):
     return df
 
 
-def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20, min_body_pct=70):
+def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
     """
     THE CORE ENTRY SIGNAL of this strategy.
 
     Detects a 9EMA -> 20EMA bullish crossover, confirmed by price trading
     above yesterday's POC, checked at two candles:
 
-      A) 9:15 candle (CLOSED, STRICT):
+      A) 9:15 candle:
          - 9EMA was BELOW 20EMA yesterday
          - 9EMA is now ABOVE 20EMA at 9:15 close
          - 9:15 candle Close > yesterday's POC
-         - Candle body >= min_body_pct% of (High - Low)
+         NOTE: Body% check removed — candle direction not required.
 
-      B) 9:20 candle (flexible — closed or still forming):
-         - Same EMA + POC conditions, NO body-check
+      B) 9:20 candle:
+         - Same EMA + POC conditions
 
     Args:
         symbol (str): Stock symbol
         poc_value (float): Yesterday's POC (from get_yesterday_poc)
         fast_span (int): Fast EMA period (default 9)
         slow_span (int): Slow EMA period (default 20)
-        min_body_pct (float): Min body % for 9:15 strict match (default 70)
 
     Returns:
-        str: "09:15" (strict) / "09:20" (flexible) / "" (no match)
+        str: "09:15" / "09:20" / "" (no match)
     """
     try:
         if poc_value is None:
@@ -313,33 +274,21 @@ def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20, min_body_
         if not was_below:
             return ""
 
-        def check_candle(candle_time_str, require_body_check=False):
+        def check_candle(candle_time_str):
             df_candle = df_today.between_time(candle_time_str, candle_time_str)
             if df_candle.empty:
                 return False
             row = df_candle.iloc[0]
-            open_  = float(row['Open'])
-            high_  = float(row['High'])
-            low_   = float(row['Low'])
             close_ = float(row['Close'])
             fast_  = float(row['EMA_fast'])
             slow_  = float(row['EMA_slow'])
+            # Condition: 9EMA > 20EMA AND Close > POC
+            return (fast_ > slow_) and (close_ > poc_value)
 
-            basic_ok = (fast_ > slow_) and (close_ > poc_value)
-            if not basic_ok:
-                return False
-
-            if require_body_check:
-                body_pct = calc_candle_body_pct(open_, high_, low_, close_)
-                if body_pct is None or body_pct < min_body_pct:
-                    return False
-
-            return True
-
-        if check_candle("09:15", require_body_check=True):
+        if check_candle("09:15"):
             return "09:15"
 
-        if check_candle("09:20", require_body_check=False):
+        if check_candle("09:20"):
             return "09:20"
 
         return ""
