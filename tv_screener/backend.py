@@ -206,19 +206,22 @@ def check_orb_filter(symbol):
     """
     Check ORB (Opening Range Breakout) filter conditions for a symbol.
 
-    Conditions (both must be True):
-      1. 9:20 close is WITHIN 9:15 candle range (high & low)
-         → 9:15_low <= 9:20_close <= 9:15_high
-      2. 9:40 close is ABOVE 9:15 candle high
-         → 9:40_close > 9:15_high
+    Two independent rules — each can be checked separately via UI checkboxes:
+      Rule 1: 9:20 close is WITHIN 9:15 candle range
+              → 9:15_low <= 9:20_close <= 9:15_high  (consolidation)
+      Rule 2: 9:35 close is ABOVE 9:15 candle high
+              → 9:35_close > 9:15_high  (breakout confirmation)
+              NOTE: 9:35 candle data available on yfinance after 9:40 IST
+
+    Single yfinance call fetches all 3 candles (9:15, 9:20, 9:35).
 
     Returns:
         dict: {
-            "pass":       True/False  — both conditions passed,
+            "pass":       True/False  — both rules passed,
             "c915_high":  float or None,
             "c915_low":   float or None,
             "c920_close": float or None,
-            "c940_close": float or None,
+            "c935_close": float or None,
             "rule1":      True/False/None  — None if data unavailable,
             "rule2":      True/False/None  — None if data unavailable,
         }
@@ -228,7 +231,7 @@ def check_orb_filter(symbol):
         "c915_high":  None,
         "c915_low":   None,
         "c920_close": None,
-        "c940_close": None,
+        "c935_close": None,
         "rule1":      None,
         "rule2":      None,
     }
@@ -264,7 +267,7 @@ def check_orb_filter(symbol):
 
         c915 = get_ohlc("09:15")
         c920 = get_ohlc("09:20")
-        c940 = get_ohlc("09:40")
+        c935 = get_ohlc("09:35")  # Changed from 09:40 to 09:35
 
         # Need at least 9:15 candle to do anything
         if c915 is None:
@@ -273,15 +276,15 @@ def check_orb_filter(symbol):
         result["c915_high"] = c915["high"]
         result["c915_low"]  = c915["low"]
 
-        # Rule 1: 9:20 close within 9:15 range
+        # Rule 1: 9:20 close within 9:15 range (consolidation)
         if c920 is not None:
             result["c920_close"] = c920["close"]
             result["rule1"] = (c915["low"] <= c920["close"] <= c915["high"])
 
-        # Rule 2: 9:40 close above 9:15 high
-        if c940 is not None:
-            result["c940_close"] = c940["close"]
-            result["rule2"] = (c940["close"] > c915["high"])
+        # Rule 2: 9:35 close above 9:15 high (breakout confirmation)
+        if c935 is not None:
+            result["c935_close"] = c935["close"]
+            result["rule2"] = (c935["close"] > c915["high"])
 
         # Both rules must be explicitly True (not None) to pass
         result["pass"] = (result["rule1"] is True) and (result["rule2"] is True)
