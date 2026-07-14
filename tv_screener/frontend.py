@@ -68,6 +68,7 @@ def fmt_volume(v):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — SIGNAL TIME
+# CHANGE: color black (#111827), font-size 14px, font-weight 700, no background
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_signal_time(signal_time):
@@ -76,13 +77,12 @@ def fmt_signal_time(signal_time):
     Shows time when stock first appeared in scanner.
     """
     if not signal_time:
-        return '<span style="color:#9ca3af;font-size:11px;">—</span>'
-    # Trim to HH:MM only for compact display
+        return '<span style="color:#9ca3af;font-size:13px;">—</span>'
     try:
         t = str(signal_time)[:5]
     except:
         t = str(signal_time)
-    return f'<span style="background:#f0f9ff;color:#0369a1;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">{t}</span>'
+    return f'<span style="color:#111827;font-size:14px;font-weight:700;letter-spacing:0.3px;">{t}</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — RELATIVE VOLUME
@@ -133,7 +133,6 @@ def fmt_entry_badges(c940, c945, c950):
         str: HTML badge display
     """
     def badge(label, candle):
-        # Backward compat — old string format
         if isinstance(candle, str):
             active   = candle
             body_pct = 0
@@ -143,13 +142,13 @@ def fmt_entry_badges(c940, c945, c950):
 
         if active == "green":
             if body_pct >= 75:
-                bg, color = "#166534", "#ffffff"   # dark green  — strong
+                bg, color = "#166534", "#ffffff"
             elif body_pct >= 50:
-                bg, color = "#16a34a", "#ffffff"   # medium green
+                bg, color = "#16a34a", "#ffffff"
             elif body_pct >= 30:
-                bg, color = "#4ade80", "#166534"   # light green
+                bg, color = "#4ade80", "#166534"
             else:
-                bg, color = "#dcfce7", "#166534"   # very light  — weak body
+                bg, color = "#dcfce7", "#166534"
             return (
                 f'<span style="background:{bg};color:{color};border-radius:4px;'
                 f'padding:2px 7px;font-size:11px;font-weight:600;" '
