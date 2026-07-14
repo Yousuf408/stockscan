@@ -139,6 +139,8 @@ def screener_fragment():
 
     if 'signalprice_cache' not in st.session_state:
         st.session_state['signalprice_cache'] = {}
+    if 'signaltime_cache' not in st.session_state:
+        st.session_state['signaltime_cache'] = {}
 
     still_missing_poc = []
     for symbol in symbols_needing_poc:
@@ -157,6 +159,8 @@ def screener_fragment():
                 st.session_state['crossover_cache'][symbol] = cached_row['crossover_status']
             if cached_row.get('signal_price') is not None:
                 st.session_state['signalprice_cache'][symbol] = cached_row['signal_price']
+            if cached_row.get('signal_time') is not None:
+                st.session_state['signaltime_cache'][symbol] = cached_row['signal_time']
         else:
             still_missing_poc.append(symbol)
 
@@ -291,8 +295,12 @@ def screener_fragment():
     def get_signal_price(row):
         return st.session_state['signalprice_cache'].get(row['Symbol'])
 
+    def get_signal_time(row):
+        return st.session_state['signaltime_cache'].get(row['Symbol'])
+
     df['PctSinceSignal'] = df.apply(calc_pct_since_signal, axis=1)
     df['SignalPrice']    = df.apply(get_signal_price, axis=1)
+    df['SignalTime']     = df.apply(get_signal_time, axis=1)
 
     # ── STEP 8: VOL5D ──
     if 'prevhigh_cache' not in st.session_state:
