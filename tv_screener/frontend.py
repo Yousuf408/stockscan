@@ -67,6 +67,24 @@ def fmt_volume(v):
         return str(v)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION: FORMATTING HELPERS — SIGNAL TIME
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fmt_signal_time(signal_time):
+    """
+    Format signal time (HH:MM:SS) as a compact badge.
+    Shows time when stock first appeared in scanner.
+    """
+    if not signal_time:
+        return '<span style="color:#9ca3af;font-size:11px;">—</span>'
+    # Trim to HH:MM only for compact display
+    try:
+        t = str(signal_time)[:5]
+    except:
+        t = str(signal_time)
+    return f'<span style="background:#f0f9ff;color:#0369a1;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">{t}</span>'
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — RELATIVE VOLUME
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -81,6 +99,17 @@ def fmt_relvol(v):
         return f'<span style="background:{bg};color:{color};padding:2px 7px;border-radius:4px;font-weight:600;">{v:.2f}x</span>'
     except:
         return '<span style="color:#9ca3af;">N/A</span>'
+
+
+def fmt_vol_relvol(vol, relvol):
+    """
+    Merged Volume + Rel Vol in one cell (two-line style).
+    Top line: volume (e.g. 2.5M)
+    Bottom line: rel vol badge (e.g. 2.76x highlighted)
+    """
+    vol_str  = fmt_volume(vol)
+    rvol_str = fmt_relvol(relvol)
+    return f'<div style="font-size:12px;font-weight:500;">{vol_str}</div><div style="margin-top:2px;">{rvol_str}</div>'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — ENTRY SIGNAL BADGES
@@ -224,6 +253,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         chg      = row.get("Chg", 0)
         vol      = row.get("Volume", 0)
         relvol   = row.get("RelVol5D", 0)
+        signal_time = row.get("SignalTime", None)
         poc      = row.get("POC", None)
         gappct   = row.get("GapPct", None)
         pct_since_signal = row.get("PctSinceSignal", None)
@@ -253,8 +283,8 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
                 <div style="font-weight:600;color:#111827;">₹{float(price):.2f}</div>
                 <div style="font-size:11px;color:{chg_col};font-weight:600;">{chg_sgn}{float(chg):.2f}%</div>
             </td>
-            <td style="{TD}">{fmt_volume(vol)}</td>
-            <td style="{TD}">{fmt_relvol(relvol)}</td>
+            <td style="{TD}">{fmt_vol_relvol(vol, relvol)}</td>
+            <td style="{TD}">{fmt_signal_time(signal_time)}</td>
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
             <td style="{TD}">{fmt_pct_since_signal(signal_price_val, pct_since_signal)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
@@ -298,8 +328,8 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH_L}">Symbol</th>
           <th style="{TH}">Max Qty</th>
           <th style="{TH}">Price / Chg%</th>
-          <th style="{TH}">Volume</th>
-          <th style="{TH}">Rel Vol</th>
+          <th style="{TH}">Volume / Rel Vol</th>
+          <th style="{TH}">Signal Time</th>
           <th style="{TH}">POC / Gap</th>
           <th style="{TH}">Signal Price / % Chg</th>
           <th style="{TH}">Entry Signal</th>
