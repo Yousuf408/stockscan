@@ -260,7 +260,7 @@ def screener_fragment():
         )
     with chk4:
         amo_test_mode = st.checkbox(
-            "🌙 After Market Order ",
+            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
             value=False,
             key="amo_mode_checkbox",
             help="Enable this to test order placement when market is closed."
