@@ -21,15 +21,7 @@ def display_order_result(symbol, result, max_inline_length=100):
         the inline message. ALWAYS also show an expander with the full raw
         error (payload sent, exact response) — even when the clean message
         is short — since order-placement issues need full traceability for
-        debugging (a short-looking error like "Invalid SecurityId" can hide
-        a payload-level problem that's only visible in the raw details).
-
-    Args:
-        symbol (str): Stock symbol (for the message prefix)
-        result (dict): {"success": bool, "order_id": str, "error": str}
-        max_inline_length (int): Kept for backward compatibility, no longer
-                                 used to decide whether to show the expander
-                                 (expander now always shows on failure).
+        debugging.
     """
     if result.get('success'):
         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
@@ -38,8 +30,6 @@ def display_order_result(symbol, result, max_inline_length=100):
     raw_error = str(result.get('error', 'Unknown error'))
     clean_msg = raw_error
 
-    # Try to pull out just the human-readable error message from a JSON
-    # blob embedded in the raw error string (e.g. Dhan's errorMessage field)
     try:
         if '{' in raw_error:
             json_str = raw_error[raw_error.index('{'):].split('| Payload sent:')[0].strip()
@@ -57,12 +47,9 @@ def display_order_result(symbol, result, max_inline_length=100):
 # SECTION: TABLE STYLING CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Header cell styles (center-aligned, except first column)
-TH = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap;text-align:center;"
+TH   = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap;text-align:center;"
 TH_L = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;text-align:left;"
-
-# Data cell styles (center-aligned, except first column)
-TD = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:center;vertical-align:middle;"
+TD   = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:center;vertical-align:middle;"
 TD_L = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;text-align:left;vertical-align:middle;"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,25 +57,13 @@ TD_L = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;text-ali
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_volume(v):
-    """
-    Format volume into human-readable units (M/L/K).
-    
-    Args:
-        v: Volume value (float or str)
-    
-    Returns:
-        str: Formatted volume (e.g., "2.5M", "50K")
-    """
     try:
         v = float(v)
-        if v >= 1_000_000: 
-            return f"{v/1_000_000:.1f}M"
-        if v >= 100_000:   
-            return f"{v/100_000:.1f}L"
-        if v >= 1_000:     
-            return f"{v/1_000:.1f}K"
+        if v >= 1_000_000: return f"{v/1_000_000:.1f}M"
+        if v >= 100_000:   return f"{v/100_000:.1f}L"
+        if v >= 1_000:     return f"{v/1_000:.1f}K"
         return str(int(v))
-    except: 
+    except:
         return str(v)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,32 +71,15 @@ def fmt_volume(v):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_relvol(v):
-    """
-    Format relative volume with color coding.
-    
-    Color scheme:
-      >= 3.0x : Yellow background (high alert)
-      >= 1.5x : Green background (elevated)
-      < 1.5x  : Gray text (normal)
-    
-    Args:
-        v: Relative volume value (float)
-    
-    Returns:
-        str: HTML-formatted relative volume
-    """
     if v is None:
         return '<span style="color:#9ca3af;">N/A</span>'
     try:
         v = float(v)
-        if v >= 3:     
-            bg, color = "#fef9c3", "#854f0b"
-        elif v >= 1.5: 
-            bg, color = "#dcfce7", "#166534"
-        else:          
-            bg, color = "transparent", "#374151"
+        if v >= 3:     bg, color = "#fef9c3", "#854f0b"
+        elif v >= 1.5: bg, color = "#dcfce7", "#166534"
+        else:          bg, color = "transparent", "#374151"
         return f'<span style="background:{bg};color:{color};padding:2px 7px;border-radius:4px;font-weight:600;">{v:.2f}x</span>'
-    except: 
+    except:
         return '<span style="color:#9ca3af;">N/A</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -131,20 +89,46 @@ def fmt_relvol(v):
 def fmt_entry_badges(c940, c945, c950):
     """
     Format entry candle signals as badges (9:40, 9:45, 9:50).
-    
-    Green badge = bullish candle detected, Gray = not yet/bearish.
-    
+
+    Color intensity based on body_pct — more body = stronger/darker green:
+      >= 75% : Dark green   — strong candle
+      >= 50% : Medium green — decent candle
+      >= 30% : Light green  — moderate candle
+      >  0%  : Very light   — bullish but weak body
+      ""     : Gray         — bearish or not yet available
+
     Args:
-        c940, c945, c950 (str): Candle signal ("green" or "")
-    
+        c940, c945, c950: dict {"signal": "green"/"", "body_pct": float}
+                          OR str "green"/"" (backward compat)
     Returns:
         str: HTML badge display
     """
-    def badge(label, active):
+    def badge(label, candle):
+        # Backward compat — old string format
+        if isinstance(candle, str):
+            active   = candle
+            body_pct = 0
+        else:
+            active   = candle.get("signal", "")
+            body_pct = candle.get("body_pct", 0)
+
         if active == "green":
-            return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">{label}</span>'
+            if body_pct >= 75:
+                bg, color = "#166534", "#ffffff"   # dark green  — strong
+            elif body_pct >= 50:
+                bg, color = "#16a34a", "#ffffff"   # medium green
+            elif body_pct >= 30:
+                bg, color = "#4ade80", "#166534"   # light green
+            else:
+                bg, color = "#dcfce7", "#166534"   # very light  — weak body
+            return (
+                f'<span style="background:{bg};color:{color};border-radius:4px;'
+                f'padding:2px 7px;font-size:11px;font-weight:600;" '
+                f'title="Body: {body_pct:.1f}%">{label}</span>'
+            )
         else:
             return f'<span style="color:#d1d5db;font-size:11px;padding:2px 5px;">{label}</span>'
+
     return f'{badge("9:40", c940)}&nbsp;{badge("9:45", c945)}&nbsp;{badge("9:50", c950)}'
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -152,30 +136,15 @@ def fmt_entry_badges(c940, c945, c950):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_poc_gap(poc, gap_pct):
-    """
-    Format POC price and gap % with color coding.
-    
-    Green = gap up, Red = gap down. Intensity based on magnitude.
-    
-    Args:
-        poc (float): Point of Control price
-        gap_pct (float): Gap percentage from POC
-    
-    Returns:
-        str: HTML-formatted POC + gap display
-    """
     if poc is None:
         return '<span style="color:#9ca3af;">N/A</span>'
     poc_str = f"₹{float(poc):,.2f}"
     if gap_pct is None:
         return f'<div style="font-size:12px;">{poc_str}</div>'
     if gap_pct > 0:
-        if gap_pct >= 5:   
-            color = "#14532d"
-        elif gap_pct >= 2: 
-            color = "#16a34a"
-        else:              
-            color = "#4ade80"
+        if gap_pct >= 5:   color = "#14532d"
+        elif gap_pct >= 2: color = "#16a34a"
+        else:              color = "#4ade80"
         gap_str = f'<span style="color:{color};font-weight:700;">↑ +{gap_pct:.1f}%</span>'
     else:
         gap_str = f'<span style="color:#dc2626;font-weight:600;">↓ {gap_pct:.1f}%</span>'
@@ -186,55 +155,23 @@ def fmt_poc_gap(poc, gap_pct):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_prev_high(dist, val):
-    """
-    Format previous day's high with distance %, color-coded.
-    
-    Green = above prev high (bullish), Red = below prev high.
-    
-    Args:
-        dist (float): Distance % from previous high
-        val (float): Previous high price value
-    
-    Returns:
-        str: HTML-formatted display
-    """
     if dist is None or val is None:
         return '<span style="color:#9ca3af;">N/A</span>'
     val_str = f"₹{val:,.2f}"
     if dist >= 0:
-        if dist >= 3:   
-            color = "#14532d"
-        elif dist >= 1: 
-            color = "#16a34a"
-        else:           
-            color = "#4ade80"
+        if dist >= 3:   color = "#14532d"
+        elif dist >= 1: color = "#16a34a"
+        else:           color = "#4ade80"
         pct_str = f'<span style="color:{color};font-weight:700;">↑ +{dist:.1f}%</span>'
     else:
         pct_str = f'<span style="color:#dc2626;font-weight:600;">↓ {dist:.1f}%</span>'
     return f'<div style="font-size:12px;font-weight:500;">{val_str}</div><div style="font-size:11px;">{pct_str}</div>'
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: FORMATTING HELPERS — EMA COIL
-# ─────────────────────────────────────────────────────────────────────────────
-
-# fmt_ema_coil() — REMOVED, EMA Coil column no longer used in the strategy.
-
-# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: FORMATTING HELPERS — CROSSOVER SIGNAL
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_crossover(matched_candle):
-    """
-    Format crossover signal as badge.
-    
-    Green checkmark = 9:15 (strict), Pink checkmark = 9:20 (flexible).
-    
-    Args:
-        matched_candle (str): "09:15", "09:20", or ""
-    
-    Returns:
-        str: HTML badge or empty
-    """
     if matched_candle == "09:15":
         return '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
     elif matched_candle == "09:20":
@@ -247,18 +184,6 @@ def fmt_crossover(matched_candle):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_max_qty(qty):
-    """
-    Format max-quantity value (from DhanHQ margin-based calculation).
-
-    Shows "—" if quantity couldn't be determined (0 or None) — e.g. symbol
-    not found in Dhan's instrument master, or margin API call failed.
-
-    Args:
-        qty: Max quantity value (int or None)
-
-    Returns:
-        str: HTML-formatted quantity badge
-    """
     if qty is None or qty <= 0:
         return '<span style="color:#9ca3af;">—</span>'
     return f'<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:4px;font-weight:700;">{int(qty)}</span>'
@@ -268,32 +193,17 @@ def fmt_max_qty(qty):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_pct_since_signal(signal_price, pct):
-    """
-    Format Signal Price + live "% moved since signal" together in one cell
-    (two-line style, matching fmt_poc_gap/fmt_prev_high pattern).
-
-    Args:
-        signal_price (float): Price captured when this stock's signal was
-                              first detected, or None if not available
-        pct (float): % change since signal_price, or None if not available
-
-    Returns:
-        str: HTML-formatted combined cell
-    """
     if signal_price is None:
         return '<span style="color:#9ca3af;">—</span>'
-
     price_str = f"₹{float(signal_price):,.2f}"
-
     if pct is None:
         return f'<div style="font-size:12px;">{price_str}</div>'
-
     if pct >= 0:
         color = "#16a34a"
-        sign = "+"
+        sign  = "+"
     else:
         color = "#dc2626"
-        sign = ""
+        sign  = ""
     pct_str = f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
     return f'<div style="font-size:12px;font-weight:500;">{price_str}</div><div style="font-size:11px;">{pct_str}</div>'
 
@@ -304,37 +214,27 @@ def fmt_pct_since_signal(signal_price, pct):
 def render_stock_table(df, height_per_row=52, extra_height=60):
     """
     Render main stock results table with all columns.
-    
     Interactive: Click symbol to copy to clipboard.
-    Color-coded: Prices, changes, volumes, signals all visually distinct.
-    
-    Args:
-        df (pd.DataFrame): Data with columns:
-                          [Symbol, Price, Chg, Volume, RelVol5D, POC, GapPct,
-                           c940, c945, c950, PrevHighDist, PrevHighVal, 
-                           Crossover, Sector] (MaxQty used for button labels, not table col)
-        height_per_row (int): Pixels per row (default 52)
-        extra_height (int): Extra padding (default 60)
     """
     rows_html = ""
     for i, (_, row) in enumerate(df.iterrows()):
-        sym    = row.get("Symbol", "")
-        maxqty = row.get("MaxQty", None)
-        price  = row.get("Price", 0)
-        chg    = row.get("Chg", 0)
-        vol    = row.get("Volume", 0)
-        relvol = row.get("RelVol5D", 0)
-        poc    = row.get("POC", None)
-        gappct = row.get("GapPct", None)
+        sym      = row.get("Symbol", "")
+        maxqty   = row.get("MaxQty", None)
+        price    = row.get("Price", 0)
+        chg      = row.get("Chg", 0)
+        vol      = row.get("Volume", 0)
+        relvol   = row.get("RelVol5D", 0)
+        poc      = row.get("POC", None)
+        gappct   = row.get("GapPct", None)
         pct_since_signal = row.get("PctSinceSignal", None)
         signal_price_val = row.get("SignalPrice", None)
-        prevhd = row.get("PrevHighDist", None)
-        prevhv = row.get("PrevHighVal", None)
+        prevhd   = row.get("PrevHighDist", None)
+        prevhv   = row.get("PrevHighVal", None)
         crossover = row.get("Crossover", "")
-        c940   = row.get("c940", "")
-        c945   = row.get("c945", "")
-        c950   = row.get("c950", "")
-        sector = row.get("Sector", "")
+        c940     = row.get("c940", {"signal": "", "body_pct": 0})
+        c945     = row.get("c945", {"signal": "", "body_pct": 0})
+        c950     = row.get("c950", {"signal": "", "body_pct": 0})
+        sector   = row.get("Sector", "")
 
         bg      = "#f9fafb" if i % 2 == 0 else "#ffffff"
         chg_col = "#16a34a" if float(chg) > 0 else "#dc2626"
@@ -421,15 +321,10 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
 def render_market_closed_view(df_market_closed):
     """
     Render market-closed mode display.
-    
-    Shows last saved data for the day (from Supabase cache).
-    No live calculations — read-only mode.
-    
-    Args:
-        df_market_closed (pd.DataFrame): Prepared market-closed data
+    Shows last saved data for the day (from Supabase cache). Read-only.
     """
     from .calculations import get_last_trading_day
-    
+
     calc_date = get_last_trading_day()
 
     st.markdown(f"""
@@ -443,7 +338,6 @@ def render_market_closed_view(df_market_closed):
         st.info("Koi saved data available nahi hai is date ke liye.")
         return
 
-    # Header cards
     top_gainer = df_market_closed.iloc[0]['Symbol'] if len(df_market_closed) > 0 else '-'
     max_chg    = df_market_closed['Chg'].max() if len(df_market_closed) > 0 else 0.0
 
