@@ -214,14 +214,35 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: CROSSOVER FILTER (default = All, no filter) ──
-    filter_col, _spacer = st.columns([2, 8])
-    with filter_col:
+    # ── STEP 6: ALL FILTERS IN ONE ROW ──
+    f1, f2, f3, f4 = st.columns([2, 1.5, 1.5, 1.5])
+    with f1:
         crossover_filter_option = st.selectbox(
             "Crossover Filter",
             ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
             index=0,
             key="crossover_filter_select"
+        )
+    with f2:
+        top20_lock_mode = st.checkbox(
+            "🔒 Top-20 till 9:35",
+            value=False,
+            key="top20_lock_checkbox",
+            help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
+        )
+    with f3:
+        orb_rule1_enabled = st.checkbox(
+            "🎯 9:20 in 9:15 range",
+            value=False,
+            key="orb_rule1_checkbox",
+            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
+        )
+    with f4:
+        orb_rule2_enabled = st.checkbox(
+            "🚀 9:35 > 9:15 high",
+            value=False,
+            key="orb_rule2_checkbox",
+            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
 
     if crossover_filter_option == "09:15 only":
@@ -231,13 +252,6 @@ def screener_fragment():
     elif crossover_filter_option == "All (09:15 + 09:20)":
         df = df[df['Crossover'].isin(["09:15", "09:20"])]
     # else "All (No Filter)" — df as-is, koi filter nahi
-
-    # ── TOP-20 LOCK MODE ──
-    top20_lock_mode = st.checkbox(
-        "🔒 Top-20 Lock Mode (9:15-9:35 window — after 9:35, list freezes to top 20 by Chg%)",
-        value=False,
-        key="top20_lock_checkbox"
-    )
 
     if top20_lock_mode:
         TOP20_WINDOW_END_HHMM = 9 * 60 + 35
@@ -405,23 +419,7 @@ def screener_fragment():
     # Uses session cache — once checked, result stays for the session.
     # ─────────────────────────────────────────────────────────────────────────
 
-    orb_col1, orb_col2 = st.columns(2)
-    with orb_col1:
-        orb_rule1_enabled = st.checkbox(
-            "🎯 9:20 close within 9:15 range",
-            value=False,
-            key="orb_rule1_checkbox",
-            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). "
-                 "Data 9:25 AM ke baad available hota hai."
-        )
-    with orb_col2:
-        orb_rule2_enabled = st.checkbox(
-            "🚀 9:35 close > 9:15 high",
-            value=False,
-            key="orb_rule2_checkbox",
-            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout confirmation). "
-                 "Data 9:40 AM ke baad available hota hai."
-        )
+    # ORB checkboxes already rendered in filter row above
 
     if orb_rule1_enabled or orb_rule2_enabled:
         # Minimum time check based on which rules are enabled
