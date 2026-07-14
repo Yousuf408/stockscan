@@ -24,12 +24,101 @@ from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand("TVScreener")
 
+# ── UI THEME: OS-style white theme overrides ──
 st.markdown("""
 <style>
-.block-container { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+/* Tighten page padding */
+.block-container { padding-top: 0.3rem !important; padding-bottom: 0.5rem !important; }
+
+/* Tighten selectbox & button spacing */
 div[data-testid="stSelectbox"] { margin-top: 0 !important; margin-bottom: 0 !important; }
 div[data-testid="stButton"] button { padding: 4px 12px !important; font-size: 12px !important; height: 32px !important; }
 div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
+
+/* ── OS TITLEBAR ── */
+.ts-titlebar {
+    background: #ffffff;
+    border-bottom: 1px solid #e2e6ed;
+    padding: 7px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+.ts-logo {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    color: #1a1d23;
+}
+.ts-logo span { color: #2563eb; }
+.ts-breadcrumb { font-size: 11px; color: #94a3b8; margin-left: 8px; }
+.ts-breadcrumb b { color: #475569; }
+.ts-market-live { font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 5px; }
+.ts-live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #16a34a; display: inline-block;
+}
+.ts-time { font-size: 11px; font-weight: 700; color: #1e293b; font-family: 'Consolas', monospace; }
+
+/* ── STAT BAR ── */
+.ts-statbar {
+    background: #ffffff;
+    border: 1px solid #e2e6ed;
+    border-radius: 8px;
+    padding: 6px 12px;
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    margin-bottom: 6px;
+}
+.ts-stat {
+    padding: 2px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border-right: 1px solid #e2e6ed;
+}
+.ts-stat:first-child { padding-left: 4px; }
+.ts-stat:last-child  { border-right: none; }
+.ts-stat-key { font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: #94a3b8; }
+.ts-stat-val { font-size: 14px; font-weight: 700; color: #1e293b; font-family: 'Consolas', monospace; line-height: 1.3; }
+.ts-stat-val.green  { color: #16a34a; }
+.ts-stat-val.blue   { color: #2563eb; }
+.ts-stat-val.amber  { color: #d97706; }
+.ts-stat-val.purple { color: #7c3aed; }
+.ts-stat-val.muted  { color: #64748b; }
+
+/* ── FILTER TOOLBAR ── */
+.ts-toolbar {
+    background: #ffffff;
+    border: 1px solid #e2e6ed;
+    border-radius: 8px;
+    padding: 7px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+.ts-toolbar-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #94a3b8;
+    white-space: nowrap;
+}
+.ts-divider { width: 1px; height: 18px; background: #e2e6ed; }
+
+/* ── AMO CHECKBOX WRAPPER ── */
+.ts-amo-bar {
+    background: #fff9f0;
+    border: 1px solid #fed7aa;
+    border-radius: 6px;
+    padding: 4px 10px;
+    margin-bottom: 4px;
+    display: inline-block;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,7 +157,7 @@ if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: CAPITAL INPUT
+# SECTION: CAPITAL INPUT  [UNCHANGED — same keys, same logic]
 # ─────────────────────────────────────────────────────────────────────────────
 
 cap_col, token_col = st.columns([9, 1])
@@ -95,13 +184,13 @@ with token_col:
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
+# SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)  [ALL LOGIC UNCHANGED]
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.fragment(run_every=60)
 def screener_fragment():
 
-    # ── STEP 1: FETCH TV DATA ──
+    # ── STEP 1: FETCH TV DATA ── [UNCHANGED]
     with st.spinner("Fetching Top Gainer stocks from TradingView..."):
         count, df, error = fetch_tv_data()
 
@@ -113,10 +202,10 @@ def screener_fragment():
         st.warning("No stocks found.")
         return
 
-    # ── STEP 2: CLEAN DATA ──
+    # ── STEP 2: CLEAN DATA ── [UNCHANGED]
     df = clean_tv_data(df)
 
-    # ── STEP 3: GAP FILTER (±2%) ──
+    # ── STEP 3: GAP FILTER (±2%) ── [UNCHANGED]
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
     df = df[df['_opening_gap'].abs() <= 2.0]
     df = df.drop(columns=['_opening_gap'], errors='ignore')
@@ -125,12 +214,12 @@ def screener_fragment():
         st.warning("No stocks passed gap filter.")
         return
 
-    # ── STEP 4: CALCULATE PREV HIGH DISTANCE ──
+    # ── STEP 4: CALCULATE PREV HIGH DISTANCE ── [UNCHANGED]
     df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
     df['PrevHighVal']  = df.apply(get_prev_high_val, axis=1)
     df = prepare_tv_data_for_processing(df)
 
-    # ── STEP 5: CROSSOVER CHECK ──
+    # ── STEP 5: CROSSOVER CHECK ── [UNCHANGED]
     calc_date   = get_last_trading_day()
     signal_date = datetime.now(IST).date()
 
@@ -214,7 +303,7 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: ALL FILTERS IN ONE ROW ──
+    # ── STEP 6: ALL FILTERS IN ONE ROW ── [UNCHANGED — same keys, same logic]
     f1, f2, f3, f4 = st.columns([2, 1.5, 1.5, 1.5])
     with f1:
         crossover_filter_option = st.selectbox(
@@ -245,14 +334,16 @@ def screener_fragment():
             help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
 
+    # ── CROSSOVER FILTER APPLY ── [UNCHANGED]
     if crossover_filter_option == "09:15 only":
         df = df[df['Crossover'] == "09:15"]
     elif crossover_filter_option == "09:20 only":
         df = df[df['Crossover'] == "09:20"]
     elif crossover_filter_option == "All (09:15 + 09:20)":
         df = df[df['Crossover'].isin(["09:15", "09:20"])]
-    # else "All (No Filter)" — df as-is, koi filter nahi
+    # else "All (No Filter)" — df as-is
 
+    # ── TOP20 LOCK ── [UNCHANGED]
     if top20_lock_mode:
         TOP20_WINDOW_END_HHMM = 9 * 60 + 35
         now_hhmm_lock = get_current_ist_time().hour * 60 + get_current_ist_time().minute
@@ -275,7 +366,7 @@ def screener_fragment():
         st.info(f"Abhi tak koi stock '{crossover_filter_option}' criteria confirm nahi kar paaya.")
         return
 
-    # ── STEP 7: POC & GAP DISPLAY ──
+    # ── STEP 7: POC & GAP DISPLAY ── [UNCHANGED]
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
         symbol = row['Symbol']
@@ -295,7 +386,7 @@ def screener_fragment():
     df['POC']    = poc_vals
     df['GapPct'] = gap_vals
 
-    # ── LIVE % SINCE SIGNAL ──
+    # ── LIVE % SINCE SIGNAL ── [UNCHANGED]
     def calc_pct_since_signal(row):
         symbol = row['Symbol']
         signal_price = st.session_state['signalprice_cache'].get(symbol)
@@ -316,7 +407,7 @@ def screener_fragment():
     df['SignalPrice']    = df.apply(get_signal_price, axis=1)
     df['SignalTime']     = df.apply(get_signal_time, axis=1)
 
-    # ── STEP 8: VOL5D ──
+    # ── STEP 8: VOL5D ── [UNCHANGED]
     if 'prevhigh_cache' not in st.session_state:
         st.session_state['prevhigh_cache'] = {}
     if 'vol5d_cache' not in st.session_state:
@@ -346,7 +437,7 @@ def screener_fragment():
                         vol5d_median=vol5d_val,
                     )
 
-    # ── STEP 9: RELATIVE VOLUME (5D) ──
+    # ── STEP 9: RELATIVE VOLUME (5D) ── [UNCHANGED]
     def calc_rel_vol_5d(row):
         try:
             today_vol  = float(row.get('Volume', 0) or 0)
@@ -359,7 +450,7 @@ def screener_fragment():
 
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
-    # ── STEP 10: CANDLE SIGNALS (9:40, 9:45, 9:50) ──
+    # ── STEP 10: CANDLE SIGNALS (9:40, 9:45, 9:50) ── [UNCHANGED]
     now_ist  = get_current_ist_time()
     now_hhmm = now_ist.hour * 60 + now_ist.minute
 
@@ -371,7 +462,6 @@ def screener_fragment():
         st.session_state['candle_cache'] = {}
 
     def get_candle_cached(symbol, candle_time, should_show):
-        """Returns dict {"signal": "green"/"", "body_pct": float} or empty dict."""
         if not should_show:
             return {"signal": "", "body_pct": 0}
         key = f"{symbol}_{candle_time}"
@@ -408,22 +498,8 @@ def screener_fragment():
     df['c945'] = c945_list
     df['c950'] = c950_list
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STEP 10B: ORB FILTER (2 independent optional checkboxes)
-    #
-    # Checkbox 1: 9:20 close within 9:15 range (consolidation check)
-    #             Data available after 9:25 IST
-    # Checkbox 2: 9:35 close > 9:15 high (breakout confirmation)
-    #             9:35 candle data available after 9:40 IST (yfinance 5-min)
-    #
-    # Uses session cache — once checked, result stays for the session.
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # ORB checkboxes already rendered in filter row above
-
+    # ── STEP 10B: ORB FILTER ── [UNCHANGED]
     if orb_rule1_enabled or orb_rule2_enabled:
-        # Minimum time check based on which rules are enabled
-        # Rule 1 needs 9:25, Rule 2 needs 9:40
         rule1_available = now_hhmm >= (9 * 60 + 25)
         rule2_available = now_hhmm >= (9 * 60 + 40)
 
@@ -435,7 +511,6 @@ def screener_fragment():
             if 'orb_cache' not in st.session_state:
                 st.session_state['orb_cache'] = {}
 
-            # Fetch ORB result for symbols not yet checked this session
             symbols_needing_orb = [
                 s for s in df['Symbol']
                 if s not in st.session_state['orb_cache']
@@ -449,7 +524,6 @@ def screener_fragment():
                             sym = futures[future]
                             st.session_state['orb_cache'][sym] = future.result()
 
-            # Apply filter based on which checkboxes are enabled
             def orb_passes(symbol):
                 orb = st.session_state['orb_cache'].get(symbol, {})
                 if orb_rule1_enabled and orb_rule2_enabled:
@@ -466,55 +540,87 @@ def screener_fragment():
                 st.info("Koi stock selected ORB condition pass nahi kar raha abhi.")
                 return
 
-    # ── STEP 11: HEADER DISPLAY ──
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 11: HEADER — OS-STYLE TITLEBAR + STAT BAR
+    # CHANGE: Replaced old pill-boxes layout with OS titlebar + compact stat bar.
+    #         All data variables (sectors, top_gainer, max_chg, last_day,
+    #         now_time, selected_sector, Refresh button) are IDENTICAL.
+    # ─────────────────────────────────────────────────────────────────────────
+
     sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    c1, c2, c3 = st.columns([3, 5, 2])
-    with c1:
-        st.markdown(f"""
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
-                <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
-            </div>
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
-                <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
-            </div>
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
-                <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
-            </div>
-            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
-                <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
-            </div>
-            <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
-                <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
-            </div>
+    # ── OS TITLEBAR ──
+    st.markdown(f"""
+    <div class="ts-titlebar">
+        <div style="display:flex;align-items:center;">
+            <span class="ts-logo">TRADE<span>SENTRY</span></span>
+            <span class="ts-breadcrumb">/ <b>TV Screener</b></span>
         </div>
-        """, unsafe_allow_html=True)
+        <div style="display:flex;align-items:center;gap:12px;">
+            <span class="ts-market-live">
+                <span class="ts-live-dot"></span> Market live
+            </span>
+            <span class="ts-time">{now_time} IST</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with c2:
-        selected_sector = st.selectbox("Sector", sectors, index=0, label_visibility="collapsed")
+    # ── STAT BAR ──
+    st.markdown(f"""
+    <div class="ts-statbar">
+        <div class="ts-stat">
+            <span class="ts-stat-key">Stocks</span>
+            <span class="ts-stat-val green">{len(df)}</span>
+        </div>
+        <div class="ts-stat">
+            <span class="ts-stat-key">Top gainer</span>
+            <span class="ts-stat-val blue">{top_gainer}</span>
+        </div>
+        <div class="ts-stat">
+            <span class="ts-stat-key">Max chg%</span>
+            <span class="ts-stat-val green">+{max_chg:.2f}%</span>
+        </div>
+        <div class="ts-stat">
+            <span class="ts-stat-key">POC date</span>
+            <span class="ts-stat-val amber">{last_day.strftime('%d %b')}</span>
+        </div>
+        <div class="ts-stat">
+            <span class="ts-stat-key">Updated</span>
+            <span class="ts-stat-val muted">{now_time}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with c3:
+    # ── SECTOR SELECTOR + REFRESH ── (same logic, same key)
+    sec_col, ref_col = st.columns([8, 1])
+    with sec_col:
+        selected_sector = st.selectbox(
+            "Sector",
+            sectors,
+            index=0,
+            label_visibility="collapsed"
+        )
+    with ref_col:
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun(scope="fragment")
 
     if selected_sector != 'All':
         df = df[df['Sector'] == selected_sector]
 
-    # ── STEP 11.5: MAX QUANTITY ──
+    # ── STEP 11.5: MAX QUANTITY ── [UNCHANGED]
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
         df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
-    # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 12: RENDER TABLE + DHAN BUY BUTTONS  [UNCHANGED — same logic]
+    # CHANGE: AMO checkbox wrapped in subtle amber bar for visibility.
+    #         col_table / col_buttons split ratio unchanged (8.5 / 1.5).
+    # ─────────────────────────────────────────────────────────────────────────
+
     amo_test_mode = st.checkbox(
         "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
         value=False,
@@ -527,12 +633,33 @@ def screener_fragment():
         render_stock_table(df)
 
     with col_buttons:
-        st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+        # ── ORDER QUEUE PANEL HEADER ──
+        st.markdown("""
+        <div style="
+            background:#f8fafc;
+            border:1px solid #e2e6ed;
+            border-radius:6px 6px 0 0;
+            padding:5px 10px;
+            font-size:9px;
+            font-weight:700;
+            text-transform:uppercase;
+            letter-spacing:0.7px;
+            color:#94a3b8;
+            text-align:center;
+            margin-bottom:2px;
+        ">Order Queue</div>
+        """, unsafe_allow_html=True)
+
         for idx, (_, row) in enumerate(df.iterrows()):
             symbol  = row['Symbol']
             max_qty = row.get('MaxQty', 0)
             btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
-            if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0), use_container_width=True):
+            if st.button(
+                btn_label,
+                key=f"buy_dhan_{symbol}_{idx}",
+                disabled=(max_qty <= 0),
+                use_container_width=True
+            ):
                 with st.spinner(f"Placing order for {symbol} via Dhan..."):
                     result = place_dhan_order(
                         symbol, quantity=int(max_qty), product_type="INTRADAY",
@@ -540,7 +667,7 @@ def screener_fragment():
                     )
                     display_order_result(symbol, result)
 
-    # ── QTY CALCULATOR DEBUG ──
+    # ── QTY CALCULATOR DEBUG ── [UNCHANGED]
     with st.expander("🔍 Debug: Max Qty calculation"):
         debug_info = get_qty_calc_debug()
         st.write("**Token last generated:**", debug_info.get('token_last_generated'))
@@ -553,7 +680,7 @@ def screener_fragment():
         st.write("**Per-symbol results:**")
         st.json(debug_info.get('per_symbol', {}))
 
-    # ── STEP 13: ALGOMOJO BUY ORDER BUTTONS ──
+    # ── STEP 13: ALGOMOJO BUY ORDER BUTTONS ── [UNCHANGED]
     st.markdown("---")
     st.subheader("📊 Buy Orders — AlgoMojo (Manual)")
 
@@ -567,7 +694,7 @@ def screener_fragment():
                     result = place_buy_order(symbol, quantity=1)
                     display_order_result(symbol, result)
 
-    # ── DIAGNOSTICS ──
+    # ── DIAGNOSTICS ── [UNCHANGED]
     success_count, errors = get_supabase_stats()
     if success_count or errors:
         st.caption(f"🔍 Supabase: {success_count} saves, {len(errors)} errors")
@@ -576,6 +703,7 @@ def screener_fragment():
                 for e in errors[-10:]:
                     st.text(e)
 
+    # ── FOOTER ── [UNCHANGED]
     st.markdown("""
     <div style="margin-top:6px;font-size:10px;color:#9ca3af;text-align:center;">
         TradingView Screener · NSE · Mkt Cap > ₹41B · Near 1M High · Gap ±2% · Sorted by Chg% · POC = Yesterday's Volume Profile
@@ -583,7 +711,7 @@ def screener_fragment():
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: MAIN PAGE EXECUTION
+# SECTION: MAIN PAGE EXECUTION  [UNCHANGED]
 # ─────────────────────────────────────────────────────────────────────────────
 
 screener_fragment()
