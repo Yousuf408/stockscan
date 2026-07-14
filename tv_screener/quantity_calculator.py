@@ -473,16 +473,54 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
 # SECTION: MAX QUANTITY CALCULATION (main entry point)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _supabase_fetch_all_margins(signal_date_str):
+    """
+    Aaj ki date ke saare stocks ka intraday_margin ek Supabase call mein fetch karo.
+    Returns dict: {symbol: intraday_margin float}
+    """
+    try:
+        from tv_screener.database import supabase
+        result = (supabase.table("tv_screener_cache")
+                  .select("symbol, intraday_margin")
+                  .eq("signal_date", signal_date_str)
+                  .execute())
+        if result.data:
+            return {
+                row['symbol']: float(row['intraday_margin'])
+                for row in result.data
+                if row.get('intraday_margin') is not None
+            }
+        return {}
+    except Exception as e:
+        _log_debug('token_error', f"Supabase margin fetch failed: {str(e)}")
+        return {}
+
+
+def _supabase_save_margin(symbol, signal_date_str, margin_value):
+    """
+    Ek stock ka intraday_margin Supabase mein save karo (upsert).
+    Silent fail — margin save failure should never block trading.
+    """
+    try:
+        from tv_screener.database import supabase
+        supabase.table("tv_screener_cache").upsert(
+            {"symbol": symbol, "signal_date": signal_date_str, "intraday_margin": margin_value},
+            on_conflict="symbol,calc_date"
+        ).execute()
+    except Exception:
+        pass  # Silent fail
+
+
 def calculate_max_quantity_column(df, total_capital, num_parts=4):
     """
     For each stock in df, calculate the max quantity purchasable using
     (total_capital / num_parts) as the budget for that single stock,
     accounting for real intraday margin/leverage via DhanHQ.
 
-    IMPORTANT: Margin-per-share is CACHED in session_state per symbol —
-    it does NOT change based on capital, so once fetched it's reused across
-    every rerun (fragment refresh, button click, capital box change).
-    Only NEW symbols (not yet cached) trigger a fresh Dhan API call.
+    Cache priority (fastest to slowest):
+      1. session_state margin_cache  — same session, instant
+      2. Supabase intraday_margin    — persists across page refreshes
+      3. Dhan Margin API             — only for new stocks not in above
 
     Args:
         df (pd.DataFrame): Must have 'Symbol' and 'Price' columns
@@ -504,17 +542,30 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
 
     part_capital = total_capital / num_parts
     security_map = get_security_id_map()
+    today_str = datetime.now().date().isoformat()
 
+    # ── Step 1: Supabase se aaj ki date ka saara margin ek call mein fetch karo ──
+    # Sirf tab fetch karo jab session cache mein koi bhi symbol missing ho
+    symbols_in_df = [str(r.get("Symbol", "")).strip().upper() for _, r in df.iterrows()]
+    missing_from_session = [s for s in symbols_in_df if s not in st.session_state['margin_cache']]
+
+    if missing_from_session:
+        sb_margins = _supabase_fetch_all_margins(today_str)
+        for sym, margin_val in sb_margins.items():
+            if sym not in st.session_state['margin_cache']:
+                st.session_state['margin_cache'][sym] = margin_val
+
+    # ── Step 2: Qty calculate karo — Dhan API sirf truly missing stocks ke liye ──
     max_qty_list = []
     for _, row in df.iterrows():
         symbol = str(row.get("Symbol", "")).strip().upper()
         price = row.get("Price", 0)
 
-        # Reuse cached margin if we already fetched it this session —
-        # avoids re-calling Dhan's Margin API on every rerun/button-click.
+        # Priority 1: session cache (instant)
         if symbol in st.session_state['margin_cache']:
             margin_per_share = st.session_state['margin_cache'][symbol]
         else:
+            # Priority 2: Dhan API (symbol not in session or Supabase)
             security_id = security_map.get(symbol)
             if not security_id:
                 _log_symbol_debug(symbol, security_id=None, margin_error="Symbol not found in Dhan instrument master")
@@ -530,7 +581,10 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
             _log_symbol_debug(symbol, security_id=security_id, margin_error=error, margin_value=margin_per_share)
 
             if margin_per_share is not None and margin_per_share > 0:
+                # Session cache mein save karo
                 st.session_state['margin_cache'][symbol] = margin_per_share
+                # Supabase mein bhi save karo — next refresh pe no API call
+                _supabase_save_margin(symbol, today_str, margin_per_share)
 
         if margin_per_share is None or margin_per_share <= 0:
             max_qty_list.append(0)
