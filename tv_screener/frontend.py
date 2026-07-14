@@ -266,26 +266,35 @@ def fmt_max_qty(qty):
 # SECTION: FORMATTING HELPERS — % SINCE SIGNAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fmt_pct_since_signal(pct):
+def fmt_pct_since_signal(signal_price, pct):
     """
-    Format the live "% moved since this stock's signal was first detected"
-    value, color-coded (green = up since signal, red = down since signal).
+    Format Signal Price + live "% moved since signal" together in one cell
+    (two-line style, matching fmt_poc_gap/fmt_prev_high pattern).
 
     Args:
+        signal_price (float): Price captured when this stock's signal was
+                              first detected, or None if not available
         pct (float): % change since signal_price, or None if not available
 
     Returns:
-        str: HTML-formatted percentage
+        str: HTML-formatted combined cell
     """
-    if pct is None:
+    if signal_price is None:
         return '<span style="color:#9ca3af;">—</span>'
+
+    price_str = f"₹{float(signal_price):,.2f}"
+
+    if pct is None:
+        return f'<div style="font-size:12px;">{price_str}</div>'
+
     if pct >= 0:
         color = "#16a34a"
         sign = "+"
     else:
         color = "#dc2626"
         sign = ""
-    return f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
+    pct_str = f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
+    return f'<div style="font-size:12px;font-weight:500;">{price_str}</div><div style="font-size:11px;">{pct_str}</div>'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE RENDERING
@@ -317,6 +326,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         poc    = row.get("POC", None)
         gappct = row.get("GapPct", None)
         pct_since_signal = row.get("PctSinceSignal", None)
+        signal_price_val = row.get("SignalPrice", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
         crossover = row.get("Crossover", "")
@@ -345,7 +355,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
             <td style="{TD}">{fmt_volume(vol)}</td>
             <td style="{TD}">{fmt_relvol(relvol)}</td>
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
-            <td style="{TD}">{fmt_pct_since_signal(pct_since_signal)}</td>
+            <td style="{TD}">{fmt_pct_since_signal(signal_price_val, pct_since_signal)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_crossover(crossover)}</td>
@@ -390,7 +400,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH}">Volume</th>
           <th style="{TH}">Rel Vol</th>
           <th style="{TH}">POC / Gap</th>
-          <th style="{TH}">% Since Signal</th>
+          <th style="{TH}">Signal Price / % Chg</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">Crossover</th>
