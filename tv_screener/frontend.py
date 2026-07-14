@@ -17,19 +17,16 @@ def display_order_result(symbol, result, max_inline_length=100):
     Show order placement result cleanly:
       - Success: short green message with order ID
       - Failure: try to extract a clean human-readable error (Dhan/AlgoMojo
-        errors are usually JSON with an 'errorMessage'/'message' field) for
-        the inline message. ALWAYS also show an expander with the full raw
-        error (payload sent, exact response) — even when the clean message
-        is short — since order-placement issues need full traceability for
-        debugging (a short-looking error like "Invalid SecurityId" can hide
-        a payload-level problem that's only visible in the raw details).
+        errors are usually JSON with an 'errorMessage'/'message' field).
+        If the clean message is short, show it inline. If it's still long
+        (or extraction failed), show a short summary inline + full raw
+        error in a collapsed expander — instead of dumping everything
+        into one long red message box.
 
     Args:
         symbol (str): Stock symbol (for the message prefix)
         result (dict): {"success": bool, "order_id": str, "error": str}
-        max_inline_length (int): Kept for backward compatibility, no longer
-                                 used to decide whether to show the expander
-                                 (expander now always shows on failure).
+        max_inline_length (int): Threshold above which details move to expander
     """
     if result.get('success'):
         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
@@ -48,10 +45,12 @@ def display_order_result(symbol, result, max_inline_length=100):
     except Exception:
         pass
 
-    display_msg = clean_msg if len(clean_msg) <= max_inline_length else clean_msg[:max_inline_length] + "..."
-    st.error(f"❌ {symbol}: {display_msg}")
-    with st.expander(f"🔍 Show full error details ({symbol})"):
-        st.code(raw_error)
+    if len(clean_msg) <= max_inline_length:
+        st.error(f"❌ {symbol}: {clean_msg}")
+    else:
+        st.error(f"❌ {symbol}: {clean_msg[:max_inline_length]}...")
+        with st.expander("Show full error details"):
+            st.code(raw_error)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE STYLING CONSTANTS
@@ -267,35 +266,26 @@ def fmt_max_qty(qty):
 # SECTION: FORMATTING HELPERS — % SINCE SIGNAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fmt_pct_since_signal(signal_price, pct):
+def fmt_pct_since_signal(pct):
     """
-    Format Signal Price + live "% moved since signal" together in one cell
-    (two-line style, matching fmt_poc_gap/fmt_prev_high pattern).
+    Format the live "% moved since this stock's signal was first detected"
+    value, color-coded (green = up since signal, red = down since signal).
 
     Args:
-        signal_price (float): Price captured when this stock's signal was
-                              first detected, or None if not available
         pct (float): % change since signal_price, or None if not available
 
     Returns:
-        str: HTML-formatted combined cell
+        str: HTML-formatted percentage
     """
-    if signal_price is None:
-        return '<span style="color:#9ca3af;">—</span>'
-
-    price_str = f"₹{float(signal_price):,.2f}"
-
     if pct is None:
-        return f'<div style="font-size:12px;">{price_str}</div>'
-
+        return '<span style="color:#9ca3af;">—</span>'
     if pct >= 0:
         color = "#16a34a"
         sign = "+"
     else:
         color = "#dc2626"
         sign = ""
-    pct_str = f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
-    return f'<div style="font-size:12px;font-weight:500;">{price_str}</div><div style="font-size:11px;">{pct_str}</div>'
+    return f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE RENDERING
@@ -327,7 +317,6 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
         poc    = row.get("POC", None)
         gappct = row.get("GapPct", None)
         pct_since_signal = row.get("PctSinceSignal", None)
-        signal_price_val = row.get("SignalPrice", None)
         prevhd = row.get("PrevHighDist", None)
         prevhv = row.get("PrevHighVal", None)
         crossover = row.get("Crossover", "")
@@ -356,7 +345,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
             <td style="{TD}">{fmt_volume(vol)}</td>
             <td style="{TD}">{fmt_relvol(relvol)}</td>
             <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
-            <td style="{TD}">{fmt_pct_since_signal(signal_price_val, pct_since_signal)}</td>
+            <td style="{TD}">{fmt_pct_since_signal(pct_since_signal)}</td>
             <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
             <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
             <td style="{TD}">{fmt_crossover(crossover)}</td>
@@ -401,7 +390,7 @@ def render_stock_table(df, height_per_row=52, extra_height=60):
           <th style="{TH}">Volume</th>
           <th style="{TH}">Rel Vol</th>
           <th style="{TH}">POC / Gap</th>
-          <th style="{TH}">Signal Price / % Chg</th>
+          <th style="{TH}">% Since Signal</th>
           <th style="{TH}">Entry Signal</th>
           <th style="{TH}">Prev High</th>
           <th style="{TH}">Crossover</th>
