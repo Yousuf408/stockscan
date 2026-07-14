@@ -239,36 +239,40 @@ def screener_fragment():
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun(scope="fragment")
 
-    # ── ROW 2: Top20 | ORB Rule1 | ORB Rule2 | AMO ──
-    chk1, chk2, chk3, chk4 = st.columns([1.5, 1.5, 1.5, 4])
-    with chk1:
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
         top20_lock_mode = st.checkbox(
             "🔒 Top-20 till 9:35",
             value=False,
             key="top20_lock_checkbox",
             help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
         )
-    with chk2:
+    with c2:
         orb_rule1_enabled = st.checkbox(
             "🎯 9:20 in 9:15 range",
             value=False,
             key="orb_rule1_checkbox",
             help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
         )
-    with chk3:
+    with c3:
         orb_rule2_enabled = st.checkbox(
             "🚀 9:35 > 9:15 high",
             value=False,
             key="orb_rule2_checkbox",
             help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
-    with chk4:
+    with c4:
         amo_test_mode = st.checkbox(
             "🌙 After Market Order",
             value=False,
             key="amo_mode_checkbox",
             help="AMO mode: order queues for next market open instead of rejecting. Use to test outside market hours."
         )
+
+    # ── STEP 11.5: MAX QUANTITY ──
+    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+    df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+
 
     # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
@@ -480,40 +484,41 @@ def screener_fragment():
                 st.info("Koi stock selected ORB condition pass nahi kar raha abhi.")
                 return
 
-    # ── STEP 11: STATS PILLS ROW ──
+    # ── STEP 11: STATS PILLS + CHECKBOXES IN SAME ROW ──
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    st.markdown(f"""
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
-            <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
-            <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
-            <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
-        </div>
-        <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
-            <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
-        </div>
-        <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
-            <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    stats_col, chk_col = st.columns([5, 5])
 
-    # (Row 2 checkboxes rendered above after Row 1)
+    with stats_col:
+        st.markdown(f"""
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
+                <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
+                <div style="font-size:14px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
+                <div style="font-size:14px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
+            </div>
+            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
+                <div style="font-size:13px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
+            </div>
+            <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
+                <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ── STEP 11.5: MAX QUANTITY ──
+    # (checkboxes already defined above, used in logic)
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
         df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
