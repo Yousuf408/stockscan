@@ -133,9 +133,17 @@ def get_all_candle_signals(symbol):
     in ONE yfinance call instead of three separate calls (3x speedup).
 
     Returns:
-        dict: {"09:40": "green"/"", "09:45": "green"/"", "09:50": "green"/""}
+        dict: {
+            "09:40": {"signal": "green"/"", "body_pct": 82.3},
+            "09:45": {"signal": "green"/"", "body_pct": 45.1},
+            "09:50": {"signal": "green"/"", "body_pct": 0},
+        }
     """
-    result = {"09:40": "", "09:45": "", "09:50": ""}
+    result = {
+        "09:40": {"signal": "", "body_pct": 0},
+        "09:45": {"signal": "", "body_pct": 0},
+        "09:50": {"signal": "", "body_pct": 0},
+    }
     try:
         today = datetime.now(IST).date()
         ticker = symbol + ".NS"
@@ -154,9 +162,18 @@ def get_all_candle_signals(symbol):
             if df_candle.empty:
                 continue
             row = df_candle.iloc[0]
-            open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
+            open_  = float(row['Open'].values[0]  if hasattr(row['Open'],  'values') else row['Open'])
             close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
-            result[candle_time_str] = "green" if close_ > open_ else ""
+            high_  = float(row['High'].values[0]  if hasattr(row['High'],  'values') else row['High'])
+            low_   = float(row['Low'].values[0]   if hasattr(row['Low'],   'values') else row['Low'])
+
+            candle_range = high_ - low_
+            body_pct = round(abs(close_ - open_) / candle_range * 100, 1) if candle_range > 0 else 0
+
+            result[candle_time_str] = {
+                "signal":   "green" if close_ > open_ else "",
+                "body_pct": body_pct,
+            }
         return result
     except:
         return result
