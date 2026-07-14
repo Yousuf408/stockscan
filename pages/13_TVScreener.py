@@ -235,6 +235,37 @@ def screener_fragment():
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun(scope="fragment")
 
+    # ── ROW 2: Top20 | ORB Rule1 | ORB Rule2 | AMO ──
+    chk1, chk2, chk3, chk4 = st.columns([1.5, 1.5, 1.5, 4])
+    with chk1:
+        top20_lock_mode = st.checkbox(
+            "🔒 Top-20 till 9:35",
+            value=False,
+            key="top20_lock_checkbox",
+            help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
+        )
+    with chk2:
+        orb_rule1_enabled = st.checkbox(
+            "🎯 9:20 in 9:15 range",
+            value=False,
+            key="orb_rule1_checkbox",
+            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
+        )
+    with chk3:
+        orb_rule2_enabled = st.checkbox(
+            "🚀 9:35 > 9:15 high",
+            value=False,
+            key="orb_rule2_checkbox",
+            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
+        )
+    with chk4:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+            value=False,
+            key="amo_mode_checkbox",
+            help="Enable this to test order placement when market is closed."
+        )
+
     # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
         df = df[df['Crossover'] == "09:15"]
@@ -476,36 +507,7 @@ def screener_fragment():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── ROW 2: Top20 | ORB Rule1 | ORB Rule2 | AMO — next to stats ──
-    chk1, chk2, chk3, chk4 = st.columns([1.5, 1.5, 1.5, 4])
-    with chk1:
-        top20_lock_mode = st.checkbox(
-            "🔒 Top-20 till 9:35",
-            value=False,
-            key="top20_lock_checkbox",
-            help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
-        )
-    with chk2:
-        orb_rule1_enabled = st.checkbox(
-            "🎯 9:20 in 9:15 range",
-            value=False,
-            key="orb_rule1_checkbox",
-            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
-        )
-    with chk3:
-        orb_rule2_enabled = st.checkbox(
-            "🚀 9:35 > 9:15 high",
-            value=False,
-            key="orb_rule2_checkbox",
-            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
-        )
-    with chk4:
-        amo_test_mode = st.checkbox(
-            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
-            value=False,
-            key="amo_mode_checkbox",
-            help="Enable this to test order placement when market is closed."
-        )
+    # (Row 2 checkboxes rendered above after Row 1)
 
     # ── STEP 11.5: MAX QUANTITY ──
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
