@@ -79,6 +79,22 @@ st.number_input(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION: DHAN ACCESS TOKEN INPUT (optional manual override — no code
+# edit/redeploy needed. Session-only, NOT saved anywhere permanent.
+# Priority: this box > hardcoded DHAN_MANUAL_ACCESS_TOKEN > automatic TOTP.
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.expander("🔑 Dhan Access Token (optional manual override)"):
+    st.text_input(
+        "Paste a fresh Dhan access token here",
+        type="password",
+        key="user_manual_access_token",
+        help="Agar khali chhodo, app automatically TOTP se token generate karega (default behavior). "
+             "Sirf tab bharo jab TOTP fail/locked ho aur turant test karna ho — session-only hai, "
+             "kahin save nahi hota, refresh pe khali ho jayega."
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -494,7 +510,7 @@ def screener_fragment():
         """, unsafe_allow_html=True)
 
     with c2:
-        selected_sector = st.selectbox("", sectors, index=0, label_visibility="collapsed")
+        selected_sector = st.selectbox("Sector", sectors, index=0, label_visibility="collapsed")
 
     with c3:
         if st.button("🔄 Refresh", use_container_width=True):
