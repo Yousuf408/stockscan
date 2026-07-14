@@ -67,22 +67,6 @@ init_session_caches()
 if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION: TOKEN POPOVER ONLY (outside fragment — password input)
-# Capital input moved inside fragment so it sits in the same row as filters
-# ─────────────────────────────────────────────────────────────────────────────
-
-_, token_col = st.columns([9, 1])
-with token_col:
-    with st.popover("🔑", use_container_width=True, help="Dhan Access Token (optional manual override)"):
-        st.text_input(
-            "Paste a fresh Dhan access token here",
-            type="password",
-            key="user_manual_access_token",
-            help="Agar khali chhodo, app automatically TOTP se token generate karega (default behavior). "
-                 "Sirf tab bharo jab TOTP fail/locked ho aur turant test karna ho — session-only hai, "
-                 "kahin save nahi hota, refresh pe khali ho jayega."
-        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
@@ -204,10 +188,10 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: ALL CONTROLS IN ONE ROW ──
-    # Capital ₹ | Crossover Filter | Sector | Top20 checkbox | ORB checkboxes
-    # ─────────────────────────────────────────────────────────────────────────
-    r1, r2, r3, r4, r5, r6 = st.columns([2, 2, 2, 1.5, 1.5, 1.5])
+    # ── STEP 6: ROW 1 — Capital | Crossover | Sector | 🔑 Key | Refresh ──
+    sectors_early = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
+
+    r1, r2, r3, r4, r5 = st.columns([2.5, 2.5, 2.5, 0.6, 1.2])
 
     with r1:
         st.number_input(
@@ -226,16 +210,7 @@ def screener_fragment():
             key="crossover_filter_select"
         )
 
-    # Sector options built after data is ready — placeholder for now,
-    # will be populated after STEP 11 computes sectors
-    # We render it here but apply filter after sectors list is built below
-    sectors_placeholder = ['All']  # will be overridden after STEP 11
-
     with r3:
-        # Sector selectbox — options updated each fragment run after df is known
-        # We pre-build sectors from current df (pre-crossover-filter),
-        # final filter applied after crossover filter below
-        sectors_early = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
         selected_sector = st.selectbox(
             "Sector",
             sectors_early,
@@ -244,28 +219,21 @@ def screener_fragment():
         )
 
     with r4:
-        top20_lock_mode = st.checkbox(
-            "🔒 Top-20 till 9:35",
-            value=False,
-            key="top20_lock_checkbox",
-            help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
-        )
+        st.write("")
+        with st.popover("🔑", use_container_width=True, help="Dhan Access Token (optional manual override)"):
+            st.text_input(
+                "Paste a fresh Dhan access token here",
+                type="password",
+                key="user_manual_access_token",
+                help="Agar khali chhodo, app automatically TOTP se token generate karega (default behavior). "
+                     "Sirf tab bharo jab TOTP fail/locked ho aur turant test karna ho — session-only hai, "
+                     "kahin save nahi hota, refresh pe khali ho jayega."
+            )
 
     with r5:
-        orb_rule1_enabled = st.checkbox(
-            "🎯 9:20 in 9:15 range",
-            value=False,
-            key="orb_rule1_checkbox",
-            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
-        )
-
-    with r6:
-        orb_rule2_enabled = st.checkbox(
-            "🚀 9:35 > 9:15 high",
-            value=False,
-            key="orb_rule2_checkbox",
-            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
-        )
+        st.write("")
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun(scope="fragment")
 
     # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
@@ -477,53 +445,74 @@ def screener_fragment():
                 st.info("Koi stock selected ORB condition pass nahi kar raha abhi.")
                 return
 
-    # ── STEP 11: HEADER DISPLAY ──
+    # ── STEP 11: STATS PILLS ROW ──
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    c1, c2 = st.columns([8, 2])
-    with c1:
-        st.markdown(f"""
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
-                <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
-            </div>
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
-                <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
-            </div>
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
-                <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
-            </div>
-            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
-                <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
-            </div>
-            <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
-                <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
-            </div>
+    st.markdown(f"""
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
+            <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
+            <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
         </div>
-        """, unsafe_allow_html=True)
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
+            <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
+            <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
+        </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
+            <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
+            <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
+        </div>
+        <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
+            <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
+            <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
+        </div>
+        <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
+            <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
+            <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with c2:
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.rerun(scope="fragment")
+    # ── ROW 2: Top20 | ORB Rule1 | ORB Rule2 | AMO — next to stats ──
+    chk1, chk2, chk3, chk4 = st.columns([1.5, 1.5, 1.5, 4])
+    with chk1:
+        top20_lock_mode = st.checkbox(
+            "🔒 Top-20 till 9:35",
+            value=False,
+            key="top20_lock_checkbox",
+            help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
+        )
+    with chk2:
+        orb_rule1_enabled = st.checkbox(
+            "🎯 9:20 in 9:15 range",
+            value=False,
+            key="orb_rule1_checkbox",
+            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
+        )
+    with chk3:
+        orb_rule2_enabled = st.checkbox(
+            "🚀 9:35 > 9:15 high",
+            value=False,
+            key="orb_rule2_checkbox",
+            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
+        )
+    with chk4:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+            value=False,
+            key="amo_mode_checkbox",
+            help="Enable this to test order placement when market is closed."
+        )
 
     # ── STEP 11.5: MAX QUANTITY ──
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
         df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
     # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
-    amo_test_mode = st.checkbox(
-        "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
-        value=False,
-        help="Enable this to test order placement when market is closed."
-    )
+    # amo_test_mode already set in Row 2 checkboxes above
 
     col_table, col_buttons = st.columns([8.5, 1.5])
 
