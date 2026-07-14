@@ -47,7 +47,7 @@ from tv_screener.backend import (
     get_last_trading_day, get_current_ist_time, is_market_hours,
     get_all_candle_signals, get_5day_median_volume,
     calc_prev_high_dist, get_prev_high_val,
-    check_orb_filter                          # NEW: ORB filter
+    check_orb_filter
 )
 from tv_screener.database import (
     get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
@@ -68,22 +68,12 @@ if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION: CAPITAL INPUT
+# SECTION: TOKEN POPOVER ONLY (outside fragment — password input)
+# Capital input moved inside fragment so it sits in the same row as filters
 # ─────────────────────────────────────────────────────────────────────────────
 
-cap_col, token_col = st.columns([9, 1])
-
-with cap_col:
-    st.number_input(
-        "💰 Total Capital (₹)",
-        min_value=0.0,
-        step=1000.0,
-        key="user_capital",
-        help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
-    )
-
+_, token_col = st.columns([9, 1])
 with token_col:
-    st.write("")
     with st.popover("🔑", use_container_width=True, help="Dhan Access Token (optional manual override)"):
         st.text_input(
             "Paste a fresh Dhan access token here",
@@ -184,7 +174,7 @@ def screener_fragment():
         result = get_crossover_signal(symbol, poc_val)
         return symbol, result
 
-    NO_MATCH_CUTOFF_HHMM = 9 * 60 + 25  # 9:25 AM IST
+    NO_MATCH_CUTOFF_HHMM = 9 * 60 + 25
 
     crossover_symbols_to_check = []
     if is_market_hours():
@@ -214,30 +204,62 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: ALL FILTERS IN ONE ROW ──
-    f1, f2, f3, f4 = st.columns([2, 1.5, 1.5, 1.5])
-    with f1:
+    # ── STEP 6: ALL CONTROLS IN ONE ROW ──
+    # Capital ₹ | Crossover Filter | Sector | Top20 checkbox | ORB checkboxes
+    # ─────────────────────────────────────────────────────────────────────────
+    r1, r2, r3, r4, r5, r6 = st.columns([2, 2, 2, 1.5, 1.5, 1.5])
+
+    with r1:
+        st.number_input(
+            "💰 Capital (₹)",
+            min_value=0.0,
+            step=1000.0,
+            key="user_capital",
+            help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
+        )
+
+    with r2:
         crossover_filter_option = st.selectbox(
             "Crossover Filter",
             ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
             index=0,
             key="crossover_filter_select"
         )
-    with f2:
+
+    # Sector options built after data is ready — placeholder for now,
+    # will be populated after STEP 11 computes sectors
+    # We render it here but apply filter after sectors list is built below
+    sectors_placeholder = ['All']  # will be overridden after STEP 11
+
+    with r3:
+        # Sector selectbox — options updated each fragment run after df is known
+        # We pre-build sectors from current df (pre-crossover-filter),
+        # final filter applied after crossover filter below
+        sectors_early = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
+        selected_sector = st.selectbox(
+            "Sector",
+            sectors_early,
+            index=0,
+            key="sector_select"
+        )
+
+    with r4:
         top20_lock_mode = st.checkbox(
             "🔒 Top-20 till 9:35",
             value=False,
             key="top20_lock_checkbox",
             help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
         )
-    with f3:
+
+    with r5:
         orb_rule1_enabled = st.checkbox(
             "🎯 9:20 in 9:15 range",
             value=False,
             key="orb_rule1_checkbox",
             help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
         )
-    with f4:
+
+    with r6:
         orb_rule2_enabled = st.checkbox(
             "🚀 9:35 > 9:15 high",
             value=False,
@@ -245,14 +267,20 @@ def screener_fragment():
             help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
 
+    # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
         df = df[df['Crossover'] == "09:15"]
     elif crossover_filter_option == "09:20 only":
         df = df[df['Crossover'] == "09:20"]
     elif crossover_filter_option == "All (09:15 + 09:20)":
         df = df[df['Crossover'].isin(["09:15", "09:20"])]
-    # else "All (No Filter)" — df as-is, koi filter nahi
+    # else "All (No Filter)" — df as-is
 
+    # ── APPLY SECTOR FILTER ──
+    if selected_sector != 'All':
+        df = df[df['Sector'] == selected_sector]
+
+    # ── APPLY TOP20 LOCK ──
     if top20_lock_mode:
         TOP20_WINDOW_END_HHMM = 9 * 60 + 35
         now_hhmm_lock = get_current_ist_time().hour * 60 + get_current_ist_time().minute
@@ -371,7 +399,6 @@ def screener_fragment():
         st.session_state['candle_cache'] = {}
 
     def get_candle_cached(symbol, candle_time, should_show):
-        """Returns dict {"signal": "green"/"", "body_pct": float} or empty dict."""
         if not should_show:
             return {"signal": "", "body_pct": 0}
         key = f"{symbol}_{candle_time}"
@@ -408,22 +435,8 @@ def screener_fragment():
     df['c945'] = c945_list
     df['c950'] = c950_list
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STEP 10B: ORB FILTER (2 independent optional checkboxes)
-    #
-    # Checkbox 1: 9:20 close within 9:15 range (consolidation check)
-    #             Data available after 9:25 IST
-    # Checkbox 2: 9:35 close > 9:15 high (breakout confirmation)
-    #             9:35 candle data available after 9:40 IST (yfinance 5-min)
-    #
-    # Uses session cache — once checked, result stays for the session.
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # ORB checkboxes already rendered in filter row above
-
+    # ── STEP 10B: ORB FILTER ──
     if orb_rule1_enabled or orb_rule2_enabled:
-        # Minimum time check based on which rules are enabled
-        # Rule 1 needs 9:25, Rule 2 needs 9:40
         rule1_available = now_hhmm >= (9 * 60 + 25)
         rule2_available = now_hhmm >= (9 * 60 + 40)
 
@@ -435,7 +448,6 @@ def screener_fragment():
             if 'orb_cache' not in st.session_state:
                 st.session_state['orb_cache'] = {}
 
-            # Fetch ORB result for symbols not yet checked this session
             symbols_needing_orb = [
                 s for s in df['Symbol']
                 if s not in st.session_state['orb_cache']
@@ -449,7 +461,6 @@ def screener_fragment():
                             sym = futures[future]
                             st.session_state['orb_cache'][sym] = future.result()
 
-            # Apply filter based on which checkboxes are enabled
             def orb_passes(symbol):
                 orb = st.session_state['orb_cache'].get(symbol, {})
                 if orb_rule1_enabled and orb_rule2_enabled:
@@ -467,13 +478,12 @@ def screener_fragment():
                 return
 
     # ── STEP 11: HEADER DISPLAY ──
-    sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    c1, c2, c3 = st.columns([3, 5, 2])
+    c1, c2 = st.columns([8, 2])
     with c1:
         st.markdown(f"""
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
@@ -501,14 +511,8 @@ def screener_fragment():
         """, unsafe_allow_html=True)
 
     with c2:
-        selected_sector = st.selectbox("Sector", sectors, index=0, label_visibility="collapsed")
-
-    with c3:
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun(scope="fragment")
-
-    if selected_sector != 'All':
-        df = df[df['Sector'] == selected_sector]
 
     # ── STEP 11.5: MAX QUANTITY ──
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
