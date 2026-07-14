@@ -499,13 +499,21 @@ def _supabase_fetch_all_margins(signal_date_str):
 def _supabase_save_margin(symbol, signal_date_str, margin_value):
     """
     Ek stock ka intraday_margin Supabase mein save karo (upsert).
-    signal_date aaj ki date hai — margin aaj ke liye cache ho raha hai.
+    signal_date = aaj ki date, calc_date = kal ki date (table constraint).
+    calc_date NOT NULL hai isliye dono dena zaroori hai — warna insert fail.
     Silent fail — margin save failure should never block trading.
     """
     try:
         from tv_screener.database import supabase
+        from datetime import date
+        calc_date_str = (date.fromisoformat(signal_date_str) - timedelta(days=1)).isoformat()
         supabase.table("tv_screener_cache").upsert(
-            {"symbol": symbol, "signal_date": signal_date_str, "intraday_margin": margin_value},
+            {
+                "symbol":         symbol,
+                "signal_date":    signal_date_str,
+                "calc_date":      calc_date_str,
+                "intraday_margin": margin_value,
+            },
             on_conflict="symbol,signal_date"
         ).execute()
     except Exception:
