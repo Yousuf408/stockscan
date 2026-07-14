@@ -36,6 +36,24 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 IST = pytz.timezone("Asia/Kolkata")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TIME GUARDS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_save_allowed():
+    """Supabase save only between 9:15 AM and 3:30 PM IST."""
+    now = datetime.now(IST)
+    start = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+    end   = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return start <= now <= end
+
+def is_qty_fetch_allowed():
+    """DhanHQ margin/qty fetch only between 9:15 AM and 4:00 PM IST."""
+    now = datetime.now(IST)
+    start = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+    end   = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+    return start <= now <= end
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION: IMPORTS FROM TV_SCREENER PACKAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -150,7 +168,8 @@ def screener_fragment():
                     poc_val = future.result()
                     st.session_state['poc_cache'][sym] = poc_val
                     current_price = price_lookup.get(sym)
-                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val, price=current_price)
+                    if is_save_allowed():
+                        supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val, price=current_price)
                     if sym not in st.session_state['signalprice_cache'] and current_price is not None:
                         st.session_state['signalprice_cache'][sym] = current_price
 
@@ -179,10 +198,12 @@ def screener_fragment():
                     sym, result = future.result()
                     if result in ("09:15", "09:20"):
                         st.session_state['crossover_cache'][sym] = result
-                        supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
+                        if is_save_allowed():
+                            supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
                     elif now_hhmm_check >= NO_MATCH_CUTOFF_HHMM:
                         st.session_state['crossover_cache'][sym] = "NO_MATCH"
-                        supabase_save_row(sym, signal_date, calc_date, crossover_status="NO_MATCH")
+                        if is_save_allowed():
+                            supabase_save_row(sym, signal_date, calc_date, crossover_status="NO_MATCH")
                     elif sym not in st.session_state['crossover_cache']:
                         st.session_state['crossover_cache'][sym] = ""
 
@@ -239,36 +260,46 @@ def screener_fragment():
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun(scope="fragment")
 
-    # ── ROW 2: Top20 | ORB Rule1 | ORB Rule2 | AMO ──
-    chk1, chk2, chk3, chk4 = st.columns([1.5, 1.5, 1.5, 4])
-    with chk1:
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
         top20_lock_mode = st.checkbox(
             "🔒 Top-20 till 9:35",
             value=False,
             key="top20_lock_checkbox",
             help="9:15-9:35 window mein live top-20 by Chg%. 9:35 ke baad list freeze ho jaati hai."
         )
-    with chk2:
+    with c2:
         orb_rule1_enabled = st.checkbox(
             "🎯 9:20 in 9:15 range",
             value=False,
             key="orb_rule1_checkbox",
             help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). Data 9:25 ke baad."
         )
-    with chk3:
+    with c3:
         orb_rule2_enabled = st.checkbox(
             "🚀 9:35 > 9:15 high",
             value=False,
             key="orb_rule2_checkbox",
             help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
-    with chk4:
+    with c4:
         amo_test_mode = st.checkbox(
             "🌙 After Market Order",
             value=False,
             key="amo_mode_checkbox",
             help="AMO mode: order queues for next market open instead of rejecting. Use to test outside market hours."
         )
+
+    # ── STEP 11.5: MAX QUANTITY ── (only during trading + 30min after close)
+    if is_qty_fetch_allowed():
+        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+            df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+    else:
+        # After 4 PM — use cached qty from session, default 0 if not available
+        df['MaxQty'] = df['Symbol'].map(
+            lambda s: st.session_state.get('qty_cache', {}).get(s, 0)
+        )
+
 
     # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
@@ -371,11 +402,12 @@ def screener_fragment():
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
                     st.session_state['vol5d_cache'][symbol] = vol5d_val
-                    supabase_save_row(
-                        symbol, signal_date, calc_date,
-                        prev_high_val=prevhigh_val,
-                        vol5d_median=vol5d_val,
-                    )
+                    if is_save_allowed():
+                        supabase_save_row(
+                            symbol, signal_date, calc_date,
+                            prev_high_val=prevhigh_val,
+                            vol5d_median=vol5d_val,
+                        )
 
     # ── STEP 9: RELATIVE VOLUME (5D) ──
     def calc_rel_vol_5d(row):
@@ -480,42 +512,56 @@ def screener_fragment():
                 st.info("Koi stock selected ORB condition pass nahi kar raha abhi.")
                 return
 
-    # ── STEP 11: STATS PILLS ROW ──
+    # ── STEP 11: STATS PILLS + CHECKBOXES IN SAME ROW ──
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    st.markdown(f"""
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
-            <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
-            <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
-            <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
-        </div>
-        <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
-            <div style="font-size:14px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
-        </div>
-        <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
-            <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    stats_col, chk_col = st.columns([5, 5])
 
-    # (Row 2 checkboxes rendered above after Row 1)
+    with stats_col:
+        st.markdown(f"""
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
+                <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
+                <div style="font-size:14px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
+            </div>
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
+                <div style="font-size:14px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
+            </div>
+            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">UPDATED</div>
+                <div style="font-size:13px;font-weight:700;color:#ca8a04;line-height:1.2;">{now_time}</div>
+            </div>
+            <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 10px;text-align:center;">
+                <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
+                <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{last_day.strftime('%d %b')}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ── STEP 11.5: MAX QUANTITY ──
-    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+    # (checkboxes already defined above, used in logic)
+    if is_qty_fetch_allowed():
+        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+            df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+        # Cache qty for post-4PM use
+        if 'qty_cache' not in st.session_state:
+            st.session_state['qty_cache'] = {}
+        for _, row in df.iterrows():
+            st.session_state['qty_cache'][row['Symbol']] = row.get('MaxQty', 0)
+    else:
+        # After 4 PM — use cached qty from session state
+        if 'qty_cache' not in st.session_state:
+            st.session_state['qty_cache'] = {}
+        df['MaxQty'] = df['Symbol'].map(
+            lambda s: st.session_state['qty_cache'].get(s, 0)
+        )
 
     # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
     # amo_test_mode already set in Row 2 checkboxes above
