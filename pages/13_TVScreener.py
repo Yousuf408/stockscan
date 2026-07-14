@@ -571,6 +571,8 @@ def screener_fragment():
         st.write("**Security map size:**", debug_info.get('security_map_size'))
         st.write("**Security map error:**", debug_info.get('security_map_error'))
         st.write("**Columns detected in Dhan CSV:**", debug_info.get('security_map_columns_found'))
+        st.write("**Duplicate symbols found (count):**", debug_info.get('duplicate_symbols_count'))
+        st.write("**Duplicate symbols sample:**", debug_info.get('duplicate_symbols_sample'))
         st.write("**Per-symbol results:**")
         st.json(debug_info.get('per_symbol', {}))
 
