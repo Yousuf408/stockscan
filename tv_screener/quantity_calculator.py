@@ -257,16 +257,13 @@ def get_security_id_map():
 
         df = pd.read_csv(io.StringIO(response.text), low_memory=False)
 
-        # Column names can vary slightly across Dhan CSV versions. IMPORTANT:
-        # must check candidates in EXPLICIT priority order (SYMBOL_NAME
-        # first), NOT just scan df.columns left-to-right — because Dhan's
-        # actual CSV has UNDERLYING_SYMBOL appearing BEFORE SYMBOL_NAME in
-        # column order, and a naive `next()` over df.columns would match
-        # UNDERLYING_SYMBOL first (wrong — that's for F&O underlying refs,
-        # not the equity's own trading symbol), silently giving wrong/stale
-        # security_ids for edge-case symbols where the two values differ.
+        # CORRECTED: UNDERLYING_SYMBOL is confirmed (via Dhan tooling docs)
+        # to hold the PLAIN trading symbol for equity-cash rows (e.g.
+        # "RELIANCE", "TCS") — NOT SYMBOL_NAME, which holds a different
+        # (longer/company-name style) format that doesn't match TradingView
+        # symbols. Priority: UNDERLYING_SYMBOL first for equities.
         symbol_col = None
-        for candidate_name in ("SYMBOL_NAME", "TRADING_SYMBOL", "UNDERLYING_SYMBOL"):
+        for candidate_name in ("UNDERLYING_SYMBOL", "TRADING_SYMBOL", "SYMBOL_NAME"):
             match = next((c for c in df.columns if c.upper() == candidate_name), None)
             if match:
                 symbol_col = match
@@ -278,6 +275,8 @@ def get_security_id_map():
         security_id_col = next((c for c in df.columns if c.upper() == "SECURITY_ID"), None)
         if not security_id_col:
             security_id_col = next((c for c in df.columns if "SECURITY_ID" in c.upper()), None)
+
+        series_col = next((c for c in df.columns if c.upper() == "SERIES"), None)
         exch_col = next((c for c in df.columns if c.upper() in ("SEM_EXM_EXCH_ID", "EXCH_ID")), None)
         segment_col = next((c for c in df.columns if c.upper() == "SEGMENT"), None)
         instrument_col = next((c for c in df.columns if "INSTRUMENT" in c.upper() and "EXCH" not in c.upper() and "UNDERLYING" not in c.upper()), None)
@@ -306,11 +305,36 @@ def get_security_id_map():
             filtered = filtered[filtered[instrument_col].astype(str).str.upper().isin(["EQUITY", "ES"])]
 
         security_map = {}
+        symbol_series_seen = {}  # symbol -> series value of the currently-stored entry
+        duplicate_symbols = {}   # symbol -> list of all (security_id, series) candidates seen
+
         for _, row in filtered.iterrows():
             sym = str(row[symbol_col]).strip().upper()
             sec_id = str(row[security_id_col]).strip()
-            if sym and sec_id and sym not in security_map:
+            series_val = str(row[series_col]).strip().upper() if series_col else None
+            if not sym or not sec_id:
+                continue
+
+            if sym not in security_map:
                 security_map[sym] = sec_id
+                symbol_series_seen[sym] = series_val
+                if series_col:
+                    duplicate_symbols[sym] = [(sec_id, series_val)]
+            else:
+                # Duplicate symbol found — track it, and prefer "EQ" series
+                # (standard equity series) over whatever we already stored,
+                # since duplicates are usually EQ vs some other series/type.
+                if series_col:
+                    duplicate_symbols.setdefault(sym, []).append((sec_id, series_val))
+                    if series_val == "EQ" and symbol_series_seen.get(sym) != "EQ":
+                        security_map[sym] = sec_id
+                        symbol_series_seen[sym] = series_val
+
+        # Only keep symbols that actually had duplicates, capped to a
+        # reasonable sample size for the debug view
+        duplicate_symbols = {k: v for k, v in duplicate_symbols.items() if len(v) > 1}
+        _log_debug('duplicate_symbols_sample', dict(list(duplicate_symbols.items())[:30]))
+        _log_debug('duplicate_symbols_count', len(duplicate_symbols))
 
         _log_debug('security_map_size', len(security_map))
         if len(security_map) == 0:
