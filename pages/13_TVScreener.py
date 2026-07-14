@@ -28,23 +28,22 @@ sidebar_brand("TVScreener")
 st.markdown("""
 <style>
 /* Tighten page padding */
-.block-container { padding-top: 0.3rem !important; padding-bottom: 0.5rem !important; }
-
-/* Tighten selectbox & button spacing */
+.block-container { padding-top: 3.5rem !important; padding-bottom: 0.5rem !important; }
+header[data-testid="stHeader"] { display:none !important; }
 div[data-testid="stSelectbox"] { margin-top: 0 !important; margin-bottom: 0 !important; }
 div[data-testid="stButton"] button { padding: 4px 12px !important; font-size: 12px !important; height: 32px !important; }
 div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
-
-/* ── OS TITLEBAR ── */
+/* ── OS TITLEBAR — FIXED AT TOP ── */
 .ts-titlebar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 9999;
     background: #ffffff;
     border-bottom: 1px solid #e2e6ed;
-    padding: 7px 4px;
+    padding: 7px 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 2px;
-    margin-top: -4px;
 }
 .ts-logo {
     font-size: 12px;
