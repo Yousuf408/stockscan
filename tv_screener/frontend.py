@@ -17,16 +17,19 @@ def display_order_result(symbol, result, max_inline_length=100):
     Show order placement result cleanly:
       - Success: short green message with order ID
       - Failure: try to extract a clean human-readable error (Dhan/AlgoMojo
-        errors are usually JSON with an 'errorMessage'/'message' field).
-        If the clean message is short, show it inline. If it's still long
-        (or extraction failed), show a short summary inline + full raw
-        error in a collapsed expander — instead of dumping everything
-        into one long red message box.
+        errors are usually JSON with an 'errorMessage'/'message' field) for
+        the inline message. ALWAYS also show an expander with the full raw
+        error (payload sent, exact response) — even when the clean message
+        is short — since order-placement issues need full traceability for
+        debugging (a short-looking error like "Invalid SecurityId" can hide
+        a payload-level problem that's only visible in the raw details).
 
     Args:
         symbol (str): Stock symbol (for the message prefix)
         result (dict): {"success": bool, "order_id": str, "error": str}
-        max_inline_length (int): Threshold above which details move to expander
+        max_inline_length (int): Kept for backward compatibility, no longer
+                                 used to decide whether to show the expander
+                                 (expander now always shows on failure).
     """
     if result.get('success'):
         st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
@@ -45,12 +48,10 @@ def display_order_result(symbol, result, max_inline_length=100):
     except Exception:
         pass
 
-    if len(clean_msg) <= max_inline_length:
-        st.error(f"❌ {symbol}: {clean_msg}")
-    else:
-        st.error(f"❌ {symbol}: {clean_msg[:max_inline_length]}...")
-        with st.expander("Show full error details"):
-            st.code(raw_error)
+    display_msg = clean_msg if len(clean_msg) <= max_inline_length else clean_msg[:max_inline_length] + "..."
+    st.error(f"❌ {symbol}: {display_msg}")
+    with st.expander(f"🔍 Show full error details ({symbol})"):
+        st.code(raw_error)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE STYLING CONSTANTS
