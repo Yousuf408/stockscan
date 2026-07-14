@@ -41,7 +41,7 @@ DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ T
 # "Generate new Access Token" button here to bypass the TOTP flow entirely
 # while it's rate-limited. Leave as "" to use automatic TOTP generation.
 # This token is valid for 24 hours from when you generate it on Dhan Web.
-DHAN_MANUAL_ACCESS_TOKEN = ""
+DHAN_MANUAL_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJwX2lwIjoiMTUxLjI0Mi4xNzguMTQ5Iiwic19pcCI6IiIsImlzcyI6ImRoYW4iLCJwYXJ0bmVySWQiOiIiLCJleHAiOjE3ODQwNzcyNjcsImlhdCI6MTc4Mzk5MDg2NywidG9rZW5Db25zdW1lclR5cGUiOiJTRUxGIiwid2ViaG9va1VybCI6Imh0dHBzOi8vc21hcnR0cmFkZXIuc3RyZWFtbGl0LmFwcC9UVlNjcmVlbmVyIiwiZGhhbkNsaWVudElkIjoiMTEwMjMwMjc1MyJ9.dJywNjC7EpWfTBPgPKmY0b_cd6I-5TmtGli8wtBU3RV7cfWLTt2WuNEmBNZEtVIrwNddQycNRh5f0v-uI0ZPVw"
 
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
