@@ -70,29 +70,28 @@ if 'user_capital' not in st.session_state:
 # SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.number_input(
-    "💰 Total Capital (₹)",
-    min_value=0.0,
-    step=1000.0,
-    key="user_capital",
-    help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
-)
+cap_col, token_col = st.columns([9, 1])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION: DHAN ACCESS TOKEN INPUT (optional manual override — no code
-# edit/redeploy needed. Session-only, NOT saved anywhere permanent.
-# Priority: this box > hardcoded DHAN_MANUAL_ACCESS_TOKEN > automatic TOTP.
-# ─────────────────────────────────────────────────────────────────────────────
-
-with st.expander("🔑 Dhan Access Token (optional manual override)"):
-    st.text_input(
-        "Paste a fresh Dhan access token here",
-        type="password",
-        key="user_manual_access_token",
-        help="Agar khali chhodo, app automatically TOTP se token generate karega (default behavior). "
-             "Sirf tab bharo jab TOTP fail/locked ho aur turant test karna ho — session-only hai, "
-             "kahin save nahi hota, refresh pe khali ho jayega."
+with cap_col:
+    st.number_input(
+        "💰 Total Capital (₹)",
+        min_value=0.0,
+        step=1000.0,
+        key="user_capital",
+        help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
     )
+
+with token_col:
+    st.write("")  # small vertical spacer to roughly align with the input box
+    with st.popover("🔑", use_container_width=True, help="Dhan Access Token (optional manual override)"):
+        st.text_input(
+            "Paste a fresh Dhan access token here",
+            type="password",
+            key="user_manual_access_token",
+            help="Agar khali chhodo, app automatically TOTP se token generate karega (default behavior). "
+                 "Sirf tab bharo jab TOTP fail/locked ho aur turant test karna ho — session-only hai, "
+                 "kahin save nahi hota, refresh pe khali ho jayega."
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
