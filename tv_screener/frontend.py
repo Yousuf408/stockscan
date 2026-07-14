@@ -332,22 +332,32 @@ def fmt_max_qty(qty):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_pct_since_signal(signal_price, pct):
-    if signal_price is None:
+    try:
+        if signal_price is None:
+            return '<span style="color:#9ca3af;">—</span>'
+        sp = float(signal_price)
+        import math
+        if math.isnan(sp):
+            return '<span style="color:#9ca3af;">—</span>'
+        price_str = f"\u20b9{sp:,.2f}"
+        if pct is None or (isinstance(pct, float) and math.isnan(pct)):
+            return f'<div style="font-size:12px;">{price_str}</div>'
+        pct = float(pct)
+        if math.isnan(pct):
+            return f'<div style="font-size:12px;">{price_str}</div>'
+        if pct >= 0:
+            color = "#16a34a"
+            sign  = "+"
+        else:
+            color = "#dc2626"
+            sign  = ""
+        pct_str = f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
+        return (
+            f'<div style="font-size:12px;font-weight:500;">{price_str}</div>'
+            f'<div style="font-size:11px;">{pct_str}</div>'
+        )
+    except Exception:
         return '<span style="color:#9ca3af;">—</span>'
-    price_str = f"₹{float(signal_price):,.2f}"
-    if pct is None:
-        return f'<div style="font-size:12px;">{price_str}</div>'
-    if pct >= 0:
-        color = "#16a34a"
-        sign  = "+"
-    else:
-        color = "#dc2626"
-        sign  = ""
-    pct_str = f'<span style="color:{color};font-weight:600;">{sign}{pct:.2f}%</span>'
-    return (
-        f'<div style="font-size:12px;font-weight:500;">{price_str}</div>'
-        f'<div style="font-size:11px;">{pct_str}</div>'
-    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: TABLE RENDERING
