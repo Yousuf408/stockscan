@@ -1,99 +1,18 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# TV SCREENER PAGE (9_TVScreener.py)
+# Main orchestration: Fragment-based live market view + market-closed fallback
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import streamlit as st
 import pandas as pd
-import numpy as np
-import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from supabase import create_client
 
-import time
-import requests
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: PAGE CONFIGURATION & STYLES
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ─────────────────────────────────────────────────────────────
-# ALGOMOJO PRODUCTION CONFIGURATION
-# ─────────────────────────────────────────────────────────────
-# Note: Ensure these exactly match your AlgoMojo Developer Console values
-ALGOMOJO_API_KEY = "b9a4a6c79371870b9b5d34dd47b8d26b"
-ALGOMOJO_API_SECRET = "d50dbbac39c8aba0d0495205d3933c2b"
-
-# Multi-broker unified place order endpoint
-ALGOMOJO_API_URL = "https://amapi.algomojo.com/v1/PlaceOrder"
-
-def place_buy_order(symbol, quantity=1, broker="DHAN", exchange="NSE"):
-    """
-    Places a standard Delivery (CNC) Market BUY order via AlgoMojo.
-    """
-    # AlgoMojo expects root level authentication alongside the nested data wrapper
-    payload = {
-        "api_key": ALGOMOJO_API_KEY,
-        "api_secret": ALGOMOJO_API_SECRET,
-        "data": {
-            "broker": str(broker).upper(),        # e.g., "DHAN"
-            "strategy": "TV_Screener",
-            "exchange": str(exchange).upper(),    # e.g., "NSE"
-            "symbol": str(symbol).upper(),        # e.g., "RELIANCE"
-            "action": "BUY",
-            "product": "CNC",                     # Cash and Carry / Delivery
-            "pricetype": "MARKET",
-            "quantity": str(quantity),
-            "price": "0",
-            "disclosed_quantity": "0",
-            "trigger_price": "0",
-            "amo": "NO",
-            "splitorder": "NO",
-            "split_quantity": "1"
-        }
-    }
-    
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    try:
-        response = requests.post(ALGOMOJO_API_URL, json=payload, headers=headers, timeout=10)
-        
-        # Guard rail for non-200 server HTTP status codes
-        if response.status_code != 200:
-            return {
-                "success": False, 
-                "error": f"HTTP Server Error: {response.status_code}", 
-                "symbol": symbol
-            }
-            
-        result = response.json()
-        
-        # Verify both common variants of success responses from AlgoMojo endpoints
-        if result.get("status") == "success" or result.get("status") == "true":
-            # Extract order ID securely across alternative response key conventions
-            data_payload = result.get("data", {})
-            order_id = data_payload.get("orderid") or data_payload.get("order_id") or "SUCCESS_NO_ID"
-            return {"success": True, "order_id": order_id, "symbol": symbol}
-            
-        # Catch explicit API level validation errors (e.g., "invalid user API key")
-        error_reason = result.get("error_msg") or result.get("message") or "Validation Rejected"
-        return {"success": False, "error": error_reason, "symbol": symbol}
-        
-    except Exception as e:
-        return {"success": False, "error": str(e), "symbol": symbol}
-
-def place_bulk_buy_orders(symbols_list, quantity_per_stock=1):
-    """
-    Iterates through a list of stock symbols to batch order placements safely.
-    """
-    results = []
-    for symbol in symbols_list:
-        if not symbol: 
-            continue
-        res = place_buy_order(symbol, quantity_per_stock)
-        results.append(res)
-        time.sleep(0.4)  # Rate limiter to safely prevent parallel thread request blocks
-    return results
-
-# ─────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="TV Screener · TradeSentry",
     page_icon="📺",
@@ -101,9 +20,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ─────────────────────────────────────────────────────────────
-# STYLES & SIDEBAR
-# ─────────────────────────────────────────────────────────────
 from styles import apply_styles, sidebar_brand
 apply_styles()
 sidebar_brand("TVScreener")
@@ -119,853 +35,72 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# ─────────────────────────────────────────────────────────────
-# SUPABASE CLIENT — same project/keys jo Momentum/Breakout Scanner
-# mein use ho rahe hain
-# ─────────────────────────────────────────────────────────────
-SUPABASE_URL = "https://atyqkbrmrosnoczktsmm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0eXFrYnJtcm9zbm9jemt0c21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjI4ODcsImV4cCI6MjA5NjEzODg4N30.f-vn85HGFfPMUNeyJLccZSIVTKvZGXp1Ty5Hw08pFsU"
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: IMPORTS FROM TV_SCREENER PACKAGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+from tv_screener.strategy import (
+    fetch_tv_data, clean_tv_data, prepare_tv_data_for_processing,
+    get_yesterday_poc, get_crossover_signal, calc_gap_pct
+)
+from tv_screener.backend import (
+    get_last_trading_day, get_current_ist_time, is_market_hours,
+    get_all_candle_signals, get_5day_median_volume,
+    calc_prev_high_dist, get_prev_high_val
+)
+from tv_screener.database import (
+    get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
+    supabase_save_row, init_session_caches, get_supabase_stats
+)
+from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges, display_order_result
+from tv_screener.algomojo import place_buy_order
+from tv_screener.dhan_orders import place_dhan_order
+from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: SESSION STATE INITIALIZATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+init_session_caches()
+
+if 'user_capital' not in st.session_state:
+    st.session_state['user_capital'] = 100000.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: CAPITAL INPUT (auto-reflects on change, no separate update button)
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.number_input(
+    "💰 Total Capital (₹)",
+    min_value=0.0,
+    step=1000.0,
+    key="user_capital",
+    help="Capital ko 4 parts mein divide karke har stock ka Max Qty calculate hota hai (DhanHQ live margin ke hisaab se)."
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: AUTO-REFRESH FRAGMENT (MARKET OPEN MODE)
+# ─────────────────────────────────────────────────────────────────────────────
 
-@st.cache_resource
-def get_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-supabase = get_supabase()
-
-# ─────────────────────────────────────────────────────────────
-# MARKET HOURS GATE — 9:15 AM - 3:30 PM IST
-# Jaisa Momentum Scanner mein hai: naya calculation/save sirf
-# market-hours ke andar, market band hone pe poori tarah read-only.
-# ─────────────────────────────────────────────────────────────
-def is_market_hours():
-    now = datetime.now(IST)
-    market_open  = now.replace(hour=9, minute=15, second=0, microsecond=0)
-    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    return market_open <= now <= market_close
-
-# ─────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────
-def get_trading_day_before(date):
-    candidate = date - timedelta(days=1)
-    attempts = 0
-    while attempts < 10:
-        if candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-            attempts += 1
-            continue
-        try:
-            test_df = yf.download("^NSEI", start=candidate, end=candidate + timedelta(days=1),
-                                  interval="1d", progress=False, auto_adjust=True)
-            if not test_df.empty:
-                return candidate
-        except:
-            pass
-        candidate -= timedelta(days=1)
-        attempts += 1
-    candidate = date - timedelta(days=1)
-    while candidate.weekday() >= 5:
-        candidate -= timedelta(days=1)
-    return candidate
-
-def get_last_trading_day():
-    now = datetime.now(IST)
-    today = now.date()
-    # Market abhi khula nahi (9:15 AM se pehle) — toh "aaj" ko bhi
-    # "not yet trading" treat karo, ek din peeche shift karo
-    if now.hour < 9 or (now.hour == 9 and now.minute < 15):
-        today = today - timedelta(days=1)
-    tv_ref = get_trading_day_before(today + timedelta(days=1))
-    poc_date = get_trading_day_before(tv_ref)
-    return poc_date
-
-def get_current_ist_time():
-    return datetime.now(IST)
-
-# ─────────────────────────────────────────────────────────────
-# SUPABASE CACHE — read/write for tv_screener_cache table
-# Persistent version of session_state cache: (symbol + calc_date)
-# → poc/prev_high/ema/vol5d/crossover, survives across app restarts.
-# ─────────────────────────────────────────────────────────────
-def supabase_get_cached_row(symbol, calc_date):
-    """
-    Supabase se ek row fetch karo agar (symbol, calc_date) already save hai.
-    Returns dict, ya None agar nahi mila.
-    """
-    try:
-        result = (supabase.table("tv_screener_cache")
-                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
-                  .eq("symbol", symbol)
-                  .eq("calc_date", calc_date.isoformat())
-                  .limit(1)
-                  .execute())
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
-    except:
-        return None
-
-
-def supabase_get_all_for_date(calc_date):
-    """
-    Saare stocks ka data ek saath fetch karo ek calc_date ke liye —
-    market-band read-only mode mein use hota hai (poori table ek
-    hi Supabase call mein mil jati hai, per-symbol calls nahi).
-    Returns dict: {symbol: {poc_value, prev_high_val, ema_coil_pct,
-                             vol5d_median, crossover_status}, ...}
-    """
-    try:
-        result = (supabase.table("tv_screener_cache")
-                  .select("symbol, poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
-                  .eq("calc_date", calc_date.isoformat())
-                  .execute())
-        if result.data:
-            return {row['symbol']: row for row in result.data}
-        return {}
-    except:
-        return {}
-
-
-def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_val=None,
-                       ema_coil_pct=None, vol5d_median=None, crossover_status=None):
-    """
-    (symbol, calc_date) ke liye row upsert karo — agar already hai toh
-    update, warna naya insert. Ab hamesha call hoti hai (market-hours-
-    gate hata diya gaya hai), chahe market khula ho ya band.
-
-    IMPORTANT: Supabase ka upsert() poori row REPLACE karta hai un
-    columns ke liye jo payload mein missing hain (merge nahi karta
-    apne-aap) — isliye pehle EXISTING row fetch karke merge karte
-    hain, taaki partial-save se dusre fields accidentally NULL na
-    ho jayein.
-    """
-    try:
-        # Pehle existing row fetch karo (agar hai) — taaki merge kar sakein
-        existing = None
-        try:
-            result = (supabase.table("tv_screener_cache")
-                      .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status")
-                      .eq("symbol", symbol)
-                      .eq("calc_date", calc_date.isoformat())
-                      .limit(1)
-                      .execute())
-            if result.data and len(result.data) > 0:
-                existing = result.data[0]
-        except:
-            existing = None
-
-        # Merge: naya value diya gaya hai toh woh use karo, warna existing (agar hai) rakho
-        def merged(new_val, key):
-            if new_val is not None:
-                return new_val
-            if existing is not None:
-                return existing.get(key)
-            return None
-
-        payload = {
-            "symbol"          : symbol,
-            "signal_date"      : signal_date.isoformat(),
-            "calc_date"        : calc_date.isoformat(),
-            "poc_value"        : merged(poc_value, "poc_value"),
-            "prev_high_val"    : merged(prev_high_val, "prev_high_val"),
-            "ema_coil_pct"     : merged(ema_coil_pct, "ema_coil_pct"),
-            "vol5d_median"     : merged(vol5d_median, "vol5d_median"),
-            "crossover_status" : merged(crossover_status, "crossover_status"),
-        }
-
-        supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
-        if 'supabase_save_success_count' not in st.session_state:
-            st.session_state['supabase_save_success_count'] = 0
-        st.session_state['supabase_save_success_count'] += 1
-    except Exception as e:
-        if 'supabase_save_errors' not in st.session_state:
-            st.session_state['supabase_save_errors'] = []
-        st.session_state['supabase_save_errors'].append(f"{symbol}: {e}")
-        pass  # Supabase save fail ho toh bhi app chalti rahe — session cache fallback hai
-
-# ─────────────────────────────────────────────────────────────
-# POC (Point of Control) — kal ka Fixed Range Volume Profile
-# Bins-based approach: har candle ka volume price-bins mein
-# distribute karo, jis bin mein sabse zyada volume ho wahi POC
-# ─────────────────────────────────────────────────────────────
-def calculate_poc_from_df(df_day, num_bins=50):
-    price_min = df_day['Low'].min()
-    price_max = df_day['High'].max()
-    if price_max <= price_min:
-        return None
-
-    bins = np.linspace(price_min, price_max, num_bins + 1)
-    bin_volumes = np.zeros(num_bins)
-
-    for _, row in df_day.iterrows():
-        low, high, vol = row['Low'], row['High'], row['Volume']
-        if high == low:
-            idx = np.digitize(low, bins) - 1
-            idx = min(max(idx, 0), num_bins - 1)
-            bin_volumes[idx] += vol
-            continue
-        for i in range(num_bins):
-            bin_low, bin_high = bins[i], bins[i+1]
-            overlap = min(high, bin_high) - max(low, bin_low)
-            if overlap > 0:
-                proportion = overlap / (high - low)
-                bin_volumes[i] += vol * proportion
-
-    bin_centers = (bins[:-1] + bins[1:]) / 2
-    poc_idx = np.argmax(bin_volumes)
-    return round(float(bin_centers[poc_idx]), 2)
-
-
-def fetch_poc_once(symbol, num_bins=50):
-    """Ek single POC fetch attempt — kal ke poore din ka data leke."""
-    try:
-        last_day = get_last_trading_day()
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, start=last_day, end=last_day + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return None
-        df.index = pd.to_datetime(df.index)
-        df = df.between_time("09:15", "15:30")
-        if df.empty:
-            return None
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        return calculate_poc_from_df(df, num_bins=num_bins)
-    except:
-        return None
-
-
-def get_yesterday_poc(symbol, num_bins=50, max_attempts=3, tolerance_pct=0.5):
-    """
-    Retry-and-verify POC fetch — kabhi kabhi yfinance ka historical
-    data thoda shift ho jata hai fetch-to-fetch. Isliye 2 consecutive
-    fetches lete hain, agar match karein (tolerance ke andar) tabhi
-    accept karte hain — warna retry karte hain max_attempts tak.
-    """
-    prev_val = None
-    for attempt in range(max_attempts):
-        current_val = fetch_poc_once(symbol, num_bins=num_bins)
-        if current_val is None:
-            return None
-        if prev_val is not None:
-            diff_pct = abs(current_val - prev_val) / prev_val * 100 if prev_val else 0
-            if diff_pct <= tolerance_pct:
-                return current_val  # Do consecutive fetches match — stable value
-        prev_val = current_val
-        if attempt < max_attempts - 1:
-            time.sleep(2)  # thoda ruk ke dobara try karo
-    return prev_val  # Match nahi hua, but jo aakhri mila woh return karo
-
-# ─────────────────────────────────────────────────────────────
-# CANDLE CHECK — Entry Signal (STANDALONE — POC/ATP pe depend nahi karta)
-# Sirf aaj ki specific 5min candle ka Close > Open check karta hai
-# ─────────────────────────────────────────────────────────────
-def get_candle_signal(symbol, candle_time_str):
-    try:
-        today = datetime.now(IST).date()
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, start=today, end=today + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return ""
-        df.index = pd.to_datetime(df.index)
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(IST)
-        else:
-            df.index = df.index.tz_convert(IST)
-        df_candle = df.between_time(candle_time_str, candle_time_str)
-        if df_candle.empty:
-            return ""
-        row = df_candle.iloc[0]
-        open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
-        close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
-        return "green" if close_ > open_ else ""
-    except:
-        return ""
-
-# ─────────────────────────────────────────────────────────────
-# CANDLE CHECK — Entry Signal, OPTIMIZED (single fetch for all 3)
-# Same logic jaisa get_candle_signal() — Close > Open check —
-# bas ek hi yfinance call se 9:40/9:45/9:50 teeno nikalta hai,
-# har candle ke liye alag call karne ki jagah. Poora din ka data
-# ek baar fetch hota hai, phir teeno candles usi se filter hoti hain.
-# ─────────────────────────────────────────────────────────────
-def get_all_candle_signals(symbol):
-    """
-    Returns dict: {"09:40": "green"/"", "09:45": "green"/"", "09:50": "green"/""}
-    Ek hi yfinance call se saare teen candle-checks — 3x fetches ki
-    jagah sirf 1x fetch per stock.
-    """
-    result = {"09:40": "", "09:45": "", "09:50": ""}
-    try:
-        today = datetime.now(IST).date()
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, start=today, end=today + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return result
-        df.index = pd.to_datetime(df.index)
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(IST)
-        else:
-            df.index = df.index.tz_convert(IST)
-
-        for candle_time_str in ["09:40", "09:45", "09:50"]:
-            df_candle = df.between_time(candle_time_str, candle_time_str)
-            if df_candle.empty:
-                continue
-            row = df_candle.iloc[0]
-            open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
-            close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
-            result[candle_time_str] = "green" if close_ > open_ else ""
-        return result
-    except:
-        return result
-
-# ─────────────────────────────────────────────────────────────
-# EMA CONSOLIDATION — "EMA Coil" check
-# Kal ke poore din (5min candles) mein kitne % candles ka
-# Close, 20 EMA ke ±0.5% range ke andar tha. 2 din ka data
-# (kal + parso) lekar EMA warm-up karte hain, phir sirf
-# kal ke candles pe % nikalte hain.
-# ─────────────────────────────────────────────────────────────
-def get_ema_consolidation_pct(symbol, ema_span=20, tolerance_pct=0.5):
-    try:
-        last_day = get_last_trading_day()
-        day_before = get_trading_day_before(last_day)
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, start=day_before, end=last_day + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return None
-        df.index = pd.to_datetime(df.index)
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        df = df.between_time("09:15", "15:30")
-        if df.empty:
-            return None
-
-        df['EMA'] = df['Close'].ewm(span=ema_span, adjust=False).mean()
-
-        # Sirf "last_day" (kal) ke candles filter karo — day_before sirf warm-up ke liye tha
-        df_yesterday = df[df.index.date == last_day]
-        if df_yesterday.empty:
-            return None
-
-        diff_pct = ((df_yesterday['Close'] - df_yesterday['EMA']).abs() / df_yesterday['EMA']) * 100
-        near_ema_count = (diff_pct <= tolerance_pct).sum()
-        total_count = len(df_yesterday)
-        if total_count == 0:
-            return None
-        return round((near_ema_count / total_count) * 100, 1)
-    except:
-        return None
-
-# ─────────────────────────────────────────────────────────────
-# CROSSOVER SIGNAL — 9 EMA cross 20 EMA (bullish) + candle close
-# > POC. 9:15 candle mein teesri condition bhi hai: candle body
-# >= 70% honi chahiye (strong directional candle, na ki doji).
-# 9:15 candle CLOSE hone ka strict wait karte hain pehle.
-# Agar 9:15 pe match nahi hua, toh 9:20 candle ka jo bhi LATEST
-# data available ho (partial ya closed, wait nahi karna) usse
-# bhi try karte hain — bina body-check ke, sirf 9:15 ke liye hai.
-# Ek baar True mil jaye toh session cache mein permanent rahega.
-# ─────────────────────────────────────────────────────────────
-def get_crossover_signal(symbol, poc_value, fast_span=9, slow_span=20):
-    """
-    Returns "✓" if either:
-      A) 9:15 candle (CLOSED) — 9EMA was below 20EMA yesterday,
-         is above 20EMA at 9:15 close, 9:15 close > poc_value,
-         AND candle body >= 70% of (High - Low).
-      B) 9:20 candle (ANY available data, closed or still forming) —
-         EMA + POC conditions checked (no body-check) against 9:20's latest data.
-    Returns "" if neither condition set is met yet.
-    """
-    try:
-        if poc_value is None:
-            return ""
-
-        last_day = get_last_trading_day()
-        today = datetime.now(IST).date()
-        ticker = symbol + ".NS"
-        # Kal ka poora din + aaj ka abhi tak ka data — EMA continuity ke liye
-        df = yf.download(ticker, start=last_day, end=today + timedelta(days=1),
-                         interval="5m", progress=False, auto_adjust=True)
-        if df.empty:
-            return ""
-        df.index = pd.to_datetime(df.index)
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(IST)
-        else:
-            df.index = df.index.tz_convert(IST)
-        df = df.between_time("09:15", "15:30")
-        if df.empty:
-            return ""
-
-        df['EMA_fast'] = df['Close'].ewm(span=fast_span, adjust=False).mean()
-        df['EMA_slow'] = df['Close'].ewm(span=slow_span, adjust=False).mean()
-
-        df_yesterday = df[df.index.date == last_day]
-        df_today     = df[df.index.date == today]
-
-        if df_yesterday.empty or df_today.empty:
-            return ""
-
-        yesterday_last_fast = df_yesterday['EMA_fast'].iloc[-1]
-        yesterday_last_slow = df_yesterday['EMA_slow'].iloc[-1]
-        was_below = yesterday_last_fast < yesterday_last_slow
-
-        if not was_below:
-            return ""  # Kal hi upar tha — "crossover" ka koi matlab nahi
-
-        def check_candle(candle_time_str, require_body_check=False, min_body_pct=70):
-            df_candle = df_today.between_time(candle_time_str, candle_time_str)
-            if df_candle.empty:
-                return False
-            row = df_candle.iloc[0]
-            open_  = float(row['Open'])
-            high_  = float(row['High'])
-            low_   = float(row['Low'])
-            close_ = float(row['Close'])
-            fast_  = float(row['EMA_fast'])
-            slow_  = float(row['EMA_slow'])
-
-            basic_ok = (fast_ > slow_) and (close_ > poc_value)
-            if not basic_ok:
-                return False
-
-            if require_body_check:
-                candle_range = high_ - low_
-                if candle_range <= 0:
-                    return False  # Doji/flat candle — body % undefined, reject
-                body_pct = abs(close_ - open_) / candle_range * 100
-                if body_pct < min_body_pct:
-                    return False
-
-            return True
-
-        # A) 9:15 candle — strict close-wait + body>=70% check
-        if check_candle("09:15", require_body_check=True):
-            return "09:15"
-
-        # B) 9:20 candle — flexible, jo bhi latest data mile (closed ya forming)
-        #    Body-check yahan NAHI hota, sirf 9:15 ke liye hai
-        if check_candle("09:20", require_body_check=False):
-            return "09:20"
-
-        return ""
-    except:
-        return ""
-
-# ─────────────────────────────────────────────────────────────
-# 5-DAY MEDIAN VOLUME — Rel Vol (5D) ka baseline
-# Yahoo Finance se peechle 5 COMPLETE trading days ka daily
-# volume leke median nikalte hain. Aaj ka (incomplete/live) din
-# explicitly exclude karte hain — warna self-referencing error
-# ho jata hai (aaj ka volume khud denominator mein aa jata hai).
-# Median use kiya hai average ki jagah — outlier-proof hai.
-# ─────────────────────────────────────────────────────────────
-def get_5day_median_volume(symbol, days=5):
-    try:
-        ticker = symbol + ".NS"
-        df = yf.download(ticker, period="15d", interval="1d", progress=False, auto_adjust=True)
-        if df.empty:
-            return None
-        df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-        # Aaj ka incomplete row (Close = NaN hota hai jab din chal raha ho) exclude karo
-        df = df.dropna(subset=['Close'])
-        if df.empty:
-            return None
-        last_n = df['Volume'].tail(days)
-        if last_n.empty:
-            return None
-        return round(float(last_n.median()), 0)
-    except:
-        return None
-
-# ─────────────────────────────────────────────────────────────
-# TV SCREENER FETCH — open + prev_close added for gap filter
-# ─────────────────────────────────────────────────────────────
-def fetch_tv_data():
-    try:
-        from tradingview_screener import Query
-        from tradingview_screener.column import col
-
-        count, df = (Query()
-            .select(
-                'name', 'close', 'change', 'volume',
-                'relative_volume', 'market_cap_basic', 'sector',
-                'High.1M', 'high', 'open', 'close[1]', 'high[1]'
-            )
-            .set_markets('india')
-            .where(
-                col('market_cap_basic') > 41_000_000_000,
-                col('exchange') == 'NSE',
-                col('high') >= col('High.1M'),
-            )
-            .order_by('change', ascending=False)
-            .limit(100)  # Bada buffer — koi hard cap nahi, jitne bhi filters pass karein sab aayenge
-            .get_scanner_data()
-        )
-        return count, df, None
-    except Exception as e:
-        return 0, pd.DataFrame(), str(e)
-
-# ─────────────────────────────────────────────────────────────
-# SHARED FORMAT HELPERS — market-open aur market-closed dono
-# views isi ek copy ko use karte hain (koi duplicate-code nahi).
-# ─────────────────────────────────────────────────────────────
-def fmt_volume(v):
-    try:
-        v = float(v)
-        if v >= 1_000_000: return f"{v/1_000_000:.1f}M"
-        if v >= 100_000:   return f"{v/100_000:.1f}L"
-        if v >= 1_000:     return f"{v/1_000:.1f}K"
-        return str(int(v))
-    except: return str(v)
-
-def fmt_relvol(v):
-    if v is None:
-        return '<span style="color:#9ca3af;">N/A</span>'
-    try:
-        v = float(v)
-        if v >= 3:     bg, color = "#fef9c3", "#854f0b"
-        elif v >= 1.5: bg, color = "#dcfce7", "#166534"
-        else:          bg, color = "transparent", "#374151"
-        return f'<span style="background:{bg};color:{color};padding:2px 7px;border-radius:4px;font-weight:600;">{v:.2f}x</span>'
-    except: return '<span style="color:#9ca3af;">N/A</span>'
-
-def fmt_entry_badges(c940, c945, c950):
-    def badge(label, active):
-        if active == "green":
-            return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600;">{label}</span>'
-        else:
-            return f'<span style="color:#d1d5db;font-size:11px;padding:2px 5px;">{label}</span>'
-    return f'{badge("9:40", c940)}&nbsp;{badge("9:45", c945)}&nbsp;{badge("9:50", c950)}'
-
-def fmt_poc_gap(poc, gap_pct):
-    if poc is None:
-        return '<span style="color:#9ca3af;">N/A</span>'
-    poc_str = f"₹{float(poc):,.2f}"
-    if gap_pct is None:
-        return f'<div style="font-size:12px;">{poc_str}</div>'
-    if gap_pct > 0:
-        if gap_pct >= 5:   color = "#14532d"
-        elif gap_pct >= 2: color = "#16a34a"
-        else:              color = "#4ade80"
-        gap_str = f'<span style="color:{color};font-weight:700;">↑ +{gap_pct:.1f}%</span>'
-    else:
-        gap_str = f'<span style="color:#dc2626;font-weight:600;">↓ {gap_pct:.1f}%</span>'
-    return f'<div style="font-size:12px;font-weight:500;">{poc_str}</div><div style="font-size:11px;">{gap_str}</div>'
-
-def fmt_prev_high(dist, val):
-    if dist is None or val is None:
-        return '<span style="color:#9ca3af;">N/A</span>'
-    val_str = f"₹{val:,.2f}"
-    if dist >= 0:
-        if dist >= 3:   color = "#14532d"
-        elif dist >= 1: color = "#16a34a"
-        else:           color = "#4ade80"
-        pct_str = f'<span style="color:{color};font-weight:700;">↑ +{dist:.1f}%</span>'
-    else:
-        pct_str = f'<span style="color:#dc2626;font-weight:600;">↓ {dist:.1f}%</span>'
-    return f'<div style="font-size:12px;font-weight:500;">{val_str}</div><div style="font-size:11px;">{pct_str}</div>'
-
-def fmt_ema_coil(pct, min_threshold=70):
-    if pct is None or pct < min_threshold:
-        return '<span style="color:#9ca3af;">—</span>'
-    return f'<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:600;">✓ {pct:.0f}%</span>'
-
-def fmt_crossover(matched_candle):
-    if matched_candle == "09:15":
-        return '<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
-    elif matched_candle == "09:20":
-        return '<span style="background:#fce7f3;color:#9d174d;border-radius:4px;padding:3px 9px;font-weight:700;">✓</span>'
-    else:
-        return ''
-
-# Shared HTML cell-styles (table borders/padding) — dono views isi ko use karte hain
-TH = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;white-space:nowrap;text-align:center;"
-TH_L = "padding:8px 10px;font-size:11px;font-weight:700;color:#6b7280;border-bottom:2px solid #e5e7eb;text-align:left;"
-TD = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;text-align:center;vertical-align:middle;"
-TD_L = "padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6;text-align:left;vertical-align:middle;"
-
-
-def render_stock_table(df, height_per_row=52, extra_height=60):
-    """
-    Shared table-renderer — df mein columns: Symbol, Price, Chg, Volume,
-    RelVol5D, POC, GapPct, c940, c945, c950, PrevHighDist, PrevHighVal,
-    EmaCoilPct, Crossover, MktCap, Sector. Market-open aur market-closed
-    dono views isi function ko call karte hain.
-    """
-    rows_html = ""
-    for i, (_, row) in enumerate(df.iterrows()):
-        sym    = row.get("Symbol", "")
-        price  = row.get("Price", 0)
-        chg    = row.get("Chg", 0)
-        vol    = row.get("Volume", 0)
-        relvol = row.get("RelVol5D", 0)
-        poc    = row.get("POC", None)
-        gappct = row.get("GapPct", None)
-        prevhd = row.get("PrevHighDist", None)
-        prevhv = row.get("PrevHighVal", None)
-        emacoil = row.get("EmaCoilPct", None)
-        crossover = row.get("Crossover", "")
-        c940   = row.get("c940", "")
-        c945   = row.get("c945", "")
-        c950   = row.get("c950", "")
-        mktcap = row.get("MktCap", "")
-        sector = row.get("Sector", "")
-
-        bg      = "#f9fafb" if i % 2 == 0 else "#ffffff"
-        chg_col = "#16a34a" if float(chg) > 0 else "#dc2626"
-        chg_sgn = "+" if float(chg) > 0 else ""
-
-        rows_html += f"""
-        <tr style="background:{bg};">
-            <td style="{TD_L}">
-                <span onclick="tsCopy(event,this,'{sym}')" style="cursor:pointer;color:#1e40af;font-weight:700;">
-                    <span class="ts-sym-name">{sym}</span>
-                </span>
-                <div style="font-size:10px;color:#9ca3af;margin-top:1px;">{sector}</div>
-            </td>
-            <td style="{TD}">
-                <div style="font-weight:600;color:#111827;">₹{float(price):.2f}</div>
-                <div style="font-size:11px;color:{chg_col};font-weight:600;">{chg_sgn}{float(chg):.2f}%</div>
-            </td>
-            <td style="{TD}">{fmt_volume(vol)}</td>
-            <td style="{TD}">{fmt_relvol(relvol)}</td>
-            <td style="{TD}">{fmt_poc_gap(poc, gappct)}</td>
-            <td style="{TD}">{fmt_entry_badges(c940, c945, c950)}</td>
-            <td style="{TD}">{fmt_prev_high(prevhd, prevhv)}</td>
-            <td style="{TD}">{fmt_ema_coil(emacoil)}</td>
-            <td style="{TD}">{fmt_crossover(crossover)}</td>
-            <td style="{TD};color:#374151;">₹{float(mktcap):.1f}B</td>
-        </tr>"""
-
-    table_html = f"""
-    <script>
-    function tsCopy(e,btn,sym){{
-      e.stopPropagation();
-      function showCopied(){{
-        var el=btn.querySelector('.ts-sym-name');
-        if(!el)return;
-        var orig=el.textContent;
-        el.textContent='✓ '+sym;
-        el.style.color='#00a854';
-        setTimeout(function(){{el.textContent=orig;el.style.color='';}},1500);
-      }}
-      if(navigator.clipboard&&window.isSecureContext){{
-        navigator.clipboard.writeText(sym).then(showCopied).catch(function(){{
-          var ta=document.createElement('textarea');
-          ta.value=sym;ta.style.position='fixed';ta.style.opacity='0';
-          document.body.appendChild(ta);ta.select();
-          try{{document.execCommand('copy');showCopied();}}catch(err){{}}
-          document.body.removeChild(ta);
-        }});
-      }}else{{
-        var ta=document.createElement('textarea');
-        ta.value=sym;ta.style.position='fixed';ta.style.opacity='0';
-        document.body.appendChild(ta);ta.select();
-        try{{document.execCommand('copy');showCopied();}}catch(err){{}}
-        document.body.removeChild(ta);
-      }}
-    }}
-    </script>
-    <div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;margin-top:8px;">
-    <table style="width:100%;border-collapse:collapse;font-family:sans-serif;">
-      <thead style="background:#f9fafb;">
-        <tr>
-          <th style="{TH_L}">Symbol</th>
-          <th style="{TH}">Price / Chg%</th>
-          <th style="{TH}">Volume</th>
-          <th style="{TH}">Rel Vol</th>
-          <th style="{TH}">POC / Gap</th>
-          <th style="{TH}">Entry Signal</th>
-          <th style="{TH}">Prev High</th>
-          <th style="{TH}">EMA Coil</th>
-          <th style="{TH}">Crossover</th>
-          <th style="{TH}">Mkt Cap</th>
-        </tr>
-      </thead>
-      <tbody>{rows_html}</tbody>
-    </table>
-    </div>
-    """
-
-    import streamlit.components.v1 as components
-    components.html(table_html, height=len(df) * height_per_row + extra_height, scrolling=False)
-
-def render_market_closed_view():
-    """
-    Market band hai — TV se stocks fetch karte hain (sirf DISPLAY ke
-    liye: Price, Chg%, Volume, Entry-Signal jaisi cheezein — TV apna
-    "last trading session" ka data deta hai chahe market band ho).
-    Koi POC/EMA-Coil/Crossover/Vol5D CALCULATION nahi hoti — woh sab
-    Supabase se seedha merge hoti hain (jo already market-hours mein
-    calculate/save ho chuki thi).
-    """
-    calc_date = get_last_trading_day()
-
-    st.markdown(f"""
-    <div style="background:#fefce8;border:1px solid #fef08a;border-radius:8px;padding:10px 16px;margin-bottom:10px;">
-        <span style="color:#854f0b;font-weight:600;font-size:13px;">🔒 Market Closed</span>
-        <span style="color:#6b7280;font-size:12px;"> — showing last saved data for {calc_date.strftime('%d %b %Y')}. No live calculation happening.</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── TV se fetch (sirf display-fields ke liye, koi calculation nahi) ──
-    count, df, error = fetch_tv_data()
-    if error or df.empty:
-        st.info("TV se data fetch nahi ho paya abhi.")
-        return
-
-    # ── Gap filter (same jaisa market-open mein) ──
-    def calc_gap_pct(row):
-        try:
-            open_price = float(row.get('open', 0) or 0)
-            prev_close = float(row.get('close[1]', 0) or 0)
-            if prev_close == 0:
-                return 0
-            return ((open_price - prev_close) / prev_close) * 100
-        except:
-            return 0
-
-    df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
-    df = df[df['_opening_gap'].abs() <= 2.0]
-
-    if df.empty:
-        st.info("Gap-filter ke baad koi stock nahi bacha.")
-        return
-
-    # ── Clean/rename (same jaisa market-open mein) ──
-    df = df.copy()
-    def calc_prev_high_dist(row):
-        try:
-            price    = float(row.get('close', 0) or 0)
-            prev_high = float(row.get('high[1]', 0) or 0)
-            if prev_high == 0:
-                return None
-            return round(((price - prev_high) / prev_high) * 100, 2)
-        except:
-            return None
-
-    def get_prev_high_val(row):
-        try:
-            v = float(row.get('high[1]', 0) or 0)
-            return v if v > 0 else None
-        except:
-            return None
-
-    df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
-    df['PrevHighVal']  = df.apply(get_prev_high_val, axis=1)
-    df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'high[1]', '_opening_gap'], errors='ignore')
-    df['change']           = df['change'].round(2)
-    df['relative_volume']  = df['relative_volume'].round(2)
-    df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
-    df['name'] = df['ticker'].str.replace('NSE:', '', regex=False)
-    df = df.drop(columns=['ticker'], errors='ignore')
-    df = df.rename(columns={
-        'name'            : 'Symbol',
-        'close'           : 'Price',
-        'change'          : 'Chg',
-        'volume'          : 'Volume',
-        'relative_volume' : 'RelVol',
-        'market_cap_basic': 'MktCap',
-        'sector'          : 'Sector',
-    })
-
-    # ── Supabase se calculated-fields merge karo (POC, EMA-Coil, Vol5D, Crossover) ──
-    saved_data = supabase_get_all_for_date(calc_date)
-
-    poc_vals, gap_vals, ema_vals, vol5d_vals, crossover_vals = [], [], [], [], []
-    for _, row in df.iterrows():
-        symbol = row['Symbol']
-        price  = row['Price']
-        saved  = saved_data.get(symbol, {})
-
-        poc = saved.get('poc_value')
-        if poc is None:
-            poc_vals.append(None)
-            gap_vals.append(None)
-        elif price > poc:
-            poc_vals.append(poc)
-            gap_vals.append(((price - poc) / poc) * 100)
-        else:
-            poc_vals.append(poc)
-            gap_vals.append(-((poc - price) / poc) * 100)
-
-        ema_vals.append(saved.get('ema_coil_pct'))
-        vol5d_vals.append(saved.get('vol5d_median'))
-        crossover_vals.append(saved.get('crossover_status', ''))
-
-    df['POC']         = poc_vals
-    df['GapPct']      = gap_vals
-    df['EmaCoilPct']  = ema_vals
-    df['Crossover']   = crossover_vals
-
-    # ── Rel Vol (5D) — Vol5D (Supabase se) ÷ aaj/last-known volume (TV se) ──
-    def calc_rel_vol_5d(row, vol5d_map):
-        try:
-            today_vol  = float(row.get('Volume', 0) or 0)
-            median_vol = vol5d_map.get(row['Symbol'])
-            if median_vol is None or median_vol == 0:
-                return None
-            return round(today_vol / median_vol, 2)
-        except:
-            return None
-
-    vol5d_map = {row['Symbol']: v for row, v in zip(df.to_dict('records'), vol5d_vals)}
-    df['RelVol5D'] = df.apply(lambda r: calc_rel_vol_5d(r, vol5d_map), axis=1)
-
-    # ── Crossover-filter (same jaisa market-open mein — sirf confirmed-stocks dikhein) ──
-    df = df[df['Crossover'] == "09:15"]
-
-    if df.empty:
-        st.info("Is trading day ke liye koi stock 9:15 crossover confirm nahi kar paaya tha.")
-        return
-
-    # ── Entry Signal — Supabase mein store NAHI hota, isliye market-band
-    # mode mein yeh blank rahega (candles ka data bhi TV se nahi milta) ──
-    df['c940'] = ""
-    df['c945'] = ""
-    df['c950'] = ""
-
-    # ── Header cards (same style jaisa market-open) ──
-    sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
-    top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
-    max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
-
-    st.markdown(f"""
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
-        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">STOCKS</div>
-            <div style="font-size:18px;font-weight:700;color:#16a34a;line-height:1.2;">{len(df)}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">TOP GAINER</div>
-            <div style="font-size:16px;font-weight:700;color:#2563eb;line-height:1.2;">{top_gainer}</div>
-        </div>
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">MAX CHG%</div>
-            <div style="font-size:16px;font-weight:700;color:#16a34a;line-height:1.2;">+{max_chg:.2f}%</div>
-        </div>
-        <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:6px;padding:5px 12px;text-align:center;">
-            <div style="font-size:10px;color:#6b7280;font-weight:600;">POC DATE</div>
-            <div style="font-size:13px;font-weight:700;color:#7c3aed;line-height:1.2;">{calc_date.strftime('%d %b')}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    render_stock_table(df)
-
-# ─────────────────────────────────────────────────────────────
-# AUTO-REFRESH FRAGMENT — har 60s sirf yeh section re-run hoga
-# Poora page reload NAHI hoga — sidebar/header stable rahenge
-# ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=60)
 def screener_fragment():
-    # ── FETCH TV DATA ──
+    """
+    Live market screening fragment — runs every 60 seconds.
+    
+    Only executes when market is open (9:15 AM - 3:30 PM IST).
+    Complete calculations: POC, Crossover, EMA-Coil, Vol5D, Entry signals.
+    """
+    
+    # ── STEP 0: Market hours check — DISABLED FOR TESTING ──
+    # Testing ke dauraan hamesha live calculation chalega, chahe market
+    # khula ho ya band. Production mein wapas enable karna ho toh neeche
+    # wale 3 lines uncomment karo.
+    #
+    # if not is_market_hours():
+    #     render_market_closed_view(pd.DataFrame())
+    #     return
+
+    # ── STEP 1: FETCH TV DATA ──
     with st.spinner("Fetching Top Gainer stocks from TradingView..."):
         count, df, error = fetch_tv_data()
 
@@ -977,100 +112,52 @@ def screener_fragment():
         st.warning("No stocks found.")
         return
 
-    # ─────────────────────────────────────────────────────────────
-    # GAP FILTER — 2% se zyada gap up/down remove karo
-    # ─────────────────────────────────────────────────────────────
-    def calc_gap_pct(row):
-        try:
-            open_price = float(row.get('open', 0) or 0)
-            prev_close = float(row.get('close[1]', 0) or 0)  # close[1] = previous day close ✅
-            if prev_close == 0:
-                return 0
-            return ((open_price - prev_close) / prev_close) * 100
-        except:
-            return 0
+    # ── STEP 2: CLEAN DATA ──
+    df = clean_tv_data(df)
 
+    # ── STEP 3: GAP FILTER (±2%) ──
     df['_opening_gap'] = df.apply(calc_gap_pct, axis=1)
-    df = df[df['_opening_gap'].abs() <= 2.0]  # Gap filter — koi count-limit nahi, jitne bhi pass karein
+    df = df[df['_opening_gap'].abs() <= 2.0]
+    df = df.drop(columns=['_opening_gap'], errors='ignore')
 
-    # ─────────────────────────────────────────────────────────────
-    # CLEAN DATA
-    # ─────────────────────────────────────────────────────────────
-    df = df.copy()
-    # Prev High Distance calculate karo before dropping
-    def calc_prev_high_dist(row):
-        try:
-            price    = float(row.get('close', 0) or 0)
-            prev_high = float(row.get('high[1]', 0) or 0)
-            if prev_high == 0:
-                return None
-            return round(((price - prev_high) / prev_high) * 100, 2)
-        except:
-            return None
+    if df.empty:
+        st.warning("No stocks passed gap filter.")
+        return
 
-    def get_prev_high_val(row):
-        try:
-            v = float(row.get('high[1]', 0) or 0)
-            return v if v > 0 else None
-        except:
-            return None
-
+    # ── STEP 4: CALCULATE PREV HIGH DISTANCE ──
     df['PrevHighDist'] = df.apply(calc_prev_high_dist, axis=1)
     df['PrevHighVal']  = df.apply(get_prev_high_val, axis=1)
-    df = df.drop(columns=['high', 'High.1M', 'open', 'close[1]', 'high[1]', '_opening_gap'], errors='ignore')
-    df['change']           = df['change'].round(2)
-    df['relative_volume']  = df['relative_volume'].round(2)
-    df['market_cap_basic'] = (df['market_cap_basic'] / 1e9).round(1)
-    df['name'] = df['ticker'].str.replace('NSE:', '', regex=False)
-    df = df.drop(columns=['ticker'], errors='ignore')
-    df = df.rename(columns={
-        'name'            : 'Symbol',
-        'close'           : 'Price',
-        'change'          : 'Chg',
-        'volume'          : 'Volume',
-        'relative_volume' : 'RelVol',
-        'market_cap_basic': 'MktCap',
-        'sector'          : 'Sector',
-    })
+    df = prepare_tv_data_for_processing(df)
 
-    # ─────────────────────────────────────────────────────────────
-    # STEP 1: CROSSOVER CHECK — sabse pehle, saare gap-filtered
-    # stocks pe. POC bhi isi step mein calculate hota hai (jinke
-    # POC missing hain unke liye), taaki POC bhi ek hi baar ho aur
-    # jo stocks pass karein unke liye already cache mein ready rahe.
-    #
-    # Cache priority: session_state (fastest) → Supabase (persists
-    # across restarts) → yfinance (slowest, sirf tab jab dono jagah
-    # miss ho). Naya calculation Supabase mein save hota hai (agli
-    # baar/naya-session ke liye instant mile) — market-hours mein hi.
-    #
-    # IMPORTANT: session_state ko worker-threads ke andar access
-    # NAHI karte (thread-safety issue) — sirf main-thread mein
-    # cache-check aur cache-write hota hai, threads sirf pure
-    # calculation (get_yesterday_poc, get_crossover_signal) karte hain.
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 5: CROSSOVER CHECK (CRITICAL FILTER)
+    # 
+    # Cache priority: session_state (fastest) → Supabase (persistent) 
+    # → yfinance (slowest)
+    # 
+    # Key: crossover confirmation is permanent (once matched, cache preserves it)
+    # ─────────────────────────────────────────────────────────────────────────
+    
     calc_date   = get_last_trading_day()
     signal_date = datetime.now(IST).date()
 
-    if 'poc_cache' not in st.session_state:
-        st.session_state['poc_cache'] = {}
-    if 'crossover_cache' not in st.session_state:
-        st.session_state['crossover_cache'] = {}
-
-    # Main-thread pe hi decide karo kaunse symbols ka POC missing hai (session-cache mein)
+    # Find symbols still needing POC (for crossover check)
     symbols_needing_poc = [s for s in df['Symbol'] if s not in st.session_state['poc_cache']]
 
-    # In mein se, pehle Supabase check karo — agar mila, seedha cache mein daal do
+    # Symbol -> current price lookup (used to capture signal_price the
+    # first time we save a symbol — see supabase_save_row call below)
+    price_lookup = dict(zip(df['Symbol'], df['Price']))
+
+    if 'signalprice_cache' not in st.session_state:
+        st.session_state['signalprice_cache'] = {}
+
+    # Check Supabase for cached POC values
     still_missing_poc = []
     for symbol in symbols_needing_poc:
         cached_row = supabase_get_cached_row(symbol, calc_date)
         if cached_row is not None and cached_row.get('poc_value') is not None:
             st.session_state['poc_cache'][symbol] = cached_row['poc_value']
-            # Baaki cheezein bhi mil gayi Supabase se — cache kar do, baad mein re-calc na ho
-            if cached_row.get('ema_coil_pct') is not None:
-                if 'ema_cache' not in st.session_state:
-                    st.session_state['ema_cache'] = {}
-                st.session_state['ema_cache'][symbol] = cached_row['ema_coil_pct']
+            # Also cache related fields
             if cached_row.get('vol5d_median') is not None:
                 if 'vol5d_cache' not in st.session_state:
                     st.session_state['vol5d_cache'] = {}
@@ -1081,30 +168,60 @@ def screener_fragment():
                 st.session_state['prevhigh_cache'][symbol] = cached_row['prev_high_val']
             if cached_row.get('crossover_status'):
                 st.session_state['crossover_cache'][symbol] = cached_row['crossover_status']
+            if cached_row.get('signal_price') is not None:
+                st.session_state['signalprice_cache'][symbol] = cached_row['signal_price']
         else:
             still_missing_poc.append(symbol)
 
-    # Ab sirf woh bache hain jo Supabase mein bhi nahi mile — yfinance se calculate karo
+    # Fetch POC for remaining symbols (parallel) — sirf market open mein.
+    # Market band hone ke baad naya POC calculate nahi karna (already
+    # missing hai toh agle trading-day mein hi milega, retry se koi
+    # fayda nahi — sirf waste API calls).
+    if still_missing_poc and not is_market_hours():
+        still_missing_poc = []
+
     if still_missing_poc:
         with st.spinner(f"Calculating POC for {len(still_missing_poc)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                # Worker thread sirf pure calculation karta hai — session_state touch nahi
                 futures = {executor.submit(get_yesterday_poc, s): s for s in still_missing_poc}
                 for future in as_completed(futures):
                     sym = futures[future]
                     poc_val = future.result()
-                    st.session_state['poc_cache'][sym] = poc_val  # Main-thread pe cache-write
-                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val)
+                    st.session_state['poc_cache'][sym] = poc_val
+                    current_price = price_lookup.get(sym)
+                    supabase_save_row(sym, signal_date, calc_date, poc_value=poc_val, price=current_price)
+                    # Capture signal_price locally too (first time we see
+                    # this symbol this session) so the live "% Since Signal"
+                    # column works even before next Supabase read-back.
+                    if sym not in st.session_state['signalprice_cache'] and current_price is not None:
+                        st.session_state['signalprice_cache'][sym] = current_price
 
+    # Check crossover signals (only for stocks not yet confirmed)
     def crossover_pure(symbol, poc_val):
-        """Pure calculation — session_state touch nahi karta, thread-safe hai."""
+        """Pure calculation for threading."""
         result = get_crossover_signal(symbol, poc_val)
         return symbol, result
 
-    crossover_symbols_to_check = [
-        s for s in df['Symbol']
-        if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20")
-    ]
+    # Market band hone ke baad naya crossover-check attempt nahi karna —
+    # jo stocks abhi tak unconfirmed hain ("") woh har 60s refresh pe
+    # dobara check hote rehte, chahe market band ho ya khula. Yahi
+    # "fetching keeps happening after close" ka root-cause tha.
+    #
+    # ALSO: sirf "match" (09:15/09:20) permanent nahi hai — "confirmed
+    # no-match" bhi permanent hona chahiye, taaki jo stock kabhi crossover
+    # nahi karega, uska baar-baar (har 60s) dobara check na ho. Lekin
+    # 9:25 AM se pehle "" ka matlab "abhi candle complete hi nahi hui"
+    # bhi ho sakta hai — isliye "confirmed no-match" sirf 9:25 AM ke
+    # baad hi permanent maana jata hai (jab 9:15 + 9:20 dono candles
+    # ka data available ho chuka ho).
+    NO_MATCH_CUTOFF_HHMM = 9 * 60 + 25  # 9:25 AM IST
+
+    crossover_symbols_to_check = []
+    if is_market_hours():
+        crossover_symbols_to_check = [
+            s for s in df['Symbol']
+            if st.session_state['crossover_cache'].get(s, "") not in ("09:15", "09:20", "NO_MATCH")
+        ]
 
     if crossover_symbols_to_check:
         with st.spinner(f"Checking crossover for {len(crossover_symbols_to_check)} stocks..."):
@@ -1113,33 +230,91 @@ def screener_fragment():
                     executor.submit(crossover_pure, s, st.session_state['poc_cache'].get(s))
                     for s in crossover_symbols_to_check
                 ]
+                now_hhmm_check = get_current_ist_time().hour * 60 + get_current_ist_time().minute
                 for future in as_completed(futures):
                     sym, result = future.result()
-                    if result in ("09:15", "09:20"):  # Match mila — permanent rahega
+                    if result in ("09:15", "09:20"):
                         st.session_state['crossover_cache'][sym] = result
                         supabase_save_row(sym, signal_date, calc_date, crossover_status=result)
+                    elif now_hhmm_check >= NO_MATCH_CUTOFF_HHMM:
+                        # Confirmed no-match — both candles' data was available
+                        # and neither matched. Cache permanently so this stock
+                        # is never re-checked again today.
+                        st.session_state['crossover_cache'][sym] = "NO_MATCH"
+                        supabase_save_row(sym, signal_date, calc_date, crossover_status="NO_MATCH")
                     elif sym not in st.session_state['crossover_cache']:
+                        # Still before 9:25 — candle data may not be complete
+                        # yet, keep as pending ("") so it gets rechecked
                         st.session_state['crossover_cache'][sym] = ""
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ─────────────────────────────────────────────────────────────
-    # STEP 2: FINAL FILTER — sirf woh stocks aage badhein jinka
-    # Crossover 9:15 (strict) confirm hua ho. Baaki sab yahi drop
-    # ho jate hain — unke liye EMA-Coil/Vol5D/Entry-Signal calculate
-    # hi nahi honge (waste-calculation avoid hota hai).
-    # ─────────────────────────────────────────────────────────────
-    df = df[df['Crossover'] == "09:15"]
+    # ── STEP 6: CROSSOVER FILTER (compact dropdown — default "09:15 only") ──
+    filter_col, _spacer = st.columns([2, 8])
+    with filter_col:
+        crossover_filter_option = st.selectbox(
+            "Crossover Filter",
+            ["09:15 only", "09:20 only", "All (09:15 + 09:20)", "No Match (NO_MATCH)"],
+            index=0,
+            key="crossover_filter_select"
+        )
+
+    if crossover_filter_option == "09:15 only":
+        df = df[df['Crossover'] == "09:15"]
+    elif crossover_filter_option == "09:20 only":
+        df = df[df['Crossover'] == "09:20"]
+    elif crossover_filter_option == "All (09:15 + 09:20)":
+        df = df[df['Crossover'].isin(["09:15", "09:20"])]
+    else:  # No Match (NO_MATCH) — stocks that did NOT confirm crossover
+        # Vol5D + Max Qty will still calculate for these (since the loops
+        # below just operate on whatever `df` is at that point) — this
+        # is the deliberate opt-in cost (extra API calls) the user chose.
+        df = df[df['Crossover'] == "NO_MATCH"]
+
+    # ── TOP-20 LOCK MODE (opt-in checkbox) ──
+    # 9:15-9:35 window: live top-20 (by Chg% descending) among confirmed
+    # stocks. At 9:35 AM, whatever is top-20 at that moment gets PERMANENTLY
+    # locked for the rest of the day — no new stocks added after that,
+    # regardless of how many more confirm crossover later.
+    top20_lock_mode = st.checkbox(
+        "🔒 Top-20 Lock Mode (9:15-9:35 window — after 9:35, list freezes to top 20 by Chg%)",
+        value=False,
+        key="top20_lock_checkbox"
+    )
+
+    if top20_lock_mode:
+        # 👉 CHANGE TIME HERE if you want a different lock-window in future
+        # (same concept as Momentum Scanner) — currently locks at 9:35 AM.
+        # Format: hour * 60 + minute. E.g. for 10:00 AM → 10 * 60 + 0
+        TOP20_WINDOW_END_HHMM = 9 * 60 + 35  # 9:35 AM
+        now_hhmm_lock = get_current_ist_time().hour * 60 + get_current_ist_time().minute
+        today_str = signal_date.isoformat()
+
+        # Reset the lock if it's a new trading day (safety, in case session
+        # somehow persists across days)
+        if st.session_state.get('top20_locked_date') != today_str:
+            st.session_state['top20_locked_symbols'] = None
+            st.session_state['top20_locked_date'] = today_str
+
+        if st.session_state.get('top20_locked_symbols') is not None:
+            # Already locked — restrict to the frozen list only
+            df = df[df['Symbol'].isin(st.session_state['top20_locked_symbols'])]
+        else:
+            # Not yet locked — live top-20 by Chg% descending
+            df_sorted = df.sort_values('Chg', ascending=False)
+            top20_symbols = df_sorted['Symbol'].head(20).tolist()
+
+            if now_hhmm_lock >= TOP20_WINDOW_END_HHMM:
+                # 9:35 AM reached — freeze this list permanently for today
+                st.session_state['top20_locked_symbols'] = top20_symbols
+
+            df = df[df['Symbol'].isin(top20_symbols)]
 
     if df.empty:
-        st.info("Abhi tak koi stock 9:15 crossover confirm nahi kar paaya. Refresh karte rahiye.")
+        st.info(f"Abhi tak koi stock '{crossover_filter_option}' criteria confirm nahi kar paaya.")
         return
 
-    # ─────────────────────────────────────────────────────────────
-    # STEP 3: POC/GapPct display-values — sirf FILTERED stocks ke
-    # liye (POC already crossover-step mein calculate ho chuka hai,
-    # cache se instant milega).
-    # ─────────────────────────────────────────────────────────────
+    # ── STEP 7: POC & GAP DISPLAY ──
     poc_vals, gap_vals = [], []
     for _, row in df.iterrows():
         symbol = row['Symbol']
@@ -1159,34 +334,48 @@ def screener_fragment():
     df['POC']     = poc_vals
     df['GapPct']  = gap_vals
 
-    # ─────────────────────────────────────────────────────────────
-    # STEP 4: EMA-COIL + VOL5D — sirf FILTERED (Crossover-passed)
-    # stocks ke liye calculate. session_state cache — naya stock
-    # aane pe hi fetch hoga.
-    # ─────────────────────────────────────────────────────────────
-    if 'ema_cache' not in st.session_state:
-        st.session_state['ema_cache'] = {}
+    # ── LIVE "% Since Signal" — (current_price - signal_price) / signal_price × 100
+    # Purely computed for display, NOT saved to Supabase (changes every
+    # refresh, so persisting it wouldn't mean anything as a static value).
+    def calc_pct_since_signal(row):
+        symbol = row['Symbol']
+        signal_price = st.session_state['signalprice_cache'].get(symbol)
+        if signal_price is None or signal_price == 0:
+            return None
+        try:
+            return round(((row['Price'] - signal_price) / signal_price) * 100, 2)
+        except Exception:
+            return None
+
+    df['PctSinceSignal'] = df.apply(calc_pct_since_signal, axis=1)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 8: VOL5D (only for crossover-passed stocks)
+    # (EMA Coil removed — wasn't useful for the strategy in practice)
+    # ─────────────────────────────────────────────────────────────────────────
+
     if 'prevhigh_cache' not in st.session_state:
         st.session_state['prevhigh_cache'] = {}
     if 'vol5d_cache' not in st.session_state:
         st.session_state['vol5d_cache'] = {}
 
-    need_check = [s for s in df['Symbol'] if s not in st.session_state['ema_cache']]
+    # Market band hone ke baad naya Vol5D calculate nahi karna —
+    # same reasoning: retry se koi fayda nahi, sirf waste calls.
+    need_check = []
+    if is_market_hours():
+        need_check = [s for s in df['Symbol'] if s not in st.session_state['vol5d_cache']]
 
-    def calculate_ema_and_vol5d(symbol):
-        """Sirf EMA-Coil aur Vol5D — POC ab yahan nahi (already ho chuka hai)."""
-        ema_val   = get_ema_consolidation_pct(symbol)
+    def calculate_vol5d(symbol):
+        """Parallel calculation."""
         vol5d_val = get_5day_median_volume(symbol)
-        return symbol, ema_val, vol5d_val
+        return symbol, vol5d_val
 
     if need_check:
-        with st.spinner(f"Calculating EMA Coil & Volume for {len(need_check)} qualified stocks..."):
+        with st.spinner(f"Calculating Volume for {len(need_check)} stocks..."):
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(calculate_ema_and_vol5d, s) for s in need_check]
+                futures = [executor.submit(calculate_vol5d, s) for s in need_check]
                 for future in as_completed(futures):
-                    symbol, ema_val, vol5d_val = future.result()
-                    st.session_state['ema_cache'][symbol] = ema_val
-                    # PrevHighVal is stock ke liye df se nikal lo (TV se already mila hua hai)
+                    symbol, vol5d_val = future.result()
                     row_match = df[df['Symbol'] == symbol]
                     prevhigh_val = float(row_match['PrevHighVal'].iloc[0]) if not row_match.empty and pd.notna(row_match['PrevHighVal'].iloc[0]) else None
                     st.session_state['prevhigh_cache'][symbol] = prevhigh_val
@@ -1194,16 +383,10 @@ def screener_fragment():
                     supabase_save_row(
                         symbol, signal_date, calc_date,
                         prev_high_val=prevhigh_val,
-                        ema_coil_pct=ema_val,
                         vol5d_median=vol5d_val,
                     )
 
-    df['EmaCoilPct'] = df['Symbol'].map(lambda s: st.session_state['ema_cache'].get(s))
-
-    # ─────────────────────────────────────────────────────────────
-    # REL VOL (5D) — LIVE calculation, cache NAHI hoga
-    # Aaj ka volume (TV se, real-time) ÷ 5-day median (cached, historical)
-    # ─────────────────────────────────────────────────────────────
+    # ── STEP 9: RELATIVE VOLUME (5D) ──
     def calc_rel_vol_5d(row):
         try:
             today_vol = float(row.get('Volume', 0) or 0)
@@ -1216,13 +399,8 @@ def screener_fragment():
 
     df['RelVol5D'] = df.apply(calc_rel_vol_5d, axis=1)
 
-    # ─────────────────────────────────────────────────────────────
-    # CANDLE COLUMNS — Entry Signal, standalone, session_state cache
-    # Kisi bhi price-comparison (POC/ATP) pe depend nahi karta —
-    # sirf candle ka Close > Open check karta hai.
-    # ─────────────────────────────────────────────────────────────
+    # ── STEP 10: CANDLE SIGNALS (9:40, 9:45, 9:50) ──
     now_ist  = get_current_ist_time()
-    now_time = now_ist.strftime('%H:%M:%S')
     now_hhmm = now_ist.hour * 60 + now_ist.minute
 
     show_940 = now_hhmm >= (9 * 60 + 45)
@@ -1238,18 +416,21 @@ def screener_fragment():
         key = f"{symbol}_{candle_time}"
         return st.session_state['candle_cache'].get(key, "")
 
-    # Har stock ke liye — jitni candles abhi "should_show" (time aa chuka hai)
-    # hain aur cache mein nahi hain, unko ek hi optimized call se nikal lo
-    # (get_all_candle_signals ek hi yfinance fetch se teeno candles deta hai)
+    # Market band hone ke baad naya candle-fetch attempt NAHI karna —
+    # warna har 60s refresh pe wahi "Fetching candles..." spinner aata
+    # rahega bina kisi naye data ke (waste API calls). Sirf market
+    # open hone par hi missing candles fetch honge; band hone ke baad
+    # jo cache mein hai wahi use hoga (missing wale blank/"" rahenge).
     symbols_needing_fetch = []
-    for _, row in df.iterrows():
-        sym = row['Symbol']
-        missing_needed = any(
-            show and f"{sym}_{t}" not in st.session_state['candle_cache']
-            for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
-        )
-        if missing_needed:
-            symbols_needing_fetch.append(sym)
+    if is_market_hours():
+        for _, row in df.iterrows():
+            sym = row['Symbol']
+            missing_needed = any(
+                show and f"{sym}_{t}" not in st.session_state['candle_cache']
+                for t, show in [("09:40", show_940), ("09:45", show_945), ("09:50", show_950)]
+            )
+            if missing_needed:
+                symbols_needing_fetch.append(sym)
 
     if symbols_needing_fetch:
         with st.spinner(f"Fetching candles for {len(symbols_needing_fetch)} stocks..."):
@@ -1271,13 +452,15 @@ def screener_fragment():
     df['c945'] = c945_list
     df['c950'] = c950_list
 
-    # ─────────────────────────────────────────────────────────────
-    # HEADER ROW
-    # ─────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 11: HEADER DISPLAY
+    # ─────────────────────────────────────────────────────────────────────────
+    
     sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
     top_gainer = df.iloc[0]['Symbol'] if len(df) > 0 else '-'
     max_chg    = df['Chg'].max() if len(df) > 0 else 0.0
     last_day   = get_last_trading_day()
+    now_time   = now_ist.strftime('%H:%M:%S')
 
     c1, c2, c3 = st.columns([3, 5, 2])
     with c1:
@@ -1316,52 +499,102 @@ def screener_fragment():
     if selected_sector != 'All':
         df = df[df['Sector'] == selected_sector]
 
-    # ─────────────────────────────────────────────────────────────
-    # TABLE RENDER — shared render_stock_table() use karta hai
-    # (module-level, market-closed view ke saath bhi share hota hai)
-    # ─────────────────────────────────────────────────────────────
-    render_stock_table(df)
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 11.5: MAX QUANTITY (based on user capital / 4 parts, via DhanHQ margin)
+    # ─────────────────────────────────────────────────────────────────────────
 
-    # ─────────────────────────────────────────────────────────────
-    # ALGOMOJO MANUAL BUY BUTTONS
-    # ─────────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("📊 Buy Orders")
-    
-    # Create buy buttons for each stock
-    cols = st.columns(min(4, len(df)))
-    for idx, (_, row) in enumerate(df.iterrows()):
-        col_idx = idx % len(cols)
-        with cols[col_idx]:
+    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+
+    # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS (side-by-side, 90%/10%) ──
+    # Table itself (render_stock_table) is completely unchanged — same
+    # function, same visual output. Only the surrounding layout wraps it
+    # in a 90/10 column split so native Dhan buy buttons sit right next
+    # to each row, without touching the HTML-table rendering logic at all.
+
+    amo_test_mode = st.checkbox(
+        "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
+        value=False,
+        help="Enable this to test order placement when market is closed. Places an After-Market Order (AMO) that Dhan queues and sends to the exchange at the next market open, instead of rejecting with 'Market is Closed'."
+    )
+
+    col_table, col_buttons = st.columns([8.5, 1.5])
+
+    with col_table:
+        render_stock_table(df)  # UNCHANGED — same function, same visual
+
+    with col_buttons:
+        # Spacer to roughly line up with the table's header row before the
+        # first data row starts. Row heights inside the HTML table can vary
+        # slightly with content (two-line cells etc.), so this is a close
+        # visual alignment, not pixel-perfect.
+        st.markdown('<div style="height:38px"></div>', unsafe_allow_html=True)
+        for idx, (_, row) in enumerate(df.iterrows()):
             symbol = row['Symbol']
-            price = row['Price']
-            
-            if st.button(f"Buy {symbol}", key=f"buy_{symbol}_{idx}"):
-                with st.spinner(f"Placing order for {symbol}..."):
-                    result = place_buy_order(symbol, quantity=1)
-                    if result['success']:
-                        st.success(f"✅ {symbol} | Order ID: {result['order_id']}")
-                    else:
-                        st.error(f"❌ {symbol}: {result['error']}")
-                st.rerun()
+            max_qty = row.get('MaxQty', 0)
+            btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
+            if st.button(btn_label, key=f"buy_dhan_{symbol}_{idx}", disabled=(max_qty <= 0), use_container_width=True):
+                with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                    result = place_dhan_order(
+                        symbol, quantity=int(max_qty), product_type="INTRADAY",
+                        after_market_order=amo_test_mode, amo_time="OPEN"
+                    )
+                    display_order_result(symbol, result)
+                # NOTE: no st.rerun() here — Streamlit already reruns
+                # automatically on button click; an explicit rerun() would
+                # wipe the message before it's readable.
 
-    # ── TEMP DIAGNOSTIC — Supabase save status, ek line mein ──
-    success_count = st.session_state.get('supabase_save_success_count', 0)
-    errors = st.session_state.get('supabase_save_errors', [])
+    # ── QTY CALCULATOR DEBUG (temporary — shows why Max Qty might be blank) ──
+    with st.expander("🔍 Debug: Max Qty calculation"):
+        debug_info = get_qty_calc_debug()
+        st.write("**Token last generated:**", debug_info.get('token_last_generated'))
+        st.write("**Token error:**", debug_info.get('token_error'))
+        st.write("**Security map size:**", debug_info.get('security_map_size'))
+        st.write("**Security map error:**", debug_info.get('security_map_error'))
+        st.write("**Columns detected in Dhan CSV:**", debug_info.get('security_map_columns_found'))
+        st.write("**Per-symbol results:**")
+        st.json(debug_info.get('per_symbol', {}))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 13: ALGOMOJO BUY ORDER BUTTONS (unchanged, separate section below)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    st.markdown("---")
+    st.subheader("📊 Buy Orders — AlgoMojo (Manual)")
+
+    algomojo_cols = st.columns(min(4, len(df)))
+    for idx, (_, row) in enumerate(df.iterrows()):
+        col_idx = idx % len(algomojo_cols)
+        with algomojo_cols[col_idx]:
+            symbol = row['Symbol']
+            if st.button(f"Buy {symbol}", key=f"buy_algomojo_{symbol}_{idx}"):
+                with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
+                    result = place_buy_order(symbol, quantity=1)
+                    display_order_result(symbol, result)
+                # NOTE: no st.rerun() here on purpose — Streamlit already
+                # reruns automatically on button click. An explicit rerun()
+                # right after would instantly wipe this message before it's
+                # readable (especially now that cached margin data makes
+                # reruns very fast). The message stays until the next
+                # natural interaction or the fragment's 60s auto-refresh.
+
+    # ── DIAGNOSTICS ──
+    success_count, errors = get_supabase_stats()
     if success_count or errors:
-        st.caption(f"🔍 Supabase saves this session: {success_count} successful, {len(errors)} failed")
+        st.caption(f"🔍 Supabase: {success_count} saves, {len(errors)} errors")
         if errors:
-            with st.expander("⚠️ Show Supabase errors"):
-                for e in errors[-10:]:  # sirf aakhri 10 dikhao
+            with st.expander("⚠️ Show errors"):
+                for e in errors[-10:]:
                     st.text(e)
 
     st.markdown("""
     <div style="margin-top:6px;font-size:10px;color:#9ca3af;text-align:center;">
-        TradingView Screener · NSE · Mkt Cap > ₹51B · New High 1M · Gap filter ±2% · Sorted by Chg% ↓ · POC = Yesterday Volume Profile Point of Control
+        TradingView Screener · NSE · Mkt Cap > ₹41B · Near 1M High · Gap ±2% · Sorted by Chg% · POC = Yesterday's Volume Profile
     </div>
     """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────
-# RUN FRAGMENT
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: MAIN PAGE EXECUTION
+# ─────────────────────────────────────────────────────────────────────────────
+
 screener_fragment()
