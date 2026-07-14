@@ -24,6 +24,7 @@ import io
 import math
 import pyotp
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: DHAN CREDENTIALS
@@ -529,7 +530,7 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
     Cache priority (fastest to slowest):
       1. session_state margin_cache  — same session, instant
       2. Supabase intraday_margin    — persists across page refreshes
-      3. Dhan Margin API             — only for new stocks not in above
+      3. Dhan Margin API (PARALLEL)  — 10 threads, ~10x faster than serial
 
     Args:
         df (pd.DataFrame): Must have 'Symbol' and 'Price' columns
@@ -554,7 +555,6 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
     today_str = datetime.now().date().isoformat()
 
     # ── Step 1: Supabase se aaj ki date ka saara margin ek call mein fetch karo ──
-    # Sirf tab fetch karo jab session cache mein koi bhi symbol missing ho
     symbols_in_df = [str(r.get("Symbol", "")).strip().upper() for _, r in df.iterrows()]
     missing_from_session = [s for s in symbols_in_df if s not in st.session_state['margin_cache']]
 
@@ -564,36 +564,50 @@ def calculate_max_quantity_column(df, total_capital, num_parts=4):
             if sym not in st.session_state['margin_cache']:
                 st.session_state['margin_cache'][sym] = margin_val
 
-    # ── Step 2: Qty calculate karo — Dhan API sirf truly missing stocks ke liye ──
+    # ── Step 2: Jo stocks abhi bhi missing hain — parallel Dhan API calls ──
+    # Price lookup for parallel fetch
+    price_lookup = {
+        str(r.get("Symbol", "")).strip().upper(): r.get("Price", 0)
+        for _, r in df.iterrows()
+    }
+
+    still_missing = [
+        s for s in symbols_in_df
+        if s not in st.session_state['margin_cache']
+        and security_map.get(s)
+        and price_lookup.get(s, 0) > 0
+    ]
+
+    def fetch_margin_for_symbol(symbol):
+        """Single symbol margin fetch — runs in thread pool."""
+        security_id = security_map.get(symbol)
+        price = price_lookup.get(symbol, 0)
+        margin, error = get_margin_per_share(security_id, price)
+        return symbol, security_id, margin, error
+
+    if still_missing:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(fetch_margin_for_symbol, sym): sym for sym in still_missing}
+            for future in as_completed(futures):
+                sym, sec_id, margin_val, error = future.result()
+                _log_symbol_debug(sym, security_id=sec_id, margin_error=error, margin_value=margin_val)
+                if margin_val is not None and margin_val > 0:
+                    # Session cache mein save
+                    st.session_state['margin_cache'][sym] = margin_val
+                    # Supabase mein bhi save — next refresh pe no API call
+                    _supabase_save_margin(sym, today_str, margin_val)
+
+    # ── Step 3: Qty calculate karo — sab kuch ab session cache mein hai ──
     max_qty_list = []
     for _, row in df.iterrows():
         symbol = str(row.get("Symbol", "")).strip().upper()
-        price = row.get("Price", 0)
+        price  = row.get("Price", 0)
 
-        # Priority 1: session cache (instant)
-        if symbol in st.session_state['margin_cache']:
-            margin_per_share = st.session_state['margin_cache'][symbol]
-        else:
-            # Priority 2: Dhan API (symbol not in session or Supabase)
-            security_id = security_map.get(symbol)
-            if not security_id:
-                _log_symbol_debug(symbol, security_id=None, margin_error="Symbol not found in Dhan instrument master")
-                max_qty_list.append(0)
-                continue
+        # Log symbols not found in security map
+        if not security_map.get(symbol):
+            _log_symbol_debug(symbol, security_id=None, margin_error="Symbol not found in Dhan instrument master")
 
-            if not price or price <= 0:
-                _log_symbol_debug(symbol, security_id=security_id, margin_error="Invalid price")
-                max_qty_list.append(0)
-                continue
-
-            margin_per_share, error = get_margin_per_share(security_id, price)
-            _log_symbol_debug(symbol, security_id=security_id, margin_error=error, margin_value=margin_per_share)
-
-            if margin_per_share is not None and margin_per_share > 0:
-                # Session cache mein save karo
-                st.session_state['margin_cache'][symbol] = margin_per_share
-                # Supabase mein bhi save karo — next refresh pe no API call
-                _supabase_save_margin(symbol, today_str, margin_per_share)
+        margin_per_share = st.session_state['margin_cache'].get(symbol)
 
         if margin_per_share is None or margin_per_share <= 0:
             max_qty_list.append(0)
