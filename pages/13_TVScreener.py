@@ -264,12 +264,12 @@ def screener_fragment():
 
     df['Crossover'] = df['Symbol'].map(lambda s: st.session_state['crossover_cache'].get(s, ""))
 
-    # ── STEP 6: CROSSOVER FILTER (compact dropdown — default "09:15 only") ──
+   # ── STEP 6: CROSSOVER FILTER (compact dropdown — default "All (No Filter)") ──
     filter_col, _spacer = st.columns([2, 8])
     with filter_col:
         crossover_filter_option = st.selectbox(
             "Crossover Filter",
-            ["09:15 only", "09:20 only", "All (09:15 + 09:20)", "No Match (NO_MATCH)"],
+            ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)", "No Match (NO_MATCH)"],
             index=0,
             key="crossover_filter_select"
         )
@@ -280,12 +280,9 @@ def screener_fragment():
         df = df[df['Crossover'] == "09:20"]
     elif crossover_filter_option == "All (09:15 + 09:20)":
         df = df[df['Crossover'].isin(["09:15", "09:20"])]
-    else:  # No Match (NO_MATCH) — stocks that did NOT confirm crossover
-        # Vol5D + Max Qty will still calculate for these (since the loops
-        # below just operate on whatever `df` is at that point) — this
-        # is the deliberate opt-in cost (extra API calls) the user chose.
+    elif crossover_filter_option == "No Match (NO_MATCH)":
         df = df[df['Crossover'] == "NO_MATCH"]
-
+    
     # ── TOP-20 LOCK MODE (opt-in checkbox) ──
     # 9:15-9:35 window: live top-20 (by Chg% descending) among confirmed
     # stocks. At 9:35 AM, whatever is top-20 at that moment gets PERMANENTLY
