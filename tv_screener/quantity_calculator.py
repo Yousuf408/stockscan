@@ -34,13 +34,20 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHAN_CLIENT_ID = "1102302753"
-DHAN_PIN = "786786"                  # 4/6-digit trading PIN
+DHAN_PIN = "YOUR_DHAN_PIN"                  # 4/6-digit trading PIN
 DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
 
-# TEMPORARY MANUAL OVERRIDE — paste a token generated via Dhan dashboard's
-# "Generate new Access Token" button here to bypass the TOTP flow entirely
-# while it's rate-limited. Leave as "" to use automatic TOTP generation.
-# This token is valid for 24 hours from when you generate it on Dhan Web.
+# TEMPORARY/BACKUP MANUAL OVERRIDE — paste a token generated via Dhan
+# dashboard's "Generate new Access Token" button here to bypass the TOTP
+# flow (e.g. while it's rate-limited). Leave as "" to use automatic TOTP.
+#
+# IMPORTANT: For Order Placement to work (IP-whitelist required), this
+# manual token MUST be generated while your BROWSER traffic is itself
+# routed through the same proxy (151.242.178.149:50100) — e.g. via a
+# FoxyProxy extension — so the token is bound to the whitelisted IP.
+# If generated from your normal browser/system IP, it will work fine for
+# Margin Calculator / Fund Limit (no IP-whitelist needed there) but will
+# FAIL with "Invalid IP" on Order Placement specifically.
 DHAN_MANUAL_ACCESS_TOKEN = ""
 
 DHAN_MARGIN_CALCULATOR_URL = "https://api.dhan.co/v2/margincalculator"
@@ -86,7 +93,20 @@ def get_access_token(force_refresh=False):
     """
     now = datetime.now()
 
-    # Manual override — bypass TOTP entirely if a token was pasted in
+    # Priority 1: UI-entered token (session_state, pasted by user in the app —
+    # no code-edit/redeploy needed). Takes precedence over everything else.
+    ui_token = st.session_state.get('user_manual_access_token', '').strip()
+    if ui_token:
+        st.session_state['dhan_access_token_data'] = {
+            "token": ui_token,
+            "expiry": now + timedelta(hours=23),
+        }
+        _log_debug('token_error', None)
+        _log_debug('token_last_generated', "UI OVERRIDE (pasted in app by user)")
+        return ui_token
+
+    # Priority 2: Hardcoded manual override (backward-compat fallback —
+    # normally leave this empty now that the UI box exists)
     if DHAN_MANUAL_ACCESS_TOKEN:
         st.session_state['dhan_access_token_data'] = {
             "token": DHAN_MANUAL_ACCESS_TOKEN,
@@ -95,6 +115,8 @@ def get_access_token(force_refresh=False):
         _log_debug('token_error', None)
         _log_debug('token_last_generated', "MANUAL OVERRIDE (pasted from Dhan dashboard)")
         return DHAN_MANUAL_ACCESS_TOKEN
+
+    # Priority 3: Automatic TOTP-based generation
 
     cached = st.session_state.get('dhan_access_token_data')
 
@@ -189,14 +211,14 @@ def get_available_balance():
             "Content-Type": "application/json",
             "access-token": access_token,
         }
-        response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+        response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code == 401:
             access_token = get_access_token(force_refresh=True)
             if not access_token:
                 return None, "401 Unauthorized, and token refresh also failed"
             headers["access-token"] = access_token
-            response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, timeout=10)
+            response = requests.get(DHAN_FUND_LIMIT_URL, headers=headers, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code != 200:
             return None, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -235,15 +257,27 @@ def get_security_id_map():
 
         df = pd.read_csv(io.StringIO(response.text), low_memory=False)
 
-        # Column names can vary slightly across Dhan CSV versions — find them
-        # defensively. Dhan's actual columns are SYMBOL_NAME (equity trading
-        # symbol), DISPLAY_NAME (full name), UNDERLYING_SYMBOL (for F&O).
-        # Priority: SYMBOL_NAME first (matches TV screener symbols directly).
-        symbol_col = next(
-            (c for c in df.columns if c.upper() in ("SYMBOL_NAME", "TRADING_SYMBOL", "UNDERLYING_SYMBOL")),
-            None
-        )
-        security_id_col = next((c for c in df.columns if "SECURITY_ID" in c.upper()), None)
+        # Column names can vary slightly across Dhan CSV versions. IMPORTANT:
+        # must check candidates in EXPLICIT priority order (SYMBOL_NAME
+        # first), NOT just scan df.columns left-to-right — because Dhan's
+        # actual CSV has UNDERLYING_SYMBOL appearing BEFORE SYMBOL_NAME in
+        # column order, and a naive `next()` over df.columns would match
+        # UNDERLYING_SYMBOL first (wrong — that's for F&O underlying refs,
+        # not the equity's own trading symbol), silently giving wrong/stale
+        # security_ids for edge-case symbols where the two values differ.
+        symbol_col = None
+        for candidate_name in ("SYMBOL_NAME", "TRADING_SYMBOL", "UNDERLYING_SYMBOL"):
+            match = next((c for c in df.columns if c.upper() == candidate_name), None)
+            if match:
+                symbol_col = match
+                break
+
+        # Same explicit-priority principle for security_id_col — prefer an
+        # EXACT "SECURITY_ID" match over "UNDERLYING_SECURITY_ID" (which
+        # also contains the substring "SECURITY_ID"), regardless of order.
+        security_id_col = next((c for c in df.columns if c.upper() == "SECURITY_ID"), None)
+        if not security_id_col:
+            security_id_col = next((c for c in df.columns if "SECURITY_ID" in c.upper()), None)
         exch_col = next((c for c in df.columns if c.upper() in ("SEM_EXM_EXCH_ID", "EXCH_ID")), None)
         segment_col = next((c for c in df.columns if c.upper() == "SEGMENT"), None)
         instrument_col = next((c for c in df.columns if "INSTRUMENT" in c.upper() and "EXCH" not in c.upper() and "UNDERLYING" not in c.upper()), None)
@@ -329,7 +363,7 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
             "Accept": "application/json",
             "access-token": access_token,
         }
-        response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, timeout=10)
+        response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code == 401:
             # Token might have just expired — force a one-time refresh and retry
@@ -337,7 +371,7 @@ def get_margin_per_share(security_id, price, product_type="INTRADAY"):
             if not access_token:
                 return None, "401 Unauthorized, and token refresh also failed"
             headers["access-token"] = access_token
-            response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, timeout=10)
+            response = requests.post(DHAN_MARGIN_CALCULATOR_URL, json=payload, headers=headers, proxies=DHAN_PROXIES, timeout=10)
 
         if response.status_code != 200:
             return None, f"HTTP {response.status_code}: {response.text[:200]}"
