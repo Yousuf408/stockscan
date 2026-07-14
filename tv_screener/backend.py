@@ -102,7 +102,7 @@ def get_candle_signal(symbol, candle_time_str):
     core buy decision.
 
     Returns:
-        str: "green" if bullish, "" if bearish/missing
+        dict: {"signal": "green"/"", "body_pct": float}
     """
     try:
         today = datetime.now(IST).date()
@@ -110,7 +110,7 @@ def get_candle_signal(symbol, candle_time_str):
         df = yf.download(ticker, start=today, end=today + timedelta(days=1),
                          interval="5m", progress=False, auto_adjust=True)
         if df.empty:
-            return ""
+            return {"signal": "", "body_pct": 0}
         df.index = pd.to_datetime(df.index)
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC").tz_convert(IST)
@@ -118,19 +118,30 @@ def get_candle_signal(symbol, candle_time_str):
             df.index = df.index.tz_convert(IST)
         df_candle = df.between_time(candle_time_str, candle_time_str)
         if df_candle.empty:
-            return ""
+            return {"signal": "", "body_pct": 0}
         row = df_candle.iloc[0]
-        open_  = float(row['Open'].values[0] if hasattr(row['Open'], 'values') else row['Open'])
+        open_  = float(row['Open'].values[0]  if hasattr(row['Open'],  'values') else row['Open'])
         close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
-        return "green" if close_ > open_ else ""
+        high_  = float(row['High'].values[0]  if hasattr(row['High'],  'values') else row['High'])
+        low_   = float(row['Low'].values[0]   if hasattr(row['Low'],   'values') else row['Low'])
+        candle_range = high_ - low_
+        body_pct = round(abs(close_ - open_) / candle_range * 100, 1) if candle_range > 0 else 0
+        return {"signal": "green" if close_ > open_ else "", "body_pct": body_pct}
     except:
-        return ""
+        return {"signal": "", "body_pct": 0}
 
 
 def get_all_candle_signals(symbol):
     """
     OPTIMIZED: Fetch all three entry-confirmation candles (9:40, 9:45, 9:50)
     in ONE yfinance call instead of three separate calls (3x speedup).
+
+    Body ratio determines candle strength:
+        body_pct = abs(close - open) / (high - low) * 100
+        >= 75% → strong candle (dark green in UI)
+        >= 50% → medium
+        >= 30% → light
+        >  0%  → very light (bullish but weak body)
 
     Returns:
         dict: {
@@ -166,10 +177,8 @@ def get_all_candle_signals(symbol):
             close_ = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
             high_  = float(row['High'].values[0]  if hasattr(row['High'],  'values') else row['High'])
             low_   = float(row['Low'].values[0]   if hasattr(row['Low'],   'values') else row['Low'])
-
             candle_range = high_ - low_
             body_pct = round(abs(close_ - open_) / candle_range * 100, 1) if candle_range > 0 else 0
-
             result[candle_time_str] = {
                 "signal":   "green" if close_ > open_ else "",
                 "body_pct": body_pct,
@@ -220,15 +229,6 @@ def calc_prev_high_dist(row):
     Calculate distance from current price to previous day's high (as %).
     Positive = trading above previous high (bullish breakout),
     Negative = still below previous high (consolidating).
-
-    Args:
-        row (pd.Series): Must have 'high[1]' column, and either 'close'
-                         (raw TV data) or 'Price' (after clean_tv_data
-                         renames 'close' -> 'Price') for current price.
-                         Checks both so this works regardless of call-order.
-
-    Returns:
-        float: Distance % (rounded to 2 decimals), or None if calculation fails
     """
     try:
         price = row.get('close', None)
@@ -253,16 +253,7 @@ def get_prev_high_val(row):
 
 
 def apply_sector_filter(df, sector):
-    """
-    Filter dataframe by sector (dropdown selection in UI).
-
-    Args:
-        df (pd.DataFrame): Data with 'Sector' column
-        sector (str): Sector to filter for, or 'All' to skip filter
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
-    """
+    """Filter dataframe by sector (dropdown selection in UI)."""
     if sector == 'All':
         return df
     return df[df['Sector'] == sector].copy()
@@ -271,50 +262,20 @@ def apply_sector_filter(df, sector):
 def apply_crossover_filter(df, match_type="09:15"):
     """
     Filter to rows where the (already-calculated) crossover result matches
-    the expected type. This just SELECTS rows based on strategy.py's output
-    — it does not calculate the signal itself.
-
-    Args:
-        df (pd.DataFrame): Data with 'Crossover' column
-        match_type (str): "09:15" (strict) / "09:20" (flexible) / "" (no match)
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
+    the expected type.
     """
     return df[df['Crossover'] == match_type].copy()
 
 
-# apply_ema_coil_filter() — REMOVED, EMA Coil column no longer used.
-
-
 def apply_relvol_filter(df, min_relvol=1.0):
-    """
-    Optional filter: only stocks with relative volume (5D) >= min_relvol.
-
-    Args:
-        df (pd.DataFrame): Data with 'RelVol5D' column
-        min_relvol (float): Minimum relative volume multiplier (default 1.0)
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
-    """
+    """Optional filter: only stocks with relative volume (5D) >= min_relvol."""
     return df[df['RelVol5D'] >= min_relvol].copy()
 
 
 def apply_all_filters(df, sector='All', crossover_match="09:15", relvol_min=None):
     """
     Apply sector/crossover/relvol filters in sequence.
-    NOTE: Gap filter is applied separately in strategy.py (it's part of
-    the core entry decision, not a supporting filter).
-
-    Args:
-        df (pd.DataFrame): Input data
-        sector (str): Sector filter ('All' = no filter)
-        crossover_match (str): "09:15", "09:20", or "" for crossover filter
-        relvol_min (float, optional): Min RelVol5D (None = skip)
-
-    Returns:
-        pd.DataFrame: Filtered dataframe
+    NOTE: Gap filter is applied separately in strategy.py.
     """
     df = df.copy()
     df = apply_sector_filter(df, sector)
