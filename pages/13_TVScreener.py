@@ -204,8 +204,8 @@ def screener_fragment():
 
     with r2:
         crossover_filter_option = st.selectbox(
-            
-            ["Select Filter", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
+            "Crossover Filter",
+            ["All (No Filter)", "09:15 only", "09:20 only", "All (09:15 + 09:20)"],
             index=0,
             key="crossover_filter_select"
         )
@@ -260,7 +260,7 @@ def screener_fragment():
         )
     with chk4:
         amo_test_mode = st.checkbox(
-            "🌙 After Market Order ",
+            "🌙 AMO mode (test outside market hours — order queues for next market open instead of rejecting)",
             value=False,
             key="amo_mode_checkbox",
             help="Enable this to test order placement when market is closed."
