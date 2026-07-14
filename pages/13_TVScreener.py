@@ -387,28 +387,44 @@ def screener_fragment():
     df['c950'] = c950_list
 
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 10B: ORB FILTER (optional checkbox)
+    # STEP 10B: ORB FILTER (2 independent optional checkboxes)
     #
-    # Only runs when checkbox is enabled AND time >= 9:45
-    # (9:40 candle data available only after 9:45 IST).
+    # Checkbox 1: 9:20 close within 9:15 range (consolidation check)
+    #             Data available after 9:25 IST
+    # Checkbox 2: 9:35 close > 9:15 high (breakout confirmation)
+    #             9:35 candle data available after 9:40 IST (yfinance 5-min)
+    #
     # Uses session cache — once checked, result stays for the session.
     # ─────────────────────────────────────────────────────────────────────────
 
-    orb_filter_enabled = st.checkbox(
-        "🎯 ORB Filter (9:20 close within 9:15 range  AND  9:40 close > 9:15 high)",
-        value=False,
-        key="orb_filter_checkbox",
-        help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation), "
-             "aur 9:40 candle ka close 9:15 ke high se upar hona chahiye (breakout). "
-             "Data 9:45 AM ke baad available hota hai."
-    )
+    orb_col1, orb_col2 = st.columns(2)
+    with orb_col1:
+        orb_rule1_enabled = st.checkbox(
+            "🎯 9:20 close within 9:15 range",
+            value=False,
+            key="orb_rule1_checkbox",
+            help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation). "
+                 "Data 9:25 AM ke baad available hota hai."
+        )
+    with orb_col2:
+        orb_rule2_enabled = st.checkbox(
+            "🚀 9:35 close > 9:15 high",
+            value=False,
+            key="orb_rule2_checkbox",
+            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout confirmation). "
+                 "Data 9:40 AM ke baad available hota hai."
+        )
 
-    if orb_filter_enabled:
-        # 9:40 candle data available only after 9:45
-        orb_available = now_hhmm >= (9 * 60 + 45)
+    if orb_rule1_enabled or orb_rule2_enabled:
+        # Minimum time check based on which rules are enabled
+        # Rule 1 needs 9:25, Rule 2 needs 9:40
+        rule1_available = now_hhmm >= (9 * 60 + 25)
+        rule2_available = now_hhmm >= (9 * 60 + 40)
 
-        if not orb_available:
-            st.info("⏳ ORB Filter 9:45 AM ke baad activate hoga (9:40 candle data tab available hoga).")
+        if orb_rule1_enabled and not rule1_available:
+            st.info("⏳ Rule 1 (9:20 candle) 9:25 AM ke baad available hoga.")
+        elif orb_rule2_enabled and not rule2_available:
+            st.info("⏳ Rule 2 (9:35 candle) 9:40 AM ke baad available hoga.")
         else:
             if 'orb_cache' not in st.session_state:
                 st.session_state['orb_cache'] = {}
@@ -427,13 +443,21 @@ def screener_fragment():
                             sym = futures[future]
                             st.session_state['orb_cache'][sym] = future.result()
 
-            # Apply filter — keep only stocks where orb["pass"] is True
-            df = df[df['Symbol'].apply(
-                lambda s: st.session_state['orb_cache'].get(s, {}).get('pass', False)
-            )]
+            # Apply filter based on which checkboxes are enabled
+            def orb_passes(symbol):
+                orb = st.session_state['orb_cache'].get(symbol, {})
+                if orb_rule1_enabled and orb_rule2_enabled:
+                    return orb.get('rule1') is True and orb.get('rule2') is True
+                elif orb_rule1_enabled:
+                    return orb.get('rule1') is True
+                elif orb_rule2_enabled:
+                    return orb.get('rule2') is True
+                return True
+
+            df = df[df['Symbol'].apply(orb_passes)]
 
             if df.empty:
-                st.info("Koi stock ORB conditions pass nahi kar raha abhi.")
+                st.info("Koi stock selected ORB condition pass nahi kar raha abhi.")
                 return
 
     # ── STEP 11: HEADER DISPLAY ──
