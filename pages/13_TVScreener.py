@@ -43,7 +43,8 @@ div[data-testid="stVerticalBlock"] { gap: 0.3rem !important; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    margin-top: -4px;
 }
 .ts-logo {
     font-size: 12px;
@@ -155,6 +156,25 @@ init_session_caches()
 
 if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION: OS TITLEBAR — rendered ONCE at top, outside fragment
+# Static logo + breadcrumb. Time shown in stat bar inside fragment.
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.markdown("""
+<div class="ts-titlebar">
+    <div style="display:flex;align-items:center;">
+        <span class="ts-logo">TRADE<span>SENTRY</span></span>
+        <span class="ts-breadcrumb">/ <b>TV Screener</b></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+        <span class="ts-market-live">
+            <span class="ts-live-dot"></span> Market live
+        </span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: CAPITAL INPUT  [UNCHANGED — same keys, same logic]
@@ -553,23 +573,7 @@ def screener_fragment():
     last_day   = get_last_trading_day()
     now_time   = now_ist.strftime('%H:%M:%S')
 
-    # ── OS TITLEBAR ──
-    st.markdown(f"""
-    <div class="ts-titlebar">
-        <div style="display:flex;align-items:center;">
-            <span class="ts-logo">TRADE<span>SENTRY</span></span>
-            <span class="ts-breadcrumb">/ <b>TV Screener</b></span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-            <span class="ts-market-live">
-                <span class="ts-live-dot"></span> Market live
-            </span>
-            <span class="ts-time">{now_time} IST</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── STAT BAR ──
+    # ── STAT BAR (with live time — updates every 60s with fragment) ──
     st.markdown(f"""
     <div class="ts-statbar">
         <div class="ts-stat">
@@ -591,6 +595,12 @@ def screener_fragment():
         <div class="ts-stat">
             <span class="ts-stat-key">Updated</span>
             <span class="ts-stat-val muted">{now_time}</span>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;padding-left:16px;">
+            <span class="ts-market-live">
+                <span class="ts-live-dot"></span> Market live
+            </span>
+            <span class="ts-time">{now_time} IST</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
