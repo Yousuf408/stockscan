@@ -77,39 +77,35 @@ def _supabase_save_token(token):
     """
     Save today's Dhan access token to Supabase dhan_tokens table.
     Uses upsert so re-pasting same day overwrites cleanly.
-    Silent fail — token save failure should never block trading.
+    Uses already-initialized supabase object from database.py.
     """
     try:
-        from tv_screener.database import get_supabase
-        sb = get_supabase()
-        if sb is None:
-            return
+        from tv_screener.database import supabase
         today_str = datetime.now().date().isoformat()
-        sb.table("dhan_tokens").upsert(
+        supabase.table("dhan_tokens").upsert(
             {"token_date": today_str, "access_token": token},
             on_conflict="token_date"
         ).execute()
-    except Exception:
-        pass  # Silent fail — never block trading on save error
+    except Exception as e:
+        _log_debug('token_error', f"Supabase token save failed: {str(e)}")
 
 
 def _supabase_fetch_token():
     """
     Fetch today's Dhan access token from Supabase dhan_tokens table.
     Returns token string if found for today's date, else None.
+    Uses already-initialized supabase object from database.py.
     """
     try:
-        from tv_screener.database import get_supabase
-        sb = get_supabase()
-        if sb is None:
-            return None
+        from tv_screener.database import supabase
         today_str = datetime.now().date().isoformat()
-        result = sb.table("dhan_tokens").select("access_token").eq("token_date", today_str).execute()
+        result = supabase.table("dhan_tokens").select("access_token").eq("token_date", today_str).execute()
         if result.data and len(result.data) > 0:
             return result.data[0].get("access_token")
         return None
-    except Exception:
-        return None  # Silent fail — fall through to TOTP
+    except Exception as e:
+        _log_debug('token_error', f"Supabase token fetch failed: {str(e)}")
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
