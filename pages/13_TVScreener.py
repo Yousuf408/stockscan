@@ -46,7 +46,8 @@ from tv_screener.strategy import (
 from tv_screener.backend import (
     get_last_trading_day, get_current_ist_time, is_market_hours,
     get_all_candle_signals, get_5day_median_volume,
-    calc_prev_high_dist, get_prev_high_val
+    calc_prev_high_dist, get_prev_high_val,
+    check_orb_filter                          # NEW: ORB filter
 )
 from tv_screener.database import (
     get_supabase, supabase_get_cached_row, supabase_get_all_for_date,
@@ -373,7 +374,6 @@ def screener_fragment():
                     sym = futures[future]
                     all_signals = future.result()
                     for t in ["09:40", "09:45", "09:50"]:
-                        # Store full dict {signal, body_pct} in cache
                         st.session_state['candle_cache'][f"{sym}_{t}"] = all_signals[t]
 
     c940_list, c945_list, c950_list = [], [], []
@@ -385,6 +385,56 @@ def screener_fragment():
     df['c940'] = c940_list
     df['c945'] = c945_list
     df['c950'] = c950_list
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 10B: ORB FILTER (optional checkbox)
+    #
+    # Only runs when checkbox is enabled AND time >= 9:45
+    # (9:40 candle data available only after 9:45 IST).
+    # Uses session cache — once checked, result stays for the session.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    orb_filter_enabled = st.checkbox(
+        "🎯 ORB Filter (9:20 close within 9:15 range  AND  9:40 close > 9:15 high)",
+        value=False,
+        key="orb_filter_checkbox",
+        help="9:20 candle ka close 9:15 ke high-low ke andar hona chahiye (consolidation), "
+             "aur 9:40 candle ka close 9:15 ke high se upar hona chahiye (breakout). "
+             "Data 9:45 AM ke baad available hota hai."
+    )
+
+    if orb_filter_enabled:
+        # 9:40 candle data available only after 9:45
+        orb_available = now_hhmm >= (9 * 60 + 45)
+
+        if not orb_available:
+            st.info("⏳ ORB Filter 9:45 AM ke baad activate hoga (9:40 candle data tab available hoga).")
+        else:
+            if 'orb_cache' not in st.session_state:
+                st.session_state['orb_cache'] = {}
+
+            # Fetch ORB result for symbols not yet checked this session
+            symbols_needing_orb = [
+                s for s in df['Symbol']
+                if s not in st.session_state['orb_cache']
+            ]
+
+            if symbols_needing_orb:
+                with st.spinner(f"Checking ORB conditions for {len(symbols_needing_orb)} stocks..."):
+                    with ThreadPoolExecutor(max_workers=10) as executor:
+                        futures = {executor.submit(check_orb_filter, sym): sym for sym in symbols_needing_orb}
+                        for future in as_completed(futures):
+                            sym = futures[future]
+                            st.session_state['orb_cache'][sym] = future.result()
+
+            # Apply filter — keep only stocks where orb["pass"] is True
+            df = df[df['Symbol'].apply(
+                lambda s: st.session_state['orb_cache'].get(s, {}).get('pass', False)
+            )]
+
+            if df.empty:
+                st.info("Koi stock ORB conditions pass nahi kar raha abhi.")
+                return
 
     # ── STEP 11: HEADER DISPLAY ──
     sectors    = ['All'] + sorted(df['Sector'].dropna().unique().tolist())
