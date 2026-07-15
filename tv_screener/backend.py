@@ -188,52 +188,41 @@ def get_all_candle_signals(symbol):
     except:
         return result
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3B: ORB FILTER (9:15 / 9:20 / 9:40 CANDLE CONDITIONS)
-#
-# Rule 1 — 9:20 candle: close must be WITHIN 9:15 candle range
-#           i.e. 9:15 low <= 9:20 close <= 9:15 high  (no breakout yet)
-#
-# Rule 2 — 9:40 candle: close must be ABOVE 9:15 candle high
-#           i.e. 9:40 close > 9:15 high  (breakout confirmation)
-#
-# Both conditions must pass for the stock to qualify.
-# Uses same yfinance 5-min data — ONE call fetches all candles needed.
+# SECTION 3B: ORB candle 930 to 9:50 candles check
 # ═══════════════════════════════════════════════════════════════════════════════
-
 def check_orb_filter(symbol):
     """
     Check ORB (Opening Range Breakout) filter conditions for a symbol.
-
-    Two independent rules — each can be checked separately via UI checkboxes:
+    
+    UPDATED LOGIC:
       Rule 1: 9:20 close is WITHIN 9:15 candle range
-              → 9:15_low <= 9:20_close <= 9:15_high  (consolidation)
-      Rule 2: 9:35 close is ABOVE 9:15 candle high
-              → 9:35_close > 9:15_high  (breakout confirmation)
-              NOTE: 9:35 candle data available on yfinance after 9:40 IST
-
-    Single yfinance call fetches all 3 candles (9:15, 9:20, 9:35).
-
+              → 9:15_low <= 9:20_close <= 9:15_high (consolidation)
+      Rule 2: ANY candle from 9:30 to 9:50 has close ABOVE 9:15 candle high
+              → Only check 9:30, 9:35, 9:40, 9:45, 9:50 candles
+              → Breakout after 9:50 is IGNORED
+    
     Returns:
         dict: {
-            "pass":       True/False  — both rules passed,
-            "c915_high":  float or None,
-            "c915_low":   float or None,
-            "c920_close": float or None,
-            "c935_close": float or None,
-            "rule1":      True/False/None  — None if data unavailable,
-            "rule2":      True/False/None  — None if data unavailable,
+            "pass":          True/False,
+            "c915_high":     float or None,
+            "c915_low":      float or None,
+            "c920_close":    float or None,
+            "breakout_time": "09:35" or "09:40" or None,  # When breakout happened
+            "breakout_price": float or None,              # Price at breakout
+            "rule1":         True/False/None,
+            "rule2":         True/False/None,
         }
     """
     result = {
-        "pass":       False,
-        "c915_high":  None,
-        "c915_low":   None,
-        "c920_close": None,
-        "c930_close": None,
-        "rule1":      None,
-        "rule2":      None,
+        "pass":          False,
+        "c915_high":     None,
+        "c915_low":      None,
+        "c920_close":    None,
+        "breakout_time": None,
+        "breakout_price": None,
+        "rule1":         None,
+        "rule2":         False,
     }
     try:
         today  = datetime.now(IST).date()
@@ -267,8 +256,7 @@ def check_orb_filter(symbol):
 
         c915 = get_ohlc("09:15")
         c920 = get_ohlc("09:20")
-        c930 = get_ohlc("09:30")  # Changed from 09:35 to 09:30
-
+        
         # Need at least 9:15 candle to do anything
         if c915 is None:
             return result
@@ -281,16 +269,33 @@ def check_orb_filter(symbol):
             result["c920_close"] = c920["close"]
             result["rule1"] = (c915["low"] <= c920["close"] <= c915["high"])
 
-        # Rule 2: 9:35 close above 9:15 high (breakout confirmation)
-        if c930 is not None:
-            result["c930_close"] = c930["close"]  # Also rename the dict key
-            result["rule2"] = (c930["close"] > c915["high"])
+        # ════════════════════════════════════════════════════════════════
+        # Rule 2: Check ONLY 9:30 to 9:50 candles for breakout
+        # Maximum 5 candles: 9:30, 9:35, 9:40, 9:45, 9:50
+        # ════════════════════════════════════════════════════════════════
+        
+        # Get only 9:30 to 9:50 candles (5-minute intervals)
+        df_check_window = df.between_time("09:30", "09:50")
+        
+        if not df_check_window.empty:
+            # Check each candle from 9:30 to 9:50
+            for idx, row in df_check_window.iterrows():
+                close_price = float(row['Close'].values[0] if hasattr(row['Close'], 'values') else row['Close'])
+                candle_time = idx.strftime("%H:%M")
+                
+                # Check if this candle's close is above 9:15 high
+                if close_price > c915["high"]:
+                    result["rule2"] = True
+                    result["breakout_time"] = candle_time
+                    result["breakout_price"] = round(close_price, 2)
+                    break  # Found first breakout, stop checking further
 
-        # Both rules must be explicitly True (not None) to pass
+        # Both rules must be True to pass
         result["pass"] = (result["rule1"] is True) and (result["rule2"] is True)
 
         return result
-    except:
+    except Exception as e:
+        print(f"Error in check_orb_filter for {symbol}: {e}")
         return result
 
 
