@@ -231,7 +231,7 @@ def check_orb_filter(symbol):
         "c915_high":  None,
         "c915_low":   None,
         "c920_close": None,
-        "c935_close": None,
+        "c930_close": None,
         "rule1":      None,
         "rule2":      None,
     }
@@ -267,7 +267,7 @@ def check_orb_filter(symbol):
 
         c915 = get_ohlc("09:15")
         c920 = get_ohlc("09:20")
-        c935 = get_ohlc("09:35")  # Changed from 09:40 to 09:35
+        c930 = get_ohlc("09:30")  # Changed from 09:35 to 09:30
 
         # Need at least 9:15 candle to do anything
         if c915 is None:
@@ -282,9 +282,9 @@ def check_orb_filter(symbol):
             result["rule1"] = (c915["low"] <= c920["close"] <= c915["high"])
 
         # Rule 2: 9:35 close above 9:15 high (breakout confirmation)
-        if c935 is not None:
-            result["c935_close"] = c935["close"]
-            result["rule2"] = (c935["close"] > c915["high"])
+        if c930 is not None:
+            result["c930_close"] = c930["close"]  # Also rename the dict key
+            result["rule2"] = (c930["close"] > c915["high"])
 
         # Both rules must be explicitly True (not None) to pass
         result["pass"] = (result["rule1"] is True) and (result["rule2"] is True)
