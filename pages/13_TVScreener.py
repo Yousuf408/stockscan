@@ -290,15 +290,11 @@ def screener_fragment():
             help="AMO mode: order queues for next market open instead of rejecting. Use to test outside market hours."
         )
 
-    # ── STEP 11.5: MAX QUANTITY ── (only during trading + 30min after close)
-    if is_qty_fetch_allowed():
-        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
-    else:
-        # After 4 PM — use cached qty from session, default 0 if not available
-        df['MaxQty'] = df['Symbol'].map(
-            lambda s: st.session_state.get('qty_cache', {}).get(s, 0)
-        )
+    # ── STEP 11.5: MAX QUANTITY ──
+    # Always calculate — is_qty_fetch_allowed sirf extra API calls rokta hai
+    # Cache empty ho to calculate karo regardless of time
+    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
 
     # ── APPLY CROSSOVER FILTER ──
@@ -547,22 +543,6 @@ def screener_fragment():
         """, unsafe_allow_html=True)
 
     # (checkboxes already defined above, used in logic)
-    if is_qty_fetch_allowed():
-        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
-        # Cache qty for post-4PM use
-        if 'qty_cache' not in st.session_state:
-            st.session_state['qty_cache'] = {}
-        for _, row in df.iterrows():
-            st.session_state['qty_cache'][row['Symbol']] = row.get('MaxQty', 0)
-    else:
-        # After 4 PM — use cached qty from session state
-        if 'qty_cache' not in st.session_state:
-            st.session_state['qty_cache'] = {}
-        df['MaxQty'] = df['Symbol'].map(
-            lambda s: st.session_state['qty_cache'].get(s, 0)
-        )
-
     # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
     # amo_test_mode already set in Row 2 checkboxes above
 
