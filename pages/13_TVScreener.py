@@ -277,10 +277,10 @@ def screener_fragment():
         )
     with c3:
         orb_rule2_enabled = st.checkbox(
-            "🚀 9:30 > 9:15 high",
+            "🚀 9:35 > 9:15 high",
             value=False,
             key="orb_rule2_checkbox",
-            help="9:30 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:35 ke baad."
+            help="9:35 candle ka close 9:15 ke high se upar hona chahiye (breakout). Data 9:40 ke baad."
         )
     with c4:
         amo_test_mode = st.checkbox(
