@@ -19,10 +19,6 @@ SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 @st.cache_resource
 def get_supabase():
-    """
-    Cached Supabase client — ek baar connect hone ke baad reuse hota hai
-    pura session mein (jab tak app reload na ho).
-    """
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = get_supabase()
@@ -33,54 +29,49 @@ supabase = get_supabase()
 
 def supabase_get_cached_row(symbol, calc_date):
     """
-    Supabase se ek specific row fetch karo (symbol + calc_date basis par).
-    
+    Supabase se ek specific row fetch karo.
+    FIX: signal_date = aaj ki date bhi match karo — taaki purana data
+    (kal ki date ka) use na ho aur fresh fetch trigger ho.
+
     Args:
-        symbol (str): Stock symbol (e.g., "RELIANCE")
-        calc_date (datetime.date): Calculation date
-    
+        symbol (str): Stock symbol
+        calc_date (datetime.date): Calculation reference date (yesterday)
+
     Returns:
-        dict: {poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status}
-              ya None agar nahi mila
+        dict or None
     """
     try:
+        today_str = datetime.now(IST).date().isoformat()
         result = (supabase.table("tv_screener_cache")
-                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
+                  .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price, signal_date")
                   .eq("symbol", symbol)
                   .eq("calc_date", calc_date.isoformat())
+                  .eq("signal_date", today_str)          # ← FIX: aaj ka data hi valid hai
                   .limit(1)
                   .execute())
         if result.data and len(result.data) > 0:
             return result.data[0]
         return None
-    except Exception as e:
-        # Log silently, fallback to yfinance
+    except Exception:
         return None
 
 
 def supabase_get_all_for_date(calc_date):
     """
-    Saare stocks ka data ek saath fetch karo ek specific calc_date ke liye.
-    Market-band read-only mode mein use hota hai (poori table ek Supabase call mein).
-    
-    Args:
-        calc_date (datetime.date): Calculation date
-    
-    Returns:
-        dict: {symbol: {poc_value, prev_high_val, ema_coil_pct, vol5d_median, 
-                        crossover_status}, ...}
-              ya empty dict agar kuch nahi mila
+    Saare stocks ka data ek saath fetch karo — market-closed read-only mode.
+    signal_date = aaj ki date filter lagao.
     """
     try:
+        today_str = datetime.now(IST).date().isoformat()
         result = (supabase.table("tv_screener_cache")
                   .select("symbol, poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
                   .eq("calc_date", calc_date.isoformat())
+                  .eq("signal_date", today_str)          # ← FIX: aaj ka data
                   .execute())
         if result.data:
             return {row['symbol']: row for row in result.data}
         return {}
-    except Exception as e:
-        # Log silently, fallback to empty cache
+    except Exception:
         return {}
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -90,37 +81,23 @@ def supabase_get_all_for_date(calc_date):
 def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_val=None,
                        ema_coil_pct=None, vol5d_median=None, crossover_status=None, price=None):
     """
-    (symbol, calc_date) ke liye row upsert karo — agar already hai toh update, 
-    warna naya insert karo. Partial save bhi support karta hai (sirf jo values diye 
-    gaye hain woh update honge, baaki unchanged rahenge).
-    
-    IMPORTANT: Supabase ka upsert() poori row REPLACE karta hai un columns ke liye 
-    jo payload mein missing hain (merge nahi karta apne-aap) — isliye pehle 
-    EXISTING row fetch karke merge karte hain, taaki partial-save se dusre fields 
-    accidentally NULL na ho jayein.
-    
-    Args:
-        symbol (str): Stock symbol
-        signal_date (datetime.date): Signal detection date (usually today)
-        calc_date (datetime.date): Calculation reference date (usually yesterday)
-        poc_value (float, optional): Point of Control price
-        prev_high_val (float, optional): Previous day's high
-        ema_coil_pct (float, optional): EMA coil percentage
-        vol5d_median (float, optional): 5-day median volume
-        crossover_status (str, optional): "09:15" / "09:20" / ""
-        price (float, optional): Current price — used ONLY to capture
-                                  signal_price the FIRST time this symbol
-                                  is saved (ignored on later calls once
-                                  signal_price is already set).
+    (symbol, signal_date) ke liye row upsert karo.
+
+    FIX: on_conflict = "symbol, signal_date" — har din naya row banta hai.
+    Pehle "symbol, calc_date" tha — isliye 14 Jul ka row 15 Jul pe bhi
+    update ho raha tha (same calc_date = 13 Jul), signal_date kabhi update
+    nahi hota tha.
+
+    Partial save support: pehle existing row fetch karke merge karte hain.
     """
     try:
-        # Step 1: Pehle existing row fetch karo (agar hai) — taaki merge kar sakein
+        # Step 1: Existing row fetch karo aaj ki signal_date ke basis pe
         existing = None
         try:
             result = (supabase.table("tv_screener_cache")
                       .select("poc_value, prev_high_val, ema_coil_pct, vol5d_median, crossover_status, signal_time, signal_price")
                       .eq("symbol", symbol)
-                      .eq("calc_date", calc_date.isoformat())
+                      .eq("signal_date", signal_date.isoformat())  # ← FIX: signal_date se match
                       .limit(1)
                       .execute())
             if result.data and len(result.data) > 0:
@@ -128,8 +105,7 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
         except:
             existing = None
 
-        # Step 2: Merge logic — naya value diya gaya hai toh woh use karo, 
-        # warna existing (agar hai) rakho, nahi toh None
+        # Step 2: Merge — naya value hai to use karo, warna existing rakho
         def merged(new_val, key):
             if new_val is not None:
                 return new_val
@@ -137,24 +113,13 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
                 return existing.get(key)
             return None
 
-        # signal_time: "yeh stock pehli baar kab list mein aaya" — sirf
-        # PEHLI baar save hone par set hota hai (jab existing row nahi tha
-        # ya existing mein signal_time khali tha). Uske baad kabhi bhi
-        # overwrite NAHI hota, chahe row baad mein kitni baar bhi update ho
-        # (POC save, phir crossover save, phir vol5d save — sab alag calls
-        # hain isi symbol ke liye, lekin signal_time hamesha first-seen
-        # time hi rahega).
+        # signal_time: pehli baar set hota hai, phir kabhi overwrite nahi
         if existing is not None and existing.get('signal_time'):
             signal_time_value = existing['signal_time']
         else:
             signal_time_value = datetime.now(IST).strftime('%H:%M:%S')
 
-        # signal_price: same first-seen-only logic as signal_time — price
-        # jab stock PEHLI baar dekha gaya tha. Sirf tab set hota hai jab
-        # existing row mein already nahi hai AND caller ne `price` diya ho
-        # (kuch save-calls price nahi bhejte, jaise crossover-only save —
-        # unn calls se signal_price capture nahi hota, but jo already set
-        # hai woh preserve rehta hai).
+        # signal_price: pehli baar set hota hai, phir preserve
         if existing is not None and existing.get('signal_price') is not None:
             signal_price_value = existing['signal_price']
         elif price is not None:
@@ -162,7 +127,7 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
         else:
             signal_price_value = None
 
-        # Step 3: Build final payload with merged values
+        # Step 3: Final payload
         payload = {
             "symbol"          : symbol,
             "signal_date"     : signal_date.isoformat(),
@@ -176,16 +141,17 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
             "signal_price"    : signal_price_value,
         }
 
-        # Step 4: Upsert karo
-        supabase.table("tv_screener_cache").upsert(payload, on_conflict="symbol,calc_date").execute()
-        
-        # Step 5: Track success in session_state (for diagnostics)
+        # Step 4: Upsert — conflict on symbol + signal_date (har din naya row)
+        supabase.table("tv_screener_cache").upsert(
+            payload,
+            on_conflict="symbol,signal_date"   # ← FIX: was "symbol,calc_date"
+        ).execute()
+
         if 'supabase_save_success_count' not in st.session_state:
             st.session_state['supabase_save_success_count'] = 0
         st.session_state['supabase_save_success_count'] += 1
-        
+
     except Exception as e:
-        # Step 5: Track error in session_state (fallback to session cache, app chalti rahe)
         if 'supabase_save_errors' not in st.session_state:
             st.session_state['supabase_save_errors'] = []
         st.session_state['supabase_save_errors'].append(f"{symbol}: {str(e)}")
@@ -195,10 +161,6 @@ def supabase_save_row(symbol, signal_date, calc_date, poc_value=None, prev_high_
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_session_caches():
-    """
-    Session-state caches initialize karo — fast in-memory storage jab app run ho.
-    Supabase persistent cache ka supplement hai (faster access, session-specific).
-    """
     if 'poc_cache' not in st.session_state:
         st.session_state['poc_cache'] = {}
     if 'crossover_cache' not in st.session_state:
@@ -215,17 +177,10 @@ def init_session_caches():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_supabase_stats():
-    """
-    Session ke liye Supabase save stats return karo — diagnostics ke liye.
-    
-    Returns:
-        tuple: (success_count, errors_list)
-    """
     success_count = st.session_state.get('supabase_save_success_count', 0)
     errors = st.session_state.get('supabase_save_errors', [])
     return success_count, errors
 
 def reset_supabase_stats():
-    """Session ke Supabase stats reset karo."""
     st.session_state['supabase_save_success_count'] = 0
     st.session_state['supabase_save_errors'] = []
