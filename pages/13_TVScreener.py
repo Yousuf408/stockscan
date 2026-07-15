@@ -290,13 +290,6 @@ def screener_fragment():
             help="AMO mode: order queues for next market open instead of rejecting. Use to test outside market hours."
         )
 
-    # ── STEP 11.5: MAX QUANTITY ──
-    # Always calculate — is_qty_fetch_allowed sirf extra API calls rokta hai
-    # Cache empty ho to calculate karo regardless of time
-    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
-
-
     # ── APPLY CROSSOVER FILTER ──
     if crossover_filter_option == "09:15 only":
         df = df[df['Crossover'] == "09:15"]
@@ -543,6 +536,11 @@ def screener_fragment():
         """, unsafe_allow_html=True)
 
     # (checkboxes already defined above, used in logic)
+
+    # ── STEP 11.5: MAX QUANTITY ──
+    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+        df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
+
     # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
     # amo_test_mode already set in Row 2 checkboxes above
 
