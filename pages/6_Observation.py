@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER WITH CANDLE FILTER - FINAL VERSION
+# TRADINGVIEW SCREENER WITH CANDLE FILTER - FINAL VERSION (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -488,14 +488,10 @@ if run_button:
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
         
-        # Format numeric columns
+        # Format numeric columns - FIX: Only round numeric dtypes
         for col in display_df.columns:
-            if col in ['Price (₹)', '9:15 High', '9:20 High', '9:20 Low', '9:20 Close']:
+            if pd.api.types.is_numeric_dtype(display_df[col]):
                 display_df[col] = display_df[col].round(2)
-            elif col in ['Change %', 'Gap %']:
-                display_df[col] = display_df[col].round(2)
-            elif col == 'Mkt Cap (B₹)':
-                display_df[col] = display_df[col].round(1)
         
         # Color code the change column
         def color_change(val):
@@ -507,8 +503,11 @@ if run_button:
             except:
                 return ''
         
-        # Apply styling
-        styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+        # Apply styling if Change % column exists
+        if 'Change %' in display_df.columns:
+            styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+        else:
+            styled_df = display_df.style
         
         # Display table
         st.dataframe(
@@ -540,7 +539,7 @@ if run_button:
         
         with col1:
             st.info("💡 **Try these fixes:**")
-            st.write("1. 📊 **Increase max gap %** (currently {max_gap}%)")
+            st.write(f"1. 📊 **Increase max gap %** (currently {max_gap}%)")
             st.write("2. 📅 **Check during market hours** (9:15 AM - 3:30 PM IST)")
             st.write("3. 🔄 **Refresh the data** after market opens")
             st.write("4. 📊 **Adjust your filters** to include more stocks")
