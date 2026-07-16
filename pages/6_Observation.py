@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER - TWO MODES (FIXED)
+# TRADINGVIEW SCREENER - BUY SIDE TOP GAINERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -119,7 +119,6 @@ def get_candle_data_bulk(tickers_list):
       - open_9_20, high_9_20, low_9_20, close_9_20
       - max_high_up_to_10_15
       - hit_9_15_low (True if any candle 9:25-9:50 touches low_9_15)
-      - breakout_9_30_to_9_50 (True if any high > high_9_15 between 9:30-9:50)
       - yahoo_ticker, data_date
     Only today's data is used.
     """
@@ -169,24 +168,18 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     max_high = float(second_candle['High'])
 
-                # --- Check 9:25-9:50 for low touch ---
+                # NEW: Check if any candle from 9:25 to 9:50 touches low_9_15
                 low_9_15 = float(first_candle['Low'])
                 mask_25_to_50 = (df_day.index.hour == 9) & (df_day.index.minute >= 25) & (df_day.index.minute <= 50)
                 hit_low = False
                 if mask_25_to_50.sum() > 0:
                     candles = df_day.loc[mask_25_to_50]
-                    hit_low = bool(((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any())
-
-                # --- Check 9:30-9:50 for breakout above high_9_15 ---
-                high_9_15 = float(first_candle['High'])
-                mask_30_to_50 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 50)
-                breakout = False
-                if mask_30_to_50.sum() > 0:
-                    candles = df_day.loc[mask_30_to_50]
-                    breakout = bool(((candles['High'] > high_9_15)).any())
+                    # Check low <= low_9_15 or close <= low_9_15
+                    if (candles['Low'] <= low_9_15).any() or (candles['Close'] <= low_9_15).any():
+                        hit_low = True
 
                 results[base_ticker] = {
-                    'high_9_15': high_9_15,
+                    'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
                     'close_9_15': float(first_candle['Close']),
                     'open_9_20': float(second_candle['Open']),
@@ -194,8 +187,7 @@ def get_candle_data_bulk(tickers_list):
                     'low_9_20': float(second_candle['Low']),
                     'close_9_20': float(second_candle['Close']),
                     'max_high_up_to_10_15': max_high,
-                    'hit_9_15_low': hit_low,          # now a Python bool
-                    'breakout_9_30_to_9_50': breakout,  # now a Python bool
+                    'hit_9_15_low': hit_low,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d")
                 }
@@ -206,8 +198,12 @@ def get_candle_data_bulk(tickers_list):
 
 def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     """
-    Compute all candle metrics and return a DataFrame with additional columns.
-    We do NOT filter here; we just compute and add columns.
+    Check all conditions:
+    1. 9:20 Close ≤ 9:15 High
+    2. 9:20 High and Low below 9:15 High
+    3. Opening gap ≤ max_open_percent
+    4. 9:20 Candle bearish: Close < Open
+    5. No candle 9:25-9:50 touches 9:15 low (Low <= low_9_15 or Close <= low_9_15)
     """
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
@@ -221,16 +217,14 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     df['candle_9_20_close'] = None
     df['max_high_up_to_10_15'] = None
     df['hit_9_15_low'] = None
-    df['breakout_9_30_to_9_50'] = None
     df['data_date'] = None
     df['open_gap_percent'] = None
-    df['passes_9_20_logic'] = False       # Mode 1
-    df['passes_breakout_logic'] = False   # Mode 2
+    df['passes_candle_check'] = False
     df['candle_check_status'] = 'No Data'
     df['yahoo_ticker'] = ''
 
-    valid_9_20 = []
-    valid_breakout = []
+    valid_stocks = []
+    invalid_stocks = []
     failed_to_fetch = []
 
     sample_data = []
@@ -249,7 +243,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'candle_9_20_close'] = data['close_9_20']
             df.at[idx, 'max_high_up_to_10_15'] = data['max_high_up_to_10_15']
             df.at[idx, 'hit_9_15_low'] = data['hit_9_15_low']
-            df.at[idx, 'breakout_9_30_to_9_50'] = data['breakout_9_30_to_9_50']
             df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
             df.at[idx, 'data_date'] = data['data_date']
 
@@ -260,36 +253,30 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             else:
                 gap_percent = 0
 
-            # Conditions for Mode 1 (9:20 Logic)
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
             cond3 = abs(gap_percent) <= max_open_percent
             cond4 = data['close_9_20'] < data['open_9_20']
-            passes_9_20 = cond1 and cond2 and cond3 and cond4
+            cond5 = not data['hit_9_15_low']
 
-            # Mode 2: breakout logic (must also pass 9_20, plus breakout and no low touch)
-            cond5 = not data['hit_9_15_low']   # now safe because it's a Python bool
-            cond6 = data['breakout_9_30_to_9_50']
-            passes_breakout = passes_9_20 and cond5 and cond6
-
-            df.at[idx, 'passes_9_20_logic'] = passes_9_20
-            df.at[idx, 'passes_breakout_logic'] = passes_breakout
-
-            if passes_breakout:
-                df.at[idx, 'candle_check_status'] = 'PASS (Breakout)'
-                valid_breakout.append(ticker)
-            elif passes_9_20:
-                df.at[idx, 'candle_check_status'] = 'PASS (9:20)'
-                valid_9_20.append(ticker)
+            if cond1 and cond2 and cond3 and cond4 and cond5:
+                df.at[idx, 'passes_candle_check'] = True
+                df.at[idx, 'candle_check_status'] = 'PASS ✓'
+                valid_stocks.append(ticker)
             else:
                 reasons = []
-                if not cond1: reasons.append('9:20 close > 9:15 high')
-                if not cond2: reasons.append('9:20 high/low not below 9:15 high')
-                if not cond3: reasons.append(f'Gap > {max_open_percent}%')
-                if not cond4: reasons.append('9:20 candle not bearish')
-                if not cond5: reasons.append('9:25-9:50 touched 9:15 low')
-                if not cond6: reasons.append('No breakout 9:30-9:50')
-                df.at[idx, 'candle_check_status'] = 'FAIL (' + ', '.join(reasons) + ')'
+                if not cond1:
+                    reasons.append('9:20 close > 9:15 high')
+                if not cond2:
+                    reasons.append('9:20 high/low not below 9:15 high')
+                if not cond3:
+                    reasons.append(f'Gap > {max_open_percent}%')
+                if not cond4:
+                    reasons.append('9:20 candle not bearish')
+                if not cond5:
+                    reasons.append('9:25-9:50 touched 9:15 low')
+                df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
+                invalid_stocks.append(ticker)
 
             if len(sample_data) < 5:
                 sample_data.append({
@@ -300,9 +287,11 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                     'close_9_20': data['close_9_20'],
                     'gap%': gap_percent,
                     'hit_low': data['hit_9_15_low'],
-                    'breakout': data['breakout_9_30_to_9_50'],
-                    'passes_9_20': passes_9_20,
-                    'passes_breakout': passes_breakout,
+                    'cond1': cond1,
+                    'cond2': cond2,
+                    'cond3': cond3,
+                    'cond4': cond4,
+                    'cond5': cond5,
                     'date': data['data_date']
                 })
         else:
@@ -315,7 +304,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     else:
         st.warning("⚠️ No stock data could be fetched from Yahoo Finance. Possible reasons: market closed, network issues, or ticker format mismatches.")
 
-    return df, valid_9_20, valid_breakout, failed_to_fetch
+    return df, valid_stocks, invalid_stocks, failed_to_fetch
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR - FILTERS
@@ -385,7 +374,6 @@ st.sidebar.markdown("""
 5. **Opening gap ≤ 2%** (configurable)
 6. **9:20 Candle bearish (Close < Open)**
 7. **No candle 9:25–9:50 touches 9:15 Low**
-8. **Breakout above 9:15 High between 9:30–9:50**
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -418,7 +406,7 @@ if not is_market_open:
 
 if run_button:
     with st.status("Fetching data from TradingView...", expanded=True) as status:
-        st.write("Applying base filters:")
+        st.write("Applying filters:")
         st.write(f"- Price: ₹{price_min} to ₹{price_max}")
         st.write(f"- Market Cap: {selected_cap}")
         st.write("- Exchange: NSE")
@@ -431,53 +419,33 @@ if run_button:
         
         status.update(label=f"✅ Found {count} stocks from TradingView", state="complete")
     
-    with st.status("Computing candle metrics...", expanded=True) as status:
-        st.write("Applying all conditions and storing results...")
+    with st.status("Checking candle conditions...", expanded=True) as status:
+        st.write("Applying all 7 conditions...")
         st.write("1️⃣ 9:20 Close ≤ 9:15 High")
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
         st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
         st.write("4️⃣ 9:20 candle bearish (Close < Open)")
         st.write("5️⃣ No candle 9:25-9:50 touches 9:15 Low")
-        st.write("6️⃣ Breakout above 9:15 High between 9:30-9:50")
         
         tickers_list = df['ticker'].tolist()[:200]
-        df, valid_9_20, valid_breakout, failed = check_candle_conditions(df, tickers_list, max_gap)
+        df, valid, invalid, failed = check_candle_conditions(df, tickers_list, max_gap)
         
         status.update(
-            label=f"✅ Metrics computed: {len(valid_9_20)} pass 9:20 logic, {len(valid_breakout)} pass breakout logic, {len(failed)} no data",
+            label=f"✅ Candle check complete: {len(valid)} pass, {len(invalid)} fail, {len(failed)} no data",
             state="complete"
         )
     
-    # ── Now present filter options ──
-    st.markdown("---")
-    st.subheader("🔎 Choose Filter Mode")
-    
-    mode = st.radio(
-        "Select which stocks to display:",
-        ("Show All Passing 9:20 Logic", "Show Breakout (9:30-9:50) Stocks"),
-        index=0
-    )
-    
-    if mode == "Show All Passing 9:20 Logic":
-        df_filtered = df[df['passes_9_20_logic'] == True].copy()
-        count_passing = len(valid_9_20)
-        label = "9:20 Logic"
-    else:
-        df_filtered = df[df['passes_breakout_logic'] == True].copy()
-        count_passing = len(valid_breakout)
-        label = "Breakout Logic (9:30-9:50)"
-    
+    df_filtered = df[df['passes_candle_check'] == True].copy()
     df_filtered = df_filtered.head(stocks_to_show)
     total_passing = len(df_filtered)
     
-    # ── Display metrics ──
     st.markdown("---")
     st.subheader("📊 Results Summary")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Stocks Found", count)
     with col2:
-        st.metric(f"Passing {label}", count_passing, delta="✓")
+        st.metric("Passing All Conditions", len(valid), delta="✓")
     with col3:
         st.metric("Displaying", total_passing)
     with col4:
@@ -487,7 +455,6 @@ if run_button:
                      delta="Gain" if avg_change > 0 else "Loss", 
                      delta_color="normal" if avg_change > 0 else "inverse")
     
-    # ── Display table ──
     if total_passing > 0:
         st.subheader("📋 Stock Details")
         display_df = df_filtered.copy()
@@ -501,7 +468,7 @@ if run_button:
             'candle_9_20_open', 'candle_9_20_high', 
             'candle_9_20_low', 'candle_9_20_close', 
             'max_high_up_to_10_15', 
-            'open_gap_percent', 'hit_9_15_low', 'breakout_9_30_to_9_50'
+            'open_gap_percent', 'hit_9_15_low'
         ]
         available_cols = [col for col in display_cols if col in display_df.columns]
         display_df = display_df[available_cols].copy()
@@ -522,8 +489,7 @@ if run_button:
             'candle_9_20_close': '9:20 Close',
             'max_high_up_to_10_15': 'Max High till 10:15',
             'open_gap_percent': 'Gap %',
-            'hit_9_15_low': 'Hit 9:15 Low?',
-            'breakout_9_30_to_9_50': 'Breakout 9:30-9:50?'
+            'hit_9_15_low': 'Hit 9:15 Low?'
         }
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
@@ -556,20 +522,34 @@ if run_button:
             mime='text/csv',
             use_container_width=True
         )
-        st.success(f"✅ Found {total_passing} stocks meeting {label} criteria!")
+        st.success(f"✅ Found {total_passing} stocks meeting all conditions!")
     else:
-        st.warning(f"⚠️ No stocks passed the {label} criteria.")
-        st.info("💡 Try adjusting the filters (e.g., increase gap % or price range).")
+        st.warning("⚠️ No stocks passed all conditions!")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("💡 **Try these fixes:**")
+            st.write(f"1. 📊 **Increase max gap %** (currently {max_gap}%)")
+            st.write("2. 📅 **Check during market hours** (9:15 AM - 3:30 PM IST)")
+            st.write("3. 🔄 **Refresh the data** after market opens")
+            st.write("4. 📊 **Adjust your filters** to include more stocks")
+        with col2:
+            st.info("📊 **Status Distribution:**")
+            status_counts = df['candle_check_status'].value_counts()
+            for status, count in status_counts.items():
+                st.write(f"- {status}: {count} stocks")
 
 else:
     st.info("👈 **Configure your filters in the sidebar and click 'Run Screener' to start**")
     st.markdown("""
     ### 🎯 What this screener does:
     - Fetches NSE stocks based on Price, Market Cap, and Exchange.
-    - Computes detailed 5‑minute candle metrics for the first hour.
-    - Provides two filtering modes:
-      - **9:20 Logic**: Classic conditions (close ≤ high, high/low below high, gap ≤ 2%, bearish candle).
-      - **Breakout Logic**: All 9:20 conditions **plus** breakout above 9:15 high between 9:30‑9:50 **and** no touch of 9:15 low in that window.
+    - Applies 7 strict conditions to identify strong bullish setups:
+      - 9:20 Close ≤ 9:15 High (consolidation)
+      - 9:20 High/Low below 9:15 High (respecting the high)
+      - Opening gap ≤ 2%
+      - 9:20 candle bearish (profit booking)
+      - **No candle from 9:25–9:50 touches the 9:15 Low** (strength check)
+    - Displays detailed candle data for each passing stock.
     """)
 
 st.markdown("---")
