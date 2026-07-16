@@ -38,6 +38,7 @@ def fetch_tv_data():
     CRITERIA:
       - Market: India (NSE)
       - Market cap: > ₹41B — liquidity filter
+      - Price: > ₹200 and ≤ ₹3000 — price filter
       - Sorted by % change (descending)
 
     Returns:
@@ -54,6 +55,8 @@ def fetch_tv_data():
             .where(
                 col('market_cap_basic') > 41_000_000_000,
                 col('exchange') == 'NSE',
+                col('close') > 200,
+                col('close') <= 3000,
                 # 1-month high filter removed
             )
             .order_by('change', ascending=False)
