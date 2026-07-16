@@ -467,7 +467,7 @@ def screener_fragment():
         if orb_rule1_enabled and not rule1_available:
             st.info("⏳ Rule 1 (9:20 candle) 9:25 AM ke baad available hoga.")
         elif orb_rule2_enabled and not rule2_available:
-            st.info("⏳ Rule 2 (9:35 candle) 9:40 AM ke baad available hoga.")
+            st.info("⏳ Rule 2 (9:30 candle) 9:35 AM ke baad available hoga.")
         else:
             if 'orb_cache' not in st.session_state:
                 st.session_state['orb_cache'] = {}
