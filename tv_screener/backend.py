@@ -146,15 +146,15 @@ def get_all_candle_signals(symbol):
 
     Returns:
         dict: {
-            "09:35": {"signal": "green"/"", "body_pct": 82.3},
-            "09:40": {"signal": "green"/"", "body_pct": 45.1},
-            "09:45": {"signal": "green"/"", "body_pct": 0},
+            "09:40": {"signal": "green"/"", "body_pct": 82.3},
+            "09:45": {"signal": "green"/"", "body_pct": 45.1},
+            "09:50": {"signal": "green"/"", "body_pct": 0},
         }
     """
     result = {
-        "09:35": {"signal": "", "body_pct": 0},
         "09:40": {"signal": "", "body_pct": 0},
         "09:45": {"signal": "", "body_pct": 0},
+        "09:50": {"signal": "", "body_pct": 0},
     }
     try:
         today = datetime.now(IST).date()
@@ -169,7 +169,7 @@ def get_all_candle_signals(symbol):
         else:
             df.index = df.index.tz_convert(IST)
 
-        for candle_time_str in ["09:35", "09:40", "09:45"]:
+        for candle_time_str in ["09:40", "09:45", "09:50"]:
             df_candle = df.between_time(candle_time_str, candle_time_str)
             if df_candle.empty:
                 continue
