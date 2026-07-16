@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER WITH CANDLE FILTER - FIXED VERSION
+# TRADINGVIEW SCREENER WITH CANDLE FILTER - FIXED COLUMN ISSUE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -519,7 +519,7 @@ if run_button:
             st.plotly_chart(fig3, use_container_width=True)
         
         # ═══════════════════════════════════════════════════════════════════════
-        # STOCK TABLE
+        # STOCK TABLE - FIXED COLUMN ISSUE
         # ═══════════════════════════════════════════════════════════════════════
         
         st.subheader("📋 Stock Details")
@@ -529,32 +529,55 @@ if run_button:
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
         
-        # Select columns for display
-        display_cols = ['name', 'close', 'change', 'volume', 'relative_volume', 
-                       'market_cap_b', 'sector']
+        # Select columns for display based on what's available
+        base_cols = ['name', 'close', 'change', 'volume', 'relative_volume', 'market_cap_b', 'sector']
         
-        if enable_candle_filter:
-            display_cols.extend(['candle_9_15_high', 'candle_9_20_close', 'candle_check_status'])
+        # Only add candle columns if they exist and filter is enabled
+        if enable_candle_filter and 'candle_9_15_high' in display_df.columns:
+            candle_cols = ['candle_9_15_high', 'candle_9_20_close', 'candle_check_status']
+        else:
+            candle_cols = []
         
-        display_df = display_df[display_cols].copy()
+        # Combine columns
+        display_cols = base_cols + candle_cols
         
-        # Rename columns
-        display_df.columns = ['Stock', 'Price (₹)', 'Change %', 'Volume', 'Rel Volume', 
-                             'Mkt Cap (B₹)', 'Sector']
+        # Select only available columns
+        available_cols = [col for col in display_cols if col in display_df.columns]
+        display_df = display_df[available_cols].copy()
         
-        if enable_candle_filter:
-            display_df.columns = list(display_df.columns) + ['9:15 High', '9:20 Close', 'Status']
+        # Rename columns dynamically
+        rename_dict = {
+            'name': 'Stock',
+            'close': 'Price (₹)',
+            'change': 'Change %',
+            'volume': 'Volume',
+            'relative_volume': 'Rel Volume',
+            'market_cap_b': 'Mkt Cap (B₹)',
+            'sector': 'Sector',
+            'candle_9_15_high': '9:15 High',
+            'candle_9_20_close': '9:20 Close',
+            'candle_check_status': 'Status'
+        }
+        
+        # Only rename columns that exist
+        rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
+        display_df = display_df.rename(columns=rename_dict)
         
         # Color code the change column
         def color_change(val):
-            color = '#00ff88' if val > 0 else '#ff4444'
-            return f'color: {color}'
+            try:
+                if isinstance(val, (int, float)):
+                    color = '#00ff88' if val > 0 else '#ff4444'
+                    return f'color: {color}'
+                return ''
+            except:
+                return ''
         
-        # Apply styling
-        styled_df = display_df.style.applymap(
-            color_change, 
-            subset=['Change %']
-        )
+        # Apply styling if Change % column exists
+        if 'Change %' in display_df.columns:
+            styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+        else:
+            styled_df = display_df.style
         
         # Display table
         st.dataframe(
