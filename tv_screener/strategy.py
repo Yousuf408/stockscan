@@ -55,9 +55,9 @@ def fetch_tv_data():
             .where(
                 col('market_cap_basic') > 41_000_000_000,
                 col('exchange') == 'NSE',
-                col('close') > 200,
-                col('close') <= 3000,
-                # 1-month high filter removed
+                col('close') > 200,           # Price > ₹200
+                col('close') <= 3000,         # Price ≤ ₹3000
+                # 1-month high filter REMOVED - was limiting to only 90 stocks
             )
             .order_by('change', ascending=False)
             .limit(100)
