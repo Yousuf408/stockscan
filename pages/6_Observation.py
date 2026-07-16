@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER - WITH TWO FILTER MODES
+# TRADINGVIEW SCREENER - TWO MODES (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -169,23 +169,21 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     max_high = float(second_candle['High'])
 
-                # --- NEW: Check 9:25-9:50 for low touch ---
+                # --- Check 9:25-9:50 for low touch ---
                 low_9_15 = float(first_candle['Low'])
                 mask_25_to_50 = (df_day.index.hour == 9) & (df_day.index.minute >= 25) & (df_day.index.minute <= 50)
                 hit_low = False
                 if mask_25_to_50.sum() > 0:
                     candles = df_day.loc[mask_25_to_50]
-                    # Use vectorized OR condition
                     hit_low = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any()
 
-                # --- NEW: Check 9:30-9:50 for breakout above high_9_15 ---
+                # --- Check 9:30-9:50 for breakout above high_9_15 ---
                 high_9_15 = float(first_candle['High'])
                 mask_30_to_50 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 50)
                 breakout = False
                 if mask_30_to_50.sum() > 0:
                     candles = df_day.loc[mask_30_to_50]
-                    if (candles['High'] > high_9_15).any():
-                        breakout = True
+                    breakout = ((candles['High'] > high_9_15)).any()  # Fixed: use .any() on the boolean Series
 
                 results[base_ticker] = {
                     'high_9_15': high_9_15,
