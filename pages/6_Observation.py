@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER WITH CANDLE FILTER - NO BREAKOUT CONDITION
+# TRADINGVIEW SCREENER WITH CANDLE FILTER - FIXED INDEX ERROR
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -25,7 +25,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS (unchanged)
 st.markdown("""
     <style>
     .main-header {
@@ -102,7 +101,6 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
         return 0, pd.DataFrame()
 
 def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
-    """Fetch intraday data for a single symbol, handling timezone and date."""
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
@@ -120,15 +118,11 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
 def get_candle_data_bulk(tickers_list):
     """
     Fetch 5‑minute data for a list of NSE tickers.
-    Returns a dict with base_ticker -> candle_info, containing:
-      - high_9_15, low_9_15, close_9_15
-      - high_9_20, low_9_20, close_9_20
-      - max_high_up_to_10_15 (max high from 9:20 to 10:15)
-      - yahoo_ticker, data_date
-    Only today's data is used; if no data for today, the stock is skipped.
+    Returns a dict with base_ticker -> candle_info.
+    Only today's data is used.
     """
     results = {}
-    symbol_formats = ['.NS', '-NS', '']  # common NSE suffixes on Yahoo
+    symbol_formats = ['.NS', '-NS', '']
 
     for ticker in tickers_list:
         base_ticker = ticker.replace('NSE:', '')
@@ -141,15 +135,14 @@ def get_candle_data_bulk(tickers_list):
                 today = datetime.now(ist).date()
                 today_data = data[data.index.date == today]
                 if today_data.empty:
-                    # We do NOT fall back to previous day; skip this format
                     continue
-                # Now we have today's data
                 df_day = today_data
 
-                # Locate 9:15 candle (first 5-min after 9:15)
-                mask_first = (df_day.index.hour == 9) & (df_day.index.minute.between(10, 20))
+                # --- 9:15 candle (first candle around 9:15) ---
+                # Use hour and minute conditions without .between()
+                mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
                 if mask_first.sum() == 0:
-                    # fallback to first candle of the day if within 9:00-9:30
+                    # fallback: first candle between 9:00 and 9:30
                     mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
                     if mask_first.sum() == 0:
                         first_candle = df_day.iloc[0]
@@ -158,10 +151,9 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     first_candle = df_day[mask_first].iloc[0]
 
-                # Locate 9:20 candle
-                mask_second = (df_day.index.hour == 9) & (df_day.index.minute.between(20, 25))
+                # --- 9:20 candle (second candle around 9:20) ---
+                mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
                 if mask_second.sum() == 0:
-                    # try second candle if available
                     if len(df_day) >= 2:
                         second_candle = df_day.iloc[1]
                     else:
@@ -169,12 +161,13 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     second_candle = df_day[mask_second].iloc[0]
 
-                # Get max high from 9:20 to 10:15 (inclusive)
-                mask_morning = (df_day.index.hour == 9) & (df_day.index.minute >= 20) | (df_day.index.hour == 10) & (df_day.index.minute <= 15)
+                # --- Max high from 9:20 to 10:15 ---
+                mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
+                               ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
                 if mask_morning.sum() > 0:
                     max_high = float(df_day.loc[mask_morning, 'High'].max())
                 else:
-                    max_high = float(second_candle['High'])  # fallback
+                    max_high = float(second_candle['High'])
 
                 results[base_ticker] = {
                     'high_9_15': float(first_candle['High']),
@@ -188,8 +181,8 @@ def get_candle_data_bulk(tickers_list):
                     'data_date': today.strftime("%Y-%m-%d")
                 }
                 found = True
-                break  # suffix loop
-        # if not found, simply skip
+                break
+        # if not found, skip
     return results
 
 def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
@@ -219,7 +212,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     invalid_stocks = []
     failed_to_fetch = []
 
-    # For debugging: sample of fetched data
     sample_data = []
 
     for idx, row in df.iterrows():
@@ -237,7 +229,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
             df.at[idx, 'data_date'] = data['data_date']
 
-            # Calculate gap
             prev_close = data['close_9_15']
             if prev_close > 0:
                 gap_percent = ((data['high_9_20'] - prev_close) / prev_close) * 100
@@ -245,7 +236,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             else:
                 gap_percent = 0
 
-            # Conditions (1,2,3 only)
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
             cond3 = abs(gap_percent) <= max_open_percent
@@ -265,7 +255,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
-            # Collect sample for debugging
             if len(sample_data) < 5:
                 sample_data.append({
                     'ticker': base_ticker,
@@ -281,7 +270,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
         else:
             failed_to_fetch.append(ticker)
 
-    # Show diagnostic sample
     if len(sample_data) > 0:
         st.info("📊 Sample data for first 5 stocks that had data (conditions shown):")
         sample_df = pd.DataFrame(sample_data)
@@ -406,7 +394,7 @@ if run_button:
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
         st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
         
-        # Process first 200 stocks for performance (you can adjust)
+        # Process first 200 stocks for performance
         tickers_list = df['ticker'].tolist()[:200]
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list, max_gap)
         
@@ -441,7 +429,6 @@ if run_button:
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
         
-        # Define columns to show
         display_cols = [
             'name', 'close', 'change', 'volume', 'relative_volume', 
             'market_cap_b', 'sector',
@@ -469,7 +456,6 @@ if run_button:
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
         
-        # Format numeric columns
         for col in display_df.columns:
             if pd.api.types.is_numeric_dtype(display_df[col]):
                 display_df[col] = display_df[col].round(2)
