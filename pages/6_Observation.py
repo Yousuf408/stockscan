@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER - WITH 9:20-10:00 LOW TOUCH CONDITION
+# TRADINGVIEW SCREENER - FINAL WITH ALL CONDITIONS + 9:20-9:35 LOW TOUCH CHECK
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -122,7 +122,7 @@ def get_candle_data_bulk(tickers_list):
       - high_9_15, low_9_15, close_9_15
       - open_9_20, high_9_20, low_9_20, close_9_20
       - max_high_up_to_10_15
-      - hit_low_9_20_to_10 (True if any candle from 9:20 to 10:00 touches low_9_15)
+      - hit_low_9_20_to_35 (True if any candle 9:20-9:35 touches low_9_15)
       - yahoo_ticker, data_date
     Only today's data is used.
     """
@@ -172,15 +172,13 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     max_high = float(second_candle['High'])
 
-                # --- NEW: Check low touch from 9:20 to 10:00 ---
+                # ✅ NEW: Check 9:20-9:35 for touching 9:15 low
                 low_9_15 = float(first_candle['Low'])
-                mask_20_to_10 = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
-                                ((df_day.index.hour == 10) & (df_day.index.minute == 0))
-                hit_low = False
-                if mask_20_to_10.sum() > 0:
-                    candles = df_day.loc[mask_20_to_10]
-                    # Use bool() to convert to Python bool
-                    hit_low = bool(((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any())
+                mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
+                hit_low_9_20_to_35 = False
+                if mask_20_to_35.sum() > 0:
+                    candles = df_day.loc[mask_20_to_35]
+                    hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any()
 
                 results[base_ticker] = {
                     'high_9_15': float(first_candle['High']),
@@ -191,7 +189,7 @@ def get_candle_data_bulk(tickers_list):
                     'low_9_20': float(second_candle['Low']),
                     'close_9_20': float(second_candle['Close']),
                     'max_high_up_to_10_15': max_high,
-                    'hit_low_9_20_to_10': hit_low,
+                    'hit_low_9_20_to_35': hit_low_9_20_to_35,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d")
                 }
@@ -207,7 +205,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     2. 9:20 High and Low below 9:15 High
     3. Opening gap ≤ max_open_percent
     4. 9:20 Candle bearish: Close < Open
-    5. No candle from 9:20 to 10:00 touches 9:15 Low  (NEW)
+    5. 9:20-9:35 does NOT touch 9:15 Low
     """
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
@@ -220,7 +218,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     df['candle_9_20_low'] = None
     df['candle_9_20_close'] = None
     df['max_high_up_to_10_15'] = None
-    df['hit_low_9_20_to_10'] = None
+    df['hit_low_9_20_to_35'] = None
     df['data_date'] = None
     df['open_gap_percent'] = None
     df['passes_candle_check'] = False
@@ -246,7 +244,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'candle_9_20_low'] = data['low_9_20']
             df.at[idx, 'candle_9_20_close'] = data['close_9_20']
             df.at[idx, 'max_high_up_to_10_15'] = data['max_high_up_to_10_15']
-            df.at[idx, 'hit_low_9_20_to_10'] = data['hit_low_9_20_to_10']
+            df.at[idx, 'hit_low_9_20_to_35'] = data['hit_low_9_20_to_35']
             df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
             df.at[idx, 'data_date'] = data['data_date']
 
@@ -257,11 +255,12 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             else:
                 gap_percent = 0
 
+            # All conditions
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
             cond3 = abs(gap_percent) <= max_open_percent
             cond4 = data['close_9_20'] < data['open_9_20']
-            cond5 = not data['hit_low_9_20_to_10']   # NEW condition
+            cond5 = not data['hit_low_9_20_to_35']  # NEW: Does NOT touch 9:15 low between 9:20-9:35
 
             if cond1 and cond2 and cond3 and cond4 and cond5:
                 df.at[idx, 'passes_candle_check'] = True
@@ -276,9 +275,9 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 if not cond3:
                     reasons.append(f'Gap > {max_open_percent}%')
                 if not cond4:
-                    reasons.append('9:20 candle not bearish')
+                    reasons.append('9:20 candle not bearish (close > open)')
                 if not cond5:
-                    reasons.append('9:20-10:00 touched 9:15 low')
+                    reasons.append('Touched 9:15 low (9:20-9:35)')
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
@@ -286,11 +285,9 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 sample_data.append({
                     'ticker': base_ticker,
                     'high_9_15': data['high_9_15'],
-                    'low_9_15': data['low_9_15'],
                     'open_9_20': data['open_9_20'],
                     'close_9_20': data['close_9_20'],
                     'gap%': gap_percent,
-                    'hit_low': data['hit_low_9_20_to_10'],
                     'cond1': cond1,
                     'cond2': cond2,
                     'cond3': cond3,
@@ -375,7 +372,7 @@ st.sidebar.markdown("""
 2. **9:20 High/Low below 9:15 High**
 3. **Opening gap ≤ 2%** (configurable)
 4. **9:20 Candle bearish (Close < Open)**
-5. **No candle 9:20–10:00 touches 9:15 Low** (NEW)
+5. **9:20-9:35 does NOT touch 9:15 Low** ✅
 6. **Price ₹200–₹2000**
 7. **Market Cap ≥ 41B**
 """)
@@ -429,7 +426,7 @@ if run_button:
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
         st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
         st.write("4️⃣ 9:20 candle bearish (Close < Open)")
-        st.write("5️⃣ No candle 9:20-10:00 touches 9:15 Low")
+        st.write("5️⃣ 9:20-9:35 does NOT touch 9:15 Low")
         
         # Process first 200 stocks for performance
         tickers_list = df['ticker'].tolist()[:200]
@@ -469,11 +466,9 @@ if run_button:
         display_cols = [
             'name', 'close', 'change', 'volume', 'relative_volume', 
             'market_cap_b', 'sector',
-            'candle_9_15_high', 'candle_9_15_low',
-            'candle_9_20_open', 'candle_9_20_high', 
-            'candle_9_20_low', 'candle_9_20_close', 
-            'max_high_up_to_10_15', 
-            'open_gap_percent', 'hit_low_9_20_to_10'
+            'candle_9_15_high', 'candle_9_20_open', 'candle_9_20_high', 
+            'candle_9_20_low', 'candle_9_20_close', 'max_high_up_to_10_15', 
+            'open_gap_percent', 'hit_low_9_20_to_35'
         ]
         available_cols = [col for col in display_cols if col in display_df.columns]
         display_df = display_df[available_cols].copy()
@@ -487,14 +482,13 @@ if run_button:
             'market_cap_b': 'Mkt Cap (B₹)',
             'sector': 'Sector',
             'candle_9_15_high': '9:15 High',
-            'candle_9_15_low': '9:15 Low',
             'candle_9_20_open': '9:20 Open',
             'candle_9_20_high': '9:20 High',
             'candle_9_20_low': '9:20 Low',
             'candle_9_20_close': '9:20 Close',
             'max_high_up_to_10_15': 'Max High till 10:15',
             'open_gap_percent': 'Gap %',
-            'hit_low_9_20_to_10': 'Hit Low 9:20-10:00?'
+            'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?'
         }
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
@@ -553,7 +547,7 @@ else:
        - 9:20 High/Low below 9:15 High
        - Opening gap ≤ 2% (configurable)
        - 9:20 candle bearish (Close < Open)
-       - **No candle from 9:20 to 10:00 touches 9:15 Low** (NEW)
+       - 9:20-9:35 does NOT touch 9:15 Low ✅
     3. **Displays results** with detailed candle data
     
     ### 🔧 Available filters:
