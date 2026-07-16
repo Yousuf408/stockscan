@@ -178,7 +178,7 @@ def get_candle_data_bulk(tickers_list):
                 hit_low_9_20_to_35 = False
                 if mask_20_to_35.sum() > 0:
                     candles = df_day.loc[mask_20_to_35]
-                    hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any()
+                    hit_low_9_20_to_35 = bool(((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any())
 
                 results[base_ticker] = {
                     'high_9_15': float(first_candle['High']),
