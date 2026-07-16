@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER WITH CANDLE FILTER - FIXED INDEX ERROR
+# TRADINGVIEW SCREENER - FINAL WITH ALL CONDITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -15,7 +15,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
@@ -118,7 +118,11 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
 def get_candle_data_bulk(tickers_list):
     """
     Fetch 5‑minute data for a list of NSE tickers.
-    Returns a dict with base_ticker -> candle_info.
+    Returns dict with base_ticker -> candle_info containing:
+      - high_9_15, low_9_15, close_9_15
+      - open_9_20, high_9_20, low_9_20, close_9_20
+      - max_high_up_to_10_15
+      - yahoo_ticker, data_date
     Only today's data is used.
     """
     results = {}
@@ -138,11 +142,9 @@ def get_candle_data_bulk(tickers_list):
                     continue
                 df_day = today_data
 
-                # --- 9:15 candle (first candle around 9:15) ---
-                # Use hour and minute conditions without .between()
+                # 9:15 candle (first candle around 9:15)
                 mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
                 if mask_first.sum() == 0:
-                    # fallback: first candle between 9:00 and 9:30
                     mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
                     if mask_first.sum() == 0:
                         first_candle = df_day.iloc[0]
@@ -151,7 +153,7 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     first_candle = df_day[mask_first].iloc[0]
 
-                # --- 9:20 candle (second candle around 9:20) ---
+                # 9:20 candle
                 mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
                 if mask_second.sum() == 0:
                     if len(df_day) >= 2:
@@ -161,7 +163,7 @@ def get_candle_data_bulk(tickers_list):
                 else:
                     second_candle = df_day[mask_second].iloc[0]
 
-                # --- Max high from 9:20 to 10:15 ---
+                # Max high 9:20–10:15
                 mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
                                ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
                 if mask_morning.sum() > 0:
@@ -173,6 +175,7 @@ def get_candle_data_bulk(tickers_list):
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': float(first_candle['Low']),
                     'close_9_15': float(first_candle['Close']),
+                    'open_9_20': float(second_candle['Open']),
                     'high_9_20': float(second_candle['High']),
                     'low_9_20': float(second_candle['Low']),
                     'close_9_20': float(second_candle['Close']),
@@ -187,10 +190,11 @@ def get_candle_data_bulk(tickers_list):
 
 def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     """
-    Check three conditions:
-    1. 9:20 Close <= 9:15 High
+    Check all conditions:
+    1. 9:20 Close ≤ 9:15 High
     2. 9:20 High and Low below 9:15 High
-    3. Opening gap <= max_open_percent
+    3. Opening gap ≤ max_open_percent
+    4. 9:20 Candle bearish: Close < Open  (NEW)
     """
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
@@ -198,6 +202,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     # Add columns
     df['candle_9_15_high'] = None
     df['candle_9_15_low'] = None
+    df['candle_9_20_open'] = None
     df['candle_9_20_high'] = None
     df['candle_9_20_low'] = None
     df['candle_9_20_close'] = None
@@ -222,6 +227,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             data = candle_data[base_ticker]
             df.at[idx, 'candle_9_15_high'] = data['high_9_15']
             df.at[idx, 'candle_9_15_low'] = data['low_9_15']
+            df.at[idx, 'candle_9_20_open'] = data['open_9_20']
             df.at[idx, 'candle_9_20_high'] = data['high_9_20']
             df.at[idx, 'candle_9_20_low'] = data['low_9_20']
             df.at[idx, 'candle_9_20_close'] = data['close_9_20']
@@ -239,8 +245,9 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
             cond3 = abs(gap_percent) <= max_open_percent
+            cond4 = data['close_9_20'] < data['open_9_20']   # bearish 9:20 candle
 
-            if cond1 and cond2 and cond3:
+            if cond1 and cond2 and cond3 and cond4:
                 df.at[idx, 'passes_candle_check'] = True
                 df.at[idx, 'candle_check_status'] = 'PASS ✓'
                 valid_stocks.append(ticker)
@@ -252,6 +259,8 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                     reasons.append('9:20 high/low not below 9:15 high')
                 if not cond3:
                     reasons.append(f'Gap > {max_open_percent}%')
+                if not cond4:
+                    reasons.append('9:20 candle not bearish (close > open)')
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
@@ -259,12 +268,13 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 sample_data.append({
                     'ticker': base_ticker,
                     'high_9_15': data['high_9_15'],
-                    'high_9_20': data['high_9_20'],
+                    'open_9_20': data['open_9_20'],
                     'close_9_20': data['close_9_20'],
                     'gap%': gap_percent,
                     'cond1': cond1,
                     'cond2': cond2,
                     'cond3': cond3,
+                    'cond4': cond4,
                     'date': data['data_date']
                 })
         else:
@@ -286,13 +296,13 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
 st.sidebar.markdown("## 🔍 Filter Settings")
 
 market_cap_options = {
-    '> 41B (Large Cap)': 41_000_000_000,
-    '> 100B (Mega Cap)': 100_000_000_000,
-    '> 500B (Giant Cap)': 500_000_000_000,
-    '> 1T (Super Cap)': 1_000_000_000_000
+    '≥ 41B (Large Cap)': 41_000_000_000,
+    '≥ 100B (Mega Cap)': 100_000_000_000,
+    '≥ 500B (Giant Cap)': 500_000_000_000,
+    '≥ 1T (Super Cap)': 1_000_000_000_000
 }
 selected_cap = st.sidebar.selectbox(
-    "📊 Market Cap",
+    "📊 Minimum Market Cap",
     options=list(market_cap_options.keys()),
     index=0
 )
@@ -310,7 +320,7 @@ price_max = st.sidebar.slider(
     "💰 Maximum Price (₹)",
     min_value=500,
     max_value=5000,
-    value=3000,
+    value=2000,          # changed from 3000 to 2000
     step=100
 )
 
@@ -343,6 +353,9 @@ st.sidebar.markdown("""
 1. **9:20 Close ≤ 9:15 High**
 2. **9:20 High/Low below 9:15 High**
 3. **Opening gap ≤ 2%** (configurable)
+4. **9:20 Candle bearish (Close < Open)**
+5. **Price ₹200–₹2000**
+6. **Market Cap ≥ 41B**
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -393,6 +406,7 @@ if run_button:
         st.write("1️⃣ 9:20 Close ≤ 9:15 High")
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
         st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
+        st.write("4️⃣ 9:20 candle bearish (Close < Open)")
         
         # Process first 200 stocks for performance
         tickers_list = df['ticker'].tolist()[:200]
@@ -432,8 +446,9 @@ if run_button:
         display_cols = [
             'name', 'close', 'change', 'volume', 'relative_volume', 
             'market_cap_b', 'sector',
-            'candle_9_15_high', 'candle_9_20_high', 'candle_9_20_low', 
-            'candle_9_20_close', 'max_high_up_to_10_15', 'open_gap_percent'
+            'candle_9_15_high', 'candle_9_20_open', 'candle_9_20_high', 
+            'candle_9_20_low', 'candle_9_20_close', 'max_high_up_to_10_15', 
+            'open_gap_percent'
         ]
         available_cols = [col for col in display_cols if col in display_df.columns]
         display_df = display_df[available_cols].copy()
@@ -447,6 +462,7 @@ if run_button:
             'market_cap_b': 'Mkt Cap (B₹)',
             'sector': 'Sector',
             'candle_9_15_high': '9:15 High',
+            'candle_9_20_open': '9:20 Open',
             'candle_9_20_high': '9:20 High',
             'candle_9_20_low': '9:20 Low',
             'candle_9_20_close': '9:20 Close',
@@ -504,24 +520,19 @@ else:
     st.info("👈 **Configure your filters in the sidebar and click 'Run Screener' to start**")
     st.markdown("""
     ### 🎯 What this screener does:
-    1. **Fetches stocks** from NSE India based on your filters
-    2. **Checks three candle conditions**:
+    1. **Fetches stocks** from NSE India based on your filters (Price, Market Cap, Exchange)
+    2. **Checks four candle conditions**:
        - 9:20 Close ≤ 9:15 High
        - 9:20 High/Low below 9:15 High
        - Opening gap ≤ 2% (configurable)
-    3. **Displays results** with detailed candle data (including max high until 10:15 for reference)
+       - 9:20 candle bearish (Close < Open)
+    3. **Displays results** with detailed candle data
     
     ### 🔧 Available filters:
-    - **Market Cap**: Choose from Large, Mega, Giant, or Super Cap
-    - **Price Range**: Set your desired price range
+    - **Minimum Market Cap**: ≥ 41B, 100B, 500B, or 1T
+    - **Price Range**: ₹50–₹5000 (slider)
     - **Max Gap %**: Control the maximum allowed opening gap
     - **Number of stocks**: Control how many stocks to display
-    
-    ### 📊 Features:
-    - Real-time data from TradingView and Yahoo Finance
-    - Multiple candle condition checks
-    - Export results to CSV
-    - Color-coded performance indicators
     """)
 
 st.markdown("---")
