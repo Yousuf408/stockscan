@@ -180,6 +180,14 @@ def get_candle_data_bulk(tickers_list):
                     candles = df_day.loc[mask_20_to_35]
                     hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
 
+                # ✅ NEW: Check 9:30-9:45 for breakout above 9:15 high
+                high_9_15 = float(first_candle['High'])
+                mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
+                breakout_9_30_to_9_45 = False
+                if mask_30_to_45.sum() > 0:
+                    candles = df_day.loc[mask_30_to_45]
+                    breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
+
                 results[base_ticker] = {
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
@@ -190,6 +198,7 @@ def get_candle_data_bulk(tickers_list):
                     'close_9_20': float(second_candle['Close']),
                     'max_high_up_to_10_15': max_high,
                     'hit_low_9_20_to_35': hit_low_9_20_to_35,
+                    'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d")
                 }
@@ -219,6 +228,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     df['candle_9_20_close'] = None
     df['max_high_up_to_10_15'] = None
     df['hit_low_9_20_to_35'] = None
+    df['breakout_9_30_to_9_45'] = None
     df['data_date'] = None
     df['open_gap_percent'] = None
     df['passes_candle_check'] = False
@@ -245,6 +255,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'candle_9_20_close'] = data['close_9_20']
             df.at[idx, 'max_high_up_to_10_15'] = data['max_high_up_to_10_15']
             df.at[idx, 'hit_low_9_20_to_35'] = data['hit_low_9_20_to_35']
+            df.at[idx, 'breakout_9_30_to_9_45'] = data['breakout_9_30_to_9_45']
             df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
             df.at[idx, 'data_date'] = data['data_date']
 
@@ -293,6 +304,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                     'cond3': cond3,
                     'cond4': cond4,
                     'cond5': cond5,
+                    'breakout_9_30_45': data['breakout_9_30_to_9_45'],
                     'date': data['data_date']
                 })
         else:
@@ -359,6 +371,22 @@ stocks_to_show = st.sidebar.slider(
     step=10
 )
 
+# ✅ NEW: Breakout checkbox (only shows after 9:30 AM)
+ist = pytz.timezone('Asia/Kolkata')
+current_time = datetime.now(ist)
+breakout_start_time = current_time.replace(hour=9, minute=30, second=0)
+is_after_9_30 = current_time >= breakout_start_time
+
+if is_after_9_30:
+    show_breakout_only = st.sidebar.checkbox(
+        "⚡ Show Breakout Stocks Only (9:30-9:45)",
+        value=False,
+        help="Filter to show only stocks that broke above 9:15 high between 9:30-9:45"
+    )
+else:
+    show_breakout_only = False
+    st.sidebar.info("⏰ Breakout filter available after 9:30 AM")
+
 run_button = st.sidebar.button(
     "🚀 Run Screener",
     type="primary",
@@ -375,6 +403,9 @@ st.sidebar.markdown("""
 5. **9:20-9:35 does NOT touch 9:15 Low** ✅
 6. **Price ₹200–₹2000**
 7. **Market Cap ≥ 41B**
+
+### ⚡ Breakout Filter (After 9:30 AM):
+- **Breakout 9:30-9:45**: High breaks above 9:15 High
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -438,6 +469,11 @@ if run_button:
         )
     
     df_filtered = df[df['passes_candle_check'] == True].copy()
+    
+    # ✅ NEW: Apply breakout filter if checkbox is selected
+    if show_breakout_only:
+        df_filtered = df_filtered[df_filtered['breakout_9_30_to_9_45'] == True].copy()
+    
     df_filtered = df_filtered.head(stocks_to_show)
     total_passing = len(df_filtered)
     
@@ -449,7 +485,11 @@ if run_button:
     with col2:
         st.metric("Passing All Conditions", len(valid), delta="✓")
     with col3:
-        st.metric("Displaying", total_passing)
+        if show_breakout_only:
+            breakout_count = len(df[df['breakout_9_30_to_9_45'] == True])
+            st.metric("Breakout Stocks", breakout_count, delta="⚡")
+        else:
+            st.metric("Displaying", total_passing)
     with col4:
         if total_passing > 0:
             avg_change = df_filtered['change'].mean()
@@ -468,7 +508,7 @@ if run_button:
             'market_cap_b', 'sector',
             'candle_9_15_high', 'candle_9_20_open', 'candle_9_20_high', 
             'candle_9_20_low', 'candle_9_20_close', 'max_high_up_to_10_15', 
-            'open_gap_percent', 'hit_low_9_20_to_35'
+            'open_gap_percent', 'hit_low_9_20_to_35', 'breakout_9_30_to_9_45'
         ]
         available_cols = [col for col in display_cols if col in display_df.columns]
         display_df = display_df[available_cols].copy()
@@ -488,7 +528,8 @@ if run_button:
             'candle_9_20_close': '9:20 Close',
             'max_high_up_to_10_15': 'Max High till 10:15',
             'open_gap_percent': 'Gap %',
-            'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?'
+            'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
+            'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?'
         }
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
@@ -521,7 +562,7 @@ if run_button:
             mime='text/csv',
             use_container_width=True
         )
-        st.success(f"✅ Found {total_passing} stocks meeting all conditions!")
+        st.success(f"✅ Found {total_passing} stocks" + (" with breakout (9:30-9:45)!" if show_breakout_only else " meeting all conditions!"))
     else:
         st.warning("⚠️ No stocks passed all conditions!")
         col1, col2 = st.columns(2)
@@ -549,12 +590,14 @@ else:
        - 9:20 candle bearish (Close < Open)
        - 9:20-9:35 does NOT touch 9:15 Low ✅
     3. **Displays results** with detailed candle data
+    4. **⚡ After 9:30 AM**: Enable "Breakout Stocks Only" checkbox to filter for stocks that broke above 9:15 high between 9:30-9:45
     
     ### 🔧 Available filters:
     - **Minimum Market Cap**: ≥ 41B, 100B, 500B, or 1T
     - **Price Range**: ₹50–₹5000 (slider)
     - **Max Gap %**: Control the maximum allowed opening gap
     - **Number of stocks**: Control how many stocks to display
+    - **Breakout Filter**: Available after 9:30 AM to show only breakout stocks
     """)
 
 st.markdown("---")
