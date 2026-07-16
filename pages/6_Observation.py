@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER WITH CANDLE FILTER - FIXED COLUMN ISSUE
+# TRADINGVIEW SCREENER WITH CANDLE FILTER - FINAL VERSION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -67,6 +67,10 @@ st.markdown("""
         color: #ffaa00;
         font-weight: bold;
     }
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -102,9 +106,10 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
         return 0, pd.DataFrame()
 
 @st.cache_data(ttl=300)
-def get_intraday_data_bulk_fixed(tickers_list, use_alternate_symbols=True):
+def get_intraday_data_bulk_fixed(tickers_list):
     """
     Fetch 5-minute intraday data with multiple symbol formats
+    Returns: high, low, close for 9:15 and 9:20 candles
     """
     results = {}
     
@@ -141,25 +146,51 @@ def get_intraday_data_bulk_fixed(tickers_list, use_alternate_symbols=True):
                     today_data = data[data.index.date == today]
                     
                     if not today_data.empty:
-                        # Look for 9:15 and 9:20 candles (with some flexibility)
-                        for hour in [9, 10]:  # Check both 9 and 10 AM
+                        # Look for 9:15 and 9:20 candles
+                        for hour in [9, 10]:
                             mask_9_15 = (today_data.index.hour == hour) & (today_data.index.minute == 15)
                             mask_9_20 = (today_data.index.hour == hour) & (today_data.index.minute == 20)
                             
                             if not today_data[mask_9_15].empty and not today_data[mask_9_20].empty:
-                                high_9_15 = float(today_data.loc[mask_9_15, 'High'].iloc[0])
-                                close_9_20 = float(today_data.loc[mask_9_20, 'Close'].iloc[0])
-                                results[base_ticker] = (high_9_15, close_9_20, yahoo_ticker)
+                                # Get 9:15 candle data
+                                candle_9_15 = today_data[mask_9_15].iloc[0]
+                                high_9_15 = float(candle_9_15['High'])
+                                low_9_15 = float(candle_9_15['Low'])
+                                close_9_15 = float(candle_9_15['Close'])
+                                
+                                # Get 9:20 candle data
+                                candle_9_20 = today_data[mask_9_20].iloc[0]
+                                high_9_20 = float(candle_9_20['High'])
+                                low_9_20 = float(candle_9_20['Low'])
+                                close_9_20 = float(candle_9_20['Close'])
+                                
+                                # Store all data
+                                results[base_ticker] = {
+                                    'high_9_15': high_9_15,
+                                    'low_9_15': low_9_15,
+                                    'close_9_15': close_9_15,
+                                    'high_9_20': high_9_20,
+                                    'low_9_20': low_9_20,
+                                    'close_9_20': close_9_20,
+                                    'yahoo_ticker': yahoo_ticker
+                                }
                                 break
                         
-                        # If no 9:15/9:20 data, try to use first two candles of the day
+                        # If no 9:15/9:20 data, use first two candles
                         if base_ticker not in results and len(today_data) >= 2:
                             try:
                                 first_candle = today_data.iloc[0]
                                 second_candle = today_data.iloc[1]
-                                high_9_15 = float(first_candle['High'])
-                                close_9_20 = float(second_candle['Close'])
-                                results[base_ticker] = (high_9_15, close_9_20, yahoo_ticker + " (first two candles)")
+                                
+                                results[base_ticker] = {
+                                    'high_9_15': float(first_candle['High']),
+                                    'low_9_15': float(first_candle['Low']),
+                                    'close_9_15': float(first_candle['Close']),
+                                    'high_9_20': float(second_candle['High']),
+                                    'low_9_20': float(second_candle['Low']),
+                                    'close_9_20': float(second_candle['Close']),
+                                    'yahoo_ticker': yahoo_ticker + " (first two candles)"
+                                }
                             except:
                                 pass
                     
@@ -170,69 +201,24 @@ def get_intraday_data_bulk_fixed(tickers_list, use_alternate_symbols=True):
     
     return results
 
-@st.cache_data(ttl=300)
-def get_previous_day_candle_data(tickers_list):
+def check_candle_condition_fixed(df, tickers_list, max_open_percent=2.0):
     """
-    Get previous day's data if today's data is not available
+    Check multiple candle conditions:
+    1. 9:20 Close <= 9:15 High (original condition)
+    2. 9:20 High and Low should be below 9:15 High (NEW condition)
+    3. Opening gap should not exceed max_open_percent
     """
-    results = {}
-    
-    for ticker in tickers_list:
-        base_ticker = ticker.replace('NSE:', '')
-        try:
-            yahoo_ticker = base_ticker + '.NS'
-            
-            data = yf.download(
-                yahoo_ticker, 
-                period="7d", 
-                interval="5m", 
-                progress=False, 
-                auto_adjust=False,
-                threads=False
-            )
-            
-            if not data.empty:
-                ist = pytz.timezone('Asia/Kolkata')
-                if data.index.tz is None:
-                    data.index = data.index.tz_localize('UTC').tz_convert(ist)
-                else:
-                    data.index = data.index.tz_convert(ist)
-                
-                # Get most recent trading day
-                dates = data.index.date.unique()
-                if len(dates) > 0:
-                    latest_date = dates[-1]
-                    latest_data = data[data.index.date == latest_date]
-                    
-                    if len(latest_data) >= 2:
-                        first_candle = latest_data.iloc[0]
-                        second_candle = latest_data.iloc[1]
-                        high_9_15 = float(first_candle['High'])
-                        close_9_20 = float(second_candle['Close'])
-                        results[base_ticker] = (high_9_15, close_9_20, yahoo_ticker + " (prev day)")
-                        
-        except Exception as e:
-            continue
-    
-    return results
-
-def check_candle_condition_fixed(df, tickers_list):
-    """
-    Check the candle condition with multiple fallback methods
-    """
-    # First try: Get today's data
-    with st.spinner('Fetching today\'s intraday data from Yahoo Finance...'):
+    # Fetch data
+    with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_intraday_data_bulk_fixed(tickers_list)
-    
-    # If not enough data, try previous day
-    if len(candle_data) < len(tickers_list) * 0.1:  # Less than 10% of stocks have data
-        with st.spinner('Today\'s data limited. Trying previous trading day...'):
-            prev_data = get_previous_day_candle_data(tickers_list)
-            candle_data.update(prev_data)
     
     # Add columns
     df['candle_9_15_high'] = None
+    df['candle_9_15_low'] = None
+    df['candle_9_20_high'] = None
+    df['candle_9_20_low'] = None
     df['candle_9_20_close'] = None
+    df['open_gap_percent'] = None
     df['passes_candle_check'] = False
     df['candle_check_status'] = 'No Data'
     df['yahoo_ticker'] = ''
@@ -240,29 +226,63 @@ def check_candle_condition_fixed(df, tickers_list):
     valid_stocks = []
     invalid_stocks = []
     failed_to_fetch = []
+    gap_fail = []
     
     for idx, row in df.iterrows():
         ticker = row['ticker']
         base_ticker = ticker.replace('NSE:', '')
+        current_close = row['close']
         
         if base_ticker in candle_data:
-            high_9_15, close_9_20, yahoo_ticker = candle_data[base_ticker]
-            df.at[idx, 'candle_9_15_high'] = high_9_15
-            df.at[idx, 'candle_9_20_close'] = close_9_20
-            df.at[idx, 'yahoo_ticker'] = yahoo_ticker
+            data = candle_data[base_ticker]
             
-            # Check condition: 9:20 Close <= 9:15 High
-            if close_9_20 <= high_9_15:
+            # Store all candle data
+            df.at[idx, 'candle_9_15_high'] = data['high_9_15']
+            df.at[idx, 'candle_9_15_low'] = data['low_9_15']
+            df.at[idx, 'candle_9_20_high'] = data['high_9_20']
+            df.at[idx, 'candle_9_20_low'] = data['low_9_20']
+            df.at[idx, 'candle_9_20_close'] = data['close_9_20']
+            df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
+            
+            # Calculate opening gap percentage
+            prev_close = data['close_9_15']  # Using 9:15 close as previous close
+            if prev_close > 0:
+                gap_percent = ((data['high_9_20'] - prev_close) / prev_close) * 100
+                df.at[idx, 'open_gap_percent'] = gap_percent
+            else:
+                gap_percent = 0
+            
+            # Check conditions:
+            # 1. 9:20 Close <= 9:15 High (original)
+            condition_1 = data['close_9_20'] <= data['high_9_15']
+            
+            # 2. 9:20 High and Low should be below 9:15 High (NEW)
+            condition_2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
+            
+            # 3. Opening gap should not exceed max_open_percent
+            condition_3 = abs(gap_percent) <= max_open_percent
+            
+            # Check if all conditions pass
+            if condition_1 and condition_2 and condition_3:
                 df.at[idx, 'passes_candle_check'] = True
                 df.at[idx, 'candle_check_status'] = 'PASS ✓'
                 valid_stocks.append(ticker)
             else:
-                df.at[idx, 'candle_check_status'] = 'FAIL ✗'
+                # Determine why it failed
+                reasons = []
+                if not condition_1:
+                    reasons.append('9:20 close > 9:15 high')
+                if not condition_2:
+                    reasons.append('9:20 high/low not below 9:15 high')
+                if not condition_3:
+                    reasons.append(f'Gap > {max_open_percent}%')
+                    gap_fail.append(ticker)
+                df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
         else:
             failed_to_fetch.append(ticker)
     
-    return df, valid_stocks, invalid_stocks, failed_to_fetch
+    return df, valid_stocks, invalid_stocks, failed_to_fetch, gap_fail
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR - FILTERS
@@ -301,11 +321,14 @@ price_max = st.sidebar.slider(
     step=100
 )
 
-# Candle filter toggle
-enable_candle_filter = st.sidebar.checkbox(
-    "🕯️ Enable 9:15/9:20 Candle Filter",
-    value=True,
-    help="Filter stocks where 9:20 AM close <= 9:15 AM high"
+# Max opening gap percentage
+max_gap = st.sidebar.slider(
+    "🚫 Max Opening Gap %",
+    min_value=0.5,
+    max_value=5.0,
+    value=2.0,
+    step=0.5,
+    help="Ignore stocks that open with a gap greater than this percentage"
 )
 
 # Number of stocks to display
@@ -326,15 +349,10 @@ run_button = st.sidebar.button(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-### ℹ️ How it works:
-1. Fetches stocks from TradingView with your filters
-2. Optionally checks 9:15/9:20 candle condition via Yahoo Finance
-3. Displays results with interactive charts
-
-### ⚠️ Note:
-- Data may be limited during market hours
-- Uses multiple symbol formats (.NS, -NS, etc.)
-- Falls back to previous day data if needed
+### 📋 Filter Conditions:
+1. **9:20 Close ≤ 9:15 High**
+2. **9:20 High/Low below 9:15 High**
+3. **Opening gap ≤ 2%** (configurable)
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -361,7 +379,6 @@ with col2:
 with col3:
     st.metric("📅 Date", now.strftime("%d %b %Y"), delta="")
 
-# Show warning if market is closed
 if not is_market_open:
     st.warning("⚠️ Market is currently closed. Candle data will be from the most recent trading day.")
 
@@ -385,31 +402,25 @@ if run_button:
         
         status.update(label=f"✅ Found {count} stocks from TradingView", state="complete")
     
-    # Step 2: Candle check if enabled
-    if enable_candle_filter and count > 0:
-        with st.status("Checking candle condition...", expanded=True) as status:
-            st.write("Fetching 9:15 and 9:20 candle data from Yahoo Finance...")
-            st.write("Trying multiple symbol formats and fallback options...")
-            
-            tickers_list = df['ticker'].tolist()[:100]  # Limit to first 100 for speed
-            df, valid, invalid, failed = check_candle_condition_fixed(df, tickers_list)
-            
-            status.update(
-                label=f"✅ Candle check complete: {len(valid)} pass, {len(invalid)} fail, {len(failed)} no data",
-                state="complete"
-            )
+    # Step 2: Candle check
+    with st.status("Checking candle conditions...", expanded=True) as status:
+        st.write("Applying conditions:")
+        st.write("1️⃣ 9:20 Close ≤ 9:15 High")
+        st.write("2️⃣ 9:20 High/Low below 9:15 High")
+        st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
         
-        # Filter stocks that pass
-        df_filtered = df[df['passes_candle_check'] == True].copy()
-        df_filtered = df_filtered.head(stocks_to_show)
-        total_passing = len(df_filtered)
+        tickers_list = df['ticker'].tolist()[:100]
+        df, valid, invalid, failed, gap_fail = check_candle_condition_fixed(df, tickers_list, max_gap)
         
-        # Show sample of stocks with data
-        df_with_data = df[df['candle_check_status'] != 'No Data'].copy()
-        
-    else:
-        df_filtered = df.head(stocks_to_show).copy()
-        total_passing = count
+        status.update(
+            label=f"✅ Candle check complete: {len(valid)} pass, {len(invalid)} fail, {len(failed)} no data",
+            state="complete"
+        )
+    
+    # Filter stocks that pass
+    df_filtered = df[df['passes_candle_check'] == True].copy()
+    df_filtered = df_filtered.head(stocks_to_show)
+    total_passing = len(df_filtered)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # RESULTS DISPLAY
@@ -422,15 +433,11 @@ if run_button:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Total Stocks Found", count, delta="From TradingView")
+        st.metric("Total Stocks Found", count)
     with col2:
-        if enable_candle_filter:
-            st.metric("Passing Candle Check", len(valid) if enable_candle_filter else "N/A", 
-                     delta="✓" if enable_candle_filter else "Filter disabled")
-        else:
-            st.metric("Candle Filter", "Disabled", delta="⏭️")
+        st.metric("Passing All Conditions", len(valid), delta="✓")
     with col3:
-        st.metric("Displaying", total_passing, delta="Top gainers")
+        st.metric("Displaying", total_passing)
     with col4:
         if total_passing > 0:
             avg_change = df_filtered['change'].mean()
@@ -438,90 +445,11 @@ if run_button:
                      delta="Gain" if avg_change > 0 else "Loss", 
                      delta_color="normal" if avg_change > 0 else "inverse")
     
-    # Show data availability
-    if enable_candle_filter:
-        with st.expander("📊 Data Availability Details"):
-            st.write(f"**Stocks with Yahoo Finance data:** {len(df_with_data)} out of {count}")
-            if len(df_with_data) > 0:
-                sample_tickers = df_with_data['ticker'].str.replace('NSE:', '').tolist()[:10]
-                st.write(f"**Sample tickers with data:** {', '.join(sample_tickers)}")
-            else:
-                st.warning("No Yahoo Finance data available for any stock. This could be because:")
-                st.write("1. Market is closed (try during market hours)")
-                st.write("2. Yahoo Finance is temporarily unavailable")
-                st.write("3. Symbol format issues (try alternative ticker formats)")
-    
     # ═══════════════════════════════════════════════════════════════════════════
-    # CHARTS AND TABLE
+    # STOCK TABLE
     # ═══════════════════════════════════════════════════════════════════════════
     
     if total_passing > 0:
-        st.subheader("📈 Visualizations")
-        
-        # Top gainers chart
-        fig1 = go.Figure()
-        fig1.add_trace(go.Bar(
-            x=df_filtered['ticker'].str.replace('NSE:', ''),
-            y=df_filtered['change'],
-            marker_color=df_filtered['change'].apply(lambda x: '#00ff88' if x > 0 else '#ff4444'),
-            text=df_filtered['change'].round(2),
-            textposition='outside',
-            name='Change %'
-        ))
-        fig1.update_layout(
-            title='Top Gainers by Percentage Change',
-            xaxis_title='Stock',
-            yaxis_title='Change %',
-            height=400,
-            showlegend=False,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-        
-        # Price distribution
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig2 = px.histogram(
-                df_filtered, 
-                x='close', 
-                nbins=20,
-                title='Price Distribution',
-                labels={'close': 'Price (₹)'},
-                color_discrete_sequence=['#00ff88']
-            )
-            fig2.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-        
-        with col2:
-            df_filtered['market_cap_b'] = df_filtered['market_cap_basic'] / 1e9
-            fig3 = px.scatter(
-                df_filtered,
-                x='change',
-                y='close',
-                size='market_cap_b',
-                color='sector',
-                title='Change vs Price (Bubble size = Market Cap)',
-                labels={'change': 'Change %', 'close': 'Price (₹)'}
-            )
-            fig3.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white'),
-                height=400
-            )
-            st.plotly_chart(fig3, use_container_width=True)
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # STOCK TABLE - FIXED COLUMN ISSUE
-        # ═══════════════════════════════════════════════════════════════════════
-        
         st.subheader("📋 Stock Details")
         
         # Prepare display dataframe
@@ -529,39 +457,45 @@ if run_button:
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
         
-        # Select columns for display based on what's available
-        base_cols = ['name', 'close', 'change', 'volume', 'relative_volume', 'market_cap_b', 'sector']
-        
-        # Only add candle columns if they exist and filter is enabled
-        if enable_candle_filter and 'candle_9_15_high' in display_df.columns:
-            candle_cols = ['candle_9_15_high', 'candle_9_20_close', 'candle_check_status']
-        else:
-            candle_cols = []
-        
-        # Combine columns
-        display_cols = base_cols + candle_cols
+        # Select columns for display
+        display_cols = [
+            'name', 'close', 'change', 'volume', 'relative_volume', 
+            'market_cap_b', 'sector',
+            'candle_9_15_high', 'candle_9_20_high', 'candle_9_20_low', 
+            'candle_9_20_close', 'open_gap_percent'
+        ]
         
         # Select only available columns
         available_cols = [col for col in display_cols if col in display_df.columns]
         display_df = display_df[available_cols].copy()
         
-        # Rename columns dynamically
+        # Rename columns
         rename_dict = {
             'name': 'Stock',
             'close': 'Price (₹)',
             'change': 'Change %',
             'volume': 'Volume',
-            'relative_volume': 'Rel Volume',
+            'relative_volume': 'Rel Vol',
             'market_cap_b': 'Mkt Cap (B₹)',
             'sector': 'Sector',
             'candle_9_15_high': '9:15 High',
+            'candle_9_20_high': '9:20 High',
+            'candle_9_20_low': '9:20 Low',
             'candle_9_20_close': '9:20 Close',
-            'candle_check_status': 'Status'
+            'open_gap_percent': 'Gap %'
         }
         
-        # Only rename columns that exist
         rename_dict = {k: v for k, v in rename_dict.items() if k in display_df.columns}
         display_df = display_df.rename(columns=rename_dict)
+        
+        # Format numeric columns
+        for col in display_df.columns:
+            if col in ['Price (₹)', '9:15 High', '9:20 High', '9:20 Low', '9:20 Close']:
+                display_df[col] = display_df[col].round(2)
+            elif col in ['Change %', 'Gap %']:
+                display_df[col] = display_df[col].round(2)
+            elif col == 'Mkt Cap (B₹)':
+                display_df[col] = display_df[col].round(1)
         
         # Color code the change column
         def color_change(val):
@@ -573,17 +507,14 @@ if run_button:
             except:
                 return ''
         
-        # Apply styling if Change % column exists
-        if 'Change %' in display_df.columns:
-            styled_df = display_df.style.applymap(color_change, subset=['Change %'])
-        else:
-            styled_df = display_df.style
+        # Apply styling
+        styled_df = display_df.style.applymap(color_change, subset=['Change %'])
         
         # Display table
         st.dataframe(
             styled_df,
             use_container_width=True,
-            height=400
+            height=500
         )
         
         # ═══════════════════════════════════════════════════════════════════════
@@ -599,31 +530,26 @@ if run_button:
             use_container_width=True
         )
         
-    else:
-        st.warning("⚠️ No stocks passed the candle check filter!")
+        # Show success message
+        st.success(f"✅ Found {total_passing} stocks meeting all conditions!")
         
-        if enable_candle_filter:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.info("💡 **Try these fixes:**")
-                st.write("1. ✅ **Disable the candle filter** to see all stocks")
-                st.write("2. 📅 **Check during market hours** (9:15 AM - 3:30 PM IST)")
-                st.write("3. 🔄 **Refresh the data** after market opens")
-                st.write("4. 📊 **Adjust your filters** to include more stocks")
-            
-            with col2:
-                st.info("📊 **Status Distribution:**")
-                status_counts = df['candle_check_status'].value_counts()
-                for status, count in status_counts.items():
-                    st.write(f"- {status}: {count} stocks")
-                
-                # Show sample of stocks with data
-                df_with_data = df[df['candle_check_status'] != 'No Data'].head(10)
-                if len(df_with_data) > 0:
-                    st.write("**Sample stocks with data:**")
-                    sample = df_with_data['ticker'].str.replace('NSE:', '').tolist()
-                    st.write(", ".join(sample[:5]))
+    else:
+        st.warning("⚠️ No stocks passed all conditions!")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info("💡 **Try these fixes:**")
+            st.write("1. 📊 **Increase max gap %** (currently {max_gap}%)")
+            st.write("2. 📅 **Check during market hours** (9:15 AM - 3:30 PM IST)")
+            st.write("3. 🔄 **Refresh the data** after market opens")
+            st.write("4. 📊 **Adjust your filters** to include more stocks")
+        
+        with col2:
+            st.info("📊 **Status Distribution:**")
+            status_counts = df['candle_check_status'].value_counts()
+            for status, count in status_counts.items():
+                st.write(f"- {status}: {count} stocks")
 
 else:
     # Initial state - show instructions
@@ -632,25 +558,23 @@ else:
     st.markdown("""
     ### 🎯 What this screener does:
     1. **Fetches stocks** from NSE India based on your filters
-    2. **Optional candle filter**: Checks if 9:20 AM close ≤ 9:15 AM high
-    3. **Displays results** with interactive charts and detailed data
+    2. **Checks multiple candle conditions**:
+       - 9:20 Close ≤ 9:15 High
+       - 9:20 High/Low below 9:15 High
+       - Opening gap ≤ 2% (configurable)
+    3. **Displays results** with detailed candle data
     
     ### 🔧 Available filters:
     - **Market Cap**: Choose from Large, Mega, Giant, or Super Cap
     - **Price Range**: Set your desired price range
-    - **Candle Filter**: Toggle the 9:15/9:20 candle condition check
+    - **Max Gap %**: Control the maximum allowed opening gap
     - **Number of stocks**: Control how many stocks to display
     
     ### 📊 Features:
     - Real-time data from TradingView and Yahoo Finance
-    - Interactive charts (Plotly)
+    - Multiple candle condition checks
     - Export results to CSV
     - Color-coded performance indicators
-    
-    ### ⚠️ Important Notes:
-    - Yahoo Finance data works best during market hours
-    - Only NSE stocks are included
-    - First 100 stocks are checked for candle data (for performance)
     """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
