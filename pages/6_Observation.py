@@ -175,7 +175,7 @@ def get_candle_data_bulk(tickers_list):
                 hit_low = False
                 if mask_25_to_50.sum() > 0:
                     candles = df_day.loc[mask_25_to_50]
-                    hit_low = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any()
+                    hit_low = bool(((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any())
 
                 # --- Check 9:30-9:50 for breakout above high_9_15 ---
                 high_9_15 = float(first_candle['High'])
@@ -183,7 +183,7 @@ def get_candle_data_bulk(tickers_list):
                 breakout = False
                 if mask_30_to_50.sum() > 0:
                     candles = df_day.loc[mask_30_to_50]
-                    breakout = ((candles['High'] > high_9_15)).any()  # Fixed: use .any() on the boolean Series
+                    breakout = bool(((candles['High'] > high_9_15)).any())
 
                 results[base_ticker] = {
                     'high_9_15': high_9_15,
@@ -194,8 +194,8 @@ def get_candle_data_bulk(tickers_list):
                     'low_9_20': float(second_candle['Low']),
                     'close_9_20': float(second_candle['Close']),
                     'max_high_up_to_10_15': max_high,
-                    'hit_9_15_low': hit_low,
-                    'breakout_9_30_to_9_50': breakout,
+                    'hit_9_15_low': hit_low,          # now a Python bool
+                    'breakout_9_30_to_9_50': breakout,  # now a Python bool
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d")
                 }
@@ -268,7 +268,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             passes_9_20 = cond1 and cond2 and cond3 and cond4
 
             # Mode 2: breakout logic (must also pass 9_20, plus breakout and no low touch)
-            cond5 = not data['hit_9_15_low']
+            cond5 = not data['hit_9_15_low']   # now safe because it's a Python bool
             cond6 = data['breakout_9_30_to_9_50']
             passes_breakout = passes_9_20 and cond5 and cond6
 
