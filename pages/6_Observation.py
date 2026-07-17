@@ -270,7 +270,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             # All conditions
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
-            cond3 = abs(gap_percent) <= max_open_percent
+            cond3 = abs(gap_percent) <= max_open_percent  # Ignore both gap up and gap down
             cond4 = data['close_9_20'] < data['open_9_20']
             cond5 = not data['hit_low_9_20_to_35']
 
@@ -285,7 +285,10 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 if not cond2:
                     reasons.append('9:20 high/low not below 9:15 high')
                 if not cond3:
-                    reasons.append(f'Gap > {max_open_percent}%')
+                    if gap_percent > max_open_percent:
+                        reasons.append(f'Gap UP > {max_open_percent}%')
+                    else:
+                        reasons.append(f'Gap DOWN > {max_open_percent}%')
                 if not cond4:
                     reasons.append('9:20 candle not bearish (close > open)')
                 if not cond5:
@@ -369,7 +372,9 @@ st.sidebar.markdown("## ⚡ Candle Filters")
 st.sidebar.markdown("""
 **Default Settings:**
 - 🚫 Max Gap: **2.0%** (fixed)
+- 📊 **Ignores both Gap UP and Gap DOWN**
 - ✅ Applied during stock fetch
+- **Buy-Side Logic**: Avoids high-impact opening gaps
 """)
 
 # Fixed gap value
@@ -404,21 +409,22 @@ run_button = st.sidebar.button(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-### 📋 Stock Filters (Stage 1):
+### 📋 Stock Filters (Stage 1 - Buy Side Logic):
 1. **Price**: ₹200–₹2000 (configurable)
 2. **Market Cap**: ≥ 41B (configurable)
 3. **Exchange**: NSE
-4. **Max Gap**: 2% (fixed)
+4. **Max Gap**: ±2% (fixed) - Ignores BOTH gap UP & gap DOWN
 
 ### ✅ Candle Conditions (Stage 2):
 1. 9:20 Close ≤ 9:15 High
 2. 9:20 High/Low below 9:15 High
-3. 9:20 Candle bearish (Close < Open)
-4. 9:20-9:35 does NOT touch 9:15 Low
+3. 9:20 Candle bearish (Close < Open) - Seller control
+4. 9:20-9:35 does NOT touch 9:15 Low - Holds support
 
-### ⚡ Breakout Tracker:
+### ⚡ Breakout Tracker (Optional):
 - Enable after 9:30 AM
-- Shows only breakout stocks
+- Shows only breakout stocks (momentum confirmation)
+- **Best for Buy entries after breakout confirmation**
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -520,11 +526,12 @@ if run_button:
     st.markdown('<div class="stage-header">✅ STAGE 2: Analyzing Candle Conditions for All Stocks</div>', unsafe_allow_html=True)
     
     with st.status("Checking candle conditions...", expanded=True) as status:
-        st.write("Applying conditions:")
+        st.write("Applying conditions (Buy-Side Logic):")
         st.write("1️⃣ 9:20 Close ≤ 9:15 High")
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
-        st.write("3️⃣ 9:20 candle bearish (Close < Open)")
-        st.write("4️⃣ 9:20-9:35 does NOT touch 9:15 Low")
+        st.write("3️⃣ 9:20 candle bearish (Close < Open) - Seller Control")
+        st.write("4️⃣ 9:20-9:35 does NOT touch 9:15 Low - Holds Support")
+        st.write("🚫 **Gap Filter**: ±2% (ignores both Gap UP and Gap DOWN)")
         
         # Process all stocks for candle analysis
         tickers_list = df['ticker'].tolist()[:200]
