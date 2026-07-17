@@ -86,6 +86,84 @@ st.markdown("""
 # FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def get_gap_filtered_stocks(df):
+    """
+    Filter stocks based on gap up/down logic with weekend handling.
+    Gap % = ((Today's Open - Previous Close) / Previous Close) × 100
+    Reject if |Gap %| >= 2%
+    """
+    filtered_stocks = []
+    rejected_stocks = []
+    
+    for ticker in df['ticker'].tolist():
+        base_ticker = ticker.replace('NSE:', '')
+        symbol_formats = ['.NS', '-NS', '']
+        found = False
+        
+        for suffix in symbol_formats:
+            yahoo_ticker = base_ticker + suffix
+            try:
+                data = yf.download(yahoo_ticker, period="10d", interval="1d",
+                                   progress=False, auto_adjust=False, threads=False)
+                if data.empty or len(data) < 2:
+                    continue
+                
+                ist = pytz.timezone('Asia/Kolkata')
+                today = datetime.now(ist).date()
+                
+                # Get today's close/open
+                today_data = data[data.index.date == today]
+                if today_data.empty:
+                    continue
+                
+                today_open = float(today_data.iloc[0]['Open'])
+                
+                # Handle weekend: find previous trading day close
+                weekday = today.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+                
+                if weekday == 0:  # Monday
+                    days_back = 3  # Look to Friday
+                else:
+                    days_back = 1  # Look to previous day
+                
+                previous_date = today - datetime.timedelta(days=days_back)
+                previous_data = data[data.index.date == previous_date]
+                
+                if previous_data.empty:
+                    # If still empty, get the last available close before today
+                    previous_data = data[data.index.date < today]
+                
+                if previous_data.empty:
+                    continue
+                
+                prev_close = float(previous_data.iloc[-1]['Close'])
+                
+                # Calculate gap %
+                if prev_close > 0:
+                    gap_percent = ((today_open - prev_close) / prev_close) * 100
+                else:
+                    continue
+                
+                # Filter: reject if |gap %| >= 2%
+                if abs(gap_percent) >= 2.0:
+                    rejected_stocks.append({
+                        'ticker': ticker,
+                        'gap_percent': gap_percent,
+                        'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN'
+                    })
+                else:
+                    filtered_stocks.append(ticker)
+                
+                found = True
+                break
+            except:
+                continue
+        
+        if not found:
+            filtered_stocks.append(ticker)  # Include if can't fetch gap data
+    
+    return filtered_stocks, rejected_stocks
+
 @st.cache_data(ttl=300)
 def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
     try:
@@ -491,8 +569,30 @@ with st.status("Fetching stocks from TradingView...", expanded=False) as status:
     
     status.update(label=f"✅ Found {count} stocks from TradingView", state="complete")
 
+# Apply gap filtering (Option A: Pre-filter at TradingView stage)
+st.markdown("---")
+st.markdown("⚡ **Applying Gap Filter (±2% from Previous Close)...**")
+
+with st.spinner("Filtering stocks by gap up/down..."):
+    filtered_tickers, rejected_gap_stocks = get_gap_filtered_stocks(df)
+    df = df[df['ticker'].isin(filtered_tickers)].copy()
+    
+    filtered_count = len(df)
+    rejected_count = len(rejected_gap_stocks)
+
+if rejected_count > 0:
+    st.success(f"✅ Gap Filter Applied: {count} → {filtered_count} stocks (Rejected {rejected_count} with ±2% gap)")
+    with st.expander(f"📊 Show Rejected Stocks ({rejected_count})"):
+        for stock in rejected_gap_stocks[:20]:  # Show first 20
+            gap_type = f"<span style='color:#ff4444'>{stock['type']}</span>"
+            st.write(f"- {stock['ticker']}: {stock['gap_percent']:.2f}% {stock['type']}")
+else:
+    st.success(f"✅ Gap Filter Applied: All {filtered_count} stocks passed ±2% check")
+
+count = filtered_count  # Update count to filtered count
+
 # Display stock table
-st.subheader(f"📋 Qualified Stocks List ({count} stocks)")
+st.subheader(f"📋 Qualified Stocks List ({count} stocks - After Gap Filter)")
 
 display_tv_df = df.copy()
 display_tv_df['name'] = display_tv_df['ticker'].str.replace('NSE:', '')
