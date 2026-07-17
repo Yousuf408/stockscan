@@ -51,15 +51,15 @@ def set_auto_refresh():
         st.experimental_rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS
+# FUNCTIONS EMA + other
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Bulk gap filter + 20 EMA filter (using TODAY's OPEN) ───
-def get_gap_filtered_stocks(df, ema_tolerance=4.0):
+def get_gap_filtered_stocks(df, ema_tolerance=4.0, ema_reference='close'):
     """
     Bulk fetch daily OHLC (1 month) – apply:
     - Gap filter: reject |gap%| >= 2%
-    - 20 EMA filter: reject if today's OPEN is > ema_tolerance% away from the 20‑day EMA
+    - 20 EMA filter: reject if reference price (yesterday's close by default)
+      is > ema_tolerance% away from the 20‑day EMA.
     """
     yahoo_tickers = []
     ticker_map = {}
@@ -110,16 +110,20 @@ def get_gap_filtered_stocks(df, ema_tolerance=4.0):
             continue
         gap_percent = ((today_open - prev_close) / prev_close) * 100
 
-        # --- 20 EMA check – uses today's OPEN (not latest close) ---
+        # --- 20 EMA check – uses yesterday's close (or specified reference) ---
         reject_reasons = []
         if abs(gap_percent) >= 2.0:
             reject_reasons.append(f"Gap {gap_percent:.2f}%")
 
         if len(hist) >= 20:
             ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            ema_distance = abs((today_open - ema_20) / ema_20) * 100
+            if ema_reference == 'open':
+                ref_price = today_open
+            else:  # default: yesterday's close
+                ref_price = float(hist['Close'].iloc[-1])
+            ema_distance = abs((ref_price - ema_20) / ema_20) * 100
             if ema_distance > ema_tolerance:
-                reject_reasons.append(f"EMA dist {ema_distance:.2f}% (from open)")
+                reject_reasons.append(f"EMA dist {ema_distance:.2f}% (from {ema_reference})")
         # else: insufficient data → keep (fail‑safe)
 
         if reject_reasons:
@@ -134,6 +138,7 @@ def get_gap_filtered_stocks(df, ema_tolerance=4.0):
             filtered.append(original_ticker)
 
     return filtered, rejected
+    
 
 # ─── TradingView screener ───
 @st.cache_data(ttl=120)
