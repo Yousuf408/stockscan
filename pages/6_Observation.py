@@ -372,14 +372,12 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             # Use gap_percent already calculated from prev_close
             gap_percent = data['gap_percent']
 
-            # All conditions
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
-            cond3 = abs(gap_percent) <= max_open_percent  # Ignore both gap up and gap down
-            cond4 = data['close_9_20'] < data['open_9_20']
-            cond5 = not data['hit_low_9_20_to_35']
+            cond4 = data['close_9_20'] < data['open_9_20']          # bearish candle
+            cond5 = not data['hit_low_9_20_to_35']                  # did not touch 9:15 low
 
-            if cond1 and cond2 and cond3 and cond4 and cond5:
+            if cond1 and cond2 and cond4 and cond5:
                 df.at[idx, 'passes_candle_check'] = True
                 df.at[idx, 'candle_check_status'] = 'PASS ✓'
                 valid_stocks.append(ticker)
@@ -389,11 +387,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                     reasons.append('9:20 close > 9:15 high')
                 if not cond2:
                     reasons.append('9:20 high/low not below 9:15 high')
-                if not cond3:
-                    if gap_percent > max_open_percent:
-                        reasons.append(f'Gap UP > {max_open_percent}% (vs prev close)')
-                    else:
-                        reasons.append(f'Gap DOWN > {max_open_percent}% (vs prev close)')
                 if not cond4:
                     reasons.append('9:20 candle not bearish (close > open)')
                 if not cond5:
@@ -401,6 +394,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
+            
             if len(sample_data) < 5:
                 sample_data.append({
                     'ticker': base_ticker,
