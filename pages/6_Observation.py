@@ -484,7 +484,12 @@ if display_df.empty:
     st.warning("⚠️ No stocks match the selected filters.")
 else:
     st.subheader(f"📋 Filtered Results ({len(display_df)} stocks)")
-    # Prepare columns for display
+
+    # 1. Compute derived columns (needs original columns)
+    display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
+    display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
+
+    # 2. Now select only the columns we want to show
     display_cols = [
         'name', 'close', 'change', 'volume', 'relative_volume',
         'market_cap_b', 'sector',
@@ -495,17 +500,24 @@ else:
     ]
     available = [c for c in display_cols if c in display_df.columns]
     display_df = display_df[available].copy()
-    display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
-    display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
 
+    # 3. Rename columns for display
     rename = {
-        'name': 'Stock', 'close': 'Price (₹)', 'change': 'Change %',
-        'volume': 'Volume', 'relative_volume': 'Rel Vol',
-        'market_cap_b': 'Mkt Cap (B₹)', 'sector': 'Sector',
-        'candle_9_15_high': '9:15 High', 'candle_9_20_open': '9:20 Open',
-        'candle_9_20_high': '9:20 High', 'candle_9_20_low': '9:20 Low',
-        'candle_9_20_close': '9:20 Close', 'max_high_up_to_10_15': 'Max High till 10:15',
-        'open_gap_percent': 'Gap %', 'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
+        'name': 'Stock',
+        'close': 'Price (₹)',
+        'change': 'Change %',
+        'volume': 'Volume',
+        'relative_volume': 'Rel Vol',
+        'market_cap_b': 'Mkt Cap (B₹)',
+        'sector': 'Sector',
+        'candle_9_15_high': '9:15 High',
+        'candle_9_20_open': '9:20 Open',
+        'candle_9_20_high': '9:20 High',
+        'candle_9_20_low': '9:20 Low',
+        'candle_9_20_close': '9:20 Close',
+        'max_high_up_to_10_15': 'Max High till 10:15',
+        'open_gap_percent': 'Gap %',
+        'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
         'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?',
         'inside_9_15': '9:20 inside 9:15?',
         'candle_check_status': 'Candle Status'
@@ -513,14 +525,20 @@ else:
     rename = {k: v for k, v in rename.items() if k in display_df.columns}
     display_df = display_df.rename(columns=rename)
 
+    # 4. Round numeric columns
     for c in display_df.columns:
         if pd.api.types.is_numeric_dtype(display_df[c]):
             display_df[c] = display_df[c].round(2)
 
-    styled = display_df.style.applymap(color_change, subset=['Change %']) if 'Change %' in display_df else display_df.style
-    st.dataframe(styled, use_container_width=True, height=500)
+    # 5. Apply color styling
+    if 'Change %' in display_df.columns:
+        styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+    else:
+        styled_df = display_df.style
 
-    # CSV Download
+    st.dataframe(styled_df, use_container_width=True, height=500)
+
+    # 6. CSV download
     csv = display_df.to_csv(index=False)
     st.download_button(
         label="📥 Download CSV",
