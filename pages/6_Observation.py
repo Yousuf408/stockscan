@@ -86,21 +86,26 @@ st.markdown("""
 # FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: GAP FILTER (BULK YAHOO FETCH)
+# ──────────────────────────────────────────────────────────────────────────────
+
 def get_gap_filtered_stocks(df):
     """
     Bulk fetch daily OHLC for all NSE tickers using yfinance.
-    Reject stocks with |gap%| >= 2% using previous close handling.
+    Uses the most recent trading day's open to compute gap, even if today is a holiday/weekend.
+    Reject stocks with |gap%| >= 2%.
     """
-    # Build list of Yahoo tickers (NSE symbols + .NS)
+    # Build mapping from Yahoo ticker (with .NS) to original TradingView ticker (NSE:...)
     yahoo_tickers = []
-    ticker_map = {}  # map yahoo_ticker -> original NSE:ticker
+    ticker_map = {}
     for row in df.itertuples():
         base = row.ticker.replace('NSE:', '')
-        yahoo_ticker = base + '.NS'
+        yahoo_ticker = base + '.NS'      # Standard suffix for NSE on Yahoo
         yahoo_tickers.append(yahoo_ticker)
         ticker_map[yahoo_ticker] = row.ticker
 
-    # Bulk download all in one go
+    # Bulk download all daily data in one call
     data = yf.download(
         tickers=yahoo_tickers,
         period="10d",
@@ -111,63 +116,56 @@ def get_gap_filtered_stocks(df):
         auto_adjust=False
     )
 
-    filtered_stocks = []
-    rejected_stocks = []
+    filtered = []
+    rejected = []
 
     for yahoo_ticker, original_ticker in ticker_map.items():
         if yahoo_ticker not in data:
-            # If no data, include the stock (fail‑safe)
-            filtered_stocks.append(original_ticker)
+            # If no data, we cannot compute gap → keep the stock (fail‑safe)
+            filtered.append(original_ticker)
             continue
 
         hist = data[yahoo_ticker]
         if hist.empty or len(hist) < 2:
-            filtered_stocks.append(original_ticker)
+            filtered.append(original_ticker)
             continue
 
-        ist = pytz.timezone('Asia/Kolkata')
-        today = datetime.now(ist).date()
-
-        # Today's data
-        today_data = hist[hist.index.date == today]
-        if today_data.empty:
-            filtered_stocks.append(original_ticker)
-            continue
-        today_open = float(today_data.iloc[0]['Open'])
-
-        # Previous close (handling weekends)
-        weekday = today.weekday()
-        if weekday == 0:  # Monday → use Friday
-            days_back = 3
-        else:
-            days_back = 1
-
-        prev_date = today - timedelta(days=days_back)
-        prev_data = hist[hist.index.date == prev_date]
-        if prev_data.empty:
-            # fallback to last available before today
-            prev_data = hist[hist.index.date < today]
-        if prev_data.empty:
-            filtered_stocks.append(original_ticker)
+        # Use the most recent available trading day
+        latest_date = hist.index[-1].date()
+        latest_data = hist[hist.index.date == latest_date]
+        if latest_data.empty:
+            filtered.append(original_ticker)
             continue
 
-        prev_close = float(prev_data.iloc[-1]['Close'])
+        today_open = float(latest_data.iloc[0]['Open'])
+
+        # Get previous close – take the row immediately before latest_date
+        prev_rows = hist[hist.index.date < latest_date]
+        if prev_rows.empty:
+            filtered.append(original_ticker)
+            continue
+        prev_close = float(prev_rows.iloc[-1]['Close'])
+
         if prev_close == 0:
-            filtered_stocks.append(original_ticker)
+            filtered.append(original_ticker)
             continue
 
         gap_percent = ((today_open - prev_close) / prev_close) * 100
 
         if abs(gap_percent) >= 2.0:
-            rejected_stocks.append({
+            rejected.append({
                 'ticker': original_ticker,
                 'gap_percent': gap_percent,
                 'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN'
             })
         else:
-            filtered_stocks.append(original_ticker)
+            filtered.append(original_ticker)
 
-    return filtered_stocks, rejected_stocks
+    return filtered, rejected
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: TRADINGVIEW SCREENER (STAGE 1)
+# ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
 def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
@@ -193,6 +191,10 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
+# ──────────────────────────────────────────────────────────────────────────────
+# SECTION: INTRADAY DATA & CANDLE CONDITIONS (STAGE 2)
+# ──────────────────────────────────────────────────────────────────────────────
+
 def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
@@ -211,6 +213,7 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
 def get_candle_data_bulk(tickers_list):
     """
     Fetch 5‑minute data for a list of NSE tickers.
+    (Sequential – Yahoo does not support bulk intraday)
     """
     results = {}
     symbol_formats = ['.NS', '-NS', '']
@@ -574,11 +577,11 @@ with st.status("Fetching stocks from TradingView...", expanded=False) as status:
     
     status.update(label=f"✅ Found {count} stocks from TradingView", state="complete")
 
-# Apply gap filtering (Option A: Pre-filter at TradingView stage)
+# Apply gap filtering (bulk Yahoo fetch)
 st.markdown("---")
 st.markdown("⚡ **Applying Gap Filter (±2% from Previous Close)...**")
 
-with st.spinner("Filtering stocks by gap up/down..."):
+with st.spinner("Filtering stocks by gap up/down (bulk download)..."):
     filtered_tickers, rejected_gap_stocks = get_gap_filtered_stocks(df)
     df = df[df['ticker'].isin(filtered_tickers)].copy()
     
