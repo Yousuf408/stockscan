@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (AUTO, WITH TIMER)
-# Stage 1: Auto-load from TradingView + gap filter + 20 EMA filter
-# Stage 2: Auto candle analysis with inside-9:15 checkbox & breakout filter
+# Stage 1: Auto-load from TradingView + gap filter + 20 EMA filter (on open)
+# Stage 2: Auto candle analysis with inside-9:15 & breakout checkboxes (main)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG & STYLES (same as before)
+# PAGE CONFIG & STYLES
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -54,8 +54,13 @@ def set_auto_refresh():
 # FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Bulk gap filter + 20 EMA filter ───
-def get_gap_filtered_stocks(df):
+# ─── Bulk gap filter + 20 EMA filter (using TODAY's OPEN) ───
+def get_gap_filtered_stocks(df, ema_tolerance=4.0):
+    """
+    Bulk fetch daily OHLC (1 month) – apply:
+    - Gap filter: reject |gap%| >= 2%
+    - 20 EMA filter: reject if today's OPEN is > ema_tolerance% away from the 20‑day EMA
+    """
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -87,13 +92,14 @@ def get_gap_filtered_stocks(df):
             filtered.append(original_ticker)
             continue
 
-        # Gap check
+        # --- Gap check (today's open vs previous close) ---
         latest_date = hist.index[-1].date()
         latest_data = hist[hist.index.date == latest_date]
         if latest_data.empty:
             filtered.append(original_ticker)
             continue
         today_open = float(latest_data.iloc[0]['Open'])
+
         prev_rows = hist[hist.index.date < latest_date]
         if prev_rows.empty:
             filtered.append(original_ticker)
@@ -104,26 +110,24 @@ def get_gap_filtered_stocks(df):
             continue
         gap_percent = ((today_open - prev_close) / prev_close) * 100
 
-        # 20 EMA check
-        if len(hist) >= 20:
-            ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            latest_close = float(hist['Close'].iloc[-1])
-            ema_distance = abs((latest_close - ema_20) / ema_20) * 100
-        else:
-            ema_distance = 0.0
-
+        # --- 20 EMA check – uses today's OPEN (not latest close) ---
         reject_reasons = []
         if abs(gap_percent) >= 2.0:
             reject_reasons.append(f"Gap {gap_percent:.2f}%")
-        if ema_distance > 4.0:
-            reject_reasons.append(f"EMA dist {ema_distance:.2f}%")
+
+        if len(hist) >= 20:
+            ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
+            ema_distance = abs((today_open - ema_20) / ema_20) * 100
+            if ema_distance > ema_tolerance:
+                reject_reasons.append(f"EMA dist {ema_distance:.2f}% (from open)")
+        # else: insufficient data → keep (fail‑safe)
 
         if reject_reasons:
             rejected.append({
                 'ticker': original_ticker,
                 'gap_percent': gap_percent,
                 'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN',
-                'ema_distance': ema_distance,
+                'ema_distance': ema_distance if len(hist) >= 20 else None,
                 'reason': ', '.join(reject_reasons)
             })
         else:
@@ -172,7 +176,7 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     except:
         return None
 
-# ─── Bulk intraday fetch (threaded) – no 5‑EMA low touch ───
+# ─── Bulk intraday fetch (threaded) ───
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
     symbol_formats = ['.NS', '-NS', '']
@@ -237,7 +241,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     candles = df_day.loc[mask_30_to_45]
                     breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
 
-                # Gap % (display only)
+                # Gap % (only for display, not used in pass/fail)
                 if prev_close is not None and prev_close > 0:
                     high_9_20 = float(second_candle['High'])
                     gap_percent = ((high_9_20 - prev_close) / prev_close) * 100
@@ -272,7 +276,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 results[base] = data
     return results
 
-# ─── Candle condition check (no sample table, no 5‑EMA) ───
+# ─── Candle condition check (no sample table) ───
 def check_candle_conditions(df, tickers_list):
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
@@ -344,7 +348,7 @@ def color_change(val):
         return ''
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS (unchanged)
+# SIDEBAR FILTERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.sidebar.markdown("## 🔍 Filter Settings")
@@ -363,22 +367,22 @@ price_max = st.sidebar.slider("💰 Maximum Price (₹)", min_value=500, max_val
 stocks_to_show = st.sidebar.slider("📋 Number of top stocks to display & analyze", min_value=10, max_value=200, value=50, step=10)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("## ⚡ Breakout Filter")
-ist = pytz.timezone('Asia/Kolkata')
-current_time = datetime.now(ist)
-is_after_9_30 = current_time >= current_time.replace(hour=9, minute=30, second=0)
-
-if is_after_9_30:
-    show_breakout_only = st.sidebar.checkbox("⚡ Show ONLY Breakout Stocks (9:30-9:45)", value=False)
-else:
-    show_breakout_only = False
-    st.sidebar.info("⏰ Available after 9:30 AM")
+st.sidebar.markdown("## 📊 EMA Filter (on Open)")
+enable_ema = st.sidebar.checkbox("Enable 20 EMA filter", value=True)
+ema_tolerance = st.sidebar.slider("EMA tolerance %", min_value=2, max_value=20, value=4, step=1) if enable_ema else None
+if not enable_ema:
+    ema_tolerance = None  # disable filter
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="main-header">📈 India Stock Screener (Auto‑Refresh Every 2 min)</div>', unsafe_allow_html=True)
+
+ist = pytz.timezone('Asia/Kolkata')
+current_time = datetime.now(ist)
+is_after_9_30 = current_time >= current_time.replace(hour=9, minute=30, second=0)
+is_after_9_25 = current_time >= current_time.replace(hour=9, minute=25, second=0)
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -406,7 +410,8 @@ with st.status("Fetching stocks from TradingView...", expanded=False) as status:
     status.update(label=f"✅ Found {count} stocks", state="complete")
 
 with st.spinner("Applying gap filter & 20 EMA filter (bulk)..."):
-    filtered_tickers, rejected = get_gap_filtered_stocks(df)
+    # Pass ema_tolerance (may be None to disable EMA filter)
+    filtered_tickers, rejected = get_gap_filtered_stocks(df, ema_tolerance=ema_tolerance if ema_tolerance is not None else 100.0)  # 100% effectively disables it
     df = df[df['ticker'].isin(filtered_tickers)].copy()
     df = df.sort_values('change', ascending=False)
     df = df.head(stocks_to_show)
@@ -421,7 +426,7 @@ if rejected:
 st.info(f"✅ {filtered_count} stocks match. Stage 2 (candle analysis) running automatically...")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: AUTO-ANALYZE CANDLES (no 5‑EMA filter)
+# STAGE 2: AUTO-ANALYZE CANDLES
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("---")
@@ -438,23 +443,35 @@ with col2: st.metric("Pass All 4 Conditions", len(valid), delta="✓")
 with col3: st.metric("Fail / No Data", len(invalid)+len(failed), delta="✗")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FILTER CHECKBOX: inside 9:15 (available after 9:25)
+# FILTER CHECKBOXES (inside 9:15 & breakout) – side by side
 # ─────────────────────────────────────────────────────────────────────────────
 
-is_after_9_25 = current_time >= current_time.replace(hour=9, minute=25, second=0)
+filter_col1, filter_col2 = st.columns(2)
 
-if is_after_9_25:
-    show_inside_only = st.checkbox(
-        "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
-        value=False,
-        help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
-    )
-else:
-    st.info("⏳ 9:20 candle not yet complete – this filter will be available after 9:25 AM.")
-    show_inside_only = False
+with filter_col1:
+    if is_after_9_25:
+        show_inside_only = st.checkbox(
+            "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
+            value=False,
+            help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
+        )
+    else:
+        st.info("⏳ 9:20 candle not yet complete – filter available after 9:25 AM.")
+        show_inside_only = False
+
+with filter_col2:
+    if is_after_9_30:
+        show_breakout_only = st.checkbox(
+            "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
+            value=False,
+            help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
+        )
+    else:
+        st.info("⏳ Breakout filter available after 9:30 AM.")
+        show_breakout_only = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS & DISPLAY FINAL RESULTS (no 5‑EMA removal)
+# APPLY FILTERS & DISPLAY FINAL RESULTS (with reduced columns)
 # ─────────────────────────────────────────────────────────────────────────────
 
 display_df = df.copy()
@@ -462,7 +479,6 @@ if show_breakout_only:
     display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
 if show_inside_only and is_after_9_25:
     display_df = display_df[display_df['inside_9_15'] == True]
-# No 5‑EMA low touch filter applied
 
 if display_df.empty:
     st.warning("⚠️ No stocks match the selected filters.")
@@ -473,19 +489,17 @@ else:
     display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
     display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
 
-    # 2. Select display columns
+    # 2. Select only the columns we want to show
     display_cols = [
         'name', 'close', 'change', 'volume', 'relative_volume',
         'market_cap_b', 'sector',
-        'candle_9_15_high', 'candle_9_20_open', 'candle_9_20_high',
-        'candle_9_20_low', 'candle_9_20_close', 'max_high_up_to_10_15',
-        'open_gap_percent', 'hit_low_9_20_to_35', 'breakout_9_30_to_9_45',
+        'hit_low_9_20_to_35', 'breakout_9_30_to_9_45',
         'inside_9_15', 'candle_check_status'
     ]
     available = [c for c in display_cols if c in display_df.columns]
     display_df = display_df[available].copy()
 
-    # 3. Rename
+    # 3. Rename columns
     rename = {
         'name': 'Stock',
         'close': 'Price (₹)',
@@ -494,13 +508,6 @@ else:
         'relative_volume': 'Rel Vol',
         'market_cap_b': 'Mkt Cap (B₹)',
         'sector': 'Sector',
-        'candle_9_15_high': '9:15 High',
-        'candle_9_20_open': '9:20 Open',
-        'candle_9_20_high': '9:20 High',
-        'candle_9_20_low': '9:20 Low',
-        'candle_9_20_close': '9:20 Close',
-        'max_high_up_to_10_15': 'Max High till 10:15',
-        'open_gap_percent': 'Gap %',
         'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
         'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?',
         'inside_9_15': '9:20 inside 9:15?',
@@ -514,7 +521,7 @@ else:
         if pd.api.types.is_numeric_dtype(display_df[c]):
             display_df[c] = display_df[c].round(2)
 
-    # 5. Apply color styling
+    # 5. Apply color styling on Change %
     if 'Change %' in display_df.columns:
         styled_df = display_df.style.applymap(color_change, subset=['Change %'])
     else:
