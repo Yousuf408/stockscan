@@ -142,6 +142,14 @@ def get_candle_data_bulk(tickers_list):
                 ist = pytz.timezone('Asia/Kolkata')
                 today = datetime.now(ist).date()
                 today_data = data[data.index.date == today]
+                
+                # Get previous day's close (for gap calculation)
+                yesterday_data = data[data.index.date < today]
+                if len(yesterday_data) > 0:
+                    prev_close = float(yesterday_data.iloc[-1]['Close'])
+                else:
+                    prev_close = None
+                
                 if today_data.empty:
                     continue
                 df_day = today_data
@@ -191,6 +199,14 @@ def get_candle_data_bulk(tickers_list):
                     candles = df_day.loc[mask_30_to_45]
                     breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
 
+                # Calculate gap based on 9:20 High vs Previous Day Close
+                if prev_close is not None and prev_close > 0:
+                    high_9_20 = float(second_candle['High'])
+                    gap_percent = ((high_9_20 - prev_close) / prev_close) * 100
+                else:
+                    gap_percent = 0
+                    prev_close = float(first_candle['Close'])  # Fallback to today's close
+
                 results[base_ticker] = {
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
@@ -202,6 +218,8 @@ def get_candle_data_bulk(tickers_list):
                     'max_high_up_to_10_15': max_high,
                     'hit_low_9_20_to_35': hit_low_9_20_to_35,
                     'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
+                    'prev_close': prev_close,
+                    'gap_percent': gap_percent,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d")
                 }
@@ -231,6 +249,8 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     df['hit_low_9_20_to_35'] = None
     df['breakout_9_30_to_9_45'] = None
     df['data_date'] = None
+    df['prev_close'] = None
+    df['gap_percent'] = None
     df['open_gap_percent'] = None
     df['passes_candle_check'] = False
     df['candle_check_status'] = 'No Data'
@@ -257,15 +277,14 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'max_high_up_to_10_15'] = data['max_high_up_to_10_15']
             df.at[idx, 'hit_low_9_20_to_35'] = data['hit_low_9_20_to_35']
             df.at[idx, 'breakout_9_30_to_9_45'] = data['breakout_9_30_to_9_45']
+            df.at[idx, 'prev_close'] = data['prev_close']
+            df.at[idx, 'gap_percent'] = data['gap_percent']
+            df.at[idx, 'open_gap_percent'] = data['gap_percent']
             df.at[idx, 'yahoo_ticker'] = data['yahoo_ticker']
             df.at[idx, 'data_date'] = data['data_date']
 
-            prev_close = data['close_9_15']
-            if prev_close > 0:
-                gap_percent = ((data['high_9_20'] - prev_close) / prev_close) * 100
-                df.at[idx, 'open_gap_percent'] = gap_percent
-            else:
-                gap_percent = 0
+            # Use gap_percent already calculated from prev_close
+            gap_percent = data['gap_percent']
 
             # All conditions
             cond1 = data['close_9_20'] <= data['high_9_15']
@@ -286,9 +305,9 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                     reasons.append('9:20 high/low not below 9:15 high')
                 if not cond3:
                     if gap_percent > max_open_percent:
-                        reasons.append(f'Gap UP > {max_open_percent}%')
+                        reasons.append(f'Gap UP > {max_open_percent}% (vs prev close)')
                     else:
-                        reasons.append(f'Gap DOWN > {max_open_percent}%')
+                        reasons.append(f'Gap DOWN > {max_open_percent}% (vs prev close)')
                 if not cond4:
                     reasons.append('9:20 candle not bearish (close > open)')
                 if not cond5:
