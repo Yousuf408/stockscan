@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TRADINGVIEW SCREENER - TWO STAGE APPROACH (AUTO, WITH TIMER)
-# Stage 1: Auto-load stocks from TradingView
-# Stage 2: Auto-analyze candles every 2 minutes, with filter checkbox
+# PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (AUTO, WITH TIMER)
+# Stage 1: Auto-load from TradingView + gap filter + 20 EMA filter
+# Stage 2: Auto candle analysis with inside-9:15 checkbox & breakout filter
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG & STYLES (unchanged)
+# PAGE CONFIG & STYLES (same as before)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -30,9 +30,6 @@ st.markdown("""
     <style>
     .main-header { font-size: 2.5rem; color: #00ff88; text-align: center; padding: 1rem 0; background: linear-gradient(90deg, #1a1a2e, #16213e, #0f3460); border-radius: 10px; margin-bottom: 2rem; }
     .stage-header { font-size: 1.3rem; color: #00ff88; padding: 0.5rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00ff88; margin: 1rem 0; }
-    .metric-card { background: #1e1e2e; padding: 1rem; border-radius: 10px; border-left: 4px solid #00ff88; margin: 0.5rem 0; }
-    .stock-card { background: #1e1e2e; padding: 0.8rem; border-radius: 8px; margin: 0.3rem 0; border: 1px solid #2d2d44; }
-    .stock-card:hover { border-color: #00ff88; transition: 0.3s; }
     .success-text { color: #00ff88; font-weight: bold; }
     .fail-text { color: #ff4444; font-weight: bold; }
     .warning-text { color: #ffaa00; font-weight: bold; }
@@ -47,10 +44,8 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────────
 
 def set_auto_refresh():
-    """Set next refresh time in session state."""
     if 'next_refresh' not in st.session_state:
         st.session_state.next_refresh = datetime.now() + timedelta(minutes=2)
-    # If it's time, rerun
     if datetime.now() >= st.session_state.next_refresh:
         st.session_state.next_refresh = datetime.now() + timedelta(minutes=2)
         st.experimental_rerun()
@@ -59,13 +54,8 @@ def set_auto_refresh():
 # FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── Bulk gap filter + 20 EMA filter ───
 def get_gap_filtered_stocks(df):
-    """
-    Bulk fetch daily OHLC, apply:
-    - Gap filter: reject |gap| >= 2%
-    - 20 EMA filter: keep only if price is within 4% of 20 EMA
-    """
-    # Build ticker map
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -74,10 +64,9 @@ def get_gap_filtered_stocks(df):
         yahoo_tickers.append(yahoo_ticker)
         ticker_map[yahoo_ticker] = row.ticker
 
-    # Bulk download – need at least 30 days for EMA
     data = yf.download(
         tickers=yahoo_tickers,
-        period="1mo",          # enough for 20-day EMA
+        period="1mo",
         interval="1d",
         group_by='ticker',
         progress=False,
@@ -90,7 +79,7 @@ def get_gap_filtered_stocks(df):
 
     for yahoo_ticker, original_ticker in ticker_map.items():
         if yahoo_ticker not in data:
-            filtered.append(original_ticker)   # fail‑safe: keep if no data
+            filtered.append(original_ticker)
             continue
 
         hist = data[yahoo_ticker]
@@ -98,13 +87,12 @@ def get_gap_filtered_stocks(df):
             filtered.append(original_ticker)
             continue
 
-        # --- Gap check ---
+        # Gap check
         latest_date = hist.index[-1].date()
         latest_data = hist[hist.index.date == latest_date]
         if latest_data.empty:
             filtered.append(original_ticker)
             continue
-
         today_open = float(latest_data.iloc[0]['Open'])
         prev_rows = hist[hist.index.date < latest_date]
         if prev_rows.empty:
@@ -114,25 +102,21 @@ def get_gap_filtered_stocks(df):
         if prev_close == 0:
             filtered.append(original_ticker)
             continue
-
         gap_percent = ((today_open - prev_close) / prev_close) * 100
 
-        # --- 20 EMA check ---
-        # Compute 20-day EMA
+        # 20 EMA check
         if len(hist) >= 20:
             ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
             latest_close = float(hist['Close'].iloc[-1])
             ema_distance = abs((latest_close - ema_20) / ema_20) * 100
         else:
-            # Not enough data – we'll keep the stock (fail‑safe)
-            ema_distance = 0
+            ema_distance = 0.0
 
-        # Apply filters
         reject_reasons = []
         if abs(gap_percent) >= 2.0:
             reject_reasons.append(f"Gap {gap_percent:.2f}%")
         if ema_distance > 4.0:
-            reject_reasons.append(f"Distance from 20 EMA = {ema_distance:.2f}%")
+            reject_reasons.append(f"EMA dist {ema_distance:.2f}%")
 
         if reject_reasons:
             rejected.append({
@@ -146,7 +130,7 @@ def get_gap_filtered_stocks(df):
             filtered.append(original_ticker)
 
     return filtered, rejected
-    
+
 # ─── TradingView screener ───
 @st.cache_data(ttl=120)
 def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
@@ -172,7 +156,7 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-# ─── Intraday data (single symbol) ───
+# ─── Intraday data for a single symbol ───
 def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
@@ -188,10 +172,11 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     except:
         return None
 
-# ─── Bulk intraday fetch (threaded) ───
+# ─── Bulk intraday fetch (threaded) – no 5‑EMA low touch ───
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
     symbol_formats = ['.NS', '-NS', '']
+
     def fetch_one(ticker):
         base_ticker = ticker.replace('NSE:', '')
         for suffix in symbol_formats:
@@ -236,7 +221,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     max_high = float(second_candle['High'])
 
-                # Check 9:20-9:35 for touching 9:15 low
+                # 9:20-9:35 touches 9:15 low?
                 low_9_15 = float(first_candle['Low'])
                 mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
                 hit_low_9_20_to_35 = False
@@ -244,7 +229,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     candles = df_day.loc[mask_20_to_35]
                     hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
 
-                # Check 9:30-9:45 breakout above 9:15 high
+                # 9:30-9:45 breakout above 9:15 high?
                 high_9_15 = float(first_candle['High'])
                 mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
                 breakout_9_30_to_9_45 = False
@@ -252,12 +237,12 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     candles = df_day.loc[mask_30_to_45]
                     breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
 
-                # Gap % (for display only, not used in pass/fail)
+                # Gap % (display only)
                 if prev_close is not None and prev_close > 0:
                     high_9_20 = float(second_candle['High'])
                     gap_percent = ((high_9_20 - prev_close) / prev_close) * 100
                 else:
-                    gap_percent = 0
+                    gap_percent = 0.0
                     prev_close = float(first_candle['Close'])
 
                 result = {
@@ -287,8 +272,8 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 results[base] = data
     return results
 
-# ─── Candle condition check ───
-def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
+# ─── Candle condition check (no sample table, no 5‑EMA) ───
+def check_candle_conditions(df, tickers_list):
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
 
@@ -305,7 +290,6 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
     valid_stocks = []
     invalid_stocks = []
     failed_to_fetch = []
-    sample_data = []
 
     for idx, row in df.iterrows():
         ticker = row['ticker']
@@ -320,7 +304,7 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
             gap_percent = data['gap_percent']
 
-            # Inside 9:15 condition
+            # inside 9:15 condition
             inside_9_15 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] >= data['low_9_15'])
             df.at[idx, 'inside_9_15'] = inside_9_15
 
@@ -343,26 +327,10 @@ def check_candle_conditions(df, tickers_list, max_open_percent=2.0):
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
-            if len(sample_data) < 5:
-                sample_data.append({
-                    'ticker': base_ticker,
-                    'high_9_15': data['high_9_15'],
-                    'open_9_20': data['open_9_20'],
-                    'close_9_20': data['close_9_20'],
-                    'gap%': gap_percent,
-                    'inside_9_15': inside_9_15,
-                    'breakout_9_30_45': data['breakout_9_30_to_9_45'],
-                    'date': data['data_date']
-                })
         else:
             failed_to_fetch.append(ticker)
 
-    if sample_data:
-        st.info("📊 Sample data for first 5 stocks:")
-        st.dataframe(pd.DataFrame(sample_data))
-    else:
-        st.warning("⚠️ No stock data could be fetched from Yahoo Finance.")
-
+    # No sample table displayed
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
 # ─── Color helper ───
@@ -376,7 +344,7 @@ def color_change(val):
         return ''
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.sidebar.markdown("## 🔍 Filter Settings")
@@ -425,7 +393,7 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: AUTO-LOAD & GAP FILTER (summary only, no table)
+# STAGE 1: AUTO-LOAD & FILTER (summary only, no table)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering</div>', unsafe_allow_html=True)
@@ -437,24 +405,23 @@ with st.status("Fetching stocks from TradingView...", expanded=False) as status:
         st.stop()
     status.update(label=f"✅ Found {count} stocks", state="complete")
 
-# Gap filter (bulk)
-with st.spinner("Applying gap filter (bulk)..."):
+with st.spinner("Applying gap filter & 20 EMA filter (bulk)..."):
     filtered_tickers, rejected = get_gap_filtered_stocks(df)
     df = df[df['ticker'].isin(filtered_tickers)].copy()
     df = df.sort_values('change', ascending=False)
-    df = df.head(stocks_to_show)   # keep only top N
+    df = df.head(stocks_to_show)
     filtered_count = len(df)
 
-st.success(f"✅ Gap Filter: {count} → {filtered_count} stocks (Rejected {len(rejected)})")
+st.success(f"✅ Filters: {count} → {filtered_count} stocks (Rejected {len(rejected)})")
 if rejected:
     with st.expander(f"📊 Show Rejected ({len(rejected)})"):
         for s in rejected[:20]:
-            st.write(f"- {s['ticker']}: {s['gap_percent']:.2f}% {s['type']}")
+            st.write(f"- {s['ticker']}: {s['reason']}")
 
-st.info(f"✅ {filtered_count} stocks match your filters. Stage 2 (candle analysis) running automatically...")
+st.info(f"✅ {filtered_count} stocks match. Stage 2 (candle analysis) running automatically...")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: AUTO-ANALYZE CANDLES (no sample table shown)
+# STAGE 2: AUTO-ANALYZE CANDLES (no 5‑EMA filter)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("---")
@@ -462,9 +429,7 @@ st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis (Auto)</div
 
 with st.spinner("Fetching 5‑minute intraday data and checking candle conditions..."):
     tickers_list = df['ticker'].tolist()
-    max_gap = 2.0
-    # The function check_candle_conditions no longer displays the sample table
-    df, valid, invalid, failed = check_candle_conditions(df, tickers_list, max_gap)
+    df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
 
 # Metrics
 col1, col2, col3 = st.columns(3)
@@ -489,7 +454,7 @@ else:
     show_inside_only = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS & DISPLAY FINAL RESULTS (single table)
+# APPLY FILTERS & DISPLAY FINAL RESULTS (no 5‑EMA removal)
 # ─────────────────────────────────────────────────────────────────────────────
 
 display_df = df.copy()
@@ -497,17 +462,18 @@ if show_breakout_only:
     display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
 if show_inside_only and is_after_9_25:
     display_df = display_df[display_df['inside_9_15'] == True]
+# No 5‑EMA low touch filter applied
 
 if display_df.empty:
     st.warning("⚠️ No stocks match the selected filters.")
 else:
     st.subheader(f"📋 Final Results ({len(display_df)} stocks)")
 
-    # 1. Compute derived columns (needs original columns)
+    # 1. Compute derived columns
     display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
     display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
 
-    # 2. Select only the columns we want to show
+    # 2. Select display columns
     display_cols = [
         'name', 'close', 'change', 'volume', 'relative_volume',
         'market_cap_b', 'sector',
@@ -519,7 +485,7 @@ else:
     available = [c for c in display_cols if c in display_df.columns]
     display_df = display_df[available].copy()
 
-    # 3. Rename columns for display
+    # 3. Rename
     rename = {
         'name': 'Stock',
         'close': 'Price (₹)',
@@ -567,7 +533,7 @@ else:
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH TRIGGER (every 2 minutes)
+# AUTO-REFRESH TRIGGER
 # ─────────────────────────────────────────────────────────────────────────────
 
 set_auto_refresh()
