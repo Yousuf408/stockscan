@@ -12,7 +12,7 @@ from tradingview_screener.column import col
 from datetime import datetime, timedelta
 import pytz
 import concurrent.futures
-import time
+import timed
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -60,8 +60,13 @@ def set_auto_refresh():
 # FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Gap filter (bulk daily) ───
 def get_gap_filtered_stocks(df):
+    """
+    Bulk fetch daily OHLC, apply:
+    - Gap filter: reject |gap| >= 2%
+    - 20 EMA filter: keep only if price is within 4% of 20 EMA
+    """
+    # Build ticker map
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -69,30 +74,38 @@ def get_gap_filtered_stocks(df):
         yahoo_ticker = base + '.NS'
         yahoo_tickers.append(yahoo_ticker)
         ticker_map[yahoo_ticker] = row.ticker
+
+    # Bulk download – need at least 30 days for EMA
     data = yf.download(
         tickers=yahoo_tickers,
-        period="10d",
+        period="1mo",          # enough for 20-day EMA
         interval="1d",
         group_by='ticker',
         progress=False,
         threads=True,
         auto_adjust=False
     )
+
     filtered = []
     rejected = []
+
     for yahoo_ticker, original_ticker in ticker_map.items():
         if yahoo_ticker not in data:
-            filtered.append(original_ticker)
+            filtered.append(original_ticker)   # fail‑safe: keep if no data
             continue
+
         hist = data[yahoo_ticker]
         if hist.empty or len(hist) < 2:
             filtered.append(original_ticker)
             continue
+
+        # --- Gap check ---
         latest_date = hist.index[-1].date()
         latest_data = hist[hist.index.date == latest_date]
         if latest_data.empty:
             filtered.append(original_ticker)
             continue
+
         today_open = float(latest_data.iloc[0]['Open'])
         prev_rows = hist[hist.index.date < latest_date]
         if prev_rows.empty:
@@ -102,17 +115,39 @@ def get_gap_filtered_stocks(df):
         if prev_close == 0:
             filtered.append(original_ticker)
             continue
+
         gap_percent = ((today_open - prev_close) / prev_close) * 100
+
+        # --- 20 EMA check ---
+        # Compute 20-day EMA
+        if len(hist) >= 20:
+            ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
+            latest_close = float(hist['Close'].iloc[-1])
+            ema_distance = abs((latest_close - ema_20) / ema_20) * 100
+        else:
+            # Not enough data – we'll keep the stock (fail‑safe)
+            ema_distance = 0
+
+        # Apply filters
+        reject_reasons = []
         if abs(gap_percent) >= 2.0:
+            reject_reasons.append(f"Gap {gap_percent:.2f}%")
+        if ema_distance > 4.0:
+            reject_reasons.append(f"Distance from 20 EMA = {ema_distance:.2f}%")
+
+        if reject_reasons:
             rejected.append({
                 'ticker': original_ticker,
                 'gap_percent': gap_percent,
-                'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN'
+                'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN',
+                'ema_distance': ema_distance,
+                'reason': ', '.join(reject_reasons)
             })
         else:
             filtered.append(original_ticker)
-    return filtered, rejected
 
+    return filtered, rejected
+    
 # ─── TradingView screener ───
 @st.cache_data(ttl=120)
 def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
