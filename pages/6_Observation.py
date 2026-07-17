@@ -12,7 +12,6 @@ from tradingview_screener.column import col
 from datetime import datetime, timedelta
 import pytz
 import concurrent.futures
-import timed
 import warnings
 warnings.filterwarnings('ignore')
 
