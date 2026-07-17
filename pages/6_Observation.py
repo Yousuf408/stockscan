@@ -391,10 +391,10 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: AUTO-LOAD STOCKS
+# STAGE 1: AUTO-LOAD & GAP FILTER (summary only, no table)
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown('<div class="stage-header">📊 STAGE 1: Loading Qualified Stocks</div>', unsafe_allow_html=True)
+st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering</div>', unsafe_allow_html=True)
 
 with st.status("Fetching stocks from TradingView...", expanded=False) as status:
     count, df = get_tradingview_stocks(price_min, price_max, market_cap_min)
@@ -417,27 +417,10 @@ if rejected:
         for s in rejected[:20]:
             st.write(f"- {s['ticker']}: {s['gap_percent']:.2f}% {s['type']}")
 
-# Stage 1 table
-st.subheader(f"📋 Top {len(df)} stocks (After Gap Filter)")
-display_tv_df = df.copy()
-display_tv_df['name'] = display_tv_df['ticker'].str.replace('NSE:', '')
-display_tv_df['market_cap_b'] = (display_tv_df['market_cap_basic'] / 1e9).round(1)
-display_tv_df = display_tv_df[['name', 'close', 'change', 'volume', 'relative_volume', 'market_cap_b', 'sector']]
-display_tv_df = display_tv_df.rename(columns={
-    'name': 'Stock', 'close': 'Price (₹)', 'change': 'Change %',
-    'volume': 'Volume', 'relative_volume': 'Rel Vol',
-    'market_cap_b': 'Mkt Cap (B₹)', 'sector': 'Sector'
-})
-for c in display_tv_df.columns:
-    if pd.api.types.is_numeric_dtype(display_tv_df[c]):
-        display_tv_df[c] = display_tv_df[c].round(2)
-styled = display_tv_df.style.applymap(color_change, subset=['Change %']) if 'Change %' in display_tv_df else display_tv_df.style
-st.dataframe(styled, use_container_width=True, height=400)
-
-st.info(f"✅ {len(df)} stocks match your filters. Stage 2 (candle analysis) running automatically...")
+st.info(f"✅ {filtered_count} stocks match your filters. Stage 2 (candle analysis) running automatically...")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: AUTO-ANALYZE CANDLES
+# STAGE 2: AUTO-ANALYZE CANDLES (no sample table shown)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("---")
@@ -446,6 +429,7 @@ st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis (Auto)</div
 with st.spinner("Fetching 5‑minute intraday data and checking candle conditions..."):
     tickers_list = df['ticker'].tolist()
     max_gap = 2.0
+    # The function check_candle_conditions no longer displays the sample table
     df, valid, invalid, failed = check_candle_conditions(df, tickers_list, max_gap)
 
 # Metrics
@@ -471,7 +455,7 @@ else:
     show_inside_only = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS & DISPLAY RESULTS
+# APPLY FILTERS & DISPLAY FINAL RESULTS (single table)
 # ─────────────────────────────────────────────────────────────────────────────
 
 display_df = df.copy()
@@ -483,13 +467,13 @@ if show_inside_only and is_after_9_25:
 if display_df.empty:
     st.warning("⚠️ No stocks match the selected filters.")
 else:
-    st.subheader(f"📋 Filtered Results ({len(display_df)} stocks)")
+    st.subheader(f"📋 Final Results ({len(display_df)} stocks)")
 
     # 1. Compute derived columns (needs original columns)
     display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
     display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
 
-    # 2. Now select only the columns we want to show
+    # 2. Select only the columns we want to show
     display_cols = [
         'name', 'close', 'change', 'volume', 'relative_volume',
         'market_cap_b', 'sector',
@@ -549,7 +533,7 @@ else:
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH TRIGGER
+# AUTO-REFRESH TRIGGER (every 2 minutes)
 # ─────────────────────────────────────────────────────────────────────────────
 
 set_auto_refresh()
