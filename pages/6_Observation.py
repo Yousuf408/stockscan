@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (AUTO, WITH TIMER)
-# Stage 1: Auto-load from TradingView + gap filter + 20 EMA filter (on open)
-# Stage 2: Auto candle analysis with inside-9:15 & breakout checkboxes (main)
+# Stage 1: Auto-load from TradingView + gap filter (±2%) ONLY
+# Stage 2: Auto candle analysis with inside-9:15 & breakout checkboxes
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -51,15 +51,14 @@ def set_auto_refresh():
         st.experimental_rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS EMA + other
+# FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_gap_filtered_stocks(df, ema_tolerance=4.0, ema_reference='close'):
+# ─── Bulk gap filter (ONLY gap, no EMA) ───
+def get_gap_filtered_stocks(df):
     """
-    Bulk fetch daily OHLC (1 month) – apply:
-    - Gap filter: reject |gap%| >= 2%
-    - 20 EMA filter: reject if reference price (yesterday's close by default)
-      is > ema_tolerance% away from the 20‑day EMA.
+    Bulk fetch daily OHLC – apply ONLY gap filter:
+    Reject stocks with |gap%| >= 2% (using today's open vs previous close).
     """
     yahoo_tickers = []
     ticker_map = {}
@@ -71,7 +70,7 @@ def get_gap_filtered_stocks(df, ema_tolerance=4.0, ema_reference='close'):
 
     data = yf.download(
         tickers=yahoo_tickers,
-        period="1mo",
+        period="10d",
         interval="1d",
         group_by='ticker',
         progress=False,
@@ -92,7 +91,6 @@ def get_gap_filtered_stocks(df, ema_tolerance=4.0, ema_reference='close'):
             filtered.append(original_ticker)
             continue
 
-        # --- Gap check (today's open vs previous close) ---
         latest_date = hist.index[-1].date()
         latest_data = hist[hist.index.date == latest_date]
         if latest_data.empty:
@@ -110,35 +108,17 @@ def get_gap_filtered_stocks(df, ema_tolerance=4.0, ema_reference='close'):
             continue
         gap_percent = ((today_open - prev_close) / prev_close) * 100
 
-        # --- 20 EMA check – uses yesterday's close (or specified reference) ---
-        reject_reasons = []
         if abs(gap_percent) >= 2.0:
-            reject_reasons.append(f"Gap {gap_percent:.2f}%")
-
-        if len(hist) >= 20:
-            ema_20 = hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            if ema_reference == 'open':
-                ref_price = today_open
-            else:  # default: yesterday's close
-                ref_price = float(hist['Close'].iloc[-1])
-            ema_distance = abs((ref_price - ema_20) / ema_20) * 100
-            if ema_distance > ema_tolerance:
-                reject_reasons.append(f"EMA dist {ema_distance:.2f}% (from {ema_reference})")
-        # else: insufficient data → keep (fail‑safe)
-
-        if reject_reasons:
             rejected.append({
                 'ticker': original_ticker,
                 'gap_percent': gap_percent,
                 'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN',
-                'ema_distance': ema_distance if len(hist) >= 20 else None,
-                'reason': ', '.join(reject_reasons)
+                'reason': f"Gap {gap_percent:.2f}%"
             })
         else:
             filtered.append(original_ticker)
 
     return filtered, rejected
-    
 
 # ─── TradingView screener ───
 @st.cache_data(ttl=120)
@@ -311,7 +291,6 @@ def check_candle_conditions(df, tickers_list):
                         'gap_percent', 'yahoo_ticker', 'data_date']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
-            gap_percent = data['gap_percent']
 
             # inside 9:15 condition
             inside_9_15 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] >= data['low_9_15'])
@@ -372,11 +351,7 @@ price_max = st.sidebar.slider("💰 Maximum Price (₹)", min_value=500, max_val
 stocks_to_show = st.sidebar.slider("📋 Number of top stocks to display & analyze", min_value=10, max_value=200, value=50, step=10)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("## 📊 EMA Filter (on Open)")
-enable_ema = st.sidebar.checkbox("Enable 20 EMA filter", value=True)
-ema_tolerance = st.sidebar.slider("EMA tolerance %", min_value=2, max_value=20, value=4, step=1) if enable_ema else None
-if not enable_ema:
-    ema_tolerance = None  # disable filter
+st.sidebar.markdown("### Stage 1 Filter: **Gap ±2%** only (EMA removed)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN PAGE
@@ -402,10 +377,10 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: AUTO-LOAD & FILTER (summary only, no table)
+# STAGE 1: AUTO-LOAD & GAP FILTER (summary only, no table)
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering</div>', unsafe_allow_html=True)
+st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering (Gap ±2%)</div>', unsafe_allow_html=True)
 
 with st.status("Fetching stocks from TradingView...", expanded=False) as status:
     count, df = get_tradingview_stocks(price_min, price_max, market_cap_min)
@@ -414,15 +389,14 @@ with st.status("Fetching stocks from TradingView...", expanded=False) as status:
         st.stop()
     status.update(label=f"✅ Found {count} stocks", state="complete")
 
-with st.spinner("Applying gap filter & 20 EMA filter (bulk)..."):
-    # Pass ema_tolerance (may be None to disable EMA filter)
-    filtered_tickers, rejected = get_gap_filtered_stocks(df, ema_tolerance=ema_tolerance if ema_tolerance is not None else 100.0)  # 100% effectively disables it
+with st.spinner("Applying gap filter (bulk)..."):
+    filtered_tickers, rejected = get_gap_filtered_stocks(df)
     df = df[df['ticker'].isin(filtered_tickers)].copy()
     df = df.sort_values('change', ascending=False)
     df = df.head(stocks_to_show)
     filtered_count = len(df)
 
-st.success(f"✅ Filters: {count} → {filtered_count} stocks (Rejected {len(rejected)})")
+st.success(f"✅ Gap Filter: {count} → {filtered_count} stocks (Rejected {len(rejected)})")
 if rejected:
     with st.expander(f"📊 Show Rejected ({len(rejected)})"):
         for s in rejected[:20]:
