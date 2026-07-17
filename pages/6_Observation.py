@@ -354,15 +354,6 @@ price_max = st.sidebar.slider(
     step=100
 )
 
-max_gap = st.sidebar.slider(
-    "🚫 Max Opening Gap %",
-    min_value=0.5,
-    max_value=5.0,
-    value=2.0,
-    step=0.5,
-    help="Ignore stocks that open with a gap greater than this percentage"
-)
-
 stocks_to_show = st.sidebar.slider(
     "📋 Number of stocks to display",
     min_value=10,
@@ -371,7 +362,22 @@ stocks_to_show = st.sidebar.slider(
     step=10
 )
 
-# ✅ NEW: Breakout checkbox (only shows after 9:30 AM)
+st.sidebar.markdown("---")
+st.sidebar.markdown("## ⚡ Candle Filters")
+
+st.sidebar.markdown("""
+**Default Settings:**
+- 🚫 Max Gap: **2.0%** (fixed)
+- ✅ Applies to all scans automatically
+""")
+
+# Set gap to fixed value
+max_gap = 2.0
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("## ⚡ Breakout Filter (After 9:30 AM)")
+
+# ✅ Breakout checkbox (only shows after 9:30 AM)
 ist = pytz.timezone('Asia/Kolkata')
 current_time = datetime.now(ist)
 breakout_start_time = current_time.replace(hour=9, minute=30, second=0)
@@ -379,13 +385,14 @@ is_after_9_30 = current_time >= breakout_start_time
 
 if is_after_9_30:
     show_breakout_only = st.sidebar.checkbox(
-        "⚡ Show Breakout Stocks Only (9:30-9:45)",
+        "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
         value=False,
-        help="Filter to show only stocks that broke above 9:15 high between 9:30-9:45"
+        help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
     )
 else:
     show_breakout_only = False
-    st.sidebar.info("⏰ Breakout filter available after 9:30 AM")
+    st.sidebar.info("⏰ **Available after 9:30 AM**")
+    st.sidebar.write("This filter will track stocks that break above 9:15 High between 9:30-9:45")
 
 run_button = st.sidebar.button(
     "🚀 Run Screener",
@@ -395,17 +402,20 @@ run_button = st.sidebar.button(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-### 📋 Filter Conditions:
-1. **9:20 Close ≤ 9:15 High**
-2. **9:20 High/Low below 9:15 High**
-3. **Opening gap ≤ 2%** (configurable)
-4. **9:20 Candle bearish (Close < Open)**
-5. **9:20-9:35 does NOT touch 9:15 Low** ✅
-6. **Price ₹200–₹2000**
-7. **Market Cap ≥ 41B**
+### 📋 Stock Filters (TradingView):
+1. **Price**: ₹200–₹2000
+2. **Market Cap**: ≥ 41B (configurable)
+3. **Exchange**: NSE
+4. **Max Gap**: 2% (fixed)
 
-### ⚡ Breakout Filter (After 9:30 AM):
-- **Breakout 9:30-9:45**: High breaks above 9:15 High
+### ✅ Candle Conditions (All Required):
+1. 9:20 Close ≤ 9:15 High
+2. 9:20 High/Low below 9:15 High
+3. 9:20 Candle bearish (Close < Open)
+4. 9:20-9:35 does NOT touch 9:15 Low
+
+### ⚡ Breakout Tracker (Optional - After 9:30 AM):
+- Enable checkbox to see only stocks breaking above 9:15 High (9:30-9:45)
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -455,9 +465,9 @@ if run_button:
         st.write("Applying conditions:")
         st.write("1️⃣ 9:20 Close ≤ 9:15 High")
         st.write("2️⃣ 9:20 High/Low below 9:15 High")
-        st.write(f"3️⃣ Opening gap ≤ {max_gap}%")
-        st.write("4️⃣ 9:20 candle bearish (Close < Open)")
-        st.write("5️⃣ 9:20-9:35 does NOT touch 9:15 Low")
+        st.write("3️⃣ 9:20 candle bearish (Close < Open)")
+        st.write("4️⃣ 9:20-9:35 does NOT touch 9:15 Low")
+        st.write("ℹ️ **Gap Filter**: 2% (fixed, applied during TradingView fetch)")
         
         # Process first 200 stocks for performance
         tickers_list = df['ticker'].tolist()[:200]
