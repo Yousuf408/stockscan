@@ -88,80 +88,85 @@ st.markdown("""
 
 def get_gap_filtered_stocks(df):
     """
-    Filter stocks based on gap up/down logic with weekend handling.
-    Gap % = ((Today's Open - Previous Close) / Previous Close) × 100
-    Reject if |Gap %| >= 2%
+    Bulk fetch daily OHLC for all NSE tickers using yfinance.
+    Reject stocks with |gap%| >= 2% using previous close handling.
     """
+    # Build list of Yahoo tickers (NSE symbols + .NS)
+    yahoo_tickers = []
+    ticker_map = {}  # map yahoo_ticker -> original NSE:ticker
+    for row in df.itertuples():
+        base = row.ticker.replace('NSE:', '')
+        yahoo_ticker = base + '.NS'
+        yahoo_tickers.append(yahoo_ticker)
+        ticker_map[yahoo_ticker] = row.ticker
+
+    # Bulk download all in one go
+    data = yf.download(
+        tickers=yahoo_tickers,
+        period="10d",
+        interval="1d",
+        group_by='ticker',
+        progress=False,
+        threads=True,
+        auto_adjust=False
+    )
+
     filtered_stocks = []
     rejected_stocks = []
-    
-    for ticker in df['ticker'].tolist():
-        base_ticker = ticker.replace('NSE:', '')
-        symbol_formats = ['.NS', '-NS', '']
-        found = False
-        
-        for suffix in symbol_formats:
-            yahoo_ticker = base_ticker + suffix
-            try:
-                data = yf.download(yahoo_ticker, period="10d", interval="1d",
-                                   progress=False, auto_adjust=False, threads=False)
-                if data.empty or len(data) < 2:
-                    continue
-                
-                ist = pytz.timezone('Asia/Kolkata')
-                today = datetime.now(ist).date()
-                
-                # Get today's close/open
-                today_data = data[data.index.date == today]
-                if today_data.empty:
-                    continue
-                
-                today_open = float(today_data.iloc[0]['Open'])
-                
-                # Handle weekend: find previous trading day close
-                weekday = today.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
-                
-                if weekday == 0:  # Monday
-                    days_back = 3  # Look to Friday
-                else:
-                    days_back = 1  # Look to previous day
-                
-                previous_date = today - datetime.timedelta(days=days_back)
-                previous_data = data[data.index.date == previous_date]
-                
-                if previous_data.empty:
-                    # If still empty, get the last available close before today
-                    previous_data = data[data.index.date < today]
-                
-                if previous_data.empty:
-                    continue
-                
-                prev_close = float(previous_data.iloc[-1]['Close'])
-                
-                # Calculate gap %
-                if prev_close > 0:
-                    gap_percent = ((today_open - prev_close) / prev_close) * 100
-                else:
-                    continue
-                
-                # Filter: reject if |gap %| >= 2%
-                if abs(gap_percent) >= 2.0:
-                    rejected_stocks.append({
-                        'ticker': ticker,
-                        'gap_percent': gap_percent,
-                        'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN'
-                    })
-                else:
-                    filtered_stocks.append(ticker)
-                
-                found = True
-                break
-            except:
-                continue
-        
-        if not found:
-            filtered_stocks.append(ticker)  # Include if can't fetch gap data
-    
+
+    for yahoo_ticker, original_ticker in ticker_map.items():
+        if yahoo_ticker not in data:
+            # If no data, include the stock (fail‑safe)
+            filtered_stocks.append(original_ticker)
+            continue
+
+        hist = data[yahoo_ticker]
+        if hist.empty or len(hist) < 2:
+            filtered_stocks.append(original_ticker)
+            continue
+
+        ist = pytz.timezone('Asia/Kolkata')
+        today = datetime.now(ist).date()
+
+        # Today's data
+        today_data = hist[hist.index.date == today]
+        if today_data.empty:
+            filtered_stocks.append(original_ticker)
+            continue
+        today_open = float(today_data.iloc[0]['Open'])
+
+        # Previous close (handling weekends)
+        weekday = today.weekday()
+        if weekday == 0:  # Monday → use Friday
+            days_back = 3
+        else:
+            days_back = 1
+
+        prev_date = today - timedelta(days=days_back)
+        prev_data = hist[hist.index.date == prev_date]
+        if prev_data.empty:
+            # fallback to last available before today
+            prev_data = hist[hist.index.date < today]
+        if prev_data.empty:
+            filtered_stocks.append(original_ticker)
+            continue
+
+        prev_close = float(prev_data.iloc[-1]['Close'])
+        if prev_close == 0:
+            filtered_stocks.append(original_ticker)
+            continue
+
+        gap_percent = ((today_open - prev_close) / prev_close) * 100
+
+        if abs(gap_percent) >= 2.0:
+            rejected_stocks.append({
+                'ticker': original_ticker,
+                'gap_percent': gap_percent,
+                'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN'
+            })
+        else:
+            filtered_stocks.append(original_ticker)
+
     return filtered_stocks, rejected_stocks
 
 @st.cache_data(ttl=300)
