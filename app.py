@@ -132,35 +132,29 @@ def get_margin_data(client, jwt_token, api_key, symbols, symbol_map):
         price = 0
         margin_per_share = 0
 
-        # ---- Get LTP (using token) ----
+        # ---- Get LTP (using token) - RAW HTTP ----
         ltp_data = {}
         try:
-            if client:
-                # Use token for LTP query
-                ltp_resp = client.get_market_quote("OHLC", {"NSE": [token]})
-                ltp_data = ltp_resp.json()
-                st.write(f"🔍 {sym} LTP response (SDK):", ltp_data)
-            else:
-                # Raw HTTP request with token
-                headers = {
-                    'X-Mirae-Version': '1',
-                    'Authorization': f'Bearer {jwt_token}',
-                    'X-PrivateKey': api_key,
-                    'Content-Type': 'application/json'
+            # Always use raw HTTP (SDK has issues)
+            headers = {
+                'X-Mirae-Version': '1',
+                'Authorization': f'Bearer {jwt_token}',
+                'X-PrivateKey': api_key,
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'mode': 'OHLC',
+                'exchangeTokens': {
+                    'NSE': [token]
                 }
-                payload = {
-                    'mode': 'OHLC',
-                    'exchangeTokens': {
-                        'NSE': [token]
-                    }
-                }
-                resp = requests.post(
-                    'https://api.mstock.trade/openapi/typeb/instruments/quote',
-                    json=payload,
-                    headers=headers
-                )
-                ltp_data = resp.json()
-                st.write(f"🔍 {sym} LTP response (HTTP):", ltp_data)
+            }
+            resp = requests.get(
+                'https://api.mstock.trade/openapi/typeb/instruments/quote',
+                json=payload,
+                headers=headers
+            )
+            ltp_data = resp.json()
+            st.write(f"🔍 {sym} LTP response:", ltp_data)
         except Exception as e:
             st.error(f"❌ {sym} LTP fetch error: {str(e)}")
             results.append({
@@ -196,45 +190,37 @@ def get_margin_data(client, jwt_token, api_key, symbols, symbol_map):
             })
             continue
 
-        # ---- Get Margin (using token) ----
+        # ---- Get Margin (using token) - RAW HTTP ----
         margin_data = {}
         try:
-            if client:
-                # Use token for margin calculation
-                margin_resp = client.calculate_order_margin(
-                    "MIS", "BUY", "1", "0", "NSE", token, "", "0"
-                )
-                margin_data = margin_resp.json()
-                st.write(f"🔍 {sym} Margin response (SDK):", margin_data)
-            else:
-                # Raw HTTP request with token
-                headers = {
-                    'X-Mirae-Version': '1',
-                    'Authorization': f'Bearer {jwt_token}',
-                    'X-PrivateKey': api_key,
-                    'Content-Type': 'application/json'
-                }
-                payload = {
-                    'orders': [
-                        {
-                            'product_type': 'MIS',
-                            'transaction_type': 'BUY',
-                            'quantity': '1',
-                            'price': '0',
-                            'exchange': 'NSE',
-                            'symbol_name': sym,
-                            'token': token,
-                            'trigger_price': '0'
-                        }
-                    ]
-                }
-                resp = requests.post(
-                    'https://api.mstock.trade/openapi/typeb/margins/orders',
-                    json=payload,
-                    headers=headers
-                )
-                margin_data = resp.json()
-                st.write(f"🔍 {sym} Margin response (HTTP):", margin_data)
+            # Always use raw HTTP (SDK has issues)
+            headers = {
+                'X-Mirae-Version': '1',
+                'Authorization': f'Bearer {jwt_token}',
+                'X-PrivateKey': api_key,
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'orders': [
+                    {
+                        'product_type': 'MIS',
+                        'transaction_type': 'BUY',
+                        'quantity': '1',
+                        'price': '0',
+                        'exchange': 'NSE',
+                        'symbol_name': sym,
+                        'token': token,
+                        'trigger_price': '0'
+                    }
+                ]
+            }
+            resp = requests.post(
+                'https://api.mstock.trade/openapi/typeb/margins/orders',
+                json=payload,
+                headers=headers
+            )
+            margin_data = resp.json()
+            st.write(f"🔍 {sym} Margin response:", margin_data)
         except Exception as e:
             st.error(f"❌ {sym} Margin calc error: {str(e)}")
 
