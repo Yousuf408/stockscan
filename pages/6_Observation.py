@@ -232,9 +232,9 @@ def check_candle_conditions(df, tickers_list):
     with st.spinner('Fetching intraday data...'):
         candle_data = get_candle_data_bulk(tickers_list)
 
-    for col_name in ['inside_9_15', 'breakout_9_30_to_9_45', 'gap_percent']:
-        df[col_name] = False
     df['inside_9_15'] = False
+    df['breakout_9_30_to_9_45'] = False
+    df['gap_percent'] = 0.0
 
     for idx, row in df.iterrows():
         ticker = row['ticker']
@@ -272,13 +272,19 @@ def should_refresh():
     return (datetime.now(IST) - st.session_state['stage1_last_refresh']).total_seconds() >= 60
 
 def prepare_display_df(display_df, user_capital):
+    display_df = display_df.copy()
+    
     display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
     display_df['Symbol'] = display_df['name']
+    
+    # Keep numeric values for Price
     display_df['Price'] = display_df['close']
-
+    
+    # Calculate MaxQty
     with st.spinner("Calculating max quantity..."):
         display_df['MaxQty'] = calculate_max_quantity_column(display_df, user_capital, 4)
 
+    # Rename columns
     display_df = display_df.rename(columns={
         'name': 'Symbol',
         'close': 'Price',
@@ -288,27 +294,53 @@ def prepare_display_df(display_df, user_capital):
         'sector': 'Sector'
     })
 
-    display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
-    display_df['Chg%'] = display_df['Chg%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
+    # Format columns (after rename)
+    def fmt_price(x):
+        try:
+            return f"₹{float(x):,.2f}"
+        except:
+            return f"₹{0:,.2f}"
+    
+    display_df['Price'] = display_df['Price'].apply(fmt_price)
+    
+    def fmt_chg(x):
+        try:
+            val = float(x)
+            return f"+{val:.2f}%" if val >= 0 else f"{val:.2f}%"
+        except:
+            return "0.00%"
+    
+    display_df['Chg%'] = display_df['Chg%'].apply(fmt_chg)
 
     def fmt_gap(x):
-        if pd.isna(x) or x is None:
+        try:
+            val = float(x)
+            return f"+{val:.2f}%" if val >= 0 else f"{val:.2f}%"
+        except:
             return "0.00%"
-        return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
 
     display_df['Gap%'] = display_df['gap_percent'].apply(fmt_gap)
 
     def fmt_vol(x):
-        if pd.isna(x) or x is None:
+        try:
+            val = float(x)
+            if val >= 1e6:
+                return f"{val/1e6:.1f}M"
+            elif val >= 1e3:
+                return f"{val/1e3:.1f}K"
+            return f"{val:.0f}"
+        except:
             return "0"
-        if x >= 1e6:
-            return f"{x/1e6:.1f}M"
-        elif x >= 1e3:
-            return f"{x/1e3:.1f}K"
-        return f"{x:.0f}"
 
     display_df['Volume'] = display_df['Volume'].apply(fmt_vol)
-    display_df['Rel Vol'] = display_df['Rel Vol'].apply(lambda x: f"{x:.2f}x" if pd.notna(x) else "0x")
+    
+    def fmt_relvol(x):
+        try:
+            return f"{float(x):.2f}x"
+        except:
+            return "0x"
+    
+    display_df['Rel Vol'] = display_df['Rel Vol'].apply(fmt_relvol)
     display_df['Inside 9:15'] = display_df['inside_9_15'].apply(lambda x: "✅" if x else "❌")
     display_df['Breakout'] = display_df['breakout_9_30_to_9_45'].apply(lambda x: "✅" if x else "❌")
 
