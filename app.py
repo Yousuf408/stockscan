@@ -64,17 +64,25 @@ def get_symbol_token_map(jwt_token, debug=False):
             data = resp.json()
             instruments = data.get('data', []) if isinstance(data, dict) else data
             
-            # Debug: show first instrument keys
-            if debug and instruments:
-                st.write("🔍 Sample instrument keys:", list(instruments[0].keys()))
-                st.write("🔍 Sample instrument:", instruments[0])
-            
+            # Filter for equity instruments only
+            equity_instruments = []
             for item in instruments:
+                inst_type = item.get('instrumenttype', '').upper()
+                # Accept 'EQ', 'EQUITY', 'E' (some APIs use different codes)
+                if inst_type in ['EQ', 'EQUITY', 'E']:
+                    equity_instruments.append(item)
+            
+            if debug:
+                st.write(f"🔍 Total instruments: {len(instruments)}")
+                st.write(f"🔍 Equity instruments: {len(equity_instruments)}")
+                if equity_instruments:
+                    st.write("🔍 Sample equity symbols:", [item.get('symbol') for item in equity_instruments[:5]])
+            
+            for item in equity_instruments:
                 symbol = item.get('symbol') or item.get('trading_symbol')
                 token = item.get('token') or item.get('instrument_token')
                 if symbol and token:
                     symbol_to_token[symbol.upper()] = str(token)
-                    
                     # Try multiple possible price fields
                     price = None
                     for field in ['last_price', 'close_price', 'ltp', 'close', 
@@ -86,9 +94,9 @@ def get_symbol_token_map(jwt_token, debug=False):
                         symbol_to_price[symbol.upper()] = price
 
             if symbol_to_token:
-                st.success(f"✅ Loaded {len(symbol_to_token)} instruments.")
+                st.success(f"✅ Loaded {len(symbol_to_token)} equity instruments.")
             else:
-                st.warning("⚠️ No symbols found in master list.")
+                st.warning("⚠️ No equity symbols found in master list.")
         else:
             st.error(f"❌ Failed to fetch master list. Status: {resp.status_code}")
     except Exception as e:
@@ -137,7 +145,7 @@ def get_margin_data(client, jwt_token, symbols, debug=False):
                 'Buying Power (₹)': '-',
                 'Max Qty': '-',
                 'Margin %': '-',
-                'Status': f'❌ Token not found'
+                'Status': f'❌ Token not found (not an equity symbol on NSE)'
             })
             continue
 
@@ -177,7 +185,7 @@ def get_margin_data(client, jwt_token, symbols, debug=False):
                 'Buying Power (₹)': '-',
                 'Max Qty': '-',
                 'Margin %': '-',
-                'Status': '⏸ Price unavailable (market closed?)'
+                'Status': '⏸ Price unavailable (market closed or symbol not traded)'
             })
             continue
 
@@ -244,7 +252,6 @@ def get_margin_data(client, jwt_token, symbols, debug=False):
 # ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
 
-# Add debug toggle in sidebar
 with st.sidebar:
     st.header("🔐 Authentication")
     if not SDK_AVAILABLE:
@@ -274,10 +281,7 @@ with st.sidebar:
     st.header("📊 Stocks")
     default = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
     stocks_input = st.text_area("Symbols (comma/newline)", value=default, height=120)
-    
-    # Debug checkbox
     debug_mode = st.checkbox("🐞 Show debug info", value=False)
-    
     fetch_btn = st.button("🔄 Fetch Margins")
 
 if not st.session_state.get('authenticated'):
@@ -304,7 +308,6 @@ if fetch_btn:
     else:
         df = pd.DataFrame(data)
 
-    # Reorder columns
     col_order = ['Symbol', 'Price (₹)', 'Margin/Share (₹)', 'Leverage (x)',
                  'Margin %', 'Buying Power (₹)', 'Max Qty', 'Status']
     if all(c in df.columns for c in col_order):
