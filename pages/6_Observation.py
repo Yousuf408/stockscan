@@ -82,7 +82,7 @@ if 'show_breakout_only' not in st.session_state:
 
 HARDCODED_SETTINGS = {
     'price_min': 200,
-    'price_max': 2000,
+    'price_max': 3000,
     'market_cap_min': 41_000_000_000,  # 41B (Large Cap)
     'stocks_limit': 50  # Number of top stocks to display
 }
