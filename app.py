@@ -30,7 +30,6 @@ def set_client_token(client, jwt_token):
     else:
         # Fallback: store token in a private attribute
         setattr(client, '_jwt_token', jwt_token)
-        # Also try to patch the get method if needed – but we'll handle manually
         return False
 
 # ------------------- Authentication -------------------
@@ -79,7 +78,7 @@ def authenticate_type_b(api_key, user_id, password, otp):
 def get_margin_data(client, jwt_token, symbols):
     """
     Fetch price and margin using either SDK or raw requests.
-    Key change: Format symbols as NSE:SYMBOL before API calls
+    KEY FIX: SDK dict uses raw symbol (GABRIEL), HTTP uses NSE: prefix (NSE:GABRIEL)
     """
     if client is None and not jwt_token:
         return [], 0.0
@@ -92,6 +91,7 @@ def get_margin_data(client, jwt_token, symbols):
             fund_data = fund_resp.json()
             if fund_data.get('status', False):
                 capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
+                st.success(f"✅ Capital fetched: ₹{capital:,.2f}")
     except Exception as e:
         st.warning(f"⚠️ Fund fetch failed: {str(e)}")
 
@@ -101,8 +101,11 @@ def get_margin_data(client, jwt_token, symbols):
         if not sym:
             continue
 
-        # ✅ Format symbol with NSE: prefix
-        api_symbol = f"NSE:{sym}"
+        # ✅ SYMBOL FORMAT FIX:
+        # SDK dict wants raw symbol: "GABRIEL"
+        # HTTP URL wants NSE: prefix: "NSE:GABRIEL"
+        api_symbol_for_sdk = sym
+        api_symbol_for_http = f"NSE:{sym}"
         
         price = 0
         margin_per_share = 0
@@ -111,19 +114,19 @@ def get_margin_data(client, jwt_token, symbols):
         ltp_data = {}
         try:
             if client:
-                # Try SDK method
-                ltp_resp = client.get_market_quote("OHLC", {"NSE": [api_symbol]})
+                # ✅ SDK: Use raw symbol in dict
+                ltp_resp = client.get_market_quote("OHLC", {"NSE": [api_symbol_for_sdk]})
                 ltp_data = ltp_resp.json()
-                st.write(f"🔍 {sym} LTP response (SDK):", ltp_data)  # DEBUG
+                st.write(f"🔍 {sym} LTP response (SDK):", ltp_data)
             else:
-                # Raw request with NSE: prefix
+                # ✅ HTTP: Use NSE: prefix in URL
                 headers = {'Authorization': f'Bearer {jwt_token}'}
                 resp = requests.get(
-                    f'https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&symbol={api_symbol}',
+                    f'https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&symbol={api_symbol_for_http}',
                     headers=headers
                 )
                 ltp_data = resp.json()
-                st.write(f"🔍 {sym} LTP response (HTTP):", ltp_data)  # DEBUG
+                st.write(f"🔍 {sym} LTP response (HTTP):", ltp_data)
         except Exception as e:
             st.error(f"❌ {sym} LTP fetch error: {str(e)}")
             results.append({
@@ -136,11 +139,14 @@ def get_margin_data(client, jwt_token, symbols):
 
         if ltp_data.get('status', False):
             ohlc = ltp_data.get('data', {}).get('OHLC', {})
-            # Try both formats
-            price_data = ohlc.get(api_symbol) or ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+            # Try multiple key formats in response
+            price_data = ohlc.get(api_symbol_for_sdk) or ohlc.get(api_symbol_for_http) or ohlc.get(sym)
             if price_data:
                 price = float(price_data.get('ltp', 0))
                 st.success(f"✅ {sym} LTP: ₹{price}")
+        else:
+            error_msg = ltp_data.get('message', 'Unknown error')
+            st.warning(f"⚠️ {sym}: API returned status=False: {error_msg}")
 
         if price == 0:
             results.append({
@@ -155,13 +161,14 @@ def get_margin_data(client, jwt_token, symbols):
         margin_data = {}
         try:
             if client:
+                # ✅ SDK: Use raw symbol
                 margin_resp = client.calculate_order_margin(
-                    "MIS", "BUY", "1", "0", "NSE", api_symbol, "", "0"
+                    "MIS", "BUY", "1", "0", "NSE", api_symbol_for_sdk, "", "0"
                 )
                 margin_data = margin_resp.json()
-                st.write(f"🔍 {sym} Margin response (SDK):", margin_data)  # DEBUG
+                st.write(f"🔍 {sym} Margin response (SDK):", margin_data)
             else:
-                # Raw request with NSE: prefix
+                # ✅ HTTP: Use NSE: prefix
                 headers = {'Authorization': f'Bearer {jwt_token}'}
                 url = f'https://api.mstock.trade/openapi/typeb/order/margin'
                 payload = {
@@ -170,19 +177,22 @@ def get_margin_data(client, jwt_token, symbols):
                     "quantity": "1",
                     "price": "0",
                     "exchange": "NSE",
-                    "trading_symbol": api_symbol,
+                    "trading_symbol": api_symbol_for_http,
                     "symbol_token": "",
                     "trigger_price": "0"
                 }
                 resp = requests.post(url, json=payload, headers=headers)
                 margin_data = resp.json()
-                st.write(f"🔍 {sym} Margin response (HTTP):", margin_data)  # DEBUG
+                st.write(f"🔍 {sym} Margin response (HTTP):", margin_data)
         except Exception as e:
             st.error(f"❌ {sym} Margin calc error: {str(e)}")
 
         if margin_data.get('status', False):
             margin_per_share = float(margin_data.get('data', {}).get('total', 0))
             st.success(f"✅ {sym} Margin/Share: ₹{margin_per_share}")
+        else:
+            error_msg = margin_data.get('message', 'Unknown error')
+            st.warning(f"⚠️ {sym}: Margin API returned status=False: {error_msg}")
 
         if margin_per_share == 0:
             results.append({
@@ -209,6 +219,7 @@ def get_margin_data(client, jwt_token, symbols):
         })
 
     return results, capital
+
 # ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
 
@@ -245,7 +256,7 @@ with st.sidebar:
 
 # Main area
 if not st.session_state.get('authenticated'):
-    st.info("Please authenticate first")
+    st.info("🔐 Please authenticate first using the sidebar")
     st.stop()
 
 client = st.session_state.get('mstock_client')
@@ -254,32 +265,36 @@ jwt_token = st.session_state.get('jwt_token')
 if fetch_btn:
     symbols = [s.strip().upper() for s in stocks_input.replace(',', ' ').split() if s]
     if not symbols:
-        st.warning("No symbols entered")
+        st.warning("⚠️ No symbols entered")
         st.stop()
 
     with st.spinner("Fetching data..."):
         data, capital = get_margin_data(client, jwt_token, symbols)
 
     st.metric("💰 Available Capital", f"₹{capital:,.2f}")
-    df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    if data:
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Simulated Buy
-    ready = df[df['Status'] == '✅ Ready']
-    if not ready.empty:
-        st.markdown("---")
-        st.subheader("📦 Simulated Order")
-        for idx, row in ready.iterrows():
-            cols = st.columns([1, 1, 1, 2])
-            with cols[0]:
-                st.write(f"**{row['Symbol']}**")
-            with cols[1]:
-                st.write(f"₹{row['Price (₹)']:.2f}")
-            with cols[2]:
-                qty = st.number_input("Qty", min_value=1, max_value=row['Max Qty'],
-                                      value=min(row['Max Qty'], 10), key=f"qty_{idx}")
-            with cols[3]:
-                if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}"):
-                    st.success(f"Simulated order: {row['Symbol']} - {qty} shares")
+        # Simulated Buy
+        ready = df[df['Status'] == '✅ Ready']
+        if not ready.empty:
+            st.markdown("---")
+            st.subheader("📦 Simulated Order")
+            for idx, row in ready.iterrows():
+                cols = st.columns([1, 1, 1, 2])
+                with cols[0]:
+                    st.write(f"**{row['Symbol']}**")
+                with cols[1]:
+                    st.write(f"₹{row['Price (₹)']:.2f}")
+                with cols[2]:
+                    qty = st.number_input("Qty", min_value=1, max_value=row['Max Qty'],
+                                          value=min(row['Max Qty'], 10), key=f"qty_{idx}")
+                with cols[3]:
+                    if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}"):
+                        st.success(f"Simulated order: {row['Symbol']} - {qty} shares @ ₹{row['Price (₹)']:.2f}")
+    else:
+        st.error("❌ No data fetched. Check errors above.")
 
 st.caption(f"Last refreshed: {datetime.now().strftime('%H:%M:%S')}")
