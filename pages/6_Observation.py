@@ -78,39 +78,30 @@ HARDCODED_SETTINGS = {
 
 WHITE_THEME_CSS = """
 <style>
-    /* ─── GLOBAL BACKGROUND ─── */
     .stApp {
         background: #ffffff !important;
     }
-    
     .stAppViewContainer {
         background: #ffffff !important;
     }
-    
     .main > div {
         background: #ffffff !important;
     }
-    
     .block-container {
         padding-top: 0 !important;
         padding-bottom: 0 !important;
         max-width: 1440px !important;
         background: #ffffff !important;
     }
-    
-    /* ─── SIDEBAR ─── */
     .css-1d391kg, .st-emotion-cache-1wmy9hl {
         background: #f8f9fa !important;
         border-right: 1px solid #e9ecef !important;
     }
-    
-    /* ─── HIDE STREAMLIT FOOTER/HEADER ─── */
     #MainMenu {visibility: hidden !important;}
     footer {visibility: hidden !important;}
     header {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     
-    /* ─── HEADER ─── */
     .tradeos-header {
         display: flex;
         justify-content: space-between;
@@ -125,19 +116,16 @@ WHITE_THEME_CSS = """
         top: 0;
         z-index: 999;
     }
-    
     .header-left {
         display: flex;
         align-items: center;
         gap: 0.75rem;
     }
-    
     .logo {
         font-size: 1.3rem;
         font-weight: 700;
         color: #1a1a2e;
     }
-    
     .version {
         font-size: 0.6rem;
         color: #888;
@@ -145,30 +133,25 @@ WHITE_THEME_CSS = """
         padding: 0.1rem 0.5rem;
         border-radius: 12px;
     }
-    
     .header-center {
         display: flex;
         gap: 1.5rem;
         font-size: 0.8rem;
         flex-wrap: wrap;
     }
-    
     .ticker-item {
         display: flex;
         gap: 0.4rem;
         align-items: center;
         color: #333;
     }
-    
     .ticker-green { color: #28a745; }
     .ticker-red { color: #dc3545; }
-    
     .header-right {
         display: flex;
         align-items: center;
         gap: 1rem;
     }
-    
     .status-indicator {
         display: flex;
         align-items: center;
@@ -176,7 +159,6 @@ WHITE_THEME_CSS = """
         font-size: 0.8rem;
         color: #333;
     }
-    
     .status-dot {
         width: 7px;
         height: 7px;
@@ -184,19 +166,16 @@ WHITE_THEME_CSS = """
         background: #28a745;
         animation: pulse 2s infinite;
     }
-    
     @keyframes pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
     }
-    
     .clock {
         font-size: 0.8rem;
         color: #888;
         font-variant-numeric: tabular-nums;
     }
     
-    /* ─── PAGE HEADER ─── */
     .page-header {
         display: flex;
         justify-content: space-between;
@@ -205,20 +184,17 @@ WHITE_THEME_CSS = """
         flex-wrap: wrap;
         gap: 0.75rem;
     }
-    
     .page-title {
         font-size: 1.4rem;
         font-weight: 600;
         color: #1a1a2e;
     }
-    
     .page-title span {
         font-size: 0.8rem;
         color: #888;
         font-weight: 400;
     }
     
-    /* ─── BUTTONS ─── */
     .stButton button {
         background: #f1f3f5 !important;
         border: 1px solid #dee2e6 !important;
@@ -228,13 +204,11 @@ WHITE_THEME_CSS = """
         font-size: 0.8rem !important;
         transition: all 0.3s ease !important;
     }
-    
     .stButton button:hover {
         background: #e9ecef !important;
         border-color: #adb5bd !important;
     }
     
-    /* ─── SCREENER CARD ─── */
     .screener-card {
         background: #ffffff;
         border-radius: 12px;
@@ -243,7 +217,6 @@ WHITE_THEME_CSS = """
         margin-bottom: 1rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    
     .screener-header {
         display: flex;
         justify-content: space-between;
@@ -254,34 +227,28 @@ WHITE_THEME_CSS = """
         flex-wrap: wrap;
         gap: 0.75rem;
     }
-    
     .screener-stats {
         display: flex;
         gap: 1.5rem;
         font-size: 0.8rem;
         flex-wrap: wrap;
     }
-    
     .stat-item {
         color: #888;
     }
-    
     .stat-item strong {
         color: #1a1a2e;
         font-weight: 600;
     }
-    
     .stat-count {
         color: #28a745;
         font-weight: 600;
     }
-    
     .filter-badges {
         display: flex;
         gap: 0.4rem;
         flex-wrap: wrap;
     }
-    
     .filter-badge {
         background: #f1f3f5;
         padding: 0.2rem 0.7rem;
@@ -290,14 +257,12 @@ WHITE_THEME_CSS = """
         color: #888;
         border: 1px solid #e9ecef;
     }
-    
     .filter-badge.active {
         border-color: #28a745;
         color: #28a745;
         background: #f0fff4;
     }
     
-    /* ─── FILTER ROW ─── */
     .filter-row {
         display: flex;
         gap: 1.5rem;
@@ -308,39 +273,31 @@ WHITE_THEME_CSS = """
         align-items: center;
     }
     
-    /* ─── CHECKBOX ─── */
     .stCheckbox label {
         color: #555 !important;
         font-size: 0.8rem !important;
     }
-    
     .stCheckbox label span {
         color: #333 !important;
     }
     
-    /* ─── DATAFRAME ─── */
     .stDataFrame {
         background: #ffffff !important;
     }
-    
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: #ffffff !important;
         border: 1px solid #e9ecef !important;
         border-radius: 8px !important;
     }
-    
     .stDataFrame table {
         background: #ffffff !important;
     }
-    
     .stDataFrame tbody {
         background: #ffffff !important;
     }
-    
     .stDataFrame tr {
         background: #ffffff !important;
     }
-    
     .stDataFrame thead tr th {
         background: #f8f9fa !important;
         color: #888 !important;
@@ -352,7 +309,6 @@ WHITE_THEME_CSS = """
         font-weight: 600 !important;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
-    
     .stDataFrame tbody tr td {
         background: #ffffff !important;
         color: #333 !important;
@@ -362,16 +318,13 @@ WHITE_THEME_CSS = """
         font-size: 0.85rem !important;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
-    
     .stDataFrame tbody tr:hover td {
         background: #f8f9fa !important;
     }
-    
     .stDataFrame tbody tr:last-child td {
         border-bottom: none !important;
     }
     
-    /* ─── FOOTER BAR ─── */
     .footer-bar {
         display: flex;
         justify-content: space-between;
@@ -383,16 +336,13 @@ WHITE_THEME_CSS = """
         flex-wrap: wrap;
         gap: 0.5rem;
     }
-    
     .footer-bar .highlight {
         color: #555;
     }
-    
     .footer-bar .live {
         color: #28a745;
     }
     
-    /* ─── BUY BUTTONS ─── */
     .stButton button[kind="secondary"] {
         background: linear-gradient(135deg, #28a745, #20c997) !important;
         border: none !important;
@@ -401,19 +351,16 @@ WHITE_THEME_CSS = """
         border-radius: 6px !important;
         transition: all 0.3s ease !important;
     }
-    
     .stButton button[kind="secondary"]:hover {
         transform: scale(1.05) !important;
         box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
     }
-    
     .stButton button[kind="secondary"]:disabled {
         opacity: 0.3 !important;
         cursor: not-allowed !important;
         transform: none !important;
     }
     
-    /* ─── SIDEBAR STYLING ─── */
     .stSidebar .stButton button {
         background: transparent !important;
         border: none !important;
@@ -423,13 +370,11 @@ WHITE_THEME_CSS = """
         text-align: left !important;
         padding: 0.5rem 1rem !important;
     }
-    
     .stSidebar .stButton button:hover {
         background: #f1f3f5 !important;
         color: #28a745 !important;
     }
     
-    /* ─── RESPONSIVE ─── */
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -437,28 +382,23 @@ WHITE_THEME_CSS = """
             gap: 0.3rem;
             margin: -0.5rem -0.5rem 0.5rem -0.5rem;
         }
-        
         .header-center {
             font-size: 0.7rem;
             gap: 0.8rem;
             justify-content: center;
         }
-        
         .page-title {
             font-size: 1.1rem;
         }
-        
         .screener-header {
             flex-direction: column;
             align-items: flex-start;
             padding: 0.75rem;
         }
-        
         .screener-stats {
             font-size: 0.7rem;
             gap: 0.8rem;
         }
-        
         .footer-bar {
             flex-direction: column;
             text-align: center;
@@ -707,10 +647,14 @@ def check_candle_conditions(df, tickers_list):
                 valid_stocks.append(ticker)
             else:
                 reasons = []
-                if not cond1: reasons.append('9:20 close > 9:15 high')
-                if not cond2: reasons.append('9:20 high/low not below 9:15 high')
-                if not cond4: reasons.append('9:20 candle not bearish')
-                if not cond5: reasons.append('Touched 9:15 low')
+                if not cond1:
+                    reasons.append('9:20 close > 9:15 high')
+                if not cond2:
+                    reasons.append('9:20 high/low not below 9:15 high')
+                if not cond4:
+                    reasons.append('9:20 candle not bearish')
+                if not cond5:
+                    reasons.append('Touched 9:15 low')
                 df.at[idx, 'candle_check_status'] = 'FAIL ✗ (' + ', '.join(reasons) + ')'
                 invalid_stocks.append(ticker)
 
@@ -903,7 +847,7 @@ if st.session_state['stage1_data']:
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
     
-        if display_df.empty:
+    if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
@@ -1031,7 +975,7 @@ if st.session_state['stage1_data']:
                         )
                         display_order_result(symbol, result)
         
-        # ─── Download CSV (INSIDE else block) ───
+        # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
