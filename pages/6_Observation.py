@@ -1,7 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (TRADEOS STYLE)
-# Complete UI overhaul with professional design
-# All backend logic remains unchanged
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FIXED DARK THEME)
+# Complete UI overhaul with proper dark theme
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -38,464 +37,6 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PROFESSIONAL CSS
-# ─────────────────────────────────────────────────────────────────────────────
-
-PROFESSIONAL_CSS = """
-<style>
-/* ─── RESET ─── */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-/* ─── GLOBAL ─── */
-.stApp {
-    background: #0a0a0f;
-}
-
-.block-container {
-    padding-top: 0.5rem !important;
-    padding-bottom: 0.5rem !important;
-    max-width: 1440px !important;
-}
-
-/* ─── HIDE STREAMLIT ELEMENTS ─── */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-.stDeployButton {display: none;}
-
-/* ─── HEADER ─── */
-.tradeos-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.6rem 2rem;
-    background: rgba(10, 10, 15, 0.95);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(20px);
-    margin: -0.5rem -1rem 0.5rem -1rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.header-left {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.logo {
-    font-size: 1.3rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #00ff88, #00ccff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.version {
-    font-size: 0.6rem;
-    color: #666;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 0.1rem 0.5rem;
-    border-radius: 12px;
-}
-
-.header-center {
-    display: flex;
-    gap: 1.5rem;
-    font-size: 0.8rem;
-    flex-wrap: wrap;
-}
-
-.ticker-item {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    color: #e0e0e0;
-}
-
-.ticker-green { color: #00ff88; }
-.ticker-red { color: #ff4444; }
-
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.8rem;
-    color: #e0e0e0;
-}
-
-.status-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #00ff88;
-    box-shadow: 0 0 10px #00ff88;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-}
-
-.clock {
-    font-size: 0.8rem;
-    color: #888;
-    font-variant-numeric: tabular-nums;
-}
-
-/* ─── PAGE HEADER ─── */
-.page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin: 1rem 0 1.25rem 0;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-}
-
-.page-title {
-    font-size: 1.4rem;
-    font-weight: 600;
-    color: #e0e0e0;
-}
-
-.page-title span {
-    font-size: 0.8rem;
-    color: #666;
-    font-weight: 400;
-}
-
-/* ─── TABS ─── */
-.tabs-container {
-    display: flex;
-    gap: 0.3rem;
-    margin-bottom: 1.25rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    padding-bottom: 0.5rem;
-    flex-wrap: wrap;
-}
-
-.tab {
-    padding: 0.5rem 1.2rem;
-    border-radius: 8px 8px 0 0;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    color: #666;
-    font-size: 0.85rem;
-    font-weight: 500;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-}
-
-.tab:hover {
-    color: #e0e0e0;
-    background: rgba(255, 255, 255, 0.02);
-}
-
-.tab.active {
-    color: #00ff88;
-    border-bottom-color: #00ff88;
-    background: rgba(0, 255, 136, 0.05);
-}
-
-.tab-badge {
-    font-size: 0.6rem;
-    background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
-    padding: 0.1rem 0.5rem;
-    border-radius: 10px;
-    margin-left: 0.3rem;
-}
-
-/* ─── SCREENER CARD ─── */
-.screener-card {
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    overflow: hidden;
-    margin-bottom: 1rem;
-}
-
-.screener-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 1.5rem;
-    background: rgba(255, 255, 255, 0.01);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    flex-wrap: wrap;
-    gap: 0.75rem;
-}
-
-.screener-stats {
-    display: flex;
-    gap: 1.5rem;
-    font-size: 0.8rem;
-    flex-wrap: wrap;
-}
-
-.stat-item {
-    color: #888;
-}
-
-.stat-item strong {
-    color: #fff;
-    font-weight: 600;
-}
-
-.stat-count {
-    color: #00ff88;
-    font-weight: 600;
-}
-
-.filter-badges {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-}
-
-.filter-badge {
-    background: rgba(255, 255, 255, 0.04);
-    padding: 0.2rem 0.7rem;
-    border-radius: 12px;
-    font-size: 0.7rem;
-    color: #888;
-    border: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.filter-badge.active {
-    border-color: rgba(0, 255, 136, 0.2);
-    color: #00ff88;
-}
-
-/* ─── FILTER ROW ─── */
-.filter-row {
-    display: flex;
-    gap: 1.5rem;
-    padding: 0.75rem 1.5rem;
-    background: rgba(255, 255, 255, 0.01);
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
-    flex-wrap: wrap;
-    align-items: center;
-}
-
-.filter-check {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.8rem;
-    color: #888;
-    cursor: pointer;
-}
-
-.filter-check.active {
-    color: #e0e0e0;
-}
-
-/* ─── TABLE ─── */
-.table-wrapper {
-    overflow-x: auto;
-    padding: 0 0.5rem 0.5rem 0.5rem;
-}
-
-.dataframe {
-    width: 100% !important;
-    border-collapse: separate !important;
-    border-spacing: 0 4px !important;
-}
-
-.dataframe th {
-    text-align: left !important;
-    padding: 0.6rem 0.8rem !important;
-    font-size: 0.6rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.5px !important;
-    color: #666 !important;
-    font-weight: 600 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-    background: #0a0a0f !important;
-}
-
-.dataframe td {
-    padding: 0.6rem 0.8rem !important;
-    background: rgba(255, 255, 255, 0.015) !important;
-    border-radius: 6px !important;
-    font-size: 0.85rem !important;
-    color: #e0e0e0 !important;
-    border: none !important;
-}
-
-.dataframe tr:hover td {
-    background: rgba(255, 255, 255, 0.04) !important;
-}
-
-/* ─── FOOTER BAR ─── */
-.footer-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1.5rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
-    font-size: 0.7rem;
-    color: #555;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.footer-bar .highlight {
-    color: #888;
-}
-
-.footer-bar .live {
-    color: #00ff88;
-}
-
-/* ─── BUY BUTTON ─── */
-.buy-btn {
-    background: linear-gradient(135deg, #00ff88, #00cc66) !important;
-    border: none !important;
-    color: #000 !important;
-    font-weight: 600 !important;
-    padding: 0.25rem 0.8rem !important;
-    border-radius: 6px !important;
-    font-size: 0.75rem !important;
-    transition: all 0.3s ease !important;
-    cursor: pointer !important;
-}
-
-.buy-btn:hover {
-    transform: scale(1.05) !important;
-    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3) !important;
-}
-
-.buy-btn:disabled {
-    opacity: 0.3 !important;
-    cursor: not-allowed !important;
-    transform: none !important;
-}
-
-/* ─── SIGNAL BADGES ─── */
-.signal-buy {
-    background: rgba(0, 255, 136, 0.12) !important;
-    color: #00ff88 !important;
-    padding: 0.15rem 0.6rem !important;
-    border-radius: 12px !important;
-    font-size: 0.7rem !important;
-    font-weight: 600 !important;
-    display: inline-block !important;
-}
-
-.signal-hold {
-    background: rgba(245, 158, 11, 0.12) !important;
-    color: #f59e0b !important;
-    padding: 0.15rem 0.6rem !important;
-    border-radius: 12px !important;
-    font-size: 0.7rem !important;
-    font-weight: 600 !important;
-    display: inline-block !important;
-}
-
-.signal-sell {
-    background: rgba(255, 68, 68, 0.12) !important;
-    color: #ff4444 !important;
-    padding: 0.15rem 0.6rem !important;
-    border-radius: 12px !important;
-    font-size: 0.7rem !important;
-    font-weight: 600 !important;
-    display: inline-block !important;
-}
-
-.price-up { color: #00ff88 !important; }
-.price-down { color: #ff4444 !important; }
-
-/* ─── RESPONSIVE ─── */
-@media (max-width: 768px) {
-    .tradeos-header {
-        padding: 0.5rem 0.75rem;
-        flex-direction: column;
-        gap: 0.3rem;
-        margin: -0.5rem -0.5rem 0.5rem -0.5rem;
-    }
-    
-    .header-center {
-        font-size: 0.7rem;
-        gap: 0.8rem;
-        justify-content: center;
-    }
-    
-    .page-title {
-        font-size: 1.1rem;
-    }
-    
-    .screener-header {
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 0.75rem;
-    }
-    
-    .screener-stats {
-        font-size: 0.7rem;
-        gap: 0.8rem;
-    }
-    
-    .filter-row {
-        padding: 0.5rem 0.75rem;
-        gap: 0.8rem;
-    }
-    
-    .footer-bar {
-        flex-direction: column;
-        text-align: center;
-        padding: 0.5rem 0.75rem;
-    }
-    
-    .tab {
-        font-size: 0.75rem;
-        padding: 0.4rem 0.8rem;
-    }
-}
-
-/* ─── DEBUG ─── */
-.debug-section {
-    margin-top: 1rem;
-    padding: 1rem 1.5rem;
-    background: rgba(255, 255, 255, 0.01);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.03);
-}
-
-.debug-section summary {
-    cursor: pointer;
-    color: #555;
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.debug-section summary:hover {
-    color: #888;
-}
-
-/* ─── SIDEBAR OVERRIDES ─── */
-.css-1d391kg {display: none;}
-[data-testid="stSidebar"] {display: none;}
-</style>
-"""
-
-# ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE INIT
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -507,9 +48,6 @@ if 'amo_mode' not in st.session_state:
 
 if 'stage1_data' not in st.session_state:
     st.session_state['stage1_data'] = None
-
-if 'stage1_timestamp' not in st.session_state:
-    st.session_state['stage1_timestamp'] = None
 
 if 'stage1_loaded' not in st.session_state:
     st.session_state['stage1_loaded'] = False
@@ -535,10 +73,488 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY CSS
+# PROFESSIONAL CSS - FIXED DARK THEME
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
+PROFESSIONAL_CSS = """
+<style>
+    /* ─── COMPLETE RESET ─── */
+    .stApp {
+        background: #0a0a0f !important;
+    }
+    
+    .stAppViewContainer {
+        background: #0a0a0f !important;
+    }
+    
+    .main > div {
+        background: #0a0a0f !important;
+    }
+    
+    .block-container {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        max-width: 1440px !important;
+        background: #0a0a0f !important;
+    }
+    
+    /* ─── HIDE ALL STREAMLIT DEFAULTS ─── */
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    .st-emotion-cache-1r6slb0 {display: none !important;}
+    .st-emotion-cache-1v0mbdj {display: none !important;}
+    .st-emotion-cache-12fmjuu {display: none !important;}
+    
+    /* ─── FORCE DARK BACKGROUND ─── */
+    .st-emotion-cache-1y4p8pa {
+        background: #0a0a0f !important;
+    }
+    
+    .st-emotion-cache-1wmy9hl {
+        background: #0a0a0f !important;
+    }
+    
+    .st-emotion-cache-1r6slb0 {
+        background: #0a0a0f !important;
+    }
+    
+    .st-emotion-cache-1avcm0n {
+        background: #0a0a0f !important;
+    }
+    
+    /* ─── HEADER ─── */
+    .tradeos-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.6rem 2rem;
+        background: rgba(10, 10, 15, 0.98);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(20px);
+        margin: -0.5rem -1rem 0.5rem -1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        position: sticky;
+        top: 0;
+        z-index: 999;
+    }
+    
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .logo {
+        font-size: 1.3rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #00ff88, #00ccff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    .version {
+        font-size: 0.6rem;
+        color: #666;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 0.1rem 0.5rem;
+        border-radius: 12px;
+    }
+    
+    .header-center {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+    
+    .ticker-item {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+        color: #e0e0e0;
+    }
+    
+    .ticker-green { color: #00ff88; }
+    .ticker-red { color: #ff4444; }
+    
+    .header-right {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: #e0e0e0;
+    }
+    
+    .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #00ff88;
+        box-shadow: 0 0 10px #00ff88;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    
+    .clock {
+        font-size: 0.8rem;
+        color: #888;
+        font-variant-numeric: tabular-nums;
+    }
+    
+    /* ─── PAGE HEADER ─── */
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 1rem 0 1.25rem 0;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    
+    .page-title {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #e0e0e0;
+    }
+    
+    .page-title span {
+        font-size: 0.8rem;
+        color: #666;
+        font-weight: 400;
+    }
+    
+    /* ─── BUTTON OVERRIDES ─── */
+    .stButton button {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        color: #e0e0e0 !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton button:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-color: rgba(0, 255, 136, 0.3) !important;
+    }
+    
+    /* ─── TABS ─── */
+    .tabs-container {
+        display: flex;
+        gap: 0.3rem;
+        margin-bottom: 1.25rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding-bottom: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .tab-btn {
+        padding: 0.5rem 1.2rem;
+        border-radius: 8px 8px 0 0;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        color: #666;
+        font-size: 0.85rem;
+        font-weight: 500;
+        border: none !important;
+        background: transparent !important;
+        border-bottom: 2px solid transparent !important;
+    }
+    
+    .tab-btn:hover {
+        color: #e0e0e0;
+        background: rgba(255, 255, 255, 0.02) !important;
+    }
+    
+    .tab-btn.active {
+        color: #00ff88 !important;
+        border-bottom-color: #00ff88 !important;
+        background: rgba(0, 255, 136, 0.05) !important;
+    }
+    
+    .tab-badge {
+        font-size: 0.6rem;
+        background: rgba(0, 255, 136, 0.15);
+        color: #00ff88;
+        padding: 0.1rem 0.5rem;
+        border-radius: 10px;
+        margin-left: 0.3rem;
+    }
+    
+    /* ─── SCREENER CARD ─── */
+    .screener-card {
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        overflow: hidden;
+        margin-bottom: 1rem;
+    }
+    
+    .screener-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        background: rgba(255, 255, 255, 0.01);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    
+    .screener-stats {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+    
+    .stat-item {
+        color: #888;
+    }
+    
+    .stat-item strong {
+        color: #fff;
+        font-weight: 600;
+    }
+    
+    .stat-count {
+        color: #00ff88;
+        font-weight: 600;
+    }
+    
+    .filter-badges {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+    
+    .filter-badge {
+        background: rgba(255, 255, 255, 0.04);
+        padding: 0.2rem 0.7rem;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        color: #888;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    
+    .filter-badge.active {
+        border-color: rgba(0, 255, 136, 0.2);
+        color: #00ff88;
+    }
+    
+    /* ─── CHECKBOX OVERRIDES ─── */
+    .stCheckbox label {
+        color: #888 !important;
+        font-size: 0.8rem !important;
+    }
+    
+    .stCheckbox label span {
+        color: #e0e0e0 !important;
+    }
+    
+    /* ─── DATAFRAME OVERRIDES ─── */
+    .stDataFrame {
+        background: transparent !important;
+    }
+    
+    .stDataFrame [data-testid="stDataFrameResizable"] {
+        background: transparent !important;
+    }
+    
+    .stDataFrame table {
+        background: transparent !important;
+    }
+    
+    .stDataFrame thead tr th {
+        background: rgba(255, 255, 255, 0.02) !important;
+        color: #666 !important;
+        font-size: 0.6rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+        padding: 0.6rem 0.8rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .stDataFrame tbody tr td {
+        background: rgba(255, 255, 255, 0.015) !important;
+        color: #e0e0e0 !important;
+        padding: 0.6rem 0.8rem !important;
+        border-radius: 6px !important;
+        border: none !important;
+        font-size: 0.85rem !important;
+    }
+    
+    .stDataFrame tbody tr:hover td {
+        background: rgba(255, 255, 255, 0.04) !important;
+    }
+    
+    /* ─── FOOTER BAR ─── */
+    .footer-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1.5rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.03);
+        font-size: 0.7rem;
+        color: #555;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    .footer-bar .highlight {
+        color: #888;
+    }
+    
+    .footer-bar .live {
+        color: #00ff88;
+    }
+    
+    /* ─── BUY BUTTON OVERRIDES ─── */
+    .stButton button[kind="secondary"] {
+        background: linear-gradient(135deg, #00ff88, #00cc66) !important;
+        border: none !important;
+        color: #000 !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton button[kind="secondary"]:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 20px rgba(0, 255, 136, 0.3) !important;
+    }
+    
+    .stButton button[kind="secondary"]:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+    }
+    
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 768px) {
+        .tradeos-header {
+            padding: 0.5rem 0.75rem;
+            flex-direction: column;
+            gap: 0.3rem;
+            margin: -0.5rem -0.5rem 0.5rem -0.5rem;
+        }
+        
+        .header-center {
+            font-size: 0.7rem;
+            gap: 0.8rem;
+            justify-content: center;
+        }
+        
+        .page-title {
+            font-size: 1.1rem;
+        }
+        
+        .screener-header {
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 0.75rem;
+        }
+        
+        .screener-stats {
+            font-size: 0.7rem;
+            gap: 0.8rem;
+        }
+        
+        .footer-bar {
+            flex-direction: column;
+            text-align: center;
+            padding: 0.5rem 0.75rem;
+        }
+        
+        .tab-btn {
+            font-size: 0.75rem;
+            padding: 0.4rem 0.8rem;
+        }
+    }
+    
+    /* ─── DEBUG ─── */
+    .debug-section {
+        margin-top: 1rem;
+        padding: 1rem 1.5rem;
+        background: rgba(255, 255, 255, 0.01);
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    
+    .debug-section summary {
+        cursor: pointer;
+        color: #555;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .debug-section summary:hover {
+        color: #888;
+    }
+    
+    /* ─── SIDEBAR OVERRIDES ─── */
+    .css-1d391kg {display: none !important;}
+    [data-testid="stSidebar"] {display: none !important;}
+    .st-emotion-cache-1cypcdb {display: none !important;}
+    
+    /* ─── EXPANDER OVERRIDES ─── */
+    .streamlit-expanderHeader {
+        color: #555 !important;
+        font-size: 0.75rem !important;
+        background: rgba(255, 255, 255, 0.01) !important;
+        border: 1px solid rgba(255, 255, 255, 0.03) !important;
+        border-radius: 8px !important;
+    }
+    
+    .streamlit-expanderContent {
+        background: rgba(0, 0, 0, 0.3) !important;
+        border-radius: 0 0 8px 8px !important;
+        color: #666 !important;
+        font-size: 0.7rem !important;
+        font-family: 'Courier New', monospace !important;
+    }
+    
+    /* ─── WARNING/INFO OVERRIDES ─── */
+    .stAlert {
+        background: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        color: #888 !important;
+    }
+    
+    .stAlert svg {
+        fill: #888 !important;
+    }
+    
+    /* ─── METRIC OVERRIDES ─── */
+    .stMetric {
+        background: rgba(255, 255, 255, 0.02) !important;
+        border-radius: 12px !important;
+        padding: 0.5rem !important;
+        border: 1px solid rgba(255, 255, 255, 0.03) !important;
+    }
+    
+    .stMetric label {
+        color: #666 !important;
+    }
+    
+    .stMetric div {
+        color: #e0e0e0 !important;
+    }
+</style>
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCTIONS (Unchanged - all backend logic)
@@ -839,7 +855,7 @@ def should_refresh_stage1():
 def render_header():
     current_time = datetime.now(IST)
     
-    # Get market indices (mock data - you can replace with real API)
+    # Get market indices
     nifty = "24,856.40"
     nifty_chg = "+0.87%"
     sensex = "81,234.56"
@@ -869,6 +885,12 @@ def render_header():
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# APPLY CSS
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -894,26 +916,6 @@ with col2:
         st.rerun()
 
 # ─── Tabs ───
-tabs_html = f"""
-<div class="tabs-container">
-    <button class="tab {'active' if st.session_state['active_tab'] == 'Gap' else ''}" 
-            onclick="parent.document.querySelector('[data-testid=\'stButton\']').click()">
-        📊 Gap <span class="tab-badge">50</span>
-    </button>
-    <button class="tab {'active' if st.session_state['active_tab'] == 'ORB' else ''}">
-        🎯 ORB <span class="tab-badge">12</span>
-    </button>
-    <button class="tab {'active' if st.session_state['active_tab'] == 'Momentum' else ''}">
-        ⚡ Momentum <span class="tab-badge">8</span>
-    </button>
-    <button class="tab {'active' if st.session_state['active_tab'] == 'AI' else ''}">
-        🤖 AI <span class="tab-badge">0</span>
-    </button>
-</div>
-"""
-st.markdown(tabs_html, unsafe_allow_html=True)
-
-# ─── Tab Selection (Hidden) ───
 tab_cols = st.columns(4)
 with tab_cols[0]:
     if st.button("📊 Gap", key="tab_gap", use_container_width=True):
@@ -937,7 +939,7 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card ───
+    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
@@ -1023,7 +1025,6 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
             )
         
         # ─── Create professional display columns ───
-        # Select columns for display
         display_cols = [
             'name', 'close', 'change', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -1048,7 +1049,7 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
         # Price formatting
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
         
-        # Chg% formatting with color
+        # Chg% formatting
         display_df['Chg%'] = display_df['Chg%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
         
         # Volume formatting
@@ -1060,7 +1061,7 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # Signal badge (simplified - based on conditions)
+        # Signal badge
         def get_signal(row):
             if row['Inside 9:15'] == "✅" and row['Breakout'] == "✅":
                 return "BUY"
@@ -1094,7 +1095,6 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
         st.markdown("---")
         st.markdown("#### 🚀 Quick Buy")
         
-        # Create buy buttons in grid
         num_cols = min(4, len(display_df))
         cols = st.columns(num_cols)
         
