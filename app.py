@@ -14,7 +14,6 @@ except ImportError:
 
 # ------------------- Helper: set token on client -------------------
 def set_client_token(client, jwt_token):
-    """Try multiple ways to set the JWT token on the client."""
     if hasattr(client, 'set_jwt_token'):
         client.set_jwt_token(jwt_token)
         return True
@@ -33,10 +32,6 @@ def set_client_token(client, jwt_token):
 
 # ------------------- Authentication -------------------
 def authenticate_type_b(api_key, user_id, password, otp):
-    """
-    Type-B authentication using SDK.
-    Returns client and JWT token.
-    """
     if not SDK_AVAILABLE:
         st.error("❌ mStock Type-B SDK not installed.")
         return None, None
@@ -68,57 +63,45 @@ def authenticate_type_b(api_key, user_id, password, otp):
 
 # ------------------- Instrument Master (Symbol → Token) -------------------
 def get_symbol_token_map(jwt_token):
-    """
-    Fetch the master instrument list from the correct endpoint
-    and build a dictionary mapping symbol name (e.g. 'GABRIEL') to numeric token.
-    """
     base_url = "https://api.mstock.trade/openapi/typeb"
     headers = {"Authorization": f"Bearer {jwt_token}"}
     symbol_to_token = {}
 
-    # Correct endpoint
     endpoint = "/instruments/OpenAPIScripMaster"
     try:
         resp = requests.get(f"{base_url}{endpoint}", headers=headers)
         if resp.status_code == 200:
             data = resp.json()
-            # The response may be a list directly or under a 'data' key
             instruments = data.get('data', []) if isinstance(data, dict) else data
 
             for item in instruments:
-                # Adjust these keys based on actual response structure
                 symbol = item.get('symbol') or item.get('trading_symbol')
                 token = item.get('token') or item.get('instrument_token')
                 if symbol and token:
                     symbol_to_token[symbol.upper()] = str(token)
 
             if symbol_to_token:
-                st.success(f"✅ Loaded {len(symbol_to_token)} instruments from master list.")
+                st.success(f"✅ Loaded {len(symbol_to_token)} instruments.")
             else:
-                st.warning("⚠️ Master list fetched but no symbols found. Check response structure.")
+                st.warning("⚠️ No symbols found in master list.")
         else:
             st.error(f"❌ Failed to fetch master list. Status: {resp.status_code}")
     except Exception as e:
-        st.error(f"❌ Error fetching instrument master: {e}")
+        st.error(f"❌ Error: {e}")
 
     return symbol_to_token
 
-# ------------------- Margin & Price Fetch (Using Tokens) -------------------
+# ------------------- Margin & Price Fetch (with Debug) -------------------
 def get_margin_data(client, jwt_token, symbols):
-    """
-    Fetch LTP and margin using numeric tokens obtained from the master list.
-    Tries SDK first, falls back to raw HTTP if needed.
-    """
     if client is None and not jwt_token:
         return [], 0.0
 
     # 1. Get symbol → token mapping
     symbol_to_token = get_symbol_token_map(jwt_token)
     if not symbol_to_token:
-        st.error("❌ Could not obtain instrument mapping. Aborting data fetch.")
         return [], 0.0
 
-    # 2. Get available capital
+    # 2. Get capital
     capital = 10000.0
     try:
         if client:
@@ -137,12 +120,16 @@ def get_margin_data(client, jwt_token, symbols):
 
     results = []
 
+    # Debug: show token for first symbol
+    if symbols:
+        first_sym = symbols[0].strip().upper()
+        st.write(f"🔍 Token for {first_sym}: {symbol_to_token.get(first_sym, 'NOT FOUND')}")
+
     for sym in symbols:
         sym = sym.strip().upper()
         if not sym:
             continue
 
-        # 3. Get token for this symbol
         token = symbol_to_token.get(sym)
         if not token:
             results.append({
@@ -156,83 +143,79 @@ def get_margin_data(client, jwt_token, symbols):
             })
             continue
 
-        # 4. Get LTP using token
+        # 3. Get LTP using token
         price = 0
+        quote_response = None
         try:
-            if client:
-                # SDK method – may require token instead of symbol
-                # Some SDK versions support get_market_quote with token
-                # If not, fallback to raw
-                try:
-                    ltp_resp = client.get_market_quote("OHLC", {"NSE": [token]})
-                    ltp_data = ltp_resp.json()
-                except:
-                    ltp_data = {}
-            else:
-                # Raw HTTP – use token
-                headers = {'Authorization': f'Bearer {jwt_token}'}
-                url_quote = f"https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&token={token}"
-                resp = requests.get(url_quote, headers=headers)
-                ltp_data = resp.json() if resp.status_code == 200 else {}
-        except:
-            ltp_data = {}
+            # Try raw HTTP first (more reliable)
+            headers = {'Authorization': f'Bearer {jwt_token}'}
+            url_quote = f"https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&token={token}"
+            resp = requests.get(url_quote, headers=headers)
+            if resp.status_code == 200:
+                quote_response = resp.json()
+                # Show debug for first symbol only
+                if sym == symbols[0].strip().upper():
+                    st.write(f"🔍 Quote response for {sym}:", quote_response)
 
-        if ltp_data.get('status', False):
-            ohlc = ltp_data.get('data', {}).get('OHLC', {})
-            # The key is the token itself
-            price_data = ohlc.get(token)
-            if price_data:
-                price = float(price_data.get('ltp', 0))
+                if quote_response.get('status', False):
+                    ohlc = quote_response.get('data', {}).get('OHLC', {})
+                    # The key might be the token itself or "NSE:token"
+                    price_data = ohlc.get(token) or ohlc.get(f"NSE:{token}")
+                    if price_data:
+                        price = float(price_data.get('ltp', 0))
+                    else:
+                        # Try to find any price in OHLC
+                        for key, val in ohlc.items():
+                            if val and val.get('ltp'):
+                                price = float(val['ltp'])
+                                break
+        except Exception as e:
+            st.write(f"❌ LTP error for {sym}: {e}")
 
         if price == 0:
+            # If market is closed, show "Market closed" instead of error
+            if quote_response and quote_response.get('status') and not quote_response.get('data', {}).get('OHLC'):
+                status_msg = "⏸ Market closed / no data"
+            else:
+                status_msg = "❌ LTP fetch failed"
             results.append({
                 'Symbol': sym,
-                'Price (₹)': 'Error',
+                'Price (₹)': 'No Data',
                 'Margin/Share (₹)': '-',
                 'Leverage (x)': '-',
                 'Buying Power (₹)': '-',
                 'Max Qty': '-',
-                'Status': '❌ LTP fetch failed'
+                'Status': status_msg
             })
             continue
 
-        # 5. Get margin (MIS) using token
+        # 4. Get margin using token
         margin_per_share = 0
         try:
-            if client:
-                # SDK may have a method that accepts token
-                try:
-                    margin_resp = client.calculate_order_margin(
-                        "MIS", "BUY", "1", "0", "NSE", sym, token, "0"
-                    )
-                    margin_data = margin_resp.json()
-                except:
-                    margin_data = {}
-            else:
-                headers = {'Authorization': f'Bearer {jwt_token}', 'Content-Type': 'application/json'}
-                payload = {
-                    "orders": [{
-                        "product_type": "MIS",
-                        "transaction_type": "BUY",
-                        "quantity": "1",
-                        "price": "0",
-                        "exchange": "NSE",
-                        "symbol_name": sym,
-                        "token": token,
-                        "trigger_price": 0
-                    }]
-                }
-                resp = requests.post(
-                    "https://api.mstock.trade/openapi/typeb/margins/orders",
-                    json=payload,
-                    headers=headers
-                )
-                margin_data = resp.json() if resp.status_code == 200 else {}
+            headers = {'Authorization': f'Bearer {jwt_token}', 'Content-Type': 'application/json'}
+            payload = {
+                "orders": [{
+                    "product_type": "MIS",
+                    "transaction_type": "BUY",
+                    "quantity": "1",
+                    "price": "0",
+                    "exchange": "NSE",
+                    "symbol_name": sym,
+                    "token": token,
+                    "trigger_price": 0
+                }]
+            }
+            resp = requests.post(
+                "https://api.mstock.trade/openapi/typeb/margins/orders",
+                json=payload,
+                headers=headers
+            )
+            if resp.status_code == 200:
+                margin_data = resp.json()
+                if margin_data.get('status', False):
+                    margin_per_share = float(margin_data.get('data', {}).get('total', 0))
         except:
-            margin_data = {}
-
-        if margin_data.get('status', False):
-            margin_per_share = float(margin_data.get('data', {}).get('total', 0))
+            pass
 
         if margin_per_share == 0:
             results.append({
@@ -246,7 +229,7 @@ def get_margin_data(client, jwt_token, symbols):
             })
             continue
 
-        # 6. Calculate
+        # 5. Calculate
         leverage = price / margin_per_share
         buying_power = capital * leverage
         max_qty = int(buying_power / price)
