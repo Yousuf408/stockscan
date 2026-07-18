@@ -938,7 +938,7 @@ if st.session_state['stage1_data']:
             st.dataframe(
                 display_df,
                 use_container_width=True,
-                height=600,
+                height=800,
                 column_config={
                     "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
                     "Price": st.column_config.TextColumn("PRICE", width="small"),
