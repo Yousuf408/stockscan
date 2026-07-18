@@ -79,7 +79,7 @@ def authenticate_type_b(api_key, user_id, password, otp):
 def get_margin_data(client, jwt_token, symbols):
     """
     Fetch price and margin using either SDK or raw requests.
-    If SDK fails, fallback to raw HTTP calls with the JWT.
+    Key change: Format symbols as NSE:SYMBOL before API calls
     """
     if client is None and not jwt_token:
         return [], 0.0
@@ -92,16 +92,8 @@ def get_margin_data(client, jwt_token, symbols):
             fund_data = fund_resp.json()
             if fund_data.get('status', False):
                 capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
-    except:
-        # Fallback: raw request
-        try:
-            headers = {'Authorization': f'Bearer {jwt_token}'}
-            resp = requests.get('https://api.mstock.trade/openapi/typeb/user/fundsummary', headers=headers)
-            fund_data = resp.json()
-            if fund_data.get('status', False):
-                capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
-        except:
-            pass
+    except Exception as e:
+        st.warning(f"⚠️ Fund fetch failed: {str(e)}")
 
     results = []
     for sym in symbols:
@@ -109,52 +101,68 @@ def get_margin_data(client, jwt_token, symbols):
         if not sym:
             continue
 
+        # ✅ Format symbol with NSE: prefix
+        api_symbol = f"NSE:{sym}"
+        
         price = 0
         margin_per_share = 0
 
         # ---- Get LTP ----
+        ltp_data = {}
         try:
             if client:
                 # Try SDK method
-                ltp_resp = client.get_market_quote("OHLC", {"NSE": [sym]})
+                ltp_resp = client.get_market_quote("OHLC", {"NSE": [api_symbol]})
                 ltp_data = ltp_resp.json()
+                st.write(f"🔍 {sym} LTP response (SDK):", ltp_data)  # DEBUG
             else:
-                # Raw request
+                # Raw request with NSE: prefix
                 headers = {'Authorization': f'Bearer {jwt_token}'}
                 resp = requests.get(
-                    f'https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&symbol={sym}',
+                    f'https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&symbol={api_symbol}',
                     headers=headers
                 )
                 ltp_data = resp.json()
+                st.write(f"🔍 {sym} LTP response (HTTP):", ltp_data)  # DEBUG
         except Exception as e:
-            ltp_data = {}
+            st.error(f"❌ {sym} LTP fetch error: {str(e)}")
+            results.append({
+                'Symbol': sym, 'Price (₹)': 'Network Error',
+                'Margin/Share (₹)': '-', 'Leverage (x)': '-',
+                'Buying Power (₹)': '-', 'Max Qty': '-',
+                'Status': f'❌ {str(e)}'
+            })
+            continue
 
         if ltp_data.get('status', False):
             ohlc = ltp_data.get('data', {}).get('OHLC', {})
-            price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+            # Try both formats
+            price_data = ohlc.get(api_symbol) or ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
             if price_data:
                 price = float(price_data.get('ltp', 0))
+                st.success(f"✅ {sym} LTP: ₹{price}")
 
         if price == 0:
             results.append({
                 'Symbol': sym, 'Price (₹)': 'Error',
                 'Margin/Share (₹)': '-', 'Leverage (x)': '-',
                 'Buying Power (₹)': '-', 'Max Qty': '-',
-                'Status': '❌ LTP fetch failed'
+                'Status': '❌ LTP not found in response'
             })
             continue
 
         # ---- Get Margin (MIS) ----
+        margin_data = {}
         try:
             if client:
                 margin_resp = client.calculate_order_margin(
-                    "MIS", "BUY", "1", "0", "NSE", sym, "", "0"
+                    "MIS", "BUY", "1", "0", "NSE", api_symbol, "", "0"
                 )
                 margin_data = margin_resp.json()
+                st.write(f"🔍 {sym} Margin response (SDK):", margin_data)  # DEBUG
             else:
-                # Raw request
+                # Raw request with NSE: prefix
                 headers = {'Authorization': f'Bearer {jwt_token}'}
-                # Use the actual margin API endpoint
                 url = f'https://api.mstock.trade/openapi/typeb/order/margin'
                 payload = {
                     "product_type": "MIS",
@@ -162,17 +170,19 @@ def get_margin_data(client, jwt_token, symbols):
                     "quantity": "1",
                     "price": "0",
                     "exchange": "NSE",
-                    "trading_symbol": sym,
+                    "trading_symbol": api_symbol,
                     "symbol_token": "",
                     "trigger_price": "0"
                 }
                 resp = requests.post(url, json=payload, headers=headers)
                 margin_data = resp.json()
+                st.write(f"🔍 {sym} Margin response (HTTP):", margin_data)  # DEBUG
         except Exception as e:
-            margin_data = {}
+            st.error(f"❌ {sym} Margin calc error: {str(e)}")
 
         if margin_data.get('status', False):
             margin_per_share = float(margin_data.get('data', {}).get('total', 0))
+            st.success(f"✅ {sym} Margin/Share: ₹{margin_per_share}")
 
         if margin_per_share == 0:
             results.append({
@@ -199,7 +209,6 @@ def get_margin_data(client, jwt_token, symbols):
         })
 
     return results, capital
-
 # ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
 
