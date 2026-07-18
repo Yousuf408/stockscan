@@ -5,135 +5,99 @@ from datetime import datetime
 
 st.set_page_config(page_title="Margin Calculator", layout="wide")
 
-# ------------------- SDK Setup -------------------
+# ------------------- SDK Setup (only for authentication) -------------------
 try:
     from tradingapi_b.mconnect import MConnectB
     SDK_AVAILABLE = True
 except ImportError:
     SDK_AVAILABLE = False
 
-# ------------------- Helper: set token on client -------------------
-def set_client_token(client, jwt_token):
-    """Try multiple ways to set the JWT token on the client."""
-    if hasattr(client, 'set_jwt_token'):
-        client.set_jwt_token(jwt_token)
-        return True
-    elif hasattr(client, 'set_access_token'):
-        client.set_access_token(jwt_token)
-        return True
-    elif hasattr(client, 'set_bearer_token'):
-        client.set_bearer_token(jwt_token)
-        return True
-    elif hasattr(client, 'headers'):
-        client.headers['Authorization'] = f'Bearer {jwt_token}'
-        return True
-    else:
-        # Fallback: store token in a private attribute
-        setattr(client, '_jwt_token', jwt_token)
-        # Also try to patch the get method if needed – but we'll handle manually
-        return False
-
 # ------------------- Authentication -------------------
 def authenticate_type_b(api_key, user_id, password, otp):
-    """
-    Type-B authentication:
-    - login() returns a JWT directly (no request_token)
-    - We extract jwtToken and set it on the client.
-    - No need for generate_session().
-    """
     if not SDK_AVAILABLE:
         st.error("❌ mStock Type-B SDK not installed.")
-        return None, None
+        return None
 
     try:
         client = MConnectB()
-
-        # 1. Login – sends OTP to phone (if 2FA is enabled)
         login_response = client.login(user_id, password)
         login_data = login_response.json()
-
-        # Debug (remove later)
         st.write("🔍 Login response:", login_data)
 
         if not login_data.get('status', False):
             st.error(f"Login failed: {login_data.get('message', 'Unknown')}")
-            return None, None
+            return None
 
-        # 2. Extract JWT token (no request_token needed)
         jwt_token = login_data.get('data', {}).get('jwtToken')
         if not jwt_token:
-            st.error("No JWT token received. Check credentials.")
-            return None, None
+            st.error("No JWT token received.")
+            return None
 
-        # 3. Set token on the client
-        set_client_token(client, jwt_token)
-
-        st.success("✅ Authentication successful (JWT set)!")
-        return client, jwt_token
+        # No need to set token on client – we'll use raw requests
+        st.success("✅ Authentication successful!")
+        return jwt_token
 
     except Exception as e:
         st.error(f"Authentication error: {str(e)}")
-        return None, None
+        return None
 
-# ------------------- Margin & Price Fetch -------------------
-def get_margin_data(client, jwt_token, symbols):
-    """
-    Fetch price and margin using either SDK or raw requests.
-    If SDK fails, fallback to raw HTTP calls with the JWT.
-    """
-    if client is None and not jwt_token:
+# ------------------- Margin & Price Fetch (raw HTTP) -------------------
+def get_margin_data(jwt_token, symbols):
+    if not jwt_token:
         return [], 0.0
 
-    # Get capital – try SDK first, fallback to raw
+    base_url = "https://api.mstock.trade/openapi/typeb"
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "Content-Type": "application/json"
+    }
+
+    # 1. Get capital
     capital = 10000.0
     try:
-        if client:
-            fund_resp = client.get_fund_summary()
-            fund_data = fund_resp.json()
-            if fund_data.get('status', False):
-                capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
+        resp = requests.get(f"{base_url}/user/fundsummary", headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('status'):
+                capital = float(data['data'][0]['MTF_AVAILABLE_BALANCE'])
     except:
-        # Fallback: raw request
-        try:
-            headers = {'Authorization': f'Bearer {jwt_token}'}
-            resp = requests.get('https://api.mstock.trade/openapi/typeb/user/fundsummary', headers=headers)
-            fund_data = resp.json()
-            if fund_data.get('status', False):
-                capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
-        except:
-            pass
+        pass
 
     results = []
+
     for sym in symbols:
         sym = sym.strip().upper()
         if not sym:
             continue
 
+        # 2. Get LTP
         price = 0
-        margin_per_share = 0
-
-        # ---- Get LTP ----
         try:
-            if client:
-                # Try SDK method
-                ltp_resp = client.get_market_quote("OHLC", {"NSE": [sym]})
-                ltp_data = ltp_resp.json()
-            else:
-                # Raw request
-                headers = {'Authorization': f'Bearer {jwt_token}'}
-                resp = requests.get(
-                    f'https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&symbol={sym}',
-                    headers=headers
-                )
-                ltp_data = resp.json()
+            # Try format: symbol=NSE:GABRIEL
+            url_quote = f"{base_url}/market/quote?mode=OHLC&symbol=NSE:{sym}"
+            resp = requests.get(url_quote, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                st.write(f"🔍 LTP response for {sym}:", data)   # Debug
+                if data.get('status'):
+                    ohlc = data.get('data', {}).get('OHLC', {})
+                    price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+                    if price_data:
+                        price = float(price_data.get('ltp', 0))
+            # Fallback: exchange + symbol
+            if price == 0:
+                url_quote2 = f"{base_url}/market/quote?mode=OHLC&exchange=NSE&symbol={sym}"
+                resp = requests.get(url_quote2, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.write(f"🔍 LTP response (alt) for {sym}:", data)
+                    if data.get('status'):
+                        ohlc = data.get('data', {}).get('OHLC', {})
+                        price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+                        if price_data:
+                            price = float(price_data.get('ltp', 0))
         except Exception as e:
-            ltp_data = {}
-
-        if ltp_data.get('status', False):
-            ohlc = ltp_data.get('data', {}).get('OHLC', {})
-            price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
-            if price_data:
-                price = float(price_data.get('ltp', 0))
+            st.write(f"Error fetching LTP for {sym}: {e}")
 
         if price == 0:
             results.append({
@@ -144,35 +108,27 @@ def get_margin_data(client, jwt_token, symbols):
             })
             continue
 
-        # ---- Get Margin (MIS) ----
+        # 3. Get margin (MIS)
+        margin_per_share = 0
         try:
-            if client:
-                margin_resp = client.calculate_order_margin(
-                    "MIS", "BUY", "1", "0", "NSE", sym, "", "0"
-                )
-                margin_data = margin_resp.json()
-            else:
-                # Raw request
-                headers = {'Authorization': f'Bearer {jwt_token}'}
-                # Use the actual margin API endpoint
-                url = f'https://api.mstock.trade/openapi/typeb/order/margin'
-                payload = {
-                    "product_type": "MIS",
-                    "transaction_type": "BUY",
-                    "quantity": "1",
-                    "price": "0",
-                    "exchange": "NSE",
-                    "trading_symbol": sym,
-                    "symbol_token": "",
-                    "trigger_price": "0"
-                }
-                resp = requests.post(url, json=payload, headers=headers)
-                margin_data = resp.json()
+            margin_payload = {
+                "product_type": "MIS",
+                "transaction_type": "BUY",
+                "quantity": "1",
+                "price": "0",
+                "exchange": "NSE",
+                "trading_symbol": sym,
+                "symbol_token": "",
+                "trigger_price": "0"
+            }
+            resp = requests.post(f"{base_url}/order/margin", json=margin_payload, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                st.write(f"🔍 Margin response for {sym}:", data)
+                if data.get('status'):
+                    margin_per_share = float(data.get('data', {}).get('total', 0))
         except Exception as e:
-            margin_data = {}
-
-        if margin_data.get('status', False):
-            margin_per_share = float(margin_data.get('data', {}).get('total', 0))
+            st.write(f"Error fetching margin for {sym}: {e}")
 
         if margin_per_share == 0:
             results.append({
@@ -183,7 +139,7 @@ def get_margin_data(client, jwt_token, symbols):
             })
             continue
 
-        # ---- Calculate ----
+        # 4. Calculate
         leverage = price / margin_per_share
         buying_power = capital * leverage
         max_qty = int(buying_power / price)
@@ -222,9 +178,8 @@ with st.sidebar:
             st.error("API Key, User ID, and Password are required")
         else:
             with st.spinner("Authenticating..."):
-                client, token = authenticate_type_b(api_key, user_id, password, otp)
-                if client or token:
-                    st.session_state['mstock_client'] = client
+                token = authenticate_type_b(api_key, user_id, password, otp)
+                if token:
                     st.session_state['jwt_token'] = token
                     st.session_state['authenticated'] = True
 
@@ -239,7 +194,6 @@ if not st.session_state.get('authenticated'):
     st.info("Please authenticate first")
     st.stop()
 
-client = st.session_state.get('mstock_client')
 jwt_token = st.session_state.get('jwt_token')
 
 if fetch_btn:
@@ -249,7 +203,7 @@ if fetch_btn:
         st.stop()
 
     with st.spinner("Fetching data..."):
-        data, capital = get_margin_data(client, jwt_token, symbols)
+        data, capital = get_margin_data(jwt_token, symbols)
 
     st.metric("💰 Available Capital", f"₹{capital:,.2f}")
     df = pd.DataFrame(data)
