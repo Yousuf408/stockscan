@@ -276,10 +276,8 @@ def resolve_dhan_symbol(ticker, security_map):
     """
     Dynamically resolve TradingView symbol to Dhan symbol
     """
-    # Clean the ticker
     base = ticker.replace('NSE:', '').strip().upper()
     
-    # If security_map is empty or None, return base
     if not security_map:
         return base
     
@@ -287,7 +285,7 @@ def resolve_dhan_symbol(ticker, security_map):
     if base in security_map:
         return base
     
-    # 2. Try with common variations
+    # 2. Try variations
     variations = [
         base,
         base.replace('&', ''),
@@ -296,53 +294,64 @@ def resolve_dhan_symbol(ticker, security_map):
         base + 'EQ',
         base.replace('EQ', ''),
         base.replace(' ', ''),
-        base + '-',
-        base.replace('-', ' '),
+        base + '-EQ',
+        base.replace('-EQ', ''),
+        base.replace('EQ', '-EQ'),
         base + '.NS',
         base.replace('.NS', ''),
+        base + 'NS',
+        base.replace('NS', ''),
     ]
     
-    # Remove duplicates
     variations = list(dict.fromkeys(variations))
     
     for var in variations:
         if var in security_map:
             return var
     
-    # 3. Try case-insensitive matching
-    security_list = list(security_map.keys())
-    for sec in security_list:
+    # 3. Case-insensitive
+    for sec in security_map.keys():
         if sec.upper() == base:
             return sec
     
-    # 4. Try partial match (if symbol contains base)
-    for sec in security_list:
+    # 4. Partial match
+    for sec in security_map.keys():
         if base in sec.upper() or sec.upper() in base:
             return sec
     
-    # 5. Return original (will fail, but at least we tried)
     return base
 
 def prepare_display_df(display_df, user_capital):
     display_df = display_df.copy()
     
-    # ─── Get security map ───
+    # Get security map
     try:
         from tv_screener.quantity_calculator import _load_security_map
         security_map = _load_security_map()
     except:
         security_map = {}
     
-    # ─── Create Symbol column with dynamic resolution ───
+    # Create Symbol column with dynamic resolution
     def map_symbol(ticker):
         return resolve_dhan_symbol(ticker, security_map)
     
     display_df['Symbol'] = display_df['ticker'].apply(map_symbol)
+    
+    # Validate symbols
+    display_df['Valid_Symbol'] = display_df['Symbol'].apply(lambda x: x in security_map if security_map else True)
+    
+    invalid = display_df[display_df['Valid_Symbol'] == False]['Symbol'].tolist()
+    if invalid:
+        st.warning(f"⚠️ These symbols may not work in Dhan: {', '.join(invalid[:5])}")
+    
     display_df['Price'] = display_df['close']
     
-    # Calculate MaxQty
     with st.spinner("Calculating max quantity..."):
         display_df['MaxQty'] = calculate_max_quantity_column(display_df, user_capital, 4)
+    
+    # Set MaxQty to 0 for invalid symbols
+    if security_map:
+        display_df.loc[display_df['Valid_Symbol'] == False, 'MaxQty'] = 0
 
     rename_map = {
         'change': 'Chg%',
@@ -472,6 +481,8 @@ if st.session_state['stage1_data']:
                 symbol = row['Symbol']
                 qty = row['MaxQty']
                 if st.button(f"{symbol} {int(qty)}" + (" 🌙" if amo else ""), key=f"buy_{symbol}_{idx}", disabled=(qty <= 0)):
+                    # Debug: Show what symbol is being sent
+                    st.write(f"Debug: Placing order for {symbol} with qty {int(qty)}")
                     result = place_dhan_order(symbol, int(qty), "INTRADAY", amo, "OPEN")
                     display_order_result(symbol, result)
 
