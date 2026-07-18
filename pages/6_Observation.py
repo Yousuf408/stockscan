@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME - FIXED)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -465,34 +465,6 @@ WHITE_THEME_CSS = """
             padding: 0.5rem 0.75rem;
         }
     }
-    
-    /* ─── SIGNAL BADGES IN TABLE ─── */
-    .signal-buy {
-        background: #d4edda !important;
-        color: #155724 !important;
-        padding: 0.15rem 0.6rem !important;
-        border-radius: 12px !important;
-        font-size: 0.7rem !important;
-        font-weight: 600 !important;
-    }
-    
-    .signal-hold {
-        background: #fff3cd !important;
-        color: #856404 !important;
-        padding: 0.15rem 0.6rem !important;
-        border-radius: 12px !important;
-        font-size: 0.7rem !important;
-        font-weight: 600 !important;
-    }
-    
-    .signal-sell {
-        background: #f8d7da !important;
-        color: #721c24 !important;
-        padding: 0.15rem 0.6rem !important;
-        border-radius: 12px !important;
-        font-size: 0.7rem !important;
-        font-weight: 600 !important;
-    }
 </style>
 """
 
@@ -948,7 +920,7 @@ if st.session_state['stage1_data']:
                 num_parts=4
             )
         
-        # ─── Create professional display columns ───
+        # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -1006,59 +978,42 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Signal with colored badges ───
-        def get_signal(row):
-            if row['Inside 9:15'] == "✅" and row['Breakout'] == "✅":
-                return "BUY"
-            elif row['Inside 9:15'] == "✅":
-                return "HOLD"
-            else:
-                return "SELL"
+        # ─── Final columns (REMOVED Signal) ───
+        final_cols = [
+            'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
+            'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
+        ]
         
-        def get_signal_badge(row):
-            signal = get_signal(row)
-            if signal == "BUY":
-                return '<span class="signal-buy">🟢 BUY</span>'
-            elif signal == "HOLD":
-                return '<span class="signal-hold">🟡 HOLD</span>'
-            else:
-                return '<span class="signal-sell">🔴 SELL</span>'
+        existing_cols = [c for c in final_cols if c in display_df.columns]
+        display_df = display_df[existing_cols]
         
-        display_df['Signal'] = display_df.apply(get_signal_badge, axis=1)
+        # ─── 85/15 SPLIT: TABLE + BUY BUTTONS ───
+        table_col, button_col = st.columns([8.5, 1.5])
         
-        # ─── Display table ───
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            height=400,
-            column_config={
-                "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
-                "Price": st.column_config.TextColumn("PRICE", width="small"),
-                "Chg%": st.column_config.TextColumn("CHG%", width="small"),
-                "Gap%": st.column_config.TextColumn("GAP%", width="small"),
-                "Volume": st.column_config.TextColumn("VOLUME", width="small"),
-                "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
-                "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
-                "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
-                "Signal": st.column_config.TextColumn("SIGNAL", width="small"),
-                "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
-                "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
-            }
-        )
+        with table_col:
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                height=500,
+                column_config={
+                    "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
+                    "Price": st.column_config.TextColumn("PRICE", width="small"),
+                    "Chg%": st.column_config.TextColumn("CHG%", width="small"),
+                    "Gap%": st.column_config.TextColumn("GAP%", width="small"),
+                    "Volume": st.column_config.TextColumn("VOLUME", width="small"),
+                    "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
+                    "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
+                    "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
+                    "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
+                    "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
+                }
+            )
         
-        # ─── Buy Buttons ───
-        st.markdown("---")
-        st.markdown("#### 🚀 Quick Buy")
-        
-        num_cols = min(4, len(display_df))
-        cols = st.columns(num_cols)
-        
-        for idx, (_, row) in enumerate(display_df.iterrows()):
-            col_idx = idx % num_cols
-            with cols[col_idx]:
+        with button_col:
+            for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
-                btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
+                btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
                 
                 if st.button(
                     btn_label,
@@ -1067,7 +1022,6 @@ if st.session_state['stage1_data']:
                     use_container_width=True
                 ):
                     with st.spinner(f"Placing order for {symbol}..."):
-                        # ─── FIX: Use "INTRADAY" (same as working dark theme) ───
                         result = place_dhan_order(
                             symbol,
                             quantity=int(max_qty),
