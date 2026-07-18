@@ -2,7 +2,10 @@
 # PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FINAL)
 # - Sidebar: Keep existing items (SwingStrategy, TVScreener, etc.)
 # - Main Content: Only Gap screener (Remove ORB, Momentum, AI tabs)
-# - Professional dark theme
+# - Professional dark theme with proper table styling
+# - GAP% column added
+# - Signal badges colored (BUY=green, HOLD=yellow, SELL=red)
+# - Rel Vol formatted with 'x'
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -308,41 +311,71 @@ PROFESSIONAL_CSS = """
         color: #e0e0e0 !important;
     }
     
-    /* ─── DATAFRAME ─── */
+    /* ─── DATAFRAME - COMPLETE FIX ─── */
     .stDataFrame {
         background: transparent !important;
     }
     
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: transparent !important;
+        border: none !important;
     }
     
     .stDataFrame table {
         background: transparent !important;
     }
     
+    .stDataFrame tbody {
+        background: transparent !important;
+    }
+    
+    .stDataFrame tr {
+        background: transparent !important;
+    }
+    
     .stDataFrame thead tr th {
-        background: rgba(255, 255, 255, 0.02) !important;
-        color: #666 !important;
+        background: rgba(255, 255, 255, 0.03) !important;
+        color: #888 !important;
         font-size: 0.6rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.5px !important;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
         padding: 0.6rem 0.8rem !important;
         font-weight: 600 !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
     
     .stDataFrame tbody tr td {
-        background: rgba(255, 255, 255, 0.015) !important;
+        background: rgba(255, 255, 255, 0.02) !important;
         color: #e0e0e0 !important;
         padding: 0.6rem 0.8rem !important;
-        border-radius: 6px !important;
         border: none !important;
         font-size: 0.85rem !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
     
     .stDataFrame tbody tr:hover td {
-        background: rgba(255, 255, 255, 0.04) !important;
+        background: rgba(255, 255, 255, 0.06) !important;
+    }
+    
+    .st-emotion-cache-1r6slb0 {
+        background: transparent !important;
+    }
+    
+    .st-emotion-cache-1wmy9hl {
+        background: transparent !important;
+    }
+    
+    .element-container {
+        background: transparent !important;
+    }
+    
+    [data-testid="stDataFrameResizable"] {
+        background: transparent !important;
+    }
+    
+    [data-testid="stDataFrame"] {
+        background: transparent !important;
     }
     
     /* ─── FOOTER BAR ─── */
@@ -465,6 +498,34 @@ PROFESSIONAL_CSS = """
         background: rgba(255, 255, 255, 0.02) !important;
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
         color: #888 !important;
+    }
+    
+    /* ─── SIGNAL BADGES IN TABLE ─── */
+    .signal-buy {
+        background: rgba(0, 255, 136, 0.15) !important;
+        color: #00ff88 !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .signal-hold {
+        background: rgba(245, 158, 11, 0.15) !important;
+        color: #f59e0b !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .signal-sell {
+        background: rgba(255, 68, 68, 0.15) !important;
+        color: #ff4444 !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
     }
 </style>
 """
@@ -915,9 +976,9 @@ if st.session_state['stage1_data']:
                 num_parts=4
             )
         
-        # ─── Create professional display columns ───
+        # ─── Create professional display columns (ADDED gap_percent) ───
         display_cols = [
-            'name', 'close', 'change', 'volume', 'relative_volume',
+            'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
         ]
         available = [c for c in display_cols if c in display_df.columns]
@@ -927,6 +988,7 @@ if st.session_state['stage1_data']:
             'name': 'Symbol',
             'close': 'Price',
             'change': 'Chg%',
+            'gap_percent': 'Gap%',
             'volume': 'Volume',
             'relative_volume': 'Rel Vol',
             'inside_9_15': 'Inside 9:15',
@@ -938,12 +1000,15 @@ if st.session_state['stage1_data']:
         # ─── Format columns ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
         display_df['Chg%'] = display_df['Chg%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
+        display_df['Gap%'] = display_df['Gap%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
         display_df['Volume'] = display_df['Volume'].apply(
             lambda x: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.1f}K"
         )
+        display_df['Rel Vol'] = display_df['Rel Vol'].apply(lambda x: f"{x:.2f}x" if x else "0x")
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
+        # ─── Signal with colored badges ───
         def get_signal(row):
             if row['Inside 9:15'] == "✅" and row['Breakout'] == "✅":
                 return "BUY"
@@ -952,9 +1017,18 @@ if st.session_state['stage1_data']:
             else:
                 return "SELL"
         
-        display_df['Signal'] = display_df.apply(get_signal, axis=1)
+        def get_signal_badge(row):
+            signal = get_signal(row)
+            if signal == "BUY":
+                return '<span class="signal-buy">🟢 BUY</span>'
+            elif signal == "HOLD":
+                return '<span class="signal-hold">🟡 HOLD</span>'
+            else:
+                return '<span class="signal-sell">🔴 SELL</span>'
         
-        # ─── Display table ───
+        display_df['Signal'] = display_df.apply(get_signal_badge, axis=1)
+        
+        # ─── Display table (ADDED Gap% column) ───
         st.dataframe(
             display_df,
             use_container_width=True,
@@ -963,6 +1037,7 @@ if st.session_state['stage1_data']:
                 "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
                 "Price": st.column_config.TextColumn("PRICE", width="small"),
                 "Chg%": st.column_config.TextColumn("CHG%", width="small"),
+                "Gap%": st.column_config.TextColumn("GAP%", width="small"),
                 "Volume": st.column_config.TextColumn("VOLUME", width="small"),
                 "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
                 "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
