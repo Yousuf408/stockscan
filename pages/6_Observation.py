@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME - FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -1067,10 +1067,11 @@ if st.session_state['stage1_data']:
                     use_container_width=True
                 ):
                     with st.spinner(f"Placing order for {symbol}..."):
+                        # ─── FIX: Use "INTRADAY" (same as working dark theme) ───
                         result = place_dhan_order(
                             symbol,
                             quantity=int(max_qty),
-                            product_type="MIS",
+                            product_type="INTRADAY",
                             after_market_order=amo_test_mode,
                             amo_time="OPEN"
                         )
