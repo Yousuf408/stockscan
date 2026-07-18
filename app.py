@@ -42,6 +42,7 @@ def authenticate_type_b(api_key, user_id, password, otp):
         return None
 
 # ------------------- Margin & Price Fetch (raw HTTP) -------------------
+
 def get_margin_data(jwt_token, symbols):
     if not jwt_token:
         return [], 0.0
@@ -52,7 +53,31 @@ def get_margin_data(jwt_token, symbols):
         "Content-Type": "application/json"
     }
 
-    # 1. Get capital
+    # ------------------------------------------------
+    # 1. Fetch instrument master and build mapping
+    # ------------------------------------------------
+    symbol_to_token = {}
+    try:
+        resp = requests.get(f"{base_url}/market/instruments", headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('status'):
+                for item in data.get('data', []):
+                    # Adjust keys based on actual response
+                    symbol = item.get('symbol') or item.get('trading_symbol')
+                    token = item.get('token') or item.get('instrument_token')
+                    if symbol and token:
+                        symbol_to_token[symbol.upper()] = str(token)
+    except Exception as e:
+        st.warning(f"Could not fetch instrument master: {e}")
+        # If we can't get tokens, we cannot proceed
+        return [], 0.0
+
+    if not symbol_to_token:
+        st.error("No instrument mapping found. Check API connectivity.")
+        return [], 0.0
+
+    # 2. Get available capital
     capital = 10000.0
     try:
         resp = requests.get(f"{base_url}/user/fundsummary", headers=headers)
@@ -70,76 +95,88 @@ def get_margin_data(jwt_token, symbols):
         if not sym:
             continue
 
-        # 2. Get LTP
+        # 3. Get token for this symbol
+        token = symbol_to_token.get(sym)
+        if not token:
+            results.append({
+                'Symbol': sym,
+                'Price (₹)': 'Error',
+                'Margin/Share (₹)': '-',
+                'Leverage (x)': '-',
+                'Buying Power (₹)': '-',
+                'Max Qty': '-',
+                'Status': f'❌ Token not found for {sym}'
+            })
+            continue
+
+        # 4. Get LTP using token (CORRECT)
         price = 0
         try:
-            # Try format: symbol=NSE:GABRIEL
-            url_quote = f"{base_url}/market/quote?mode=OHLC&symbol=NSE:{sym}"
+            # Use token in the quote URL
+            url_quote = f"{base_url}/market/quote?mode=OHLC&exchange=NSE&token={token}"
             resp = requests.get(url_quote, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
-                st.write(f"🔍 LTP response for {sym}:", data)   # Debug
                 if data.get('status'):
                     ohlc = data.get('data', {}).get('OHLC', {})
-                    price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+                    # The key is the token itself
+                    price_data = ohlc.get(token)
                     if price_data:
                         price = float(price_data.get('ltp', 0))
-            # Fallback: exchange + symbol
-            if price == 0:
-                url_quote2 = f"{base_url}/market/quote?mode=OHLC&exchange=NSE&symbol={sym}"
-                resp = requests.get(url_quote2, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    st.write(f"🔍 LTP response (alt) for {sym}:", data)
-                    if data.get('status'):
-                        ohlc = data.get('data', {}).get('OHLC', {})
-                        price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
-                        if price_data:
-                            price = float(price_data.get('ltp', 0))
         except Exception as e:
             st.write(f"Error fetching LTP for {sym}: {e}")
 
         if price == 0:
             results.append({
-                'Symbol': sym, 'Price (₹)': 'Error',
-                'Margin/Share (₹)': '-', 'Leverage (x)': '-',
-                'Buying Power (₹)': '-', 'Max Qty': '-',
+                'Symbol': sym,
+                'Price (₹)': 'Error',
+                'Margin/Share (₹)': '-',
+                'Leverage (x)': '-',
+                'Buying Power (₹)': '-',
+                'Max Qty': '-',
                 'Status': '❌ LTP fetch failed'
             })
             continue
 
-        # 3. Get margin (MIS)
+        # 5. Get margin (MIS) – using token
         margin_per_share = 0
         try:
+            # The margin endpoint expects the token in the payload
             margin_payload = {
-                "product_type": "MIS",
-                "transaction_type": "BUY",
-                "quantity": "1",
-                "price": "0",
-                "exchange": "NSE",
-                "trading_symbol": sym,
-                "symbol_token": "",
-                "trigger_price": "0"
+                "orders": [{
+                    "product_type": "MIS",
+                    "transaction_type": "BUY",
+                    "quantity": "1",
+                    "price": "0",
+                    "exchange": "NSE",
+                    "symbol_name": sym,
+                    "token": token,
+                    "trigger_price": 0
+                }]
             }
-            resp = requests.post(f"{base_url}/order/margin", json=margin_payload, headers=headers)
+            # Use the correct margin endpoint (from documentation)
+            resp = requests.post(f"{base_url}/margins/orders", json=margin_payload, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
-                st.write(f"🔍 Margin response for {sym}:", data)
                 if data.get('status'):
+                    # The margin may be in data['data']['total'] or similar
                     margin_per_share = float(data.get('data', {}).get('total', 0))
         except Exception as e:
             st.write(f"Error fetching margin for {sym}: {e}")
 
         if margin_per_share == 0:
             results.append({
-                'Symbol': sym, 'Price (₹)': round(price, 2),
-                'Margin/Share (₹)': 'Error', 'Leverage (x)': '-',
-                'Buying Power (₹)': '-', 'Max Qty': '-',
+                'Symbol': sym,
+                'Price (₹)': round(price, 2),
+                'Margin/Share (₹)': 'Error',
+                'Leverage (x)': '-',
+                'Buying Power (₹)': '-',
+                'Max Qty': '-',
                 'Status': '❌ Margin calc failed'
             })
             continue
 
-        # 4. Calculate
+        # 6. Calculate derived values
         leverage = price / margin_per_share
         buying_power = capital * leverage
         max_qty = int(buying_power / price)
@@ -155,7 +192,7 @@ def get_margin_data(jwt_token, symbols):
         })
 
     return results, capital
-
+    
 # ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
 
