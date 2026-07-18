@@ -51,11 +51,10 @@ def authenticate_type_b(api_key, user_id, password, otp):
         st.error(f"Authentication error: {str(e)}")
         return None, None
 
-def get_symbol_token_map(jwt_token):
+def get_symbol_token_map(jwt_token, debug=False):
     base_url = "https://api.mstock.trade/openapi/typeb"
     headers = {"Authorization": f"Bearer {jwt_token}"}
     symbol_to_token = {}
-    # Also store price if available in master list
     symbol_to_price = {}
 
     endpoint = "/instruments/OpenAPIScripMaster"
@@ -64,28 +63,43 @@ def get_symbol_token_map(jwt_token):
         if resp.status_code == 200:
             data = resp.json()
             instruments = data.get('data', []) if isinstance(data, dict) else data
+            
+            # Debug: show first instrument keys
+            if debug and instruments:
+                st.write("🔍 Sample instrument keys:", list(instruments[0].keys()))
+                st.write("🔍 Sample instrument:", instruments[0])
+            
             for item in instruments:
                 symbol = item.get('symbol') or item.get('trading_symbol')
                 token = item.get('token') or item.get('instrument_token')
-                # Some master lists include last price
-                last_price = item.get('last_price') or item.get('close_price') or item.get('ltp')
                 if symbol and token:
                     symbol_to_token[symbol.upper()] = str(token)
-                    if last_price:
-                        symbol_to_price[symbol.upper()] = float(last_price)
+                    
+                    # Try multiple possible price fields
+                    price = None
+                    for field in ['last_price', 'close_price', 'ltp', 'close', 
+                                  'prev_close', 'day_close', 'previous_close']:
+                        if field in item and item[field]:
+                            price = float(item[field])
+                            break
+                    if price:
+                        symbol_to_price[symbol.upper()] = price
+
             if symbol_to_token:
                 st.success(f"✅ Loaded {len(symbol_to_token)} instruments.")
+            else:
+                st.warning("⚠️ No symbols found in master list.")
         else:
             st.error(f"❌ Failed to fetch master list. Status: {resp.status_code}")
     except Exception as e:
         st.error(f"❌ Error: {e}")
     return symbol_to_token, symbol_to_price
 
-def get_margin_data(client, jwt_token, symbols):
+def get_margin_data(client, jwt_token, symbols, debug=False):
     if client is None and not jwt_token:
         return [], 0.0
 
-    symbol_to_token, symbol_to_price = get_symbol_token_map(jwt_token)
+    symbol_to_token, symbol_to_price = get_symbol_token_map(jwt_token, debug=debug)
     if not symbol_to_token:
         return [], 0.0
 
@@ -129,7 +143,7 @@ def get_margin_data(client, jwt_token, symbols):
 
         # ---- 1. Get Price ----
         price = 0
-        # Try quote API first
+        # Try quote API first (live LTP)
         try:
             headers = {'Authorization': f'Bearer {jwt_token}'}
             url_quote = f"https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&token={token}"
@@ -138,12 +152,11 @@ def get_margin_data(client, jwt_token, symbols):
                 quote_data = resp.json()
                 if quote_data.get('status', False):
                     ohlc = quote_data.get('data', {}).get('OHLC', {})
-                    # Try to get price from OHLC (key is token or "NSE:token")
                     price_data = ohlc.get(token) or ohlc.get(f"NSE:{token}")
                     if price_data:
                         price = float(price_data.get('ltp', 0))
                     else:
-                        # Maybe the response structure is different: try to find any price
+                        # Try any price
                         for key, val in ohlc.items():
                             if isinstance(val, dict) and val.get('ltp'):
                                 price = float(val['ltp'])
@@ -151,7 +164,7 @@ def get_margin_data(client, jwt_token, symbols):
         except:
             pass
 
-        # If quote fails, try master list price
+        # If live quote fails, use master list price (last close)
         if price == 0 and sym in symbol_to_price:
             price = symbol_to_price[sym]
 
@@ -166,8 +179,6 @@ def get_margin_data(client, jwt_token, symbols):
                 'Margin %': '-',
                 'Status': '⏸ Price unavailable (market closed?)'
             })
-            # Still try to fetch margin to show it?
-            # We'll do it optionally; but without price, we can't compute %
             continue
 
         # ---- 2. Get Margin per Share (MIS) ----
@@ -233,6 +244,7 @@ def get_margin_data(client, jwt_token, symbols):
 # ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
 
+# Add debug toggle in sidebar
 with st.sidebar:
     st.header("🔐 Authentication")
     if not SDK_AVAILABLE:
@@ -262,6 +274,10 @@ with st.sidebar:
     st.header("📊 Stocks")
     default = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
     stocks_input = st.text_area("Symbols (comma/newline)", value=default, height=120)
+    
+    # Debug checkbox
+    debug_mode = st.checkbox("🐞 Show debug info", value=False)
+    
     fetch_btn = st.button("🔄 Fetch Margins")
 
 if not st.session_state.get('authenticated'):
@@ -278,7 +294,7 @@ if fetch_btn:
         st.stop()
 
     with st.spinner("Fetching data..."):
-        data, capital = get_margin_data(client, jwt_token, symbols)
+        data, capital = get_margin_data(client, jwt_token, symbols, debug=debug_mode)
 
     st.metric("💰 Available Capital", f"₹{capital:,.2f}")
     if not data:
@@ -288,7 +304,7 @@ if fetch_btn:
     else:
         df = pd.DataFrame(data)
 
-    # Reorder columns to put Margin % after Leverage
+    # Reorder columns
     col_order = ['Symbol', 'Price (₹)', 'Margin/Share (₹)', 'Leverage (x)',
                  'Margin %', 'Buying Power (₹)', 'Max Qty', 'Status']
     if all(c in df.columns for c in col_order):
@@ -296,7 +312,7 @@ if fetch_btn:
 
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Simulated Buy section (optional)
+    # Simulated Buy section
     if 'Status' in df.columns:
         ready = df[df['Status'] == '✅ Ready']
         if not ready.empty:
