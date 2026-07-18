@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (OPTIMIZED)
-# Stage 1: Loads ONCE at start, refreshes every 1 minute
-# Stage 2: Instant filtering on cached data (no reload)
+# Stage 1: Refreshes every 1 minute (data updates)
+# Stage 2: Instant filtering on updated data
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -68,6 +68,13 @@ if 'stage1_timestamp' not in st.session_state:
 
 if 'stage1_loaded' not in st.session_state:
     st.session_state['stage1_loaded'] = False
+
+# Stage 2 filter states (preserved across refreshes)
+if 'show_inside_only' not in st.session_state:
+    st.session_state['show_inside_only'] = False
+
+if 'show_breakout_only' not in st.session_state:
+    st.session_state['show_breakout_only'] = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED STAGE 1 FILTERS (Removed from UI)
@@ -343,43 +350,34 @@ def color_change(val):
         return ''
 
 def load_stage1_data():
-    """Load all Stage 1 data (called only when needed)"""
-    status_text = st.empty()
-    status_text.info("🔄 Loading Stage 1 data...")
-    
-    # Step 1: Fetch from TradingView
-    count, df = get_tradingview_stocks()
-    if count == 0:
-        status_text.error("❌ No stocks found!")
-        return None
-    
-    status_text.info(f"✅ Found {count} stocks, applying gap filter...")
-    
-    # Step 2: Apply gap filter
-    filtered_tickers, rejected = get_gap_filtered_stocks(df)
-    df = df[df['ticker'].isin(filtered_tickers)].copy()
-    df = df.sort_values('change', ascending=False)
-    df = df.head(HARDCODED_SETTINGS['stocks_limit'])
-    
-    status_text.info(f"✅ Gap Filter: {count} → {len(df)} stocks, running candle analysis...")
-    
-    # Step 3: Candle analysis
-    tickers_list = df['ticker'].tolist()
-    df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
-    
-    status_text.success(f"✅ Stage 1 complete! {len(df)} stocks ready for Stage 2")
-    
-    # Store results
-    return {
-        'df': df,
-        'valid': valid,
-        'invalid': invalid,
-        'failed': failed,
-        'rejected': rejected,
-        'total_count': count,
-        'filtered_count': len(df),
-        'timestamp': datetime.now(IST)
-    }
+    """Load all Stage 1 data (called every 1 minute)"""
+    with st.spinner("🔄 Refreshing Stage 1 data..."):
+        # Step 1: Fetch from TradingView
+        count, df = get_tradingview_stocks()
+        if count == 0:
+            return None
+        
+        # Step 2: Apply gap filter
+        filtered_tickers, rejected = get_gap_filtered_stocks(df)
+        df = df[df['ticker'].isin(filtered_tickers)].copy()
+        df = df.sort_values('change', ascending=False)
+        df = df.head(HARDCODED_SETTINGS['stocks_limit'])
+        
+        # Step 3: Candle analysis
+        tickers_list = df['ticker'].tolist()
+        df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
+        
+        # Store results
+        return {
+            'df': df,
+            'valid': valid,
+            'invalid': invalid,
+            'failed': failed,
+            'rejected': rejected,
+            'total_count': count,
+            'filtered_count': len(df),
+            'timestamp': datetime.now(IST)
+        }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO-REFRESH LOGIC (Stage 1 only, every 1 minute)
@@ -397,17 +395,6 @@ def should_refresh_stage1():
     if time_diff.total_seconds() >= 60:  # 1 minute
         return True
     return False
-
-def refresh_stage1_if_needed():
-    """Refresh Stage 1 data if needed"""
-    if should_refresh_stage1():
-        with st.spinner("🔄 Refreshing Stage 1 data..."):
-            stage1_data = load_stage1_data()
-            if stage1_data:
-                st.session_state['stage1_data'] = stage1_data
-                st.session_state['stage1_last_refresh'] = datetime.now(IST)
-                st.session_state['stage1_loaded'] = True
-                st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR (Only Stage 2 & Dhan settings)
@@ -457,19 +444,19 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: LOAD DATA (Runs only once or on refresh)
+# STAGE 1: LOAD DATA (Runs every 1 minute with auto-refresh)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering (Gap ±2%)</div>', unsafe_allow_html=True)
 
-# Check if we need to load Stage 1 data
-if not st.session_state['stage1_loaded'] or st.session_state['stage1_data'] is None:
-    with st.spinner("🔄 Loading Stage 1 data..."):
-        stage1_data = load_stage1_data()
-        if stage1_data:
-            st.session_state['stage1_data'] = stage1_data
-            st.session_state['stage1_last_refresh'] = datetime.now(IST)
-            st.session_state['stage1_loaded'] = True
+# Check if we need to load Stage 1 data (auto-refresh every 1 minute)
+if should_refresh_stage1() or st.session_state['stage1_data'] is None:
+    stage1_data = load_stage1_data()
+    if stage1_data:
+        st.session_state['stage1_data'] = stage1_data
+        st.session_state['stage1_last_refresh'] = datetime.now(IST)
+        st.session_state['stage1_loaded'] = True
+        st.rerun()  # Rerun to update display with new data
 
 # Display Stage 1 status
 if st.session_state['stage1_data']:
@@ -481,7 +468,8 @@ if st.session_state['stage1_data']:
     with col2:
         st.metric("✅ After Gap Filter", data['filtered_count'])
     with col3:
-        st.metric("🕐 Last Refresh", data['timestamp'].strftime("%H:%M:%S"))
+        last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
+        st.metric("🕐 Last Refresh", last_refresh.strftime("%H:%M:%S"))
     
     if data['rejected']:
         with st.expander(f"📊 Show Rejected ({len(data['rejected'])})"):
@@ -491,11 +479,11 @@ if st.session_state['stage1_data']:
     st.info(f"✅ {data['filtered_count']} stocks match. Stage 2 (candle analysis) running automatically...")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: FILTERING & DISPLAY (Fast, no reload)
+# STAGE 2: FILTERING & DISPLAY (Instant, uses cached data)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("---")
-st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis (Auto)</div>', unsafe_allow_html=True)
+st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis & Filters</div>', unsafe_allow_html=True)
 
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
@@ -510,16 +498,19 @@ if st.session_state['stage1_data']:
     with col3: 
         st.metric("Fail / No Data", len(data['invalid'])+len(data['failed']), delta="✗")
 
-    # ── FILTER CHECKBOXES (Stage 2 only) ──
+    # ── FILTER CHECKBOXES (Stage 2 only - PRESERVED in session state) ──
     filter_col1, filter_col2 = st.columns(2)
 
     with filter_col1:
         if is_after_9_25:
             show_inside_only = st.checkbox(
                 "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
-                value=False,
+                value=st.session_state['show_inside_only'],
+                key="inside_checkbox",
                 help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
             )
+            # Save to session state (preserved across refreshes)
+            st.session_state['show_inside_only'] = show_inside_only
         else:
             st.info("⏳ 9:20 candle not yet complete – filter available after 9:25 AM.")
             show_inside_only = False
@@ -528,14 +519,17 @@ if st.session_state['stage1_data']:
         if is_after_9_30:
             show_breakout_only = st.checkbox(
                 "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
-                value=False,
+                value=st.session_state['show_breakout_only'],
+                key="breakout_checkbox",
                 help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
             )
+            # Save to session state (preserved across refreshes)
+            st.session_state['show_breakout_only'] = show_breakout_only
         else:
             st.info("⏳ Breakout filter available after 9:30 AM.")
             show_breakout_only = False
 
-    # ── APPLY STAGE 2 FILTERS (FAST - no reload) ──
+    # ── APPLY STAGE 2 FILTERS (INSTANT - no reload) ──
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -657,14 +651,13 @@ if st.session_state['stage1_data']:
 # AUTO-REFRESH TRIGGER (Stage 1 only, every 1 minute)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Check if Stage 1 needs refresh
-refresh_stage1_if_needed()
-
 st.markdown("---")
 st.markdown(
     f"""
     <div style='text-align: center; color: #666; padding: 1rem;'>
         🔄 Stage 1 refreshes every 1 minute • Last refresh: {st.session_state.get('stage1_last_refresh', datetime.now(IST)).strftime('%H:%M:%S')}
+        <br>
+        ✅ Stage 2 filters preserved • Checkbox states maintained
         <br>
         Made with ❤️ using Streamlit | Data from TradingView & Yahoo Finance | Orders via DhanHQ
     </div>
