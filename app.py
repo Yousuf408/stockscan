@@ -1,295 +1,218 @@
 import streamlit as st
 import pandas as pd
 import requests
+import math
+import pyotp
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="Margin Calculator", layout="wide")
 
-# ------------------- SDK Setup -------------------
-try:
-    from tradingapi_b.mconnect import MConnectB
-    SDK_AVAILABLE = True
-except ImportError:
-    SDK_AVAILABLE = False
+# ================================================================
+# 1. MSTOCK CREDENTIALS (FILLED)
+# ================================================================
+MSTOCK_BASE_URL = "https://api.mstock.trade/openapi/typeb"
+MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
+MSTOCK_USER_ID = "MA1764118"
+MSTOCK_PASSWORD = "P@ssw0rd"
+MSTOCK_TOTP_SECRET = "CRIJTB7OAMTK7L5UB27PILGM6RHHS6FV"
 
-def set_client_token(client, jwt_token):
-    if hasattr(client, 'set_jwt_token'):
-        client.set_jwt_token(jwt_token)
-        return True
-    elif hasattr(client, 'set_access_token'):
-        client.set_access_token(jwt_token)
-        return True
-    elif hasattr(client, 'set_bearer_token'):
-        client.set_bearer_token(jwt_token)
-        return True
-    elif hasattr(client, 'headers'):
-        client.headers['Authorization'] = f'Bearer {jwt_token}'
-        return True
-    else:
-        setattr(client, '_jwt_token', jwt_token)
-        return False
+# ================================================================
+# 2. DEBUG TRACKING
+# ================================================================
+def _init_debug():
+    if 'qty_calc_debug' not in st.session_state:
+        st.session_state['qty_calc_debug'] = {
+            'token_map_size': 0,
+            'token_error': None,
+            'token_last_generated': None,
+            'per_symbol': {},
+        }
 
-def authenticate_type_b(api_key, user_id, password, otp):
-    if not SDK_AVAILABLE:
-        st.error("❌ mStock Type-B SDK not installed.")
-        return None, None
+def _log_debug(key, value):
+    _init_debug()
+    st.session_state['qty_calc_debug'][key] = value
+
+def _log_symbol_debug(symbol, **kwargs):
+    _init_debug()
+    if symbol not in st.session_state['qty_calc_debug']['per_symbol']:
+        st.session_state['qty_calc_debug']['per_symbol'][symbol] = {}
+    st.session_state['qty_calc_debug']['per_symbol'][symbol].update(kwargs)
+
+def get_qty_calc_debug():
+    _init_debug()
+    return st.session_state['qty_calc_debug']
+
+# ================================================================
+# 3. AUTHENTICATION – RAW HTTP with OTP
+# ================================================================
+def get_access_token():
+    """Generate JWT token using TOTP."""
     try:
-        client = MConnectB()
-        login_response = client.login(user_id, password)
-        login_data = login_response.json()
-        if not login_data.get('status', False):
-            st.error(f"Login failed: {login_data.get('message', 'Unknown')}")
-            return None, None
-        jwt_token = login_data.get('data', {}).get('jwtToken')
+        totp = pyotp.TOTP(MSTOCK_TOTP_SECRET).now()
+        url = f"{MSTOCK_BASE_URL}/connect/login"
+        payload = {
+            "clientcode": MSTOCK_USER_ID,
+            "password": MSTOCK_PASSWORD,
+            "totp": totp,
+            "state": ""
+        }
+        resp = requests.post(url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            _log_debug('token_error', f"HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
+        data = resp.json()
+        if not data.get('status'):
+            _log_debug('token_error', data.get('message', 'Login failed'))
+            return None
+        jwt_token = data.get('data', {}).get('jwtToken')
         if not jwt_token:
-            st.error("No JWT token received.")
-            return None, None
-        set_client_token(client, jwt_token)
-        st.success("✅ Authentication successful!")
-        return client, jwt_token
+            _log_debug('token_error', 'No JWT token in response')
+            return None
+        _log_debug('token_error', None)
+        _log_debug('token_last_generated', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        return jwt_token
     except Exception as e:
-        st.error(f"Authentication error: {str(e)}")
-        return None, None
+        _log_debug('token_error', f"Exception: {str(e)}")
+        return None
 
-def get_symbol_token_map(jwt_token, debug=False):
-    base_url = "https://api.mstock.trade/openapi/typeb"
-    headers = {"Authorization": f"Bearer {jwt_token}"}
-    symbol_to_token = {}
-    symbol_to_price = {}
-
-    endpoint = "/instruments/OpenAPIScripMaster"
+# ================================================================
+# 4. SYMBOL → TOKEN MAP (from instrument master)
+# ================================================================
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_symbol_token_map():
+    token_map = {}
     try:
-        resp = requests.get(f"{base_url}{endpoint}", headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            instruments = data.get('data', []) if isinstance(data, dict) else data
-            
-            # Filter for equity instruments only
-            equity_instruments = []
-            for item in instruments:
-                inst_type = item.get('instrumenttype', '').upper()
-                # Accept 'EQ', 'EQUITY', 'E' (some APIs use different codes)
-                if inst_type in ['EQ', 'EQUITY', 'E']:
-                    equity_instruments.append(item)
-            
-            if debug:
-                st.write(f"🔍 Total instruments: {len(instruments)}")
-                st.write(f"🔍 Equity instruments: {len(equity_instruments)}")
-                if equity_instruments:
-                    st.write("🔍 Sample equity symbols:", [item.get('symbol') for item in equity_instruments[:5]])
-            
-            for item in equity_instruments:
-                symbol = item.get('symbol') or item.get('trading_symbol')
-                token = item.get('token') or item.get('instrument_token')
-                if symbol and token:
-                    symbol_to_token[symbol.upper()] = str(token)
-                    # Try multiple possible price fields
-                    price = None
-                    for field in ['last_price', 'close_price', 'ltp', 'close', 
-                                  'prev_close', 'day_close', 'previous_close']:
-                        if field in item and item[field]:
-                            price = float(item[field])
-                            break
-                    if price:
-                        symbol_to_price[symbol.upper()] = price
-
-            if symbol_to_token:
-                st.success(f"✅ Loaded {len(symbol_to_token)} equity instruments.")
-            else:
-                st.warning("⚠️ No equity symbols found in master list.")
-        else:
-            st.error(f"❌ Failed to fetch master list. Status: {resp.status_code}")
+        jwt_token = get_access_token()
+        if not jwt_token:
+            _log_debug('token_map_error', 'Could not get access token')
+            return {}
+        headers = {"Authorization": f"Bearer {jwt_token}"}
+        url = f"{MSTOCK_BASE_URL}/instruments/OpenAPIScripMaster"
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            _log_debug('token_map_error', f"HTTP {resp.status_code}")
+            return {}
+        data = resp.json()
+        instruments = data.get('data', []) if isinstance(data, dict) else data
+        for item in instruments:
+            inst_type = item.get('instrumenttype', '').upper()
+            if inst_type not in ['EQ', 'EQUITY', 'E']:
+                continue
+            symbol = item.get('symbol') or item.get('trading_symbol')
+            token = item.get('token') or item.get('instrument_token')
+            if symbol and token:
+                token_map[symbol.upper()] = str(token)
+        _log_debug('token_map_size', len(token_map))
+        return token_map
     except Exception as e:
-        st.error(f"❌ Error: {e}")
-    return symbol_to_token, symbol_to_price
+        _log_debug('token_map_error', f"Exception: {str(e)}")
+        return {}
 
-def get_margin_data(client, jwt_token, symbols, debug=False):
-    if client is None and not jwt_token:
-        return [], 0.0
-
-    symbol_to_token, symbol_to_price = get_symbol_token_map(jwt_token, debug=debug)
-    if not symbol_to_token:
-        return [], 0.0
-
-    # Get capital
-    capital = 10000.0
+# ================================================================
+# 5. MARGIN PER SHARE
+# ================================================================
+def get_margin_per_share(token, price, product_type="MIS"):
+    jwt_token = get_access_token()
+    if not jwt_token:
+        return None, "Could not obtain access token"
     try:
-        if client:
-            fund_resp = client.get_fund_summary()
-            fund_data = fund_resp.json()
-            if fund_data.get('status', False):
-                capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
-        else:
-            headers = {'Authorization': f'Bearer {jwt_token}'}
-            resp = requests.get('https://api.mstock.trade/openapi/typeb/user/fundsummary', headers=headers)
-            fund_data = resp.json()
-            if fund_data.get('status', False):
-                capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
-    except:
-        pass
+        headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"}
+        payload = {
+            "orders": [{
+                "product_type": product_type,
+                "transaction_type": "BUY",
+                "quantity": "1",
+                "price": "0",
+                "exchange": "NSE",
+                "symbol_name": "",
+                "token": token,
+                "trigger_price": 0
+            }]
+        }
+        url = f"{MSTOCK_BASE_URL}/margins/orders"
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 401:
+            jwt_token = get_access_token()
+            if not jwt_token:
+                return None, "401 Unauthorized, token refresh failed"
+            headers["Authorization"] = f"Bearer {jwt_token}"
+            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        data = resp.json()
+        if not data.get('status'):
+            return None, data.get('message', 'Margin API error')
+        margin = data.get('data', {}).get('total', 0)
+        if margin == 0:
+            return None, "Zero margin returned"
+        return float(margin), None
+    except Exception as e:
+        return None, f"Exception: {str(e)}"
 
-    results = []
+# ================================================================
+# 6. MAX QUANTITY CALCULATION (Parallel)
+# ================================================================
+def calculate_max_quantity_column(df, total_capital, num_parts=4):
+    _init_debug()
+    if 'margin_cache' not in st.session_state:
+        st.session_state['margin_cache'] = {}
+    if total_capital is None or total_capital <= 0 or df.empty:
+        return pd.Series([0] * len(df), index=df.index)
+    part_capital = total_capital / num_parts
+    token_map = get_symbol_token_map()
+    symbols_in_df = [str(r.get("Symbol", "")).strip().upper() for _, r in df.iterrows()]
+    missing = [s for s in symbols_in_df if s not in st.session_state['margin_cache'] and token_map.get(s)]
+    price_lookup = {str(r.get("Symbol", "")).strip().upper(): r.get("Price", 0) for _, r in df.iterrows()}
 
-    for sym in symbols:
-        sym = sym.strip().upper()
-        if not sym:
+    def fetch_margin(symbol):
+        token = token_map.get(symbol)
+        price = price_lookup.get(symbol, 0)
+        if not token or price <= 0:
+            return symbol, None, "No token or price"
+        margin, error = get_margin_per_share(token, price)
+        return symbol, margin, error
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(fetch_margin, sym): sym for sym in missing}
+            for future in as_completed(futures):
+                sym, margin_val, error = future.result()
+                _log_symbol_debug(sym, token=token_map.get(sym), margin_error=error, margin_value=margin_val)
+                if margin_val is not None and margin_val > 0:
+                    st.session_state['margin_cache'][sym] = margin_val
+
+    max_qty_list = []
+    for _, row in df.iterrows():
+        symbol = str(row.get("Symbol", "")).strip().upper()
+        margin_per_share = st.session_state['margin_cache'].get(symbol)
+        if margin_per_share is None or margin_per_share <= 0:
+            max_qty_list.append(0)
             continue
+        max_qty = math.floor(part_capital / margin_per_share)
+        max_qty_list.append(max(max_qty, 0))
+    return pd.Series(max_qty_list, index=df.index)
 
-        token = symbol_to_token.get(sym)
-        if not token:
-            results.append({
-                'Symbol': sym,
-                'Price (₹)': 'Error',
-                'Margin/Share (₹)': '-',
-                'Leverage (x)': '-',
-                'Buying Power (₹)': '-',
-                'Max Qty': '-',
-                'Margin %': '-',
-                'Status': f'❌ Token not found (not an equity symbol on NSE)'
-            })
-            continue
-
-        # ---- 1. Get Price ----
-        price = 0
-        # Try quote API first (live LTP)
-        try:
-            headers = {'Authorization': f'Bearer {jwt_token}'}
-            url_quote = f"https://api.mstock.trade/openapi/typeb/market/quote?mode=OHLC&exchange=NSE&token={token}"
-            resp = requests.get(url_quote, headers=headers)
-            if resp.status_code == 200:
-                quote_data = resp.json()
-                if quote_data.get('status', False):
-                    ohlc = quote_data.get('data', {}).get('OHLC', {})
-                    price_data = ohlc.get(token) or ohlc.get(f"NSE:{token}")
-                    if price_data:
-                        price = float(price_data.get('ltp', 0))
-                    else:
-                        # Try any price
-                        for key, val in ohlc.items():
-                            if isinstance(val, dict) and val.get('ltp'):
-                                price = float(val['ltp'])
-                                break
-        except:
-            pass
-
-        # If live quote fails, use master list price (last close)
-        if price == 0 and sym in symbol_to_price:
-            price = symbol_to_price[sym]
-
-        if price == 0:
-            results.append({
-                'Symbol': sym,
-                'Price (₹)': 'No Data',
-                'Margin/Share (₹)': '-',
-                'Leverage (x)': '-',
-                'Buying Power (₹)': '-',
-                'Max Qty': '-',
-                'Margin %': '-',
-                'Status': '⏸ Price unavailable (market closed or symbol not traded)'
-            })
-            continue
-
-        # ---- 2. Get Margin per Share (MIS) ----
-        margin_per_share = 0
-        try:
-            headers = {'Authorization': f'Bearer {jwt_token}', 'Content-Type': 'application/json'}
-            payload = {
-                "orders": [{
-                    "product_type": "MIS",
-                    "transaction_type": "BUY",
-                    "quantity": "1",
-                    "price": "0",
-                    "exchange": "NSE",
-                    "symbol_name": sym,
-                    "token": token,
-                    "trigger_price": 0
-                }]
-            }
-            resp = requests.post(
-                "https://api.mstock.trade/openapi/typeb/margins/orders",
-                json=payload,
-                headers=headers
-            )
-            if resp.status_code == 200:
-                margin_data = resp.json()
-                if margin_data.get('status', False):
-                    margin_per_share = float(margin_data.get('data', {}).get('total', 0))
-        except:
-            pass
-
-        if margin_per_share == 0:
-            results.append({
-                'Symbol': sym,
-                'Price (₹)': round(price, 2),
-                'Margin/Share (₹)': 'Error',
-                'Leverage (x)': '-',
-                'Buying Power (₹)': '-',
-                'Max Qty': '-',
-                'Margin %': '-',
-                'Status': '❌ Margin calc failed'
-            })
-            continue
-
-        # ---- 3. Calculate ----
-        leverage = price / margin_per_share
-        buying_power = capital * leverage
-        max_qty = int(buying_power / price)
-        margin_percent = (margin_per_share / price) * 100
-
-        results.append({
-            'Symbol': sym,
-            'Price (₹)': round(price, 2),
-            'Margin/Share (₹)': round(margin_per_share, 2),
-            'Leverage (x)': round(leverage, 1),
-            'Buying Power (₹)': round(buying_power, 2),
-            'Max Qty': max_qty,
-            'Margin %': f"{margin_percent:.1f}%",
-            'Status': '✅ Ready'
-        })
-
-    return results, capital
-
-# ------------------- Streamlit UI -------------------
+# ================================================================
+# 7. STREAMLIT UI
+# ================================================================
 st.title("🚀 Live Margin Calculator")
 
 with st.sidebar:
     st.header("🔐 Authentication")
-    if not SDK_AVAILABLE:
-        st.error("❌ Type-B SDK not installed")
-        st.code("pip install mStock-TradingApi-B")
-        st.stop()
+    jwt_token = get_access_token()
+    if jwt_token:
+        st.success("✅ Authenticated")
     else:
-        st.success("✅ SDK loaded")
-
-    api_key = st.text_input("API Key", type="password")
-    user_id = st.text_input("User ID")
-    password = st.text_input("Password", type="password")
-    otp = st.text_input("OTP (6-digit)", type="password")
-
-    if st.button("🔑 Authenticate"):
-        if not all([api_key, user_id, password]):
-            st.error("API Key, User ID, and Password are required")
-        else:
-            with st.spinner("Authenticating..."):
-                client, token = authenticate_type_b(api_key, user_id, password, otp)
-                if client or token:
-                    st.session_state['mstock_client'] = client
-                    st.session_state['jwt_token'] = token
-                    st.session_state['authenticated'] = True
+        st.warning("⚠️ Not authenticated – check credentials")
 
     st.markdown("---")
-    st.header("📊 Stocks")
-    default = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
-    stocks_input = st.text_area("Symbols (comma/newline)", value=default, height=120)
-    debug_mode = st.checkbox("🐞 Show debug info", value=False)
-    fetch_btn = st.button("🔄 Fetch Margins")
-
-if not st.session_state.get('authenticated'):
-    st.info("Please authenticate first")
-    st.stop()
-
-client = st.session_state.get('mstock_client')
-jwt_token = st.session_state.get('jwt_token')
+    st.header("📊 Capital & Stocks")
+    total_capital = st.number_input("Total Capital (₹)", min_value=1000, value=10000, step=1000)
+    num_parts = st.number_input("Number of Parts", min_value=1, max_value=10, value=4, step=1)
+    default_stocks = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
+    stocks_input = st.text_area("Stock Symbols (comma/newline)", value=default_stocks, height=120)
+    fetch_btn = st.button("🔄 Fetch Margins", type="primary")
 
 if fetch_btn:
     symbols = [s.strip().upper() for s in stocks_input.replace(',', ' ').split() if s]
@@ -297,41 +220,41 @@ if fetch_btn:
         st.warning("No symbols entered")
         st.stop()
 
-    with st.spinner("Fetching data..."):
-        data, capital = get_margin_data(client, jwt_token, symbols, debug=debug_mode)
+    # Build DataFrame with symbols and fetch prices
+    df = pd.DataFrame({'Symbol': symbols})
+    token_map = get_symbol_token_map()
+    jwt_token = get_access_token()
+    prices = []
+    for sym in symbols:
+        token = token_map.get(sym)
+        if not token:
+            prices.append(0)
+            continue
+        try:
+            headers = {"Authorization": f"Bearer {jwt_token}"}
+            url = f"{MSTOCK_BASE_URL}/market/quote?mode=OHLC&exchange=NSE&token={token}"
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('status'):
+                    ohlc = data.get('data', {}).get('OHLC', {})
+                    price_data = ohlc.get(token)
+                    if price_data:
+                        prices.append(float(price_data.get('ltp', 0)))
+                        continue
+            prices.append(0)
+        except:
+            prices.append(0)
+    df['Price'] = prices
 
-    st.metric("💰 Available Capital", f"₹{capital:,.2f}")
-    if not data:
-        st.warning("No data returned.")
-        df = pd.DataFrame(columns=['Symbol', 'Price (₹)', 'Margin/Share (₹)', 'Leverage (x)',
-                                   'Buying Power (₹)', 'Max Qty', 'Margin %', 'Status'])
-    else:
-        df = pd.DataFrame(data)
+    with st.spinner("Calculating margins..."):
+        df['Max Qty'] = calculate_max_quantity_column(df, total_capital, num_parts)
 
-    col_order = ['Symbol', 'Price (₹)', 'Margin/Share (₹)', 'Leverage (x)',
-                 'Margin %', 'Buying Power (₹)', 'Max Qty', 'Status']
-    if all(c in df.columns for c in col_order):
-        df = df[col_order]
-
+    st.metric("💰 Capital per part", f"₹{total_capital/num_parts:,.2f}")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Simulated Buy section
-    if 'Status' in df.columns:
-        ready = df[df['Status'] == '✅ Ready']
-        if not ready.empty:
-            st.markdown("---")
-            st.subheader("📦 Simulated Order")
-            for idx, row in ready.iterrows():
-                cols = st.columns([1, 1, 1, 2])
-                with cols[0]:
-                    st.write(f"**{row['Symbol']}**")
-                with cols[1]:
-                    st.write(f"₹{row['Price (₹)']:.2f}")
-                with cols[2]:
-                    qty = st.number_input("Qty", min_value=1, max_value=row['Max Qty'],
-                                          value=min(row['Max Qty'], 10), key=f"qty_{idx}")
-                with cols[3]:
-                    if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}"):
-                        st.success(f"Simulated order: {row['Symbol']} - {qty} shares")
+    with st.expander("🐞 Debug Info"):
+        debug = get_qty_calc_debug()
+        st.json(debug)
 
 st.caption(f"Last refreshed: {datetime.now().strftime('%H:%M:%S')}")
