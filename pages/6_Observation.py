@@ -483,7 +483,7 @@ if st.session_state['stage1_data']:
                 if st.button(f"{symbol} {int(qty)}" + (" 🌙" if amo else ""), key=f"buy_{symbol}_{idx}", disabled=(qty <= 0)):
                     # Debug: Show what symbol is being sent
                     st.write(f"Debug: Placing order for {symbol} with qty {int(qty)}")
-                    result = place_dhan_order(symbol, int(qty), "INTRADAY", amo, "OPEN")
+                    result = place_dhan_order(symbol, int(qty), "MIS", amo, "OPEN")
                     display_order_result(symbol, result)
 
         st.download_button("📥 Download CSV", display_df.to_csv(index=False),
