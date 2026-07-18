@@ -13,10 +13,159 @@ from datetime import datetime, timedelta
 import pytz
 import concurrent.futures
 import warnings
+import requests
+import math
+import pyotp
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG & STYLES
+# MSTOCK MARGIN CALCULATOR (integrated)
+# ─────────────────────────────────────────────────────────────────────────────
+# Replace these with your actual credentials or use st.secrets
+MSTOCK_BASE_URL = "https://api.mstock.trade/openapi/typeb"
+MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
+MSTOCK_USER_ID = "MA1764118"
+MSTOCK_PASSWORD = "P@ssw0rd"
+MSTOCK_TOTP_SECRET = "CRIJTB7OAMTK7L5UB27PILGM6RHHS6FV"
+
+def _mstock_headers(jwt=None):
+    headers = {"X-Mirae-Version": "1"}
+    if jwt:
+        headers["Authorization"] = f"Bearer {jwt}"
+    return headers
+
+def _mstock_token():
+    try:
+        totp = pyotp.TOTP(MSTOCK_TOTP_SECRET).now()
+        resp = requests.post(
+            f"{MSTOCK_BASE_URL}/connect/login",
+            json={"clientcode": MSTOCK_USER_ID, "password": MSTOCK_PASSWORD, "totp": totp, "state": ""},
+            headers=_mstock_headers(),
+            timeout=10
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data.get('data', {}).get('jwtToken') if data.get('status') else None
+    except:
+        return None
+
+@st.cache_data(ttl=86400)
+def _mstock_token_map():
+    token_map = {}
+    jwt = _mstock_token()
+    if not jwt:
+        return token_map
+    resp = requests.get(f"{MSTOCK_BASE_URL}/instruments/OpenAPIScripMaster", headers=_mstock_headers(jwt), timeout=30)
+    if resp.status_code != 200:
+        return token_map
+    data = resp.json()
+    instruments = data.get('data', []) if isinstance(data, dict) else data
+    for item in instruments:
+        if item.get('instrumenttype', '').upper() not in ('EQ', 'EQUITY', 'E'):
+            continue
+        sym = item.get('symbol') or item.get('trading_symbol')
+        tok = item.get('token') or item.get('instrument_token')
+        if sym and tok:
+            token_map[sym.upper()] = str(tok)
+    return token_map
+
+def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
+    """
+    Adds three columns to the input DataFrame (must have 'Symbol' and price_col):
+        - Margin/Share (₹)
+        - Leverage (x)
+        - Max Qty
+    """
+    if df.empty or total_capital <= 0:
+        df['Margin/Share (₹)'] = 0
+        df['Leverage (x)'] = 0
+        df['Max Qty'] = 0
+        return df
+
+    token_map = _mstock_token_map()
+    if not token_map:
+        df['Margin/Share (₹)'] = 0
+        df['Leverage (x)'] = 0
+        df['Max Qty'] = 0
+        return df
+
+    # Ensure price is numeric
+    df[price_col] = pd.to_numeric(df[price_col], errors='coerce').fillna(0)
+
+    if 'margin_cache' not in st.session_state:
+        st.session_state['margin_cache'] = {}
+
+    part_capital = total_capital / num_parts
+    jwt = _mstock_token()   # get token once
+
+    symbols = df['Symbol'].str.upper().str.strip().tolist()
+    missing = []
+    for s in symbols:
+        price = df[df['Symbol'].str.upper() == s][price_col].iloc[0]
+        if s not in st.session_state['margin_cache'] and token_map.get(s) and price > 0:
+            missing.append(s)
+
+    def fetch_margin(sym):
+        token = token_map.get(sym)
+        if not token:
+            return sym, None
+        headers = _mstock_headers(jwt)
+        headers["Content-Type"] = "application/json"
+        payload = {
+            "orders": [{
+                "product_type": "MIS",
+                "transaction_type": "BUY",
+                "quantity": "1",
+                "price": "0",
+                "exchange": "NSE",
+                "symbol_name": "",
+                "token": token,
+                "trigger_price": 0
+            }]
+        }
+        try:
+            resp = requests.post(f"{MSTOCK_BASE_URL}/margins/orders", json=payload, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return sym, None
+            data = resp.json()
+            if not data.get('status'):
+                return sym, None
+            margin = data.get('data', {}).get('total', 0)
+            return sym, float(margin) if margin > 0 else None
+        except:
+            return sym, None
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(fetch_margin, s): s for s in missing}
+            for future in as_completed(futures):
+                sym, margin = future.result()
+                if margin is not None and margin > 0:
+                    st.session_state['margin_cache'][sym] = margin
+
+    margins, leverages, qties = [], [], []
+    for sym in symbols:
+        margin = st.session_state['margin_cache'].get(sym)
+        price = df[df['Symbol'].str.upper() == sym][price_col].iloc[0]
+        if margin is None or margin <= 0 or price <= 0:
+            margins.append(None)
+            leverages.append(None)
+            qties.append(0)
+        else:
+            margins.append(round(margin, 2))
+            leverages.append(round(price / margin, 1))
+            qties.append(math.floor(part_capital / margin))
+
+    df['Margin/Share (₹)'] = margins
+    df['Leverage (x)'] = leverages
+    df['Max Qty'] = qties
+    return df
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE CONFIG & STYLES (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -51,15 +200,10 @@ def set_auto_refresh():
         st.experimental_rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS
+# FUNCTIONS (all original, unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Bulk gap filter (ONLY gap, no EMA) ───
 def get_gap_filtered_stocks(df):
-    """
-    Bulk fetch daily OHLC – apply ONLY gap filter:
-    Reject stocks with |gap%| >= 2% (using today's open vs previous close).
-    """
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -120,7 +264,6 @@ def get_gap_filtered_stocks(df):
 
     return filtered, rejected
 
-# ─── TradingView screener ───
 @st.cache_data(ttl=120)
 def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
     try:
@@ -145,7 +288,6 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-# ─── Intraday data for a single symbol ───
 def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
@@ -161,7 +303,6 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     except:
         return None
 
-# ─── Bulk intraday fetch (threaded) ───
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
     symbol_formats = ['.NS', '-NS', '']
@@ -181,7 +322,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     continue
                 df_day = today_data
 
-                # 9:15 candle
                 mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
                 if mask_first.sum() == 0:
                     mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
@@ -192,7 +332,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     first_candle = df_day[mask_first].iloc[0]
 
-                # 9:20 candle
                 mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
                 if mask_second.sum() == 0:
                     if len(df_day) >= 2:
@@ -202,7 +341,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     second_candle = df_day[mask_second].iloc[0]
 
-                # Max high 9:20–10:15
                 mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
                                ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
                 if mask_morning.sum() > 0:
@@ -210,7 +348,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     max_high = float(second_candle['High'])
 
-                # 9:20-9:35 touches 9:15 low?
                 low_9_15 = float(first_candle['Low'])
                 mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
                 hit_low_9_20_to_35 = False
@@ -218,7 +355,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     candles = df_day.loc[mask_20_to_35]
                     hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
 
-                # 9:30-9:45 breakout above 9:15 high?
                 high_9_15 = float(first_candle['High'])
                 mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
                 breakout_9_30_to_9_45 = False
@@ -226,7 +362,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     candles = df_day.loc[mask_30_to_45]
                     breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
 
-                # Gap % (only for display, not used in pass/fail)
                 if prev_close is not None and prev_close > 0:
                     high_9_20 = float(second_candle['High'])
                     gap_percent = ((high_9_20 - prev_close) / prev_close) * 100
@@ -261,12 +396,10 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 results[base] = data
     return results
 
-# ─── Candle condition check (no sample table) ───
 def check_candle_conditions(df, tickers_list):
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
 
-    # Initialize columns
     for col_name in ['candle_9_15_high', 'candle_9_15_low', 'candle_9_20_open',
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
@@ -292,11 +425,9 @@ def check_candle_conditions(df, tickers_list):
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
-            # inside 9:15 condition
             inside_9_15 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] >= data['low_9_15'])
             df.at[idx, 'inside_9_15'] = inside_9_15
 
-            # 4 candle conditions (no gap check)
             cond1 = data['close_9_20'] <= data['high_9_15']
             cond2 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] <= data['high_9_15'])
             cond4 = data['close_9_20'] < data['open_9_20']
@@ -318,10 +449,8 @@ def check_candle_conditions(df, tickers_list):
         else:
             failed_to_fetch.append(ticker)
 
-    # No sample table displayed
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
-# ─── Color helper ───
 def color_change(val):
     try:
         if isinstance(val, (int, float)):
@@ -332,7 +461,7 @@ def color_change(val):
         return ''
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS
+# SIDEBAR FILTERS (added margin inputs)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.sidebar.markdown("## 🔍 Filter Settings")
@@ -353,8 +482,14 @@ stocks_to_show = st.sidebar.slider("📋 Number of top stocks to display & analy
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Stage 1 Filter: **Gap ±2%** only (EMA removed)")
 
+# ── NEW: Margin settings ──
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💰 Margin Settings")
+total_capital = st.sidebar.number_input("Total Capital (₹)", min_value=1000, value=10000, step=1000)
+num_parts = st.sidebar.number_input("Number of Parts", min_value=1, max_value=10, value=4, step=1)
+
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN PAGE
+# MAIN PAGE (unchanged except margin integration)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="main-header">📈 India Stock Screener (Auto‑Refresh Every 2 min)</div>', unsafe_allow_html=True)
@@ -450,7 +585,7 @@ with filter_col2:
         show_breakout_only = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS & DISPLAY FINAL RESULTS (with reduced columns)
+# APPLY FILTERS & PREPARE FINAL DATAFRAME
 # ─────────────────────────────────────────────────────────────────────────────
 
 display_df = df.copy()
@@ -500,7 +635,22 @@ else:
         if pd.api.types.is_numeric_dtype(display_df[c]):
             display_df[c] = display_df[c].round(2)
 
-    # 5. Apply color styling on Change %
+    # ── NEW: Add margin columns ──
+    # Temporarily rename Price column to 'Price' for the function
+    display_df['Price'] = display_df['Price (₹)']
+    display_df['Symbol'] = display_df['Stock']
+    # Call margin calculator
+    display_df = calculate_margin_and_qty(
+        display_df,
+        total_capital=total_capital,
+        num_parts=num_parts,
+        price_col='Price'
+    )
+    # Drop temporary columns (keep only the new margin columns)
+    # The function adds 'Margin/Share (₹)', 'Leverage (x)', 'Max Qty'
+    display_df = display_df.drop(columns=['Price', 'Symbol'], errors='ignore')
+
+    # ── Display styled table ──
     if 'Change %' in display_df.columns:
         styled_df = display_df.style.applymap(color_change, subset=['Change %'])
     else:
@@ -508,7 +658,7 @@ else:
 
     st.dataframe(styled_df, use_container_width=True, height=500)
 
-    # 6. CSV download
+    # CSV download
     csv = display_df.to_csv(index=False)
     st.download_button(
         label="📥 Download CSV",
