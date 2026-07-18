@@ -17,42 +17,46 @@ except ImportError:
     SDK_AVAILABLE = False
 
 # ============================================================
-# 3. AUTHENTICATION FUNCTION – TYPE B
+# 3. AUTHENTICATION FUNCTION – TYPE B (CORRECTED)
 # ============================================================
 def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
     """
     Authenticate with mStock using Type-B API.
-    
-    Flow:
-    1. Login with user_id and password → sends OTP to registered mobile
-    2. Generate session using API key, request_token, and OTP
-    3. Returns authenticated client or None
+    Type-B login response uses "success" (boolean) instead of "status".
     """
     if not SDK_AVAILABLE:
         st.error("❌ mStock Type-B SDK not installed. Run: pip install mStock-TradingApi-B")
         return None
 
     try:
-        client = MConnectB()  # Type-B client[reference:7]
+        client = MConnectB()  # Type-B client
 
-        # Step 1: Login – this sends OTP to your registered mobile[reference:8]
+        # Step 1: Login – sends OTP to registered mobile
         login_response = client.login(user_id, password)
         login_data = login_response.json()
 
-        if login_data.get('status') != 'success':
+        # Debug – remove after testing
+        st.write("🔍 Login response:", login_data)
+
+        # Type B uses "success": true/false, not "status"
+        if not login_data.get('success', False):
             st.error(f"Login failed: {login_data.get('message', 'Unknown error')}")
             return None
 
         request_token = login_data.get('data', {}).get('request_token')
         if not request_token:
-            st.error("No request_token received. Check your User ID and Password.")
+            st.error("No request_token received. Check your credentials.")
             return None
 
-        # Step 2: Generate access token using OTP[reference:9][reference:10]
+        # Step 2: Generate session using OTP
         gen_response = client.generate_session(api_key, request_token, otp)
         gen_data = gen_response.json()
 
-        if gen_data.get('status') != 'success':
+        # Debug – remove after testing
+        st.write("🔍 Session response:", gen_data)
+
+        # Check for "success" in session response too
+        if not gen_data.get('success', False):
             st.error(f"Session generation failed: {gen_data.get('message', 'Unknown error')}")
             return None
 
@@ -64,18 +68,19 @@ def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
         return None
 
 # ============================================================
-# 4. MARGIN CALCULATION FUNCTION
+# 4. MARGIN CALCULATION FUNCTION (UPDATED FOR TYPE B)
 # ============================================================
 def get_margin_data(client, symbols: list):
     """Fetch price, margin, leverage, and max quantity for each symbol."""
     if client is None:
         return [], 0.0
 
-    # Get available capital[reference:11]
+    # Get available capital
     try:
         fund_resp = client.get_fund_summary()
         fund_data = fund_resp.json()
-        if fund_data.get('status') == 'success':
+        # Type B may use "success" here too
+        if fund_data.get('success', False):
             capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
         else:
             capital = 10000.0
@@ -89,11 +94,12 @@ def get_margin_data(client, symbols: list):
             continue
 
         try:
-            # Get LTP[reference:12]
+            # Get LTP – Type B uses get_market_quote
+            # Format: {"NSE": ["GABRIEL"]}
             ltp_resp = client.get_market_quote("OHLC", {"NSE": [sym]})
             ltp_data = ltp_resp.json()
 
-            if ltp_data.get('status') != 'success':
+            if not ltp_data.get('success', False):
                 results.append({
                     'Symbol': sym, 'Price (₹)': 'Error',
                     'Margin/Share (₹)': '-', 'Leverage (x)': '-',
@@ -102,7 +108,7 @@ def get_margin_data(client, symbols: list):
                 })
                 continue
 
-            # Extract price – Type B response structure may vary
+            # Extract price – structure may be data.OHLC[symbol].ltp
             price_data = ltp_data.get('data', {}).get('OHLC', {}).get(sym, {})
             price = float(price_data.get('ltp', 0))
 
@@ -115,7 +121,8 @@ def get_margin_data(client, symbols: list):
                 })
                 continue
 
-            # Calculate margin for 1 share (MIS / Intraday)[reference:13]
+            # Calculate margin for 1 share (MIS / Intraday)
+            # Type B: calculate_order_margin(product_type, transaction_type, quantity, price, exchange, symbol, symbol_token, trigger_price)
             margin_resp = client.calculate_order_margin(
                 "MIS",          # product_type
                 "BUY",          # transaction_type
@@ -128,7 +135,7 @@ def get_margin_data(client, symbols: list):
             )
             margin_data = margin_resp.json()
 
-            if margin_data.get('status') != 'success':
+            if not margin_data.get('success', False):
                 results.append({
                     'Symbol': sym, 'Price (₹)': round(price, 2),
                     'Margin/Share (₹)': 'Error', 'Leverage (x)': '-',
