@@ -980,44 +980,50 @@ if st.session_state['stage1_data']:
         </div>
     """, unsafe_allow_html=True)
     
-    # Apply Filters
-    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-    
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
-    
-    with filter_col1:
-        if is_after_9_25:
-            show_inside_only = st.checkbox(
-                "📊 Inside 9:15 Range",
-                value=st.session_state['show_inside_only'],
-                key="inside_checkbox"
-            )
-            st.session_state['show_inside_only'] = show_inside_only
-        else:
-            st.info("⏳ 9:20 candle available after 9:25 AM")
-            show_inside_only = False
-    
-    with filter_col2:
-        if is_after_9_30:
-            show_breakout_only = st.checkbox(
-                "⚡ Breakout 9:30-9:45",
-                value=st.session_state['show_breakout_only'],
-                key="breakout_checkbox"
-            )
-            st.session_state['show_breakout_only'] = show_breakout_only
-        else:
-            st.info("⏳ Breakout filter available after 9:30 AM")
-            show_breakout_only = False
-    
-    with filter_col3:
-        amo_test_mode = st.checkbox(
-            "🌙 AMO",
-            value=st.session_state['amo_mode'],
-            key="amo_checkbox"
+   # ─── Apply Filters ───
+is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+
+# Create filter row inside the card
+st.markdown('<div class="filter-row">', unsafe_allow_html=True)
+
+# Use columns for checkboxes
+filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+
+with filter_col1:
+    if is_after_9_25:
+        show_inside_only = st.checkbox(
+            "📊 Inside 9:15 Range",
+            value=st.session_state['show_inside_only'],
+            key="inside_checkbox"
         )
-        st.session_state['amo_mode'] = amo_test_mode
-    
+        st.session_state['show_inside_only'] = show_inside_only
+    else:
+        st.info("⏳ 9:20 candle available after 9:25 AM")
+        show_inside_only = False
+
+with filter_col2:
+    if is_after_9_30:
+        show_breakout_only = st.checkbox(
+            "⚡ Breakout 9:30-9:45",
+            value=st.session_state['show_breakout_only'],
+            key="breakout_checkbox"
+        )
+        st.session_state['show_breakout_only'] = show_breakout_only
+    else:
+        st.info("⏳ Breakout filter available after 9:30 AM")
+        show_breakout_only = False
+
+with filter_col3:
+    amo_test_mode = st.checkbox(
+        "🌙 AMO",
+        value=st.session_state['amo_mode'],
+        key="amo_checkbox"
+    )
+    st.session_state['amo_mode'] = amo_test_mode
+
+st.markdown('</div>', unsafe_allow_html=True)
+
     # Apply filters
     display_df = df.copy()
     if show_breakout_only:
