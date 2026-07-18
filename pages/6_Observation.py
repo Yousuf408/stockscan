@@ -21,9 +21,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MSTOCK MARGIN CALCULATOR (integrated)
+# MSTOCK MARGIN CALCULATOR (fixed token reuse)
 # ─────────────────────────────────────────────────────────────────────────────
-# Replace these with your actual credentials or use st.secrets
 MSTOCK_BASE_URL = "https://api.mstock.trade/openapi/typeb"
 MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
 MSTOCK_USER_ID = "MA1764118"
@@ -36,7 +35,13 @@ def _mstock_headers(jwt=None):
         headers["Authorization"] = f"Bearer {jwt}"
     return headers
 
-def _mstock_token():
+def _mstock_token(force_refresh=False):
+    """
+    Returns a valid JWT token. Stores it in session_state to reuse.
+    """
+    if not force_refresh and 'mstock_jwt' in st.session_state:
+        return st.session_state['mstock_jwt']
+
     try:
         totp = pyotp.TOTP(MSTOCK_TOTP_SECRET).now()
         resp = requests.post(
@@ -48,7 +53,12 @@ def _mstock_token():
         if resp.status_code != 200:
             return None
         data = resp.json()
-        return data.get('data', {}).get('jwtToken') if data.get('status') else None
+        if not data.get('status'):
+            return None
+        jwt = data.get('data', {}).get('jwtToken')
+        if jwt:
+            st.session_state['mstock_jwt'] = jwt
+        return jwt
     except:
         return None
 
@@ -75,9 +85,18 @@ def _mstock_token_map():
 def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     """
     Adds three columns: Margin/Share (₹), Leverage (x), Max Qty.
-    Includes debug output to diagnose failures.
+    Uses a shared JWT token stored in session_state.
     """
     if df.empty or total_capital <= 0:
+        df['Margin/Share (₹)'] = 0
+        df['Leverage (x)'] = 0
+        df['Max Qty'] = 0
+        return df
+
+    # Get a valid token (reuse if available)
+    jwt = _mstock_token()
+    if not jwt:
+        st.error("❌ Could not get JWT token. Check credentials.")
         df['Margin/Share (₹)'] = 0
         df['Leverage (x)'] = 0
         df['Max Qty'] = 0
@@ -93,25 +112,21 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     }
 
     if not token_map:
-        st.error("❌ Token map is empty – check credentials or instrument master endpoint.")
+        st.error("❌ Token map is empty.")
         df['Margin/Share (₹)'] = 0
         df['Leverage (x)'] = 0
         df['Max Qty'] = 0
-        # Show debug expander
-        with st.expander("🐞 Debug: Token Map Empty"):
-            st.write("No tokens loaded. Possible causes: invalid credentials, API down, or no equity instruments.")
         return df
 
-    # Ensure price is numeric
     df[price_col] = pd.to_numeric(df[price_col], errors='coerce').fillna(0)
 
     if 'margin_cache' not in st.session_state:
         st.session_state['margin_cache'] = {}
 
     part_capital = total_capital / num_parts
-    jwt = _mstock_token()   # get token once
-
     symbols = df['Symbol'].str.upper().str.strip().tolist()
+
+    # Determine which symbols need margin fetch
     missing = []
     for s in symbols:
         price = df[df['Symbol'].str.upper() == s][price_col].iloc[0]
@@ -126,6 +141,7 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
         token = token_map.get(sym)
         if not token:
             return sym, None, "No token"
+        # Use the shared JWT token (already in session_state)
         headers = _mstock_headers(jwt)
         headers["Content-Type"] = "application/json"
         payload = {
@@ -142,6 +158,13 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
         }
         try:
             resp = requests.post(f"{MSTOCK_BASE_URL}/margins/orders", json=payload, headers=headers, timeout=10)
+            if resp.status_code == 401:
+                # Token expired – refresh once and retry
+                fresh_jwt = _mstock_token(force_refresh=True)
+                if fresh_jwt:
+                    headers = _mstock_headers(fresh_jwt)
+                    headers["Content-Type"] = "application/json"
+                    resp = requests.post(f"{MSTOCK_BASE_URL}/margins/orders", json=payload, headers=headers, timeout=10)
             if resp.status_code != 200:
                 return sym, None, f"HTTP {resp.status_code}"
             data = resp.json()
@@ -184,7 +207,7 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     df['Leverage (x)'] = leverages
     df['Max Qty'] = qties
 
-    # ── Show debug expander ──
+    # ── Debug expander ──
     with st.expander("🐞 Debug: Margin Fetch Details"):
         st.write(f"**Token map size:** {debug_info['token_map_size']}")
         st.write(f"**Symbols found in token map:** {debug_info['symbols_found'][:10]}")
@@ -197,7 +220,7 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     return df
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG & STYLES (unchanged)
+# PAGE CONFIG & STYLES
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -232,7 +255,7 @@ def set_auto_refresh():
         st.experimental_rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS (all original, unchanged)
+# FUNCTIONS (original, unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_gap_filtered_stocks(df):
@@ -493,7 +516,7 @@ def color_change(val):
         return ''
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS (added margin inputs)
+# SIDEBAR FILTERS (including margin inputs)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.sidebar.markdown("## 🔍 Filter Settings")
@@ -514,14 +537,14 @@ stocks_to_show = st.sidebar.slider("📋 Number of top stocks to display & analy
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Stage 1 Filter: **Gap ±2%** only (EMA removed)")
 
-# ── NEW: Margin settings ──
+# ── Margin settings ──
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💰 Margin Settings")
 total_capital = st.sidebar.number_input("Total Capital (₹)", min_value=1000, value=10000, step=1000)
 num_parts = st.sidebar.number_input("Number of Parts", min_value=1, max_value=10, value=4, step=1)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN PAGE (unchanged except margin integration)
+# MAIN PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="main-header">📈 India Stock Screener (Auto‑Refresh Every 2 min)</div>', unsafe_allow_html=True)
@@ -544,7 +567,7 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: AUTO-LOAD & GAP FILTER (summary only, no table)
+# STAGE 1: AUTO-LOAD & GAP FILTER
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering (Gap ±2%)</div>', unsafe_allow_html=True)
@@ -589,7 +612,7 @@ with col2: st.metric("Pass All 4 Conditions", len(valid), delta="✓")
 with col3: st.metric("Fail / No Data", len(invalid)+len(failed), delta="✗")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FILTER CHECKBOXES (inside 9:15 & breakout) – side by side
+# FILTER CHECKBOXES
 # ─────────────────────────────────────────────────────────────────────────────
 
 filter_col1, filter_col2 = st.columns(2)
@@ -668,18 +691,14 @@ else:
             display_df[c] = display_df[c].round(2)
 
     # ── NEW: Add margin columns ──
-    # Temporarily rename Price column to 'Price' for the function
     display_df['Price'] = display_df['Price (₹)']
     display_df['Symbol'] = display_df['Stock']
-    # Call margin calculator
     display_df = calculate_margin_and_qty(
         display_df,
         total_capital=total_capital,
         num_parts=num_parts,
         price_col='Price'
     )
-    # Drop temporary columns (keep only the new margin columns)
-    # The function adds 'Margin/Share (₹)', 'Leverage (x)', 'Max Qty'
     display_df = display_df.drop(columns=['Price', 'Symbol'], errors='ignore')
 
     # ── Display styled table ──
