@@ -271,21 +271,79 @@ def should_refresh():
         return True
     return (datetime.now(IST) - st.session_state['stage1_last_refresh']).total_seconds() >= 60
 
-# ─── FIXED: prepare_display_df ───
+# ─── DYNAMIC SYMBOL RESOLVER ───
+def resolve_dhan_symbol(ticker, security_map):
+    """
+    Dynamically resolve TradingView symbol to Dhan symbol
+    """
+    # Clean the ticker
+    base = ticker.replace('NSE:', '').strip().upper()
+    
+    # If security_map is empty or None, return base
+    if not security_map:
+        return base
+    
+    # 1. Try exact match
+    if base in security_map:
+        return base
+    
+    # 2. Try with common variations
+    variations = [
+        base,
+        base.replace('&', ''),
+        base.replace('-', ''),
+        base.replace('_', ''),
+        base + 'EQ',
+        base.replace('EQ', ''),
+        base.replace(' ', ''),
+        base + '-',
+        base.replace('-', ' '),
+        base + '.NS',
+        base.replace('.NS', ''),
+    ]
+    
+    # Remove duplicates
+    variations = list(dict.fromkeys(variations))
+    
+    for var in variations:
+        if var in security_map:
+            return var
+    
+    # 3. Try case-insensitive matching
+    security_list = list(security_map.keys())
+    for sec in security_list:
+        if sec.upper() == base:
+            return sec
+    
+    # 4. Try partial match (if symbol contains base)
+    for sec in security_list:
+        if base in sec.upper() or sec.upper() in base:
+            return sec
+    
+    # 5. Return original (will fail, but at least we tried)
+    return base
+
 def prepare_display_df(display_df, user_capital):
     display_df = display_df.copy()
     
-    # ─── Create Symbol column ───
-    display_df['Symbol'] = display_df['ticker'].str.replace('NSE:', '')
+    # ─── Get security map ───
+    try:
+        from tv_screener.quantity_calculator import _load_security_map
+        security_map = _load_security_map()
+    except:
+        security_map = {}
     
-    # ─── Price (keep numeric for calculation) ───
+    # ─── Create Symbol column with dynamic resolution ───
+    def map_symbol(ticker):
+        return resolve_dhan_symbol(ticker, security_map)
+    
+    display_df['Symbol'] = display_df['ticker'].apply(map_symbol)
     display_df['Price'] = display_df['close']
     
-    # ─── Calculate MaxQty ───
+    # Calculate MaxQty
     with st.spinner("Calculating max quantity..."):
         display_df['MaxQty'] = calculate_max_quantity_column(display_df, user_capital, 4)
 
-    # ─── Rename columns FIRST (avoid duplicates) ───
     rename_map = {
         'change': 'Chg%',
         'volume': 'Volume',
@@ -294,7 +352,6 @@ def prepare_display_df(display_df, user_capital):
     }
     display_df = display_df.rename(columns=rename_map)
 
-    # ─── Now format columns ───
     def fmt_price(x):
         try:
             return f"₹{float(x):,.2f}"
@@ -354,13 +411,11 @@ def prepare_display_df(display_df, user_capital):
 
     display_df['Signal'] = display_df.apply(get_signal, axis=1)
 
-    # ─── Select final columns (ONCE, no duplicates) ───
     final_cols = [
         'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
         'Rel Vol', 'Inside 9:15', 'Breakout', 'Signal', 'MaxQty', 'Sector'
     ]
     
-    # Only keep columns that exist
     existing_cols = [c for c in final_cols if c in display_df.columns]
     
     return display_df[existing_cols]
@@ -368,7 +423,6 @@ def prepare_display_df(display_df, user_capital):
 # ─── MAIN APP ───
 st.title("📊 Gap Screener")
 
-# Refresh
 if should_refresh() or st.session_state['stage1_data'] is None:
     data = load_stage1_data()
     if data:
@@ -380,14 +434,12 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
 
-    # Stats
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total", data['total_count'])
     col2.metric("After Gap", data['filtered_count'])
     col3.metric("Pass Candle", 0)
     col4.metric("Last Refresh", st.session_state['stage1_last_refresh'].strftime('%H:%M:%S'))
 
-    # Filters
     st.caption("💰 200-2000  |  📊 ≥41B  |  📈 Gap ±2%")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -400,7 +452,6 @@ if st.session_state['stage1_data']:
         amo = st.checkbox("AMO", value=st.session_state['amo_mode'])
         st.session_state['amo_mode'] = amo
 
-    # Apply filters
     display_df = df.copy()
     if show_breakout:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -412,10 +463,8 @@ if st.session_state['stage1_data']:
     else:
         display_df = prepare_display_df(display_df, st.session_state['user_capital'])
 
-        # Table
         st.dataframe(display_df, use_container_width=True, height=400)
 
-        # Buy buttons
         st.markdown("### 🚀 Quick Buy")
         cols = st.columns(min(4, len(display_df)))
         for idx, (_, row) in enumerate(display_df.iterrows()):
@@ -426,7 +475,6 @@ if st.session_state['stage1_data']:
                     result = place_dhan_order(symbol, int(qty), "INTRADAY", amo, "OPEN")
                     display_order_result(symbol, result)
 
-        # Download
         st.download_button("📥 Download CSV", display_df.to_csv(index=False),
                           f"screener_{datetime.now().strftime('%Y%m%d_%H%M')}.csv")
 
