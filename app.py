@@ -2,29 +2,17 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# ============================================================
-# 1. PAGE CONFIG – MUST BE FIRST
-# ============================================================
 st.set_page_config(page_title="Margin Calculator", layout="wide")
 
-# ============================================================
-# 2. SDK SETUP – Type B
-# ============================================================
+# ------------------- SDK Setup -------------------
 try:
     from tradingapi_b.mconnect import MConnectB
     SDK_AVAILABLE = True
 except ImportError:
     SDK_AVAILABLE = False
 
-# ============================================================
-# 3. AUTHENTICATION FUNCTION – TYPE B (FIXED)
-# ============================================================
+# ------------------- Authentication -------------------
 def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
-    """
-    Authenticate with mStock using Type-B API.
-    
-    Type-B login response uses "status": true/false, not "success".
-    """
     if not SDK_AVAILABLE:
         st.error("❌ mStock Type-B SDK not installed. Run: pip install mStock-TradingApi-B")
         return None
@@ -32,57 +20,39 @@ def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
     try:
         client = MConnectB()
 
-        # Step 1: Login – sends OTP to registered mobile
+        # 1. Login – sends OTP to phone
         login_response = client.login(user_id, password)
         login_data = login_response.json()
+        st.write("🔍 Login response:", login_data)   # Debug
 
-        # Debug – remove after testing
-        st.write("🔍 Login response:", login_data)
-
-        # ✅ FIX: Type B uses "status" (boolean), not "success"
+        # Check using "status" (boolean)
         if not login_data.get('status', False):
-            st.error(f"Login failed: {login_data.get('message', 'Unknown error')}")
+            st.error(f"Login failed: {login_data.get('message', 'Unknown')}")
             return None
 
-        # Get request_token from data
-        request_token = login_data.get('data', {}).get('request_token')
-        
-        # If request_token is missing, the SDK might already be authenticated
-        if not request_token:
-            st.warning("No request_token received. Testing if SDK is already authenticated...")
-            try:
-                test_resp = client.get_fund_summary()
-                test_data = test_resp.json()
-                if test_data.get('status', False):
-                    st.success("✅ Already authenticated (using stored token)!")
-                    return client
-            except:
-                st.error("No request_token and test call failed. Please check your credentials.")
-                return None
+        # 2. Get JWT token from login response
+        jwt_token = login_data.get('data', {}).get('jwtToken')
+        if not jwt_token:
+            st.error("No JWT token received – cannot authenticate further.")
+            return None
 
-        # Step 2: Generate session using OTP (if request_token was received)
-        if request_token:
-            gen_response = client.generate_session(api_key, request_token, otp)
-            gen_data = gen_response.json()
-            st.write("🔍 Session response:", gen_data)
+        # 3. IMPORTANT: Set the token on the client!
+        client.set_jwt_token(jwt_token)   # or .set_access_token(jwt_token)
 
-            # ✅ FIX: Check "status" (boolean), not "success"
-            if not gen_data.get('status', False):
-                st.error(f"Session generation failed: {gen_data.get('message', 'Unknown error')}")
-                return None
+        # Optional: also set refresh/feed tokens if needed
+        # refresh_token = login_data['data'].get('refreshToken')
+        # feed_token = login_data['data'].get('feedToken')
+        # client.set_refresh_token(refresh_token) etc.
 
-        st.success("✅ Authentication successful!")
+        st.success("✅ Authentication successful with token set!")
         return client
 
     except Exception as e:
         st.error(f"Authentication error: {str(e)}")
         return None
 
-# ============================================================
-# 4. MARGIN CALCULATION FUNCTION (UPDATED FOR TYPE B)
-# ============================================================
+# ------------------- Margin Calculator -------------------
 def get_margin_data(client, symbols: list):
-    """Fetch price, margin, leverage, and max quantity for each symbol."""
     if client is None:
         return [], 0.0
 
@@ -90,12 +60,13 @@ def get_margin_data(client, symbols: list):
     try:
         fund_resp = client.get_fund_summary()
         fund_data = fund_resp.json()
-        # Type B uses "status" here too
+        st.write("🔍 Fund summary:", fund_data)   # Debug
         if fund_data.get('status', False):
             capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
         else:
             capital = 10000.0
-    except:
+    except Exception as e:
+        st.warning(f"Could not fetch capital: {e}. Using ₹10,000 mock.")
         capital = 10000.0
 
     results = []
@@ -105,50 +76,61 @@ def get_margin_data(client, symbols: list):
             continue
 
         try:
-            # Get LTP – Type B uses get_market_quote
+            # ---- Fetch LTP ----
+            # Method 1: try get_market_quote (OHLC) – previously used
             ltp_resp = client.get_market_quote("OHLC", {"NSE": [sym]})
             ltp_data = ltp_resp.json()
+            st.write(f"🔍 LTP response for {sym}:", ltp_data)   # Debug
 
-            if not ltp_data.get('status', False):
+            if ltp_data.get('status', False):
+                # Try to extract price from OHLC
+                ohlc = ltp_data.get('data', {}).get('OHLC', {})
+                # The key might be the symbol or "NSE:symbol"
+                price_data = ohlc.get(sym) or ohlc.get(f"NSE:{sym}")
+                if price_data:
+                    price = float(price_data.get('ltp', 0))
+                else:
+                    price = 0
+            else:
+                # Fallback: try get_ltp method if available
+                try:
+                    ltp_resp2 = client.get_ltp("NSE", sym)   # check SDK method
+                    ltp_data2 = ltp_resp2.json()
+                    st.write(f"🔍 LTP (fallback) for {sym}:", ltp_data2)
+                    if ltp_data2.get('status', False):
+                        price = float(ltp_data2.get('data', {}).get('ltp', 0))
+                    else:
+                        price = 0
+                except:
+                    price = 0
+
+            if price == 0:
                 results.append({
-                    'Symbol': sym, 'Price (₹)': 'Error',
-                    'Margin/Share (₹)': '-', 'Leverage (x)': '-',
-                    'Buying Power (₹)': '-', 'Max Qty': '-',
+                    'Symbol': sym,
+                    'Price (₹)': 'Error',
+                    'Margin/Share (₹)': '-',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
                     'Status': '❌ LTP fetch failed'
                 })
                 continue
 
-            # Extract price – structure may be data.OHLC[symbol].ltp
-            price_data = ltp_data.get('data', {}).get('OHLC', {}).get(sym, {})
-            price = float(price_data.get('ltp', 0))
-
-            if price == 0:
-                results.append({
-                    'Symbol': sym, 'Price (₹)': 'Error',
-                    'Margin/Share (₹)': '-', 'Leverage (x)': '-',
-                    'Buying Power (₹)': '-', 'Max Qty': '-',
-                    'Status': '❌ Price is zero'
-                })
-                continue
-
-            # Calculate margin for 1 share (MIS / Intraday)
+            # ---- Calculate Margin (MIS / Intraday) ----
             margin_resp = client.calculate_order_margin(
-                "MIS",          # product_type
-                "BUY",          # transaction_type
-                "1",            # quantity
-                "0",            # price (0 for market)
-                "NSE",          # exchange
-                sym,            # trading_symbol
-                "",             # symbol_token (optional)
-                "0"             # trigger_price
+                "MIS", "BUY", "1", "0", "NSE", sym, "", "0"
             )
             margin_data = margin_resp.json()
+            st.write(f"🔍 Margin for {sym}:", margin_data)   # Debug
 
             if not margin_data.get('status', False):
                 results.append({
-                    'Symbol': sym, 'Price (₹)': round(price, 2),
-                    'Margin/Share (₹)': 'Error', 'Leverage (x)': '-',
-                    'Buying Power (₹)': '-', 'Max Qty': '-',
+                    'Symbol': sym,
+                    'Price (₹)': round(price, 2),
+                    'Margin/Share (₹)': 'Error',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
                     'Status': '❌ Margin calc failed'
                 })
                 continue
@@ -156,14 +138,17 @@ def get_margin_data(client, symbols: list):
             margin_per_share = float(margin_data.get('data', {}).get('total', 0))
             if margin_per_share == 0:
                 results.append({
-                    'Symbol': sym, 'Price (₹)': round(price, 2),
-                    'Margin/Share (₹)': 'Error', 'Leverage (x)': '-',
-                    'Buying Power (₹)': '-', 'Max Qty': '-',
+                    'Symbol': sym,
+                    'Price (₹)': round(price, 2),
+                    'Margin/Share (₹)': 'Error',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
                     'Status': '❌ Zero margin'
                 })
                 continue
 
-            # Calculate derived values
+            # ---- Derived values ----
             leverage = price / margin_per_share
             buying_power = capital * leverage
             max_qty = int(buying_power / price)
@@ -191,124 +176,77 @@ def get_margin_data(client, symbols: list):
 
     return results, capital
 
-# ============================================================
-# 5. STREAMLIT UI
-# ============================================================
+# ------------------- Streamlit UI -------------------
 st.title("🚀 Live Margin Calculator")
-st.markdown("Get real‑time margin, leverage, and maximum quantity for any stock")
 
-# --- Sidebar ---
 with st.sidebar:
     st.header("🔐 Authentication")
-
-    if SDK_AVAILABLE:
-        st.success("✅ mStock Type-B SDK loaded")
-    else:
+    if not SDK_AVAILABLE:
         st.error("❌ Type-B SDK not installed")
-        st.code("pip install mStock-TradingApi-B", language="bash")
+        st.code("pip install mStock-TradingApi-B")
         st.stop()
+    else:
+        st.success("✅ SDK loaded")
 
-    api_key = st.text_input("API Key", type="password",
-                            help="Generated from mStock dashboard → Products → Trading APIs (Type B)")
-    user_id = st.text_input("User ID", help="Your mStock trading username")
-    password = st.text_input("Password", type="password", help="Your mStock trading password")
-    otp = st.text_input("OTP (6-digit from authenticator app)", type="password",
-                        help="Generate from Google Authenticator / Authy using your TOTP secret")
+    api_key = st.text_input("API Key", type="password")
+    user_id = st.text_input("User ID")
+    password = st.text_input("Password", type="password")
+    otp = st.text_input("OTP (6-digit)", type="password")
 
-    if st.button("🔑 Authenticate", type="primary"):
-        if not api_key or not user_id or not password or not otp:
-            st.error("Please fill in ALL fields including OTP")
+    if st.button("🔑 Authenticate"):
+        if not all([api_key, user_id, password, otp]):
+            st.error("All fields required")
         else:
-            with st.spinner("Authenticating with mStock Type-B..."):
+            with st.spinner("Authenticating..."):
                 client = authenticate_type_b(api_key, user_id, password, otp)
                 if client:
                     st.session_state['mstock_client'] = client
                     st.session_state['authenticated'] = True
-                    st.success("✅ Connected!")
 
     st.markdown("---")
+    st.header("📊 Stocks")
+    default = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
+    stocks_input = st.text_area("Symbols (comma/newline)", value=default, height=120)
+    fetch_btn = st.button("🔄 Fetch Margins")
 
-    st.header("📊 Stock Selection")
-    default_stocks = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
-    stock_input = st.text_area(
-        "Enter symbols (comma or newline separated):",
-        value=default_stocks,
-        height=120,
-        help="Example: TCS, INFY, RELIANCE"
-    )
-
-    fetch_btn = st.button("🔄 Fetch Margins", type="primary")
-
-# --- Main Area ---
-if not st.session_state.get('authenticated', False):
-    st.info("👈 Please authenticate first by entering your credentials and OTP, then click 'Authenticate'")
-    st.dataframe(pd.DataFrame(columns=[
-        'Symbol', 'Price (₹)', 'Margin/Share (₹)',
-        'Leverage (x)', 'Buying Power (₹)', 'Max Qty', 'Status'
-    ]))
+# Main
+if not st.session_state.get('authenticated'):
+    st.info("Authenticate first")
     st.stop()
 
 client = st.session_state.get('mstock_client')
 if not client:
-    st.warning("⚠️ Client not available. Please authenticate again.")
+    st.warning("Client missing – re-authenticate")
     st.stop()
 
-capital_placeholder = st.empty()
-
 if fetch_btn:
-    symbols = [s.strip().upper() for s in stock_input.replace(',', ' ').split() if s.strip()]
+    symbols = [s.strip().upper() for s in stocks_input.replace(',', ' ').split() if s]
     if not symbols:
-        st.warning("Please enter at least one stock symbol.")
+        st.warning("No symbols")
         st.stop()
 
-    with st.spinner("Fetching real‑time margin data..."):
+    with st.spinner("Fetching..."):
         data, capital = get_margin_data(client, symbols)
 
-    capital_placeholder.metric("💰 Available Capital", f"₹{capital:,.2f}")
-
+    st.metric("💰 Capital", f"₹{capital:,.2f}")
     df = pd.DataFrame(data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
-    st.dataframe(
-        df,
-        use_container_width=True,
-        column_config={
-            "Symbol": st.column_config.TextColumn("Symbol", width="small"),
-            "Price (₹)": st.column_config.NumberColumn("Price", format="₹%.2f"),
-            "Margin/Share (₹)": st.column_config.NumberColumn("Margin/Share", format="₹%.2f"),
-            "Leverage (x)": st.column_config.NumberColumn("Leverage", format="%.1fx"),
-            "Buying Power (₹)": st.column_config.NumberColumn("Buying Power", format="₹%.2f"),
-            "Max Qty": st.column_config.NumberColumn("Max Qty", format="%d"),
-            "Status": st.column_config.TextColumn("Status"),
-        },
-        hide_index=True,
-    )
-
-    # --- Simulated Buy ---
-    st.markdown("---")
-    st.subheader("📦 Place Order (Simulation)")
-
-    ready_stocks = df[df['Status'] == '✅ Ready']
-    if not ready_stocks.empty:
-        for idx, row in ready_stocks.iterrows():
-            col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-            with col1:
-                st.write(f"**{row['Symbol']}**")
-            with col2:
-                st.write(f"₹{row['Price (₹)']:.2f}")
-            with col3:
-                qty = st.number_input(
-                    "Qty",
-                    min_value=1,
-                    max_value=row['Max Qty'],
-                    value=min(row['Max Qty'], 10),
-                    key=f"qty_{idx}_{row['Symbol']}"
-                )
-            with col4:
-                if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}_{row['Symbol']}"):
-                    st.success(f"✅ Order placed: {row['Symbol']} - {qty} shares at ₹{row['Price (₹)']:.2f} (Simulation)")
+    # Simulated Buy
+    ready = df[df['Status'] == '✅ Ready']
+    if not ready.empty:
+        st.markdown("---")
+        st.subheader("📦 Simulated Buy")
+        for idx, row in ready.iterrows():
+            cols = st.columns([1,1,1,2])
+            with cols[0]: st.write(f"**{row['Symbol']}**")
+            with cols[1]: st.write(f"₹{row['Price (₹)']:.2f}")
+            with cols[2]:
+                qty = st.number_input("Qty", min_value=1, max_value=row['Max Qty'], value=min(row['Max Qty'],10), key=f"qty_{idx}")
+            with cols[3]:
+                if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}"):
+                    st.success(f"Simulated: {row['Symbol']} {qty} shares")
     else:
-        st.info("No stocks with 'Ready' status to place orders.")
+        st.info("No ready stocks")
 
-st.markdown("---")
-st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-st.caption("Powered by mStock Type-B Trading API")
+st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
