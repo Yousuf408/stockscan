@@ -7,7 +7,8 @@ import pandas as pd
 from datetime import datetime
 import pytz
 
-Observation_Backend_file import (
+# Import Backend
+from observation_backend import (
     init_session_state,
     HARDCODED_SETTINGS,
     should_refresh_stage1,
@@ -17,7 +18,7 @@ Observation_Backend_file import (
     IST
 )
 
-# ── Import DhanHQ modules ──
+# Import DhanHQ modules
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
 from tv_screener.quantity_calculator import get_qty_calc_debug
@@ -39,39 +40,30 @@ st.set_page_config(
 
 PROFESSIONAL_CSS = """
 <style>
-    /* ─── GLOBAL BACKGROUND ─── */
     .stApp {
         background: #0a0a0f !important;
     }
-    
     .stAppViewContainer {
         background: #0a0a0f !important;
     }
-    
     .main > div {
         background: #0a0a0f !important;
     }
-    
     .block-container {
         padding-top: 0 !important;
         padding-bottom: 0 !important;
         max-width: 1440px !important;
         background: #0a0a0f !important;
     }
-    
-    /* ─── SIDEBAR ─── */
     .css-1d391kg, .st-emotion-cache-1wmy9hl {
         background: rgba(10, 10, 15, 0.98) !important;
         border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
     }
-    
-    /* ─── HIDE STREAMLIT FOOTER/HEADER ─── */
     #MainMenu {visibility: hidden !important;}
     footer {visibility: hidden !important;}
     header {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     
-    /* ─── HEADER ─── */
     .tradeos-header {
         display: flex;
         justify-content: space-between;
@@ -87,13 +79,11 @@ PROFESSIONAL_CSS = """
         top: 0;
         z-index: 999;
     }
-    
     .header-left {
         display: flex;
         align-items: center;
         gap: 0.75rem;
     }
-    
     .logo {
         font-size: 1.3rem;
         font-weight: 700;
@@ -101,7 +91,6 @@ PROFESSIONAL_CSS = """
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-    
     .version {
         font-size: 0.6rem;
         color: #666;
@@ -109,30 +98,25 @@ PROFESSIONAL_CSS = """
         padding: 0.1rem 0.5rem;
         border-radius: 12px;
     }
-    
     .header-center {
         display: flex;
         gap: 1.5rem;
         font-size: 0.8rem;
         flex-wrap: wrap;
     }
-    
     .ticker-item {
         display: flex;
         gap: 0.4rem;
         align-items: center;
         color: #e0e0e0;
     }
-    
     .ticker-green { color: #00ff88; }
     .ticker-red { color: #ff4444; }
-    
     .header-right {
         display: flex;
         align-items: center;
         gap: 1rem;
     }
-    
     .status-indicator {
         display: flex;
         align-items: center;
@@ -140,7 +124,6 @@ PROFESSIONAL_CSS = """
         font-size: 0.8rem;
         color: #e0e0e0;
     }
-    
     .status-dot {
         width: 7px;
         height: 7px;
@@ -149,19 +132,16 @@ PROFESSIONAL_CSS = """
         box-shadow: 0 0 10px #00ff88;
         animation: pulse 2s infinite;
     }
-    
     @keyframes pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
     }
-    
     .clock {
         font-size: 0.8rem;
         color: #888;
         font-variant-numeric: tabular-nums;
     }
     
-    /* ─── PAGE HEADER ─── */
     .page-header {
         display: flex;
         justify-content: space-between;
@@ -170,20 +150,17 @@ PROFESSIONAL_CSS = """
         flex-wrap: wrap;
         gap: 0.75rem;
     }
-    
     .page-title {
         font-size: 1.4rem;
         font-weight: 600;
         color: #e0e0e0;
     }
-    
     .page-title span {
         font-size: 0.8rem;
         color: #666;
         font-weight: 400;
     }
     
-    /* ─── REFRESH BUTTON ─── */
     .stButton button {
         background: rgba(255, 255, 255, 0.05) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -193,13 +170,11 @@ PROFESSIONAL_CSS = """
         font-size: 0.8rem !important;
         transition: all 0.3s ease !important;
     }
-    
     .stButton button:hover {
         background: rgba(255, 255, 255, 0.1) !important;
         border-color: rgba(0, 255, 136, 0.3) !important;
     }
     
-    /* ─── SCREENER CARD ─── */
     .screener-card {
         background: rgba(255, 255, 255, 0.02);
         border-radius: 16px;
@@ -207,7 +182,6 @@ PROFESSIONAL_CSS = """
         overflow: hidden;
         margin-bottom: 1rem;
     }
-    
     .screener-header {
         display: flex;
         justify-content: space-between;
@@ -218,34 +192,28 @@ PROFESSIONAL_CSS = """
         flex-wrap: wrap;
         gap: 0.75rem;
     }
-    
     .screener-stats {
         display: flex;
         gap: 1.5rem;
         font-size: 0.8rem;
         flex-wrap: wrap;
     }
-    
     .stat-item {
         color: #888;
     }
-    
     .stat-item strong {
         color: #fff;
         font-weight: 600;
     }
-    
     .stat-count {
         color: #00ff88;
         font-weight: 600;
     }
-    
     .filter-badges {
         display: flex;
         gap: 0.4rem;
         flex-wrap: wrap;
     }
-    
     .filter-badge {
         background: rgba(255, 255, 255, 0.04);
         padding: 0.2rem 0.7rem;
@@ -254,44 +222,35 @@ PROFESSIONAL_CSS = """
         color: #888;
         border: 1px solid rgba(255, 255, 255, 0.04);
     }
-    
     .filter-badge.active {
         border-color: rgba(0, 255, 136, 0.2);
         color: #00ff88;
     }
     
-    /* ─── CHECKBOX ─── */
     .stCheckbox label {
         color: #888 !important;
         font-size: 0.8rem !important;
     }
-    
     .stCheckbox label span {
         color: #e0e0e0 !important;
     }
     
-    /* ─── DATAFRAME - COMPLETE FIX ─── */
     .stDataFrame {
         background: transparent !important;
     }
-    
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: transparent !important;
         border: none !important;
     }
-    
     .stDataFrame table {
         background: transparent !important;
     }
-    
     .stDataFrame tbody {
         background: transparent !important;
     }
-    
     .stDataFrame tr {
         background: transparent !important;
     }
-    
     .stDataFrame thead tr th {
         background: rgba(255, 255, 255, 0.03) !important;
         color: #888 !important;
@@ -303,7 +262,6 @@ PROFESSIONAL_CSS = """
         font-weight: 600 !important;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
-    
     .stDataFrame tbody tr td {
         background: rgba(255, 255, 255, 0.02) !important;
         color: #e0e0e0 !important;
@@ -312,32 +270,25 @@ PROFESSIONAL_CSS = """
         font-size: 0.85rem !important;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
-    
     .stDataFrame tbody tr:hover td {
         background: rgba(255, 255, 255, 0.06) !important;
     }
-    
     .st-emotion-cache-1r6slb0 {
         background: transparent !important;
     }
-    
     .st-emotion-cache-1wmy9hl {
         background: transparent !important;
     }
-    
     .element-container {
         background: transparent !important;
     }
-    
     [data-testid="stDataFrameResizable"] {
         background: transparent !important;
     }
-    
     [data-testid="stDataFrame"] {
         background: transparent !important;
     }
     
-    /* ─── FOOTER BAR ─── */
     .footer-bar {
         display: flex;
         justify-content: space-between;
@@ -349,16 +300,13 @@ PROFESSIONAL_CSS = """
         flex-wrap: wrap;
         gap: 0.5rem;
     }
-    
     .footer-bar .highlight {
         color: #888;
     }
-    
     .footer-bar .live {
         color: #00ff88;
     }
     
-    /* ─── BUY BUTTONS ─── */
     .stButton button[kind="secondary"] {
         background: linear-gradient(135deg, #00ff88, #00cc66) !important;
         border: none !important;
@@ -367,19 +315,16 @@ PROFESSIONAL_CSS = """
         border-radius: 6px !important;
         transition: all 0.3s ease !important;
     }
-    
     .stButton button[kind="secondary"]:hover {
         transform: scale(1.05) !important;
         box-shadow: 0 0 20px rgba(0, 255, 136, 0.3) !important;
     }
-    
     .stButton button[kind="secondary"]:disabled {
         opacity: 0.3 !important;
         cursor: not-allowed !important;
         transform: none !important;
     }
     
-    /* ─── SIDEBAR STYLING ─── */
     .stSidebar .stButton button {
         background: rgba(255, 255, 255, 0.03) !important;
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
@@ -389,14 +334,12 @@ PROFESSIONAL_CSS = """
         text-align: left !important;
         padding: 0.5rem 1rem !important;
     }
-    
     .stSidebar .stButton button:hover {
         background: rgba(255, 255, 255, 0.08) !important;
         border-color: rgba(0, 255, 136, 0.2) !important;
         color: #00ff88 !important;
     }
     
-    /* ─── RESPONSIVE ─── */
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -404,28 +347,23 @@ PROFESSIONAL_CSS = """
             gap: 0.3rem;
             margin: -0.5rem -0.5rem 0.5rem -0.5rem;
         }
-        
         .header-center {
             font-size: 0.7rem;
             gap: 0.8rem;
             justify-content: center;
         }
-        
         .page-title {
             font-size: 1.1rem;
         }
-        
         .screener-header {
             flex-direction: column;
             align-items: flex-start;
             padding: 0.75rem;
         }
-        
         .screener-stats {
             font-size: 0.7rem;
             gap: 0.8rem;
         }
-        
         .footer-bar {
             flex-direction: column;
             text-align: center;
@@ -433,7 +371,6 @@ PROFESSIONAL_CSS = """
         }
     }
     
-    /* ─── DEBUG ─── */
     .debug-section {
         margin-top: 1rem;
         padding: 1rem 1.5rem;
@@ -441,25 +378,21 @@ PROFESSIONAL_CSS = """
         border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.03);
     }
-    
     .debug-section summary {
         cursor: pointer;
         color: #555;
         font-size: 0.75rem;
         font-weight: 500;
     }
-    
     .debug-section summary:hover {
         color: #888;
     }
-    
     .stAlert {
         background: rgba(255, 255, 255, 0.02) !important;
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
         color: #888 !important;
     }
     
-    /* ─── SIGNAL BADGES IN TABLE ─── */
     .signal-buy {
         background: rgba(0, 255, 136, 0.15) !important;
         color: #00ff88 !important;
@@ -468,7 +401,6 @@ PROFESSIONAL_CSS = """
         font-size: 0.7rem !important;
         font-weight: 600 !important;
     }
-    
     .signal-hold {
         background: rgba(245, 158, 11, 0.15) !important;
         color: #f59e0b !important;
@@ -477,7 +409,6 @@ PROFESSIONAL_CSS = """
         font-size: 0.7rem !important;
         font-weight: 600 !important;
     }
-    
     .signal-sell {
         background: rgba(255, 68, 68, 0.15) !important;
         color: #ff4444 !important;
@@ -562,16 +493,16 @@ def render_buy_buttons(display_df, amo_test_mode):
 # MAIN APP
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── Apply CSS ───
+# Apply CSS
 st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
 
-# ─── Initialize Session State ───
+# Initialize Session State
 init_session_state()
 
-# ─── Render Header ───
+# Render Header
 render_header()
 
-# ─── Check auto-refresh ───
+# Check auto-refresh
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
     if stage1_data:
@@ -580,7 +511,7 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
-# ─── Page Header ───
+# Page Header
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
@@ -589,12 +520,12 @@ with col2:
         st.session_state['stage1_data'] = None
         st.rerun()
 
-# ─── Show Gap Screener Content ───
+# Show Gap Screener Content
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
+    # Screener Card Header
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
@@ -615,7 +546,7 @@ if st.session_state['stage1_data']:
         </div>
     """, unsafe_allow_html=True)
     
-    # ─── Apply Filters ───
+    # Apply Filters
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
@@ -653,16 +584,16 @@ if st.session_state['stage1_data']:
         )
         st.session_state['amo_mode'] = amo_test_mode
     
-    # ─── Apply filters to dataframe ───
+    # Apply filters to dataframe
     display_df = get_filtered_data(df, show_inside_only, show_breakout_only)
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
-        # ─── Prepare and format display dataframe ───
+        # Prepare and format display dataframe
         display_df = prepare_display_dataframe(display_df, st.session_state['user_capital'])
         
-        # ─── Display table ───
+        # Display table
         st.dataframe(
             display_df,
             use_container_width=True,
@@ -682,10 +613,10 @@ if st.session_state['stage1_data']:
             }
         )
         
-        # ─── Render Buy Buttons ───
+        # Render Buy Buttons
         render_buy_buttons(display_df, amo_test_mode)
         
-        # ─── Download CSV ───
+        # Download CSV
         csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
@@ -695,7 +626,7 @@ if st.session_state['stage1_data']:
             use_container_width=True
         )
     
-    # ─── Footer Bar ───
+    # Footer Bar
     st.markdown(f"""
     <div class="footer-bar">
         <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
@@ -706,12 +637,12 @@ if st.session_state['stage1_data']:
     </div>
     """, unsafe_allow_html=True)
     
-    # ─── Debug Section ───
+    # Debug Section
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
 
-# ─── Footer ───
+# Footer
 st.markdown("""
 <div style="text-align:center; padding:1.5rem; color:#333; font-size:0.65rem; border-top:1px solid rgba(255,255,255,0.02); margin-top:1rem;">
     ⚡ TradeOS v3.0 · Professional Screener<br>
