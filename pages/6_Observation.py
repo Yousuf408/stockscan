@@ -74,10 +74,8 @@ def _mstock_token_map():
 
 def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     """
-    Adds three columns to the input DataFrame (must have 'Symbol' and price_col):
-        - Margin/Share (₹)
-        - Leverage (x)
-        - Max Qty
+    Adds three columns: Margin/Share (₹), Leverage (x), Max Qty.
+    Includes debug output to diagnose failures.
     """
     if df.empty or total_capital <= 0:
         df['Margin/Share (₹)'] = 0
@@ -86,10 +84,22 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
         return df
 
     token_map = _mstock_token_map()
+    debug_info = {
+        'token_map_size': len(token_map),
+        'symbols_found': [],
+        'symbols_not_found': [],
+        'margin_success': [],
+        'margin_fail': []
+    }
+
     if not token_map:
+        st.error("❌ Token map is empty – check credentials or instrument master endpoint.")
         df['Margin/Share (₹)'] = 0
         df['Leverage (x)'] = 0
         df['Max Qty'] = 0
+        # Show debug expander
+        with st.expander("🐞 Debug: Token Map Empty"):
+            st.write("No tokens loaded. Possible causes: invalid credentials, API down, or no equity instruments.")
         return df
 
     # Ensure price is numeric
@@ -107,11 +117,15 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
         price = df[df['Symbol'].str.upper() == s][price_col].iloc[0]
         if s not in st.session_state['margin_cache'] and token_map.get(s) and price > 0:
             missing.append(s)
+            debug_info['symbols_found'].append(s)
+        else:
+            if not token_map.get(s):
+                debug_info['symbols_not_found'].append(s)
 
     def fetch_margin(sym):
         token = token_map.get(sym)
         if not token:
-            return sym, None
+            return sym, None, "No token"
         headers = _mstock_headers(jwt)
         headers["Content-Type"] = "application/json"
         payload = {
@@ -129,22 +143,29 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
         try:
             resp = requests.post(f"{MSTOCK_BASE_URL}/margins/orders", json=payload, headers=headers, timeout=10)
             if resp.status_code != 200:
-                return sym, None
+                return sym, None, f"HTTP {resp.status_code}"
             data = resp.json()
             if not data.get('status'):
-                return sym, None
+                return sym, None, data.get('message', 'API error')
             margin = data.get('data', {}).get('total', 0)
-            return sym, float(margin) if margin > 0 else None
-        except:
-            return sym, None
+            if margin > 0:
+                return sym, float(margin), None
+            else:
+                return sym, None, "Zero margin"
+        except Exception as e:
+            return sym, None, str(e)
 
     if missing:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(fetch_margin, s): s for s in missing}
-            for future in as_completed(futures):
-                sym, margin = future.result()
-                if margin is not None and margin > 0:
-                    st.session_state['margin_cache'][sym] = margin
+        with st.spinner(f"Fetching margins for {len(missing)} stocks..."):
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_margin, s): s for s in missing}
+                for future in as_completed(futures):
+                    sym, margin, error = future.result()
+                    if margin is not None and margin > 0:
+                        st.session_state['margin_cache'][sym] = margin
+                        debug_info['margin_success'].append((sym, margin))
+                    else:
+                        debug_info['margin_fail'].append((sym, error))
 
     margins, leverages, qties = [], [], []
     for sym in symbols:
@@ -162,6 +183,17 @@ def calculate_margin_and_qty(df, total_capital, num_parts=4, price_col='Price'):
     df['Margin/Share (₹)'] = margins
     df['Leverage (x)'] = leverages
     df['Max Qty'] = qties
+
+    # ── Show debug expander ──
+    with st.expander("🐞 Debug: Margin Fetch Details"):
+        st.write(f"**Token map size:** {debug_info['token_map_size']}")
+        st.write(f"**Symbols found in token map:** {debug_info['symbols_found'][:10]}")
+        st.write(f"**Symbols NOT found:** {debug_info['symbols_not_found'][:10]}")
+        st.write(f"**Margin fetch successes:** {debug_info['margin_success'][:10]}")
+        st.write(f"**Margin fetch failures:** {debug_info['margin_fail'][:10]}")
+        if debug_info['margin_fail']:
+            st.warning("Sample failure: " + str(debug_info['margin_fail'][0]))
+
     return df
 
 # ─────────────────────────────────────────────────────────────────────────────
