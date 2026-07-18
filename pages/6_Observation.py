@@ -903,7 +903,7 @@ if st.session_state['stage1_data']:
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
     
-    if display_df.empty:
+        if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
@@ -987,55 +987,51 @@ if st.session_state['stage1_data']:
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-       # ─── 85/15 SPLIT: TABLE + BUY BUTTONS ───
-table_col, button_col = st.columns([8.5, 1.5])
-
-with table_col:
-    # ─── Display table ───
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        height=600,  # ← Increased height to fit screen
-        column_config={
-            "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
-            "Price": st.column_config.TextColumn("PRICE", width="small"),
-            "Chg%": st.column_config.TextColumn("CHG%", width="small"),
-            "Gap%": st.column_config.TextColumn("GAP%", width="small"),
-            "Volume": st.column_config.TextColumn("VOLUME", width="small"),
-            "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
-            "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
-            "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
-            "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
-            "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
-        }
-    )
-
-with button_col:
-    # ─── Buy Buttons (Aligned with rows) ───
-    st.write("")  # Empty spacer for header alignment
-    for idx, (_, row) in enumerate(display_df.iterrows()):
-        symbol = row['Symbol']
-        max_qty = row['MaxQty']
-        btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
+        # ─── 85/15 SPLIT: TABLE + BUY BUTTONS ───
+        table_col, button_col = st.columns([8.5, 1.5])
         
-        # Each button takes exactly one row height
-        if st.button(
-            btn_label,
-            key=f"buy_{symbol}_{idx}",
-            disabled=(max_qty <= 0),
-            use_container_width=True
-        ):
-            with st.spinner(f"Placing order for {symbol}..."):
-                result = place_dhan_order(
-                    symbol,
-                    quantity=int(max_qty),
-                    product_type="INTRADAY",
-                    after_market_order=amo_test_mode,
-                    amo_time="OPEN"
-                )
-                display_order_result(symbol, result)
+        with table_col:
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                height=600,
+                column_config={
+                    "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
+                    "Price": st.column_config.TextColumn("PRICE", width="small"),
+                    "Chg%": st.column_config.TextColumn("CHG%", width="small"),
+                    "Gap%": st.column_config.TextColumn("GAP%", width="small"),
+                    "Volume": st.column_config.TextColumn("VOLUME", width="small"),
+                    "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
+                    "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
+                    "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
+                    "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
+                    "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
+                }
+            )
         
-        # ─── Download CSV ───
+        with button_col:
+            for idx, (_, row) in enumerate(display_df.iterrows()):
+                symbol = row['Symbol']
+                max_qty = row['MaxQty']
+                btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
+                
+                if st.button(
+                    btn_label,
+                    key=f"buy_{symbol}_{idx}",
+                    disabled=(max_qty <= 0),
+                    use_container_width=True
+                ):
+                    with st.spinner(f"Placing order for {symbol}..."):
+                        result = place_dhan_order(
+                            symbol,
+                            quantity=int(max_qty),
+                            product_type="INTRADAY",
+                            after_market_order=amo_test_mode,
+                            amo_time="OPEN"
+                        )
+                        display_order_result(symbol, result)
+        
+        # ─── Download CSV (INSIDE else block) ───
         csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
