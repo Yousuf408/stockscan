@@ -17,19 +17,20 @@ except ImportError:
     SDK_AVAILABLE = False
 
 # ============================================================
-# 3. AUTHENTICATION FUNCTION – TYPE B (CORRECTED)
+# 3. AUTHENTICATION FUNCTION – TYPE B (FIXED)
 # ============================================================
 def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
     """
     Authenticate with mStock using Type-B API.
-    Type-B login response uses "success" (boolean) instead of "status".
+    
+    Type-B login response uses "status": true/false, not "success".
     """
     if not SDK_AVAILABLE:
         st.error("❌ mStock Type-B SDK not installed. Run: pip install mStock-TradingApi-B")
         return None
 
     try:
-        client = MConnectB()  # Type-B client
+        client = MConnectB()
 
         # Step 1: Login – sends OTP to registered mobile
         login_response = client.login(user_id, password)
@@ -38,27 +39,37 @@ def authenticate_type_b(api_key: str, user_id: str, password: str, otp: str):
         # Debug – remove after testing
         st.write("🔍 Login response:", login_data)
 
-        # Type B uses "success": true/false, not "status"
-        if not login_data.get('success', False):
+        # ✅ FIX: Type B uses "status" (boolean), not "success"
+        if not login_data.get('status', False):
             st.error(f"Login failed: {login_data.get('message', 'Unknown error')}")
             return None
 
+        # Get request_token from data
         request_token = login_data.get('data', {}).get('request_token')
+        
+        # If request_token is missing, the SDK might already be authenticated
         if not request_token:
-            st.error("No request_token received. Check your credentials.")
-            return None
+            st.warning("No request_token received. Testing if SDK is already authenticated...")
+            try:
+                test_resp = client.get_fund_summary()
+                test_data = test_resp.json()
+                if test_data.get('status', False):
+                    st.success("✅ Already authenticated (using stored token)!")
+                    return client
+            except:
+                st.error("No request_token and test call failed. Please check your credentials.")
+                return None
 
-        # Step 2: Generate session using OTP
-        gen_response = client.generate_session(api_key, request_token, otp)
-        gen_data = gen_response.json()
+        # Step 2: Generate session using OTP (if request_token was received)
+        if request_token:
+            gen_response = client.generate_session(api_key, request_token, otp)
+            gen_data = gen_response.json()
+            st.write("🔍 Session response:", gen_data)
 
-        # Debug – remove after testing
-        st.write("🔍 Session response:", gen_data)
-
-        # Check for "success" in session response too
-        if not gen_data.get('success', False):
-            st.error(f"Session generation failed: {gen_data.get('message', 'Unknown error')}")
-            return None
+            # ✅ FIX: Check "status" (boolean), not "success"
+            if not gen_data.get('status', False):
+                st.error(f"Session generation failed: {gen_data.get('message', 'Unknown error')}")
+                return None
 
         st.success("✅ Authentication successful!")
         return client
@@ -79,8 +90,8 @@ def get_margin_data(client, symbols: list):
     try:
         fund_resp = client.get_fund_summary()
         fund_data = fund_resp.json()
-        # Type B may use "success" here too
-        if fund_data.get('success', False):
+        # Type B uses "status" here too
+        if fund_data.get('status', False):
             capital = float(fund_data['data'][0]['MTF_AVAILABLE_BALANCE'])
         else:
             capital = 10000.0
@@ -95,11 +106,10 @@ def get_margin_data(client, symbols: list):
 
         try:
             # Get LTP – Type B uses get_market_quote
-            # Format: {"NSE": ["GABRIEL"]}
             ltp_resp = client.get_market_quote("OHLC", {"NSE": [sym]})
             ltp_data = ltp_resp.json()
 
-            if not ltp_data.get('success', False):
+            if not ltp_data.get('status', False):
                 results.append({
                     'Symbol': sym, 'Price (₹)': 'Error',
                     'Margin/Share (₹)': '-', 'Leverage (x)': '-',
@@ -122,7 +132,6 @@ def get_margin_data(client, symbols: list):
                 continue
 
             # Calculate margin for 1 share (MIS / Intraday)
-            # Type B: calculate_order_margin(product_type, transaction_type, quantity, price, exchange, symbol, symbol_token, trigger_price)
             margin_resp = client.calculate_order_margin(
                 "MIS",          # product_type
                 "BUY",          # transaction_type
@@ -135,7 +144,7 @@ def get_margin_data(client, symbols: list):
             )
             margin_data = margin_resp.json()
 
-            if not margin_data.get('success', False):
+            if not margin_data.get('status', False):
                 results.append({
                     'Symbol': sym, 'Price (₹)': round(price, 2),
                     'Margin/Share (₹)': 'Error', 'Leverage (x)': '-',
