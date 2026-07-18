@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (AUTO, WITH TIMER)
-# Stage 1: Auto-load from TradingView + gap filter (±2%) ONLY
-# Stage 2: Auto candle analysis with inside-9:15 & breakout checkboxes
+# PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (OPTIMIZED)
+# Stage 1: Loads ONCE at start, refreshes every 1 minute
+# Stage 2: Instant filtering on cached data (no reload)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -60,22 +60,32 @@ if 'user_capital' not in st.session_state:
 if 'amo_mode' not in st.session_state:
     st.session_state['amo_mode'] = False
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTO‑REFRESH TIMER (every 2 minutes)
-# ─────────────────────────────────────────────────────────────────────────────
+if 'stage1_data' not in st.session_state:
+    st.session_state['stage1_data'] = None
 
-def set_auto_refresh():
-    if 'next_refresh' not in st.session_state:
-        st.session_state.next_refresh = datetime.now() + timedelta(minutes=2)
-    if datetime.now() >= st.session_state.next_refresh:
-        st.session_state.next_refresh = datetime.now() + timedelta(minutes=2)
-        st.rerun()
+if 'stage1_timestamp' not in st.session_state:
+    st.session_state['stage1_timestamp'] = None
+
+if 'stage1_loaded' not in st.session_state:
+    st.session_state['stage1_loaded'] = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS (original, unchanged)
+# HARDCODED STAGE 1 FILTERS (Removed from UI)
+# ─────────────────────────────────────────────────────────────────────────────
+
+HARDCODED_SETTINGS = {
+    'price_min': 200,
+    'price_max': 2000,
+    'market_cap_min': 41_000_000_000,  # 41B (Large Cap)
+    'stocks_limit': 50  # Number of top stocks to display
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_gap_filtered_stocks(df):
+    """Filter stocks with gap ±2%"""
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -136,8 +146,8 @@ def get_gap_filtered_stocks(df):
 
     return filtered, rejected
 
-@st.cache_data(ttl=120)
-def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
+def get_tradingview_stocks():
+    """Fetch stocks from TradingView with hardcoded filters"""
     try:
         count, df = (Query()
             .select(
@@ -146,13 +156,13 @@ def get_tradingview_stocks(price_min, price_max, market_cap_min, limit=1000):
             )
             .set_markets('india')
             .where(
-                col('close') > price_min,
-                col('close') <= price_max,
-                col('market_cap_basic') > market_cap_min,
+                col('close') > HARDCODED_SETTINGS['price_min'],
+                col('close') <= HARDCODED_SETTINGS['price_max'],
+                col('market_cap_basic') > HARDCODED_SETTINGS['market_cap_min'],
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            .limit(limit)
+            .limit(HARDCODED_SETTINGS['stocks_limit'])
             .get_scanner_data()
         )
         return count, df
@@ -332,31 +342,78 @@ def color_change(val):
     except:
         return ''
 
+def load_stage1_data():
+    """Load all Stage 1 data (called only when needed)"""
+    status_text = st.empty()
+    status_text.info("🔄 Loading Stage 1 data...")
+    
+    # Step 1: Fetch from TradingView
+    count, df = get_tradingview_stocks()
+    if count == 0:
+        status_text.error("❌ No stocks found!")
+        return None
+    
+    status_text.info(f"✅ Found {count} stocks, applying gap filter...")
+    
+    # Step 2: Apply gap filter
+    filtered_tickers, rejected = get_gap_filtered_stocks(df)
+    df = df[df['ticker'].isin(filtered_tickers)].copy()
+    df = df.sort_values('change', ascending=False)
+    df = df.head(HARDCODED_SETTINGS['stocks_limit'])
+    
+    status_text.info(f"✅ Gap Filter: {count} → {len(df)} stocks, running candle analysis...")
+    
+    # Step 3: Candle analysis
+    tickers_list = df['ticker'].tolist()
+    df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
+    
+    status_text.success(f"✅ Stage 1 complete! {len(df)} stocks ready for Stage 2")
+    
+    # Store results
+    return {
+        'df': df,
+        'valid': valid,
+        'invalid': invalid,
+        'failed': failed,
+        'rejected': rejected,
+        'total_count': count,
+        'filtered_count': len(df),
+        'timestamp': datetime.now(IST)
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR FILTERS (including margin inputs)
+# AUTO-REFRESH LOGIC (Stage 1 only, every 1 minute)
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.sidebar.markdown("## 🔍 Filter Settings")
+IST = pytz.timezone('Asia/Kolkata')
 
-market_cap_options = {
-    '≥ 41B (Large Cap)': 41_000_000_000,
-    '≥ 100B (Mega Cap)': 100_000_000_000,
-    '≥ 500B (Giant Cap)': 500_000_000_000,
-    '≥ 1T (Super Cap)': 1_000_000_000_000
-}
-selected_cap = st.sidebar.selectbox("📊 Minimum Market Cap", options=list(market_cap_options.keys()), index=0)
-market_cap_min = market_cap_options[selected_cap]
+def should_refresh_stage1():
+    """Check if Stage 1 needs refresh (every 1 minute)"""
+    if 'stage1_last_refresh' not in st.session_state:
+        st.session_state['stage1_last_refresh'] = datetime.now(IST)
+        return True
+    
+    time_diff = datetime.now(IST) - st.session_state['stage1_last_refresh']
+    if time_diff.total_seconds() >= 60:  # 1 minute
+        return True
+    return False
 
-price_min = st.sidebar.slider("💰 Minimum Price (₹)", min_value=50, max_value=1000, value=200, step=50)
-price_max = st.sidebar.slider("💰 Maximum Price (₹)", min_value=500, max_value=5000, value=2000, step=100)
-stocks_to_show = st.sidebar.slider("📋 Number of top stocks to display & analyze", min_value=10, max_value=200, value=50, step=10)
+def refresh_stage1_if_needed():
+    """Refresh Stage 1 data if needed"""
+    if should_refresh_stage1():
+        with st.spinner("🔄 Refreshing Stage 1 data..."):
+            stage1_data = load_stage1_data()
+            if stage1_data:
+                st.session_state['stage1_data'] = stage1_data
+                st.session_state['stage1_last_refresh'] = datetime.now(IST)
+                st.session_state['stage1_loaded'] = True
+                st.rerun()
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Stage 1 Filter: **Gap ±2%** only (EMA removed)")
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR (Only Stage 2 & Dhan settings)
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Margin settings ──
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 Margin Settings")
+st.sidebar.markdown("## 💰 Margin Settings")
 total_capital = st.sidebar.number_input(
     "Total Capital (₹)", 
     min_value=1000, 
@@ -365,7 +422,6 @@ total_capital = st.sidebar.number_input(
     key="user_capital"
 )
 
-# ── AMO Mode ──
 st.sidebar.markdown("---")
 amo_test_mode = st.sidebar.checkbox(
     "🌙 After Market Order",
@@ -374,14 +430,17 @@ amo_test_mode = st.sidebar.checkbox(
     help="AMO mode: order queues for next market open instead of rejecting."
 )
 
+st.sidebar.markdown("---")
+st.sidebar.caption(f"⚡ Stage 1 refresh: Every 1 minute")
+st.sidebar.caption(f"📊 Filters: Price ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}, Mkt Cap ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown('<div class="main-header">📈 India Stock Screener (Auto‑Refresh Every 2 min)</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">📈 India Stock Screener (Auto-Refresh Every 1 min)</div>', unsafe_allow_html=True)
 
-ist = pytz.timezone('Asia/Kolkata')
-current_time = datetime.now(ist)
+current_time = datetime.now(IST)
 is_after_9_30 = current_time >= current_time.replace(hour=9, minute=30, second=0)
 is_after_9_25 = current_time >= current_time.replace(hour=9, minute=25, second=0)
 
@@ -398,209 +457,215 @@ if not is_after_9_30:
     st.warning("⚠️ Market is closed. Data shown is from last trading day.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: AUTO-LOAD & GAP FILTER
+# STAGE 1: LOAD DATA (Runs only once or on refresh)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering (Gap ±2%)</div>', unsafe_allow_html=True)
 
-with st.status("Fetching stocks from TradingView...", expanded=False) as status:
-    count, df = get_tradingview_stocks(price_min, price_max, market_cap_min)
-    if count == 0:
-        st.error("❌ No stocks found!")
-        st.stop()
-    status.update(label=f"✅ Found {count} stocks", state="complete")
+# Check if we need to load Stage 1 data
+if not st.session_state['stage1_loaded'] or st.session_state['stage1_data'] is None:
+    with st.spinner("🔄 Loading Stage 1 data..."):
+        stage1_data = load_stage1_data()
+        if stage1_data:
+            st.session_state['stage1_data'] = stage1_data
+            st.session_state['stage1_last_refresh'] = datetime.now(IST)
+            st.session_state['stage1_loaded'] = True
 
-with st.spinner("Applying gap filter (bulk)..."):
-    filtered_tickers, rejected = get_gap_filtered_stocks(df)
-    df = df[df['ticker'].isin(filtered_tickers)].copy()
-    df = df.sort_values('change', ascending=False)
-    df = df.head(stocks_to_show)
-    filtered_count = len(df)
-
-st.success(f"✅ Gap Filter: {count} → {filtered_count} stocks (Rejected {len(rejected)})")
-if rejected:
-    with st.expander(f"📊 Show Rejected ({len(rejected)})"):
-        for s in rejected[:20]:
-            st.write(f"- {s['ticker']}: {s['reason']}")
-
-st.info(f"✅ {filtered_count} stocks match. Stage 2 (candle analysis) running automatically...")
+# Display Stage 1 status
+if st.session_state['stage1_data']:
+    data = st.session_state['stage1_data']
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📊 Total Stocks", data['total_count'])
+    with col2:
+        st.metric("✅ After Gap Filter", data['filtered_count'])
+    with col3:
+        st.metric("🕐 Last Refresh", data['timestamp'].strftime("%H:%M:%S"))
+    
+    if data['rejected']:
+        with st.expander(f"📊 Show Rejected ({len(data['rejected'])})"):
+            for s in data['rejected'][:20]:
+                st.write(f"- {s['ticker']}: {s['reason']}")
+    
+    st.info(f"✅ {data['filtered_count']} stocks match. Stage 2 (candle analysis) running automatically...")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: AUTO-ANALYZE CANDLES
+# STAGE 2: FILTERING & DISPLAY (Fast, no reload)
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.markdown("---")
 st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis (Auto)</div>', unsafe_allow_html=True)
 
-with st.spinner("Fetching 5‑minute intraday data and checking candle conditions..."):
-    tickers_list = df['ticker'].tolist()
-    df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
-
-# Metrics
-col1, col2, col3 = st.columns(3)
-with col1: st.metric("Analyzed", len(df))
-with col2: st.metric("Pass All 4 Conditions", len(valid), delta="✓")
-with col3: st.metric("Fail / No Data", len(invalid)+len(failed), delta="✗")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FILTER CHECKBOXES
-# ─────────────────────────────────────────────────────────────────────────────
-
-filter_col1, filter_col2 = st.columns(2)
-
-with filter_col1:
-    if is_after_9_25:
-        show_inside_only = st.checkbox(
-            "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
-            value=False,
-            help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
-        )
-    else:
-        st.info("⏳ 9:20 candle not yet complete – filter available after 9:25 AM.")
-        show_inside_only = False
-
-with filter_col2:
-    if is_after_9_30:
-        show_breakout_only = st.checkbox(
-            "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
-            value=False,
-            help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
-        )
-    else:
-        st.info("⏳ Breakout filter available after 9:30 AM.")
-        show_breakout_only = False
-
-# ─────────────────────────────────────────────────────────────────────────────
-# APPLY FILTERS & PREPARE FINAL DATAFRAME
-# ─────────────────────────────────────────────────────────────────────────────
-
-display_df = df.copy()
-if show_breakout_only:
-    display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
-if show_inside_only and is_after_9_25:
-    display_df = display_df[display_df['inside_9_15'] == True]
-
-if display_df.empty:
-    st.warning("⚠️ No stocks match the selected filters.")
-else:
-    st.subheader(f"📋 Final Results ({len(display_df)} stocks)")
-
-    # 1. Compute derived columns
-    display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
-    display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
-
-    # 2. Select only the columns we want to show
-    display_cols = [
-        'name', 'close', 'change', 'volume', 'relative_volume',
-        'market_cap_b', 'sector',
-        'hit_low_9_20_to_35', 'breakout_9_30_to_9_45',
-        'inside_9_15', 'candle_check_status'
-    ]
-    available = [c for c in display_cols if c in display_df.columns]
-    display_df = display_df[available].copy()
-
-    # 3. Rename columns
-    rename = {
-        'name': 'Stock',
-        'close': 'Price (₹)',
-        'change': 'Change %',
-        'volume': 'Volume',
-        'relative_volume': 'Rel Vol',
-        'market_cap_b': 'Mkt Cap (B₹)',
-        'sector': 'Sector',
-        'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
-        'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?',
-        'inside_9_15': '9:20 inside 9:15?',
-        'candle_check_status': 'Candle Status'
-    }
-    rename = {k: v for k, v in rename.items() if k in display_df.columns}
-    display_df = display_df.rename(columns=rename)
-
-    # 4. Round numeric columns
-    for c in display_df.columns:
-        if pd.api.types.is_numeric_dtype(display_df[c]):
-            display_df[c] = display_df[c].round(2)
-
-    # ── NEW: Add DhanHQ margin columns & MaxQty ──
-    display_df['Price'] = display_df['Price (₹)']
-    display_df['Symbol'] = display_df['Stock']
+if st.session_state['stage1_data']:
+    data = st.session_state['stage1_data']
+    df = data['df'].copy()
     
-    # Calculate MaxQty using DhanHQ
-    with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-        display_df['MaxQty'] = calculate_max_quantity_column(
-            display_df,
-            total_capital=st.session_state['user_capital'],
-            num_parts=4
-        )
-    
-    # ── Display styled table ──
-    if 'Change %' in display_df.columns:
-        styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+    # Metrics
+    col1, col2, col3 = st.columns(3)
+    with col1: 
+        st.metric("Analyzed", len(df))
+    with col2: 
+        st.metric("Pass All 4 Conditions", len(data['valid']), delta="✓")
+    with col3: 
+        st.metric("Fail / No Data", len(data['invalid'])+len(data['failed']), delta="✗")
+
+    # ── FILTER CHECKBOXES (Stage 2 only) ──
+    filter_col1, filter_col2 = st.columns(2)
+
+    with filter_col1:
+        if is_after_9_25:
+            show_inside_only = st.checkbox(
+                "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
+                value=False,
+                help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
+            )
+        else:
+            st.info("⏳ 9:20 candle not yet complete – filter available after 9:25 AM.")
+            show_inside_only = False
+
+    with filter_col2:
+        if is_after_9_30:
+            show_breakout_only = st.checkbox(
+                "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
+                value=False,
+                help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
+            )
+        else:
+            st.info("⏳ Breakout filter available after 9:30 AM.")
+            show_breakout_only = False
+
+    # ── APPLY STAGE 2 FILTERS (FAST - no reload) ──
+    display_df = df.copy()
+    if show_breakout_only:
+        display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
+    if show_inside_only and is_after_9_25:
+        display_df = display_df[display_df['inside_9_15'] == True]
+
+    if display_df.empty:
+        st.warning("⚠️ No stocks match the selected filters.")
     else:
-        styled_df = display_df.style
+        st.subheader(f"📋 Final Results ({len(display_df)} stocks)")
 
-    st.dataframe(styled_df, use_container_width=True, height=500)
+        # 1. Compute derived columns
+        display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
+        display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
 
-    # ── BUY BUTTONS (like TV Screener) ──
-    st.markdown("---")
-    st.subheader("📊 Buy Orders — Dhan (Manual)")
-    
-    # Buttons in columns
-    num_cols = min(4, len(display_df))
-    cols = st.columns(num_cols)
-    for idx, (_, row) in enumerate(display_df.iterrows()):
-        col_idx = idx % num_cols
-        with cols[col_idx]:
-            symbol = row['Stock']
-            max_qty = row.get('MaxQty', 0)
-            btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
-            
-            if st.button(
-                btn_label,
-                key=f"buy_dhan_obs_{symbol}_{idx}",
-                disabled=(max_qty <= 0),
-                use_container_width=True
-            ):
-                with st.spinner(f"Placing order for {symbol} via Dhan..."):
-                    result = place_dhan_order(
-                        symbol,
-                        quantity=int(max_qty),
-                        product_type="INTRADAY",
-                        after_market_order=amo_test_mode,
-                        amo_time="OPEN"
-                    )
-                    display_order_result(symbol, result)
+        # 2. Select columns
+        display_cols = [
+            'name', 'close', 'change', 'volume', 'relative_volume',
+            'market_cap_b', 'sector',
+            'hit_low_9_20_to_35', 'breakout_9_30_to_9_45',
+            'inside_9_15', 'candle_check_status'
+        ]
+        available = [c for c in display_cols if c in display_df.columns]
+        display_df = display_df[available].copy()
 
-    # ── Debug expander ──
-    with st.expander("🔍 Debug: Max Qty calculation"):
-        debug_info = get_qty_calc_debug()
-        st.write("**Token last generated:**", debug_info.get('token_last_generated'))
-        st.write("**Token error:**", debug_info.get('token_error'))
-        st.write("**Security map size:**", debug_info.get('security_map_size'))
-        st.write("**Security map error:**", debug_info.get('security_map_error'))
-        st.write("**Per-symbol results:**")
-        st.json(debug_info.get('per_symbol', {}))
+        # 3. Rename columns
+        rename = {
+            'name': 'Stock',
+            'close': 'Price (₹)',
+            'change': 'Change %',
+            'volume': 'Volume',
+            'relative_volume': 'Rel Vol',
+            'market_cap_b': 'Mkt Cap (B₹)',
+            'sector': 'Sector',
+            'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
+            'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?',
+            'inside_9_15': '9:20 inside 9:15?',
+            'candle_check_status': 'Candle Status'
+        }
+        rename = {k: v for k, v in rename.items() if k in display_df.columns}
+        display_df = display_df.rename(columns=rename)
 
-    # CSV download
-    csv = display_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download CSV",
-        data=csv,
-        file_name=f'candle_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
-        mime='text/csv',
-        use_container_width=True
-    )
+        # 4. Round numeric columns
+        for c in display_df.columns:
+            if pd.api.types.is_numeric_dtype(display_df[c]):
+                display_df[c] = display_df[c].round(2)
+
+        # ── Add DhanHQ margin columns & MaxQty ──
+        display_df['Price'] = display_df['Price (₹)']
+        display_df['Symbol'] = display_df['Stock']
+        
+        # Calculate MaxQty using DhanHQ
+        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+            display_df['MaxQty'] = calculate_max_quantity_column(
+                display_df,
+                total_capital=st.session_state['user_capital'],
+                num_parts=4
+            )
+
+        # ── Display styled table ──
+        if 'Change %' in display_df.columns:
+            styled_df = display_df.style.applymap(color_change, subset=['Change %'])
+        else:
+            styled_df = display_df.style
+
+        st.dataframe(styled_df, use_container_width=True, height=500)
+
+        # ── BUY BUTTONS ──
+        st.markdown("---")
+        st.subheader("📊 Buy Orders — Dhan (Manual)")
+        
+        # Buttons in columns
+        num_cols = min(4, len(display_df))
+        cols = st.columns(num_cols)
+        for idx, (_, row) in enumerate(display_df.iterrows()):
+            col_idx = idx % num_cols
+            with cols[col_idx]:
+                symbol = row['Stock']
+                max_qty = row.get('MaxQty', 0)
+                btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
+                
+                if st.button(
+                    btn_label,
+                    key=f"buy_dhan_obs_{symbol}_{idx}",
+                    disabled=(max_qty <= 0),
+                    use_container_width=True
+                ):
+                    with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                        result = place_dhan_order(
+                            symbol,
+                            quantity=int(max_qty),
+                            product_type="INTRADAY",
+                            after_market_order=amo_test_mode,
+                            amo_time="OPEN"
+                        )
+                        display_order_result(symbol, result)
+
+        # ── Debug expander ──
+        with st.expander("🔍 Debug: Max Qty calculation"):
+            debug_info = get_qty_calc_debug()
+            st.write("**Token last generated:**", debug_info.get('token_last_generated'))
+            st.write("**Token error:**", debug_info.get('token_error'))
+            st.write("**Security map size:**", debug_info.get('security_map_size'))
+            st.write("**Security map error:**", debug_info.get('security_map_error'))
+            st.write("**Per-symbol results:**")
+            st.json(debug_info.get('per_symbol', {}))
+
+        # CSV download
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name=f'candle_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+            mime='text/csv',
+            use_container_width=True
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH TRIGGER
+# AUTO-REFRESH TRIGGER (Stage 1 only, every 1 minute)
 # ─────────────────────────────────────────────────────────────────────────────
 
-set_auto_refresh()
+# Check if Stage 1 needs refresh
+refresh_stage1_if_needed()
 
 st.markdown("---")
 st.markdown(
-    """
+    f"""
     <div style='text-align: center; color: #666; padding: 1rem;'>
+        🔄 Stage 1 refreshes every 1 minute • Last refresh: {st.session_state.get('stage1_last_refresh', datetime.now(IST)).strftime('%H:%M:%S')}
+        <br>
         Made with ❤️ using Streamlit | Data from TradingView & Yahoo Finance | Orders via DhanHQ
     </div>
     """,
