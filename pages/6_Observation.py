@@ -271,30 +271,30 @@ def should_refresh():
         return True
     return (datetime.now(IST) - st.session_state['stage1_last_refresh']).total_seconds() >= 60
 
+# ─── FIXED: prepare_display_df ───
 def prepare_display_df(display_df, user_capital):
     display_df = display_df.copy()
     
-    display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
-    display_df['Symbol'] = display_df['name']
+    # ─── Create Symbol column ───
+    display_df['Symbol'] = display_df['ticker'].str.replace('NSE:', '')
     
-    # Keep numeric values for Price
+    # ─── Price (keep numeric for calculation) ───
     display_df['Price'] = display_df['close']
     
-    # Calculate MaxQty
+    # ─── Calculate MaxQty ───
     with st.spinner("Calculating max quantity..."):
         display_df['MaxQty'] = calculate_max_quantity_column(display_df, user_capital, 4)
 
-    # Rename columns
-    display_df = display_df.rename(columns={
-        'name': 'Symbol',
-        'close': 'Price',
+    # ─── Rename columns FIRST (avoid duplicates) ───
+    rename_map = {
         'change': 'Chg%',
         'volume': 'Volume',
         'relative_volume': 'Rel Vol',
         'sector': 'Sector'
-    })
+    }
+    display_df = display_df.rename(columns=rename_map)
 
-    # Format columns (after rename)
+    # ─── Now format columns ───
     def fmt_price(x):
         try:
             return f"₹{float(x):,.2f}"
@@ -354,8 +354,16 @@ def prepare_display_df(display_df, user_capital):
 
     display_df['Signal'] = display_df.apply(get_signal, axis=1)
 
-    cols = ['Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 'Rel Vol', 'Inside 9:15', 'Breakout', 'Signal', 'MaxQty', 'Sector']
-    return display_df[[c for c in cols if c in display_df.columns]]
+    # ─── Select final columns (ONCE, no duplicates) ───
+    final_cols = [
+        'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
+        'Rel Vol', 'Inside 9:15', 'Breakout', 'Signal', 'MaxQty', 'Sector'
+    ]
+    
+    # Only keep columns that exist
+    existing_cols = [c for c in final_cols if c in display_df.columns]
+    
+    return display_df[existing_cols]
 
 # ─── MAIN APP ───
 st.title("📊 Gap Screener")
