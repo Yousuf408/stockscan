@@ -1,7 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – INDIA STOCK SCREENER (OPTIMIZED)
-# Stage 1: Refreshes every 1 minute (data updates)
-# Stage 2: Instant filtering on updated data
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -27,28 +25,15 @@ from tv_screener.frontend import display_order_result
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG & STYLES
+# PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="TradingView Screener India",
-    page_icon="📈",
+    page_title="Gap Screener",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-st.markdown("""
-    <style>
-    .main-header { font-size: 2.5rem; color: #00ff88; text-align: center; padding: 1rem 0; background: linear-gradient(90deg, #1a1a2e, #16213e, #0f3460); border-radius: 10px; margin-bottom: 2rem; }
-    .stage-header { font-size: 1.3rem; color: #00ff88; padding: 0.5rem; background: rgba(0, 255, 136, 0.1); border-left: 4px solid #00ff88; margin: 1rem 0; }
-    .success-text { color: #00ff88; font-weight: bold; }
-    .fail-text { color: #ff4444; font-weight: bold; }
-    .warning-text { color: #ffaa00; font-weight: bold; }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE INIT
@@ -63,36 +48,459 @@ if 'amo_mode' not in st.session_state:
 if 'stage1_data' not in st.session_state:
     st.session_state['stage1_data'] = None
 
-if 'stage1_timestamp' not in st.session_state:
-    st.session_state['stage1_timestamp'] = None
-
 if 'stage1_loaded' not in st.session_state:
     st.session_state['stage1_loaded'] = False
 
-# Stage 2 filter states (preserved across refreshes)
 if 'show_inside_only' not in st.session_state:
     st.session_state['show_inside_only'] = False
 
 if 'show_breakout_only' not in st.session_state:
     st.session_state['show_breakout_only'] = False
 
+if 'stage1_last_refresh' not in st.session_state:
+    IST = pytz.timezone('Asia/Kolkata')
+    st.session_state['stage1_last_refresh'] = datetime.now(IST)
+
 # ─────────────────────────────────────────────────────────────────────────────
-# HARDCODED STAGE 1 FILTERS (Removed from UI)
+# HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
 HARDCODED_SETTINGS = {
     'price_min': 200,
-    'price_max': 3000,
-    'market_cap_min': 41_000_000_000,  # 41B (Large Cap)
-    'stocks_limit': 50  # Number of top stocks to display
+    'price_max': 2000,
+    'market_cap_min': 41_000_000_000,
+    'stocks_limit': 50
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CSS - WHITE THEME
+# ─────────────────────────────────────────────────────────────────────────────
+
+WHITE_THEME_CSS = """
+<style>
+    /* ─── GLOBAL BACKGROUND ─── */
+    .stApp {
+        background: #ffffff !important;
+    }
+    
+    .stAppViewContainer {
+        background: #ffffff !important;
+    }
+    
+    .main > div {
+        background: #ffffff !important;
+    }
+    
+    .block-container {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        max-width: 1440px !important;
+        background: #ffffff !important;
+    }
+    
+    /* ─── SIDEBAR ─── */
+    .css-1d391kg, .st-emotion-cache-1wmy9hl {
+        background: #f8f9fa !important;
+        border-right: 1px solid #e9ecef !important;
+    }
+    
+    /* ─── HIDE STREAMLIT FOOTER/HEADER ─── */
+    #MainMenu {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    
+    /* ─── HEADER ─── */
+    .tradeos-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.6rem 2rem;
+        background: #ffffff;
+        border-bottom: 1px solid #e9ecef;
+        margin: -0.5rem -1rem 0.5rem -1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        position: sticky;
+        top: 0;
+        z-index: 999;
+    }
+    
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .logo {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #1a1a2e;
+    }
+    
+    .version {
+        font-size: 0.6rem;
+        color: #888;
+        background: #f1f3f5;
+        padding: 0.1rem 0.5rem;
+        border-radius: 12px;
+    }
+    
+    .header-center {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+    
+    .ticker-item {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+        color: #333;
+    }
+    
+    .ticker-green { color: #28a745; }
+    .ticker-red { color: #dc3545; }
+    
+    .header-right {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: #333;
+    }
+    
+    .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #28a745;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    
+    .clock {
+        font-size: 0.8rem;
+        color: #888;
+        font-variant-numeric: tabular-nums;
+    }
+    
+    /* ─── PAGE HEADER ─── */
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 1rem 0 1.25rem 0;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    
+    .page-title {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #1a1a2e;
+    }
+    
+    .page-title span {
+        font-size: 0.8rem;
+        color: #888;
+        font-weight: 400;
+    }
+    
+    /* ─── BUTTONS ─── */
+    .stButton button {
+        background: #f1f3f5 !important;
+        border: 1px solid #dee2e6 !important;
+        color: #333 !important;
+        border-radius: 8px !important;
+        padding: 0.4rem 1.2rem !important;
+        font-size: 0.8rem !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton button:hover {
+        background: #e9ecef !important;
+        border-color: #adb5bd !important;
+    }
+    
+    /* ─── SCREENER CARD ─── */
+    .screener-card {
+        background: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #e9ecef;
+        overflow: hidden;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .screener-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    
+    .screener-stats {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+    
+    .stat-item {
+        color: #888;
+    }
+    
+    .stat-item strong {
+        color: #1a1a2e;
+        font-weight: 600;
+    }
+    
+    .stat-count {
+        color: #28a745;
+        font-weight: 600;
+    }
+    
+    .filter-badges {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+    
+    .filter-badge {
+        background: #f1f3f5;
+        padding: 0.2rem 0.7rem;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        color: #888;
+        border: 1px solid #e9ecef;
+    }
+    
+    .filter-badge.active {
+        border-color: #28a745;
+        color: #28a745;
+        background: #f0fff4;
+    }
+    
+    /* ─── FILTER ROW ─── */
+    .filter-row {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.75rem 1.5rem;
+        background: #f8f9fa;
+        border-top: 1px solid #e9ecef;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    /* ─── CHECKBOX ─── */
+    .stCheckbox label {
+        color: #555 !important;
+        font-size: 0.8rem !important;
+    }
+    
+    .stCheckbox label span {
+        color: #333 !important;
+    }
+    
+    /* ─── DATAFRAME ─── */
+    .stDataFrame {
+        background: #ffffff !important;
+    }
+    
+    .stDataFrame [data-testid="stDataFrameResizable"] {
+        background: #ffffff !important;
+        border: 1px solid #e9ecef !important;
+        border-radius: 8px !important;
+    }
+    
+    .stDataFrame table {
+        background: #ffffff !important;
+    }
+    
+    .stDataFrame tbody {
+        background: #ffffff !important;
+    }
+    
+    .stDataFrame tr {
+        background: #ffffff !important;
+    }
+    
+    .stDataFrame thead tr th {
+        background: #f8f9fa !important;
+        color: #888 !important;
+        font-size: 0.6rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
+        border-bottom: 2px solid #e9ecef !important;
+        padding: 0.6rem 0.8rem !important;
+        font-weight: 600 !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+    
+    .stDataFrame tbody tr td {
+        background: #ffffff !important;
+        color: #333 !important;
+        padding: 0.6rem 0.8rem !important;
+        border: none !important;
+        border-bottom: 1px solid #f1f3f5 !important;
+        font-size: 0.85rem !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+    
+    .stDataFrame tbody tr:hover td {
+        background: #f8f9fa !important;
+    }
+    
+    .stDataFrame tbody tr:last-child td {
+        border-bottom: none !important;
+    }
+    
+    /* ─── FOOTER BAR ─── */
+    .footer-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1.5rem;
+        border-top: 1px solid #e9ecef;
+        font-size: 0.7rem;
+        color: #888;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    .footer-bar .highlight {
+        color: #555;
+    }
+    
+    .footer-bar .live {
+        color: #28a745;
+    }
+    
+    /* ─── BUY BUTTONS ─── */
+    .stButton button[kind="secondary"] {
+        background: linear-gradient(135deg, #28a745, #20c997) !important;
+        border: none !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton button[kind="secondary"]:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
+    }
+    
+    .stButton button[kind="secondary"]:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+    }
+    
+    /* ─── SIDEBAR STYLING ─── */
+    .stSidebar .stButton button {
+        background: transparent !important;
+        border: none !important;
+        color: #333 !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+        text-align: left !important;
+        padding: 0.5rem 1rem !important;
+    }
+    
+    .stSidebar .stButton button:hover {
+        background: #f1f3f5 !important;
+        color: #28a745 !important;
+    }
+    
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 768px) {
+        .tradeos-header {
+            padding: 0.5rem 0.75rem;
+            flex-direction: column;
+            gap: 0.3rem;
+            margin: -0.5rem -0.5rem 0.5rem -0.5rem;
+        }
+        
+        .header-center {
+            font-size: 0.7rem;
+            gap: 0.8rem;
+            justify-content: center;
+        }
+        
+        .page-title {
+            font-size: 1.1rem;
+        }
+        
+        .screener-header {
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 0.75rem;
+        }
+        
+        .screener-stats {
+            font-size: 0.7rem;
+            gap: 0.8rem;
+        }
+        
+        .footer-bar {
+            flex-direction: column;
+            text-align: center;
+            padding: 0.5rem 0.75rem;
+        }
+    }
+    
+    /* ─── SIGNAL BADGES IN TABLE ─── */
+    .signal-buy {
+        background: #d4edda !important;
+        color: #155724 !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .signal-hold {
+        background: #fff3cd !important;
+        color: #856404 !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .signal-sell {
+        background: #f8d7da !important;
+        color: #721c24 !important;
+        padding: 0.15rem 0.6rem !important;
+        border-radius: 12px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+    }
+</style>
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_gap_filtered_stocks(df):
-    """Filter stocks with gap ±2%"""
     yahoo_tickers = []
     ticker_map = {}
     for row in df.itertuples():
@@ -154,7 +562,6 @@ def get_gap_filtered_stocks(df):
     return filtered, rejected
 
 def get_tradingview_stocks():
-    """Fetch stocks from TradingView with hardcoded filters"""
     try:
         count, df = (Query()
             .select(
@@ -340,34 +747,20 @@ def check_candle_conditions(df, tickers_list):
 
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
-def color_change(val):
-    try:
-        if isinstance(val, (int, float)):
-            color = '#00ff88' if val > 0 else '#ff4444'
-            return f'color: {color}'
-        return ''
-    except:
-        return ''
-
 def load_stage1_data():
-    """Load all Stage 1 data (called every 1 minute)"""
-    with st.spinner("🔄 Refreshing Stage 1 data..."):
-        # Step 1: Fetch from TradingView
+    with st.spinner("🔄 Loading market data..."):
         count, df = get_tradingview_stocks()
         if count == 0:
             return None
         
-        # Step 2: Apply gap filter
         filtered_tickers, rejected = get_gap_filtered_stocks(df)
         df = df[df['ticker'].isin(filtered_tickers)].copy()
         df = df.sort_values('change', ascending=False)
         df = df.head(HARDCODED_SETTINGS['stocks_limit'])
         
-        # Step 3: Candle analysis
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
-        # Store results
         return {
             'df': df,
             'valid': valid,
@@ -380,287 +773,338 @@ def load_stage1_data():
         }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH LOGIC (Stage 1 only, every 1 minute)
+# AUTO-REFRESH LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
 
 IST = pytz.timezone('Asia/Kolkata')
 
 def should_refresh_stage1():
-    """Check if Stage 1 needs refresh (every 1 minute)"""
     if 'stage1_last_refresh' not in st.session_state:
         st.session_state['stage1_last_refresh'] = datetime.now(IST)
         return True
     
     time_diff = datetime.now(IST) - st.session_state['stage1_last_refresh']
-    if time_diff.total_seconds() >= 60:  # 1 minute
+    if time_diff.total_seconds() >= 60:
         return True
     return False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR (Only Stage 2 & Dhan settings)
+# RENDER HEADER
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.sidebar.markdown("## 💰 Margin Settings")
-total_capital = st.sidebar.number_input(
-    "Total Capital (₹)", 
-    min_value=1000, 
-    value=100000, 
-    step=1000,
-    key="user_capital"
-)
-
-st.sidebar.markdown("---")
-amo_test_mode = st.sidebar.checkbox(
-    "🌙 After Market Order",
-    value=False,
-    key="amo_mode",
-    help="AMO mode: order queues for next market open instead of rejecting."
-)
-
-st.sidebar.markdown("---")
-st.sidebar.caption(f"⚡ Stage 1 refresh: Every 1 minute")
-st.sidebar.caption(f"📊 Filters: Price ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}, Mkt Cap ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN PAGE
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.markdown('<div class="main-header">📈 India Stock Screener (Auto-Refresh Every 1 min)</div>', unsafe_allow_html=True)
-
-current_time = datetime.now(IST)
-is_after_9_30 = current_time >= current_time.replace(hour=9, minute=30, second=0)
-is_after_9_25 = current_time >= current_time.replace(hour=9, minute=25, second=0)
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    status = "🟢 Open" if is_after_9_30 else "🔴 Closed"
-    st.metric("🇮🇳 Market", status, delta="NSE India")
-with col2:
-    st.metric("🕐 Time", current_time.strftime("%H:%M IST"), delta="")
-with col3:
-    st.metric("📅 Date", current_time.strftime("%d %b %Y"), delta="")
-
-if not is_after_9_30:
-    st.warning("⚠️ Market is closed. Data shown is from last trading day.")
+def render_header():
+    current_time = datetime.now(IST)
+    
+    nifty = "24,856.40"
+    nifty_chg = "+0.87%"
+    sensex = "81,234.56"
+    sensex_chg = "+0.92%"
+    bank_nifty = "52,345.67"
+    bank_chg = "-0.23%"
+    
+    st.markdown(f"""
+    <div class="tradeos-header">
+        <div class="header-left">
+            <span class="logo">📊 Gap Screener</span>
+            <span class="version">v1.0</span>
+        </div>
+        <div class="header-center">
+            <span class="ticker-item">NIFTY 50 {nifty} <span class="ticker-green">▲ {nifty_chg}</span></span>
+            <span class="ticker-item">SENSEX {sensex} <span class="ticker-green">▲ {sensex_chg}</span></span>
+            <span class="ticker-item">BANK NIFTY {bank_nifty} <span class="ticker-red">▼ {bank_chg}</span></span>
+        </div>
+        <div class="header-right">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>Live</span>
+            </div>
+            <span class="clock">{current_time.strftime('%H:%M:%S')} IST</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: LOAD DATA (Runs every 1 minute with auto-refresh)
+# APPLY CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown('<div class="stage-header">📊 STAGE 1: Loading & Filtering (Gap ±2%)</div>', unsafe_allow_html=True)
+st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 
-# Check if we need to load Stage 1 data (auto-refresh every 1 minute)
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN APP
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Render Header
+render_header()
+
+# ─── Check auto-refresh ───
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
     if stage1_data:
         st.session_state['stage1_data'] = stage1_data
         st.session_state['stage1_last_refresh'] = datetime.now(IST)
         st.session_state['stage1_loaded'] = True
-        st.rerun()  # Rerun to update display with new data
+        st.rerun()
 
-# Display Stage 1 status
-if st.session_state['stage1_data']:
-    data = st.session_state['stage1_data']
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("📊 Total Stocks", data['total_count'])
-    with col2:
-        st.metric("✅ After Gap Filter", data['filtered_count'])
-    with col3:
-        last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
-        st.metric("🕐 Last Refresh", last_refresh.strftime("%H:%M:%S"))
-    
-    if data['rejected']:
-        with st.expander(f"📊 Show Rejected ({len(data['rejected'])})"):
-            for s in data['rejected'][:20]:
-                st.write(f"- {s['ticker']}: {s['reason']}")
-    
-    st.info(f"✅ {data['filtered_count']} stocks match. Stage 2 (candle analysis) running automatically...")
+# ─── Page Header ───
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
+with col2:
+    if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
+        st.session_state['stage1_data'] = None
+        st.rerun()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: FILTERING & DISPLAY (Instant, uses cached data)
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.markdown("---")
-st.markdown('<div class="stage-header">📊 STAGE 2: Candle Analysis & Filters</div>', unsafe_allow_html=True)
-
+# ─── Show Gap Screener Content ───
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # Metrics
-    col1, col2, col3 = st.columns(3)
-    with col1: 
-        st.metric("Analyzed", len(df))
-    with col2: 
-        st.metric("Pass All 4 Conditions", len(data['valid']), delta="✓")
-    with col3: 
-        st.metric("Fail / No Data", len(data['invalid'])+len(data['failed']), delta="✗")
-
-    # ── FILTER CHECKBOXES (Stage 2 only - PRESERVED in session state) ──
-    filter_col1, filter_col2 = st.columns(2)
-
+    # ─── Screener Card Header ───
+    last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
+    pass_count = len(data['valid'])
+    
+    st.markdown(f"""
+    <div class="screener-card">
+        <div class="screener-header">
+            <div class="screener-stats">
+                <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
+                <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
+                <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
+                <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
+            </div>
+            <div class="filter-badges">
+                <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
+                <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
+                <span class="filter-badge active">📈 Gap ±2%</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # ─── Apply Filters ───
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    # ─── Filter Row ───
+    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
+    
+    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+    
     with filter_col1:
         if is_after_9_25:
             show_inside_only = st.checkbox(
-                "📊 Show only stocks where 9:20 candle is INSIDE 9:15 range",
+                "📊 Inside 9:15 Range",
                 value=st.session_state['show_inside_only'],
-                key="inside_checkbox",
-                help="Filters to show only stocks where 9:20 high ≤ 9:15 high AND 9:20 low ≥ 9:15 low"
+                key="inside_checkbox"
             )
-            # Save to session state (preserved across refreshes)
             st.session_state['show_inside_only'] = show_inside_only
         else:
-            st.info("⏳ 9:20 candle not yet complete – filter available after 9:25 AM.")
+            st.info("⏳ 9:20 candle available after 9:25 AM")
             show_inside_only = False
-
+    
     with filter_col2:
         if is_after_9_30:
             show_breakout_only = st.checkbox(
-                "⚡ Show ONLY Breakout Stocks (9:30-9:45)",
+                "⚡ Breakout 9:30-9:45",
                 value=st.session_state['show_breakout_only'],
-                key="breakout_checkbox",
-                help="Filters to show only stocks that broke above 9:15 High between 9:30-9:45"
+                key="breakout_checkbox"
             )
-            # Save to session state (preserved across refreshes)
             st.session_state['show_breakout_only'] = show_breakout_only
         else:
-            st.info("⏳ Breakout filter available after 9:30 AM.")
+            st.info("⏳ Breakout filter available after 9:30 AM")
             show_breakout_only = False
-
-    # ── APPLY STAGE 2 FILTERS (INSTANT - no reload) ──
+    
+    with filter_col3:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO",
+            value=st.session_state['amo_mode'],
+            key="amo_checkbox"
+        )
+        st.session_state['amo_mode'] = amo_test_mode
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
+    
+    # ─── Apply filters to dataframe ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
-
+    
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
-        st.subheader(f"📋 Final Results ({len(display_df)} stocks)")
-
-        # 1. Compute derived columns
+        # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
-
-        # 2. Select columns
-        display_cols = [
-            'name', 'close', 'change', 'volume', 'relative_volume',
-            'market_cap_b', 'sector',
-            'hit_low_9_20_to_35', 'breakout_9_30_to_9_45',
-            'inside_9_15', 'candle_check_status'
-        ]
-        available = [c for c in display_cols if c in display_df.columns]
-        display_df = display_df[available].copy()
-
-        # 3. Rename columns
-        rename = {
-            'name': 'Stock',
-            'close': 'Price (₹)',
-            'change': 'Change %',
-            'volume': 'Volume',
-            'relative_volume': 'Rel Vol',
-            'market_cap_b': 'Mkt Cap (B₹)',
-            'sector': 'Sector',
-            'hit_low_9_20_to_35': 'Hit Low (9:20-9:35)?',
-            'breakout_9_30_to_9_45': 'Breakout (9:30-9:45)?',
-            'inside_9_15': '9:20 inside 9:15?',
-            'candle_check_status': 'Candle Status'
-        }
-        rename = {k: v for k, v in rename.items() if k in display_df.columns}
-        display_df = display_df.rename(columns=rename)
-
-        # 4. Round numeric columns
-        for c in display_df.columns:
-            if pd.api.types.is_numeric_dtype(display_df[c]):
-                display_df[c] = display_df[c].round(2)
-
-        # ── Add DhanHQ margin columns & MaxQty ──
-        display_df['Price'] = display_df['Price (₹)']
-        display_df['Symbol'] = display_df['Stock']
         
-        # Calculate MaxQty using DhanHQ
+        display_df['Price'] = display_df['close']
+        display_df['Symbol'] = display_df['name']
+        
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
                 display_df,
                 total_capital=st.session_state['user_capital'],
                 num_parts=4
             )
-
-        # ── Display styled table ──
-        if 'Change %' in display_df.columns:
-            styled_df = display_df.style.applymap(color_change, subset=['Change %'])
-        else:
-            styled_df = display_df.style
-
-        st.dataframe(styled_df, use_container_width=True, height=500)
-
-        # ── BUY BUTTONS ──
-        st.markdown("---")
-        st.subheader("📊 Buy Orders — Dhan (Manual)")
         
-        # Buttons in columns
+        # ─── Create professional display columns ───
+        display_cols = [
+            'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
+            'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
+        ]
+        available = [c for c in display_cols if c in display_df.columns]
+        display_df = display_df[available].copy()
+        
+        display_df = display_df.rename(columns={
+            'name': 'Symbol',
+            'close': 'Price',
+            'change': 'Chg%',
+            'gap_percent': 'Gap%',
+            'volume': 'Volume',
+            'relative_volume': 'Rel Vol',
+            'inside_9_15': 'Inside 9:15',
+            'breakout_9_30_to_9_45': 'Breakout',
+            'MaxQty': 'MaxQty',
+            'sector': 'Sector'
+        })
+        
+        # ─── Format columns with NaN handling ───
+        display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
+        
+        def format_chg(x):
+            if pd.isna(x) or x is None:
+                return "0.00%"
+            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
+        
+        display_df['Chg%'] = display_df['Chg%'].apply(format_chg)
+        
+        def format_gap(x):
+            if pd.isna(x) or x is None:
+                return "0.00%"
+            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
+        
+        display_df['Gap%'] = display_df['Gap%'].apply(format_gap)
+        
+        def format_volume(x):
+            if pd.isna(x) or x is None:
+                return "0"
+            if x >= 1e6:
+                return f"{x/1e6:.1f}M"
+            elif x >= 1e3:
+                return f"{x/1e3:.1f}K"
+            return f"{x:.0f}"
+        
+        display_df['Volume'] = display_df['Volume'].apply(format_volume)
+        
+        def format_relvol(x):
+            if pd.isna(x) or x is None:
+                return "0x"
+            return f"{x:.2f}x"
+        
+        display_df['Rel Vol'] = display_df['Rel Vol'].apply(format_relvol)
+        display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
+        display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
+        
+        # ─── Signal with colored badges ───
+        def get_signal(row):
+            if row['Inside 9:15'] == "✅" and row['Breakout'] == "✅":
+                return "BUY"
+            elif row['Inside 9:15'] == "✅":
+                return "HOLD"
+            else:
+                return "SELL"
+        
+        def get_signal_badge(row):
+            signal = get_signal(row)
+            if signal == "BUY":
+                return '<span class="signal-buy">🟢 BUY</span>'
+            elif signal == "HOLD":
+                return '<span class="signal-hold">🟡 HOLD</span>'
+            else:
+                return '<span class="signal-sell">🔴 SELL</span>'
+        
+        display_df['Signal'] = display_df.apply(get_signal_badge, axis=1)
+        
+        # ─── Display table ───
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            height=400,
+            column_config={
+                "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
+                "Price": st.column_config.TextColumn("PRICE", width="small"),
+                "Chg%": st.column_config.TextColumn("CHG%", width="small"),
+                "Gap%": st.column_config.TextColumn("GAP%", width="small"),
+                "Volume": st.column_config.TextColumn("VOLUME", width="small"),
+                "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
+                "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
+                "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
+                "Signal": st.column_config.TextColumn("SIGNAL", width="small"),
+                "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
+                "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
+            }
+        )
+        
+        # ─── Buy Buttons ───
+        st.markdown("---")
+        st.markdown("#### 🚀 Quick Buy")
+        
         num_cols = min(4, len(display_df))
         cols = st.columns(num_cols)
+        
         for idx, (_, row) in enumerate(display_df.iterrows()):
             col_idx = idx % num_cols
             with cols[col_idx]:
-                symbol = row['Stock']
-                max_qty = row.get('MaxQty', 0)
+                symbol = row['Symbol']
+                max_qty = row['MaxQty']
                 btn_label = f"{symbol} {int(max_qty)}" + (" 🌙" if amo_test_mode else "")
                 
                 if st.button(
                     btn_label,
-                    key=f"buy_dhan_obs_{symbol}_{idx}",
+                    key=f"buy_{symbol}_{idx}",
                     disabled=(max_qty <= 0),
                     use_container_width=True
                 ):
-                    with st.spinner(f"Placing order for {symbol} via Dhan..."):
+                    with st.spinner(f"Placing order for {symbol}..."):
                         result = place_dhan_order(
                             symbol,
                             quantity=int(max_qty),
-                            product_type="INTRADAY",
+                            product_type="MIS",
                             after_market_order=amo_test_mode,
                             amo_time="OPEN"
                         )
                         display_order_result(symbol, result)
-
-        # ── Debug expander ──
-        with st.expander("🔍 Debug: Max Qty calculation"):
-            debug_info = get_qty_calc_debug()
-            st.write("**Token last generated:**", debug_info.get('token_last_generated'))
-            st.write("**Token error:**", debug_info.get('token_error'))
-            st.write("**Security map size:**", debug_info.get('security_map_size'))
-            st.write("**Security map error:**", debug_info.get('security_map_error'))
-            st.write("**Per-symbol results:**")
-            st.json(debug_info.get('per_symbol', {}))
-
-        # CSV download
+        
+        # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
             data=csv,
-            file_name=f'candle_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+            file_name=f'screener_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
             mime='text/csv',
             use_container_width=True
         )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTO-REFRESH TRIGGER (Stage 1 only, every 1 minute)
-# ─────────────────────────────────────────────────────────────────────────────
-
-st.markdown("---")
-st.markdown(
-    f"""
-    <div style='text-align: center; color: #666; padding: 1rem;'>
-        🔄 Stage 1 refreshes every 1 minute • Last refresh: {st.session_state.get('stage1_last_refresh', datetime.now(IST)).strftime('%H:%M:%S')}
-        <br>
-        ✅ Stage 2 filters preserved • Checkbox states maintained
-        <br>
-        Made with ❤️ using Streamlit | Data from TradingView & Yahoo Finance | Orders via DhanHQ
+    
+    # ─── Footer Bar ───
+    st.markdown(f"""
+    <div class="footer-bar">
+        <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
+        <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · 
+        <span class="highlight">{pass_count}</span> pass candle check</span>
+        <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
     </div>
-    """,
-    unsafe_allow_html=True
-)
+    """, unsafe_allow_html=True)
+    
+    # ─── Debug Section ───
+    with st.expander("🔍 Debug: Max Qty Calculation"):
+        debug_info = get_qty_calc_debug()
+        st.json(debug_info)
+
+# ─── Footer ───
+st.markdown("""
+<div style="text-align:center; padding:1.5rem; color:#888; font-size:0.65rem; border-top:1px solid #e9ecef; margin-top:1rem;">
+    📊 Gap Screener · Professional Trading Scanner<br>
+    Data: TradingView · Yahoo Finance · DhanHQ
+</div>
+""", unsafe_allow_html=True)
