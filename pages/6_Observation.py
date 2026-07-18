@@ -273,19 +273,14 @@ def should_refresh():
 
 # ─── DYNAMIC SYMBOL RESOLVER ───
 def resolve_dhan_symbol(ticker, security_map):
-    """
-    Dynamically resolve TradingView symbol to Dhan symbol
-    """
     base = ticker.replace('NSE:', '').strip().upper()
     
     if not security_map:
         return base
     
-    # 1. Try exact match
     if base in security_map:
         return base
     
-    # 2. Try variations
     variations = [
         base,
         base.replace('&', ''),
@@ -309,12 +304,10 @@ def resolve_dhan_symbol(ticker, security_map):
         if var in security_map:
             return var
     
-    # 3. Case-insensitive
     for sec in security_map.keys():
         if sec.upper() == base:
             return sec
     
-    # 4. Partial match
     for sec in security_map.keys():
         if base in sec.upper() or sec.upper() in base:
             return sec
@@ -324,20 +317,17 @@ def resolve_dhan_symbol(ticker, security_map):
 def prepare_display_df(display_df, user_capital):
     display_df = display_df.copy()
     
-    # Get security map
     try:
         from tv_screener.quantity_calculator import _load_security_map
         security_map = _load_security_map()
     except:
         security_map = {}
     
-    # Create Symbol column with dynamic resolution
     def map_symbol(ticker):
         return resolve_dhan_symbol(ticker, security_map)
     
     display_df['Symbol'] = display_df['ticker'].apply(map_symbol)
     
-    # Validate symbols
     display_df['Valid_Symbol'] = display_df['Symbol'].apply(lambda x: x in security_map if security_map else True)
     
     invalid = display_df[display_df['Valid_Symbol'] == False]['Symbol'].tolist()
@@ -349,7 +339,6 @@ def prepare_display_df(display_df, user_capital):
     with st.spinner("Calculating max quantity..."):
         display_df['MaxQty'] = calculate_max_quantity_column(display_df, user_capital, 4)
     
-    # Set MaxQty to 0 for invalid symbols
     if security_map:
         display_df.loc[display_df['Valid_Symbol'] == False, 'MaxQty'] = 0
 
@@ -480,11 +469,23 @@ if st.session_state['stage1_data']:
             with cols[idx % len(cols)]:
                 symbol = row['Symbol']
                 qty = row['MaxQty']
-                if st.button(f"{symbol} {int(qty)}" + (" 🌙" if amo else ""), key=f"buy_{symbol}_{idx}", disabled=(qty <= 0)):
-                    # Debug: Show what symbol is being sent
-                    st.write(f"Debug: Placing order for {symbol} with qty {int(qty)}")
-                    result = place_dhan_order(symbol, int(qty), "MIS", amo, "OPEN")
-                    display_order_result(symbol, result)
+                
+                # ─── FIX: Use correct parameter names ───
+                if st.button(
+                    f"{symbol} {int(qty)}" + (" 🌙" if amo else ""), 
+                    key=f"buy_{symbol}_{idx}", 
+                    disabled=(qty <= 0)
+                ):
+                    with st.spinner(f"Placing order for {symbol}..."):
+                        # ─── CORRECT ORDER: symbol, quantity, product_type, after_market_order, amo_time ───
+                        result = place_dhan_order(
+                            symbol=symbol,
+                            quantity=int(qty),
+                            product_type="MIS",
+                            after_market_order=amo,
+                            amo_time="OPEN"
+                        )
+                        display_order_result(symbol, result)
 
         st.download_button("📥 Download CSV", display_df.to_csv(index=False),
                           f"screener_{datetime.now().strftime('%Y%m%d_%H%M')}.csv")
