@@ -1,167 +1,260 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
-import re
 from datetime import datetime
+import logging
 
 # ================================================================
-# 1. SET PAGE CONFIG – MUST BE FIRST
+# 1. PAGE CONFIG – MUST BE FIRST STREAMLIT COMMAND
 # ================================================================
 st.set_page_config(page_title="Margin Calculator", layout="wide")
 
 # ================================================================
-# 2. MSTOCK CONFIG (replace with your key)
+# 2. MSTOCK SDK SETUP
 # ================================================================
-MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
-MSTOCK_AVAILABLE = False
-
+# Try importing the official mStock SDK (Type A)
+# Install: pip install mStock-TradingApi-A
 try:
-    from Mconnect import Mconnect
-    mconnect_obj = Mconnect()
-    mconnect_obj.set_jwt_token(MSTOCK_API_KEY)
-    MSTOCK_AVAILABLE = True
-except:
-    pass
+    from tradingapi_a.mconnect import MConnect
+    MSTOCK_SDK_AVAILABLE = True
+except ImportError:
+    MSTOCK_SDK_AVAILABLE = False
 
 # ================================================================
-# 3. AUTO-DETECT STOCKS FROM YOUR DASHBOARD URL
+# 3. AUTHENTICATION & API FUNCTIONS
 # ================================================================
-def scrape_stock_symbols_from_url(url):
+def authenticate_mstock(api_key: str, user_id: str, password: str, otp: str = None):
     """
-    Fetches the webpage and extracts stock symbols from the first column of a table.
+    Authenticate with mStock and return an authenticated client object.
+    
+    Flow:
+    1. Login with user_id and password -> get request_token
+    2. Generate session with API key, request_token, and checksum/OTP
+    3. Return the client with valid access token
     """
+    if not MSTOCK_SDK_AVAILABLE:
+        st.error("❌ mStock SDK not installed. Run: pip install mStock-TradingApi-A")
+        return None
+    
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        # Initialize MConnect client
+        client = MConnect()
         
-        soup = BeautifulSoup(response.text, 'html.parser')
-        symbols = []
+        # Step 1: Login to get request token
+        login_response = client.login(user_id, password)
         
-        # Method 1: Look for <td> in first column (your dashboard style)
-        rows = soup.select('table tbody tr')
-        for row in rows:
-            first_cell = row.find('td')
-            if first_cell:
-                text = first_cell.get_text(strip=True)
-                # Match stock symbols: 2-5 uppercase letters
-                if re.match(r'^[A-Z]{2,5}$', text):
-                    symbols.append(text)
+        if login_response.get('status') != 'success':
+            st.error(f"Login failed: {login_response.get('message', 'Unknown error')}")
+            return None
         
-        # Method 2: If no table rows found, look for elements with stock-symbol class
-        if not symbols:
-            for el in soup.select('[data-symbol], .symbol, .stock-symbol'):
-                text = el.get_text(strip=True)
-                if re.match(r'^[A-Z]{2,5}$', text):
-                    symbols.append(text)
+        request_token = login_response.get('data', {}).get('request_token')
+        if not request_token:
+            st.error("Failed to get request_token from login response")
+            return None
         
-        return list(dict.fromkeys(symbols))  # remove duplicates
+        # Step 2: Generate access token
+        # For Type A: generate_session(api_key, request_token, checksum)
+        # checksum is typically the OTP or a pre-generated checksum from mStock portal
+        if otp:
+            gen_response = client.generate_session(api_key, request_token, otp)
+        else:
+            # If no OTP provided, try with empty checksum (might work if 2FA is disabled)
+            gen_response = client.generate_session(api_key, request_token, "")
+        
+        if gen_response.get('status') != 'success':
+            st.error(f"Session generation failed: {gen_response.get('message', 'Unknown error')}")
+            return None
+        
+        st.success("✅ Authentication successful!")
+        return client
+        
     except Exception as e:
-        st.warning(f"Could not auto-fetch from URL: {e}")
-        return []
+        st.error(f"Authentication error: {str(e)}")
+        return None
 
-# ================================================================
-# 4. MARGIN CALCULATION FUNCTION
-# ================================================================
-def get_margin_data(stock_symbols):
-    """Fetch price, margin, leverage, max quantity for each stock."""
-    capital = 10000.0  # default mock
-    if MSTOCK_AVAILABLE:
+def get_margin_data(client, symbols: list, capital: float = None):
+    """
+    For each stock, fetch:
+    - Current price (LTP)
+    - Margin required for 1 share (MIS / intraday)
+    - Calculate leverage, buying power, and max quantity
+    """
+    if client is None:
+        return [], 0
+    
+    # If capital not provided, fetch from API
+    if capital is None:
         try:
-            funds = mconnect_obj.get_fund_summary()
-            capital = float(funds['data'][0]['MTF_AVAILABLE_BALANCE'])
+            fund_summary = client.get_fund_summary()
+            if fund_summary and fund_summary.get('data'):
+                capital = float(fund_summary['data'][0].get('MTF_AVAILABLE_BALANCE', 10000))
+            else:
+                capital = 10000.0
         except:
-            pass
-
+            capital = 10000.0
+    
     results = []
-    for sym in stock_symbols:
+    
+    for sym in symbols:
         sym = sym.strip().upper()
         if not sym:
             continue
+            
         try:
-            if MSTOCK_AVAILABLE:
-                quote = mconnect_obj.get_lttp(sym)
-                price = float(quote['data']['ltp'])
-                margin_data = mconnect_obj.calculate_order_margin(
-                    exchange="NSE", trading_symbol=sym, transaction_type="BUY",
-                    product_type="MIS", order_type="MARKET", quantity="1",
-                    price="0", trigger_price="0"
-                )
-                margin_per_share = float(margin_data['data']['total'])
-            else:
-                import random
-                price = round(random.uniform(50, 5000), 2)
-                margin_per_share = round(price * random.uniform(0.2, 0.5), 2)
-
+            # Get current price (LTP)
+            # get_ltp expects list of symbols with exchange prefix
+            ltp_response = client.get_ltp([f"NSE:{sym}"])
+            
+            if not ltp_response or ltp_response.get('status') != 'success':
+                results.append({
+                    'Symbol': sym,
+                    'Price (₹)': 'Error',
+                    'Margin/Share (₹)': '-',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
+                    'Status': f'❌ Price fetch failed'
+                })
+                continue
+            
+            # Extract price from response
+            price_data = ltp_response.get('data', {})
+            price = float(price_data.get(f'NSE:{sym}', {}).get('ltp', 0))
+            
+            if price == 0:
+                results.append({
+                    'Symbol': sym,
+                    'Price (₹)': 'Error',
+                    'Margin/Share (₹)': '-',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
+                    'Status': f'❌ No price data'
+                })
+                continue
+            
+            # Calculate margin for 1 share (MIS / Intraday)
+            # calculate_order_margin(exchange, symbol, transaction_type, product_type, 
+            #                        order_type, quantity, price, trigger_price)
+            margin_response = client.calculate_order_margin(
+                exchange="NSE",
+                trading_symbol=sym,
+                transaction_type="BUY",
+                product_type="MIS",      # Intraday
+                order_type="MARKET",
+                quantity="1",
+                price="0",
+                trigger_price="0"
+            )
+            
+            if not margin_response or margin_response.get('status') != 'success':
+                results.append({
+                    'Symbol': sym,
+                    'Price (₹)': round(price, 2),
+                    'Margin/Share (₹)': 'Error',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
+                    'Status': f'❌ Margin calc failed'
+                })
+                continue
+            
+            margin_per_share = float(margin_response.get('data', {}).get('total', 0))
+            
+            if margin_per_share == 0:
+                results.append({
+                    'Symbol': sym,
+                    'Price (₹)': round(price, 2),
+                    'Margin/Share (₹)': 'Error',
+                    'Leverage (x)': '-',
+                    'Buying Power (₹)': '-',
+                    'Max Qty': '-',
+                    'Status': f'❌ Zero margin'
+                })
+                continue
+            
+            # Calculate derived values
             leverage = price / margin_per_share
             buying_power = capital * leverage
             max_qty = int(buying_power / price)
-
+            
             results.append({
-                'Symbol': sym, 'Price (₹)': price, 'Margin/Share (₹)': margin_per_share,
-                'Leverage (x)': round(leverage, 1), 'Buying Power (₹)': round(buying_power, 2),
-                'Max Qty': max_qty, 'Status': '✅ Ready'
+                'Symbol': sym,
+                'Price (₹)': round(price, 2),
+                'Margin/Share (₹)': round(margin_per_share, 2),
+                'Leverage (x)': round(leverage, 1),
+                'Buying Power (₹)': round(buying_power, 2),
+                'Max Qty': max_qty,
+                'Status': '✅ Ready'
             })
+            
         except Exception as e:
             results.append({
-                'Symbol': sym, 'Price (₹)': 'Error', 'Margin/Share (₹)': '-',
-                'Leverage (x)': '-', 'Buying Power (₹)': '-', 'Max Qty': '-',
-                'Status': f'❌ {str(e)[:30]}'
+                'Symbol': sym,
+                'Price (₹)': 'Error',
+                'Margin/Share (₹)': '-',
+                'Leverage (x)': '-',
+                'Buying Power (₹)': '-',
+                'Max Qty': '-',
+                'Status': f'❌ {str(e)[:40]}'
             })
+    
     return results, capital
 
 # ================================================================
-# 5. STREAMLIT UI
+# 4. STREAMLIT UI
 # ================================================================
 st.title("🚀 Live Margin Calculator")
+st.markdown("Get real-time margin, leverage, and max quantity for any stock")
 
-# --- Sidebar: Auto-Fetch or Manual Entry ---
+# --- Sidebar: Authentication ---
 with st.sidebar:
-    st.header("📊 Stock Sources")
+    st.header("🔐 Authentication")
     
-    # Option 1: Auto-fetch from URL
-    st.subheader("🌐 Auto-Fetch from Dashboard")
-    dashboard_url = st.text_input("Enter your dashboard URL:", placeholder="https://your-trading-dashboard.com")
-    if st.button("🔍 Auto-Detect Stocks", type="primary"):
-        if dashboard_url:
-            with st.spinner("Scraping stock symbols..."):
-                scraped = scrape_stock_symbols_from_url(dashboard_url)
-                if scraped:
-                    st.success(f"✅ Found {len(scraped)} stocks!")
-                    st.session_state['stock_list'] = scraped
-                    st.session_state['auto_detected'] = True
-                else:
-                    st.warning("No symbols found. Enter manually below.")
+    # Show SDK status
+    if MSTOCK_SDK_AVAILABLE:
+        st.success("✅ mStock SDK loaded")
+    else:
+        st.error("❌ mStock SDK not installed")
+        st.code("pip install mStock-TradingApi-A", language="bash")
+        st.stop()
+    
+    # Credentials input
+    api_key = st.text_input("API Key", type="password", 
+                            help="Generate from mStock dashboard → Products → Trading APIs")
+    user_id = st.text_input("User ID", help="Your mStock trading username")
+    password = st.text_input("Password", type="password", help="Your mStock trading password")
+    otp = st.text_input("OTP / Checksum (if 2FA enabled)", type="password",
+                        help="OTP received on registered mobile or checksum from mStock portal")
+    
+    auth_btn = st.button("🔑 Authenticate", type="primary")
+    
+    if auth_btn:
+        if not api_key or not user_id or not password:
+            st.error("Please fill in API Key, User ID, and Password")
         else:
-            st.warning("Please enter a URL.")
+            with st.spinner("Authenticating with mStock..."):
+                client = authenticate_mstock(api_key, user_id, password, otp if otp else None)
+                if client:
+                    st.session_state['mstock_client'] = client
+                    st.session_state['authenticated'] = True
+                    st.success("✅ Connected!")
     
     st.markdown("---")
     
-    # Option 2: Manual Entry (fallback)
-    st.subheader("✏️ Manual Entry")
+    # --- Stock Selection ---
+    st.header("📊 Stock Selection")
+    
+    # Default stock list (from your screenshot)
     default_stocks = "GABRIEL, TIMETECHNO, KMEW, SIGNATURE, ORCHPHARMA, JYOTICNC"
     
-    # If auto-detected, use that list, else default
-    if 'stock_list' in st.session_state and st.session_state.get('auto_detected'):
-        default_val = ", ".join(st.session_state['stock_list'])
-    else:
-        default_val = default_stocks
-    
     stock_input = st.text_area(
-        "Stock symbols (comma or newline):",
-        value=default_val,
-        height=150,
-        key="stock_input_area"
+        "Enter stock symbols (comma or newline separated):",
+        value=default_stocks,
+        height=120,
+        help="Enter NSE stock symbols. Example: TCS, INFY, RELIANCE"
     )
     
     fetch_btn = st.button("🔄 Fetch Margins", type="primary")
-    st.caption("Powered by mStock API")
-    
-    if not MSTOCK_AVAILABLE:
-        st.warning("⚠️ mStock SDK not installed – using mock data.")
 
 # --- Main Area ---
 col1, col2 = st.columns([2, 1])
@@ -170,20 +263,34 @@ with col1:
 with col2:
     capital_placeholder = st.empty()
 
-if fetch_btn:
-    # Parse symbols from the text area
+# Check authentication status
+if not st.session_state.get('authenticated', False):
+    st.info("👈 Please authenticate first by entering your credentials and clicking 'Authenticate'")
+    # Show empty table
+    st.dataframe(pd.DataFrame(columns=['Symbol', 'Price (₹)', 'Margin/Share (₹)', 
+                                        'Leverage (x)', 'Buying Power (₹)', 'Max Qty', 'Status']))
+    st.stop()
+
+client = st.session_state.get('mstock_client')
+
+if fetch_btn and client:
+    # Parse stock symbols
     symbols = [s.strip().upper() for s in stock_input.replace(',', ' ').split() if s.strip()]
     
     if not symbols:
-        st.warning("No stocks to fetch. Enter symbols or auto-detect.")
+        st.warning("Please enter at least one stock symbol.")
         st.stop()
     
-    with st.spinner("Calculating margins..."):
-        data, capital = get_margin_data(symbols)
+    with st.spinner("Fetching real-time margin data..."):
+        data, capital = get_margin_data(client, symbols)
     
+    # Update capital display
     capital_placeholder.metric("💰 Available Capital", f"₹{capital:,.2f}")
+    
+    # Create and display DataFrame
     df = pd.DataFrame(data)
     
+    # Style the dataframe
     st.dataframe(
         df,
         use_container_width=True,
@@ -198,21 +305,39 @@ if fetch_btn:
         },
         hide_index=True,
     )
-
+    
+    # --- Order Simulation ---
     st.markdown("---")
     st.subheader("📦 Place Order (Simulation)")
-    for idx, row in df.iterrows():
-        if row['Status'] == '✅ Ready':
-            c1, c2, c3 = st.columns([1, 1, 2])
-            with c1:
+    
+    # Filter only ready stocks
+    ready_stocks = df[df['Status'] == '✅ Ready']
+    
+    if not ready_stocks.empty:
+        for idx, row in ready_stocks.iterrows():
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+            with col1:
                 st.write(f"**{row['Symbol']}**")
-            with c2:
-                qty = st.number_input("Qty", min_value=1, max_value=row['Max Qty'], value=row['Max Qty'], key=f"qty_{idx}")
-            with c3:
-                if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}"):
-                    st.success(f"✅ Order placed: {row['Symbol']} {qty} shares (Simulation)")
-else:
-    st.info("👈 Enter symbols or auto-fetch from your dashboard URL, then click **Fetch Margins**.")
-    st.dataframe(pd.DataFrame(columns=['Symbol', 'Price (₹)', 'Margin/Share (₹)', 'Leverage (x)', 'Buying Power (₹)', 'Max Qty', 'Status']))
+            with col2:
+                st.write(f"₹{row['Price (₹)']:.2f}")
+            with col3:
+                qty = st.number_input(
+                    "Qty",
+                    min_value=1,
+                    max_value=row['Max Qty'],
+                    value=min(row['Max Qty'], 10),
+                    key=f"qty_{idx}_{row['Symbol']}"
+                )
+            with col4:
+                if st.button(f"Buy {row['Symbol']}", key=f"buy_{idx}_{row['Symbol']}"):
+                    st.success(f"✅ Order placed: {row['Symbol']} - {qty} shares at ₹{row['Price (₹)']:.2f} (Simulation)")
+    else:
+        st.info("No stocks with 'Ready' status to place orders.")
 
+elif fetch_btn and not client:
+    st.error("❌ Not authenticated. Please authenticate first.")
+
+# --- Footer ---
+st.markdown("---")
 st.caption(f"Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption("Powered by mStock Trading API | Data refreshes on each fetch")
