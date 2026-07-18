@@ -9,18 +9,98 @@ from mstock_symbol_resolver import (
     get_token
 )
 
+# ------------------- SDK Setup -------------------
+try:
+    from tradingapi_b.mconnect import MConnectB
+    SDK_AVAILABLE = True
+except ImportError:
+    SDK_AVAILABLE = False
+
+# ------------------- Helper: set token on client -------------------
+def set_client_token(client, jwt_token):
+    """Try multiple ways to set the JWT token on the client."""
+    if hasattr(client, 'set_jwt_token'):
+        client.set_jwt_token(jwt_token)
+        return True
+    elif hasattr(client, 'set_access_token'):
+        client.set_access_token(jwt_token)
+        return True
+    elif hasattr(client, 'set_bearer_token'):
+        client.set_bearer_token(jwt_token)
+        return True
+    elif hasattr(client, 'headers'):
+        client.headers['Authorization'] = f'Bearer {jwt_token}'
+        return True
+    else:
+        setattr(client, '_jwt_token', jwt_token)
+        return False
+
+# ------------------- Authentication -------------------
+def authenticate_type_b(api_key, user_id, password, otp):
+    """
+    Type-B authentication
+    """
+    if not SDK_AVAILABLE:
+        st.error("❌ mStock Type-B SDK not installed.")
+        return None, None, None
+
+    try:
+        client = MConnectB()
+        login_response = client.login(user_id, password)
+        login_data = login_response.json()
+
+        if not login_data.get('status', False):
+            st.error(f"Login failed: {login_data.get('message', 'Unknown')}")
+            return None, None, None
+
+        jwt_token = login_data.get('data', {}).get('jwtToken')
+        if not jwt_token:
+            st.error("No JWT token received. Check credentials.")
+            return None, None, None
+
+        set_client_token(client, jwt_token)
+        st.success("✅ Authentication successful!")
+        return client, jwt_token, api_key
+
+    except Exception as e:
+        st.error(f"Authentication error: {str(e)}")
+        return None, None, None
+
 st.set_page_config(page_title="mStock Symbol Download", layout="wide")
 
 st.title("🔧 mStock Instrument Master Download")
 
 with st.sidebar:
     st.header("🔐 Authenticate First")
+    
+    if not SDK_AVAILABLE:
+        st.error("❌ Type-B SDK not installed")
+        st.code("pip install mStock-TradingApi-B")
+        st.stop()
+    
+    st.subheader("Login Credentials")
     api_key = st.text_input("API Key", type="password")
-    jwt_token = st.text_input("JWT Token", type="password", help="From your login response")
+    user_id = st.text_input("User ID")
+    password = st.text_input("Password", type="password")
+    otp = st.text_input("OTP (6-digit)", type="password", help="If 2FA enabled")
+    
+    if st.button("🔑 Login & Get JWT Token"):
+        if not all([api_key, user_id, password]):
+            st.error("API Key, User ID, and Password are required")
+        else:
+            with st.spinner("Authenticating..."):
+                client, jwt_token, api_key = authenticate_type_b(api_key, user_id, password, otp)
+                if client or jwt_token:
+                    st.session_state['jwt_token'] = jwt_token
+                    st.session_state['api_key'] = api_key
+                    st.session_state['authenticated'] = True
 
-if not api_key or not jwt_token:
-    st.warning("⚠️ Please enter API Key and JWT Token in sidebar")
+if not st.session_state.get('authenticated'):
+    st.warning("⚠️ Please login first using the sidebar")
     st.stop()
+
+jwt_token = st.session_state.get('jwt_token')
+api_key = st.session_state.get('api_key')
 
 # Main area
 col1, col2 = st.columns(2)
