@@ -1,9 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FIXED)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FINAL)
+# - Sidebar: Keep existing items (SwingStrategy, TVScreener, etc.)
+# - Main Content: Only Gap screener (Remove ORB, Momentum, AI tabs)
 # - Professional dark theme
-# - Proper tab styling (underline, badges)
-# - Sidebar navigation restored
-# - Refresh button styled
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -36,7 +35,7 @@ st.set_page_config(
     page_title="TradeOS · Professional Screener",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded"  # Keep sidebar visible
+    initial_sidebar_state="expanded"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,9 +60,6 @@ if 'show_inside_only' not in st.session_state:
 if 'show_breakout_only' not in st.session_state:
     st.session_state['show_breakout_only'] = False
 
-if 'active_tab' not in st.session_state:
-    st.session_state['active_tab'] = "Gap"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +72,7 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PROFESSIONAL CSS (without hiding sidebar)
+# PROFESSIONAL CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
 PROFESSIONAL_CSS = """
@@ -105,10 +101,6 @@ PROFESSIONAL_CSS = """
     .css-1d391kg, .st-emotion-cache-1wmy9hl {
         background: rgba(10, 10, 15, 0.98) !important;
         border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
-    }
-    
-    .css-1d391kg .st-emotion-cache-6qob1r {
-        color: #888 !important;
     }
     
     /* ─── HIDE STREAMLIT FOOTER/HEADER ─── */
@@ -230,7 +222,7 @@ PROFESSIONAL_CSS = """
     }
     
     /* ─── REFRESH BUTTON ─── */
-    .refresh-btn {
+    .stButton button {
         background: rgba(255, 255, 255, 0.05) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
         color: #e0e0e0 !important;
@@ -238,56 +230,11 @@ PROFESSIONAL_CSS = """
         padding: 0.4rem 1.2rem !important;
         font-size: 0.8rem !important;
         transition: all 0.3s ease !important;
-        cursor: pointer;
     }
     
-    .refresh-btn:hover {
+    .stButton button:hover {
         background: rgba(255, 255, 255, 0.1) !important;
         border-color: rgba(0, 255, 136, 0.3) !important;
-    }
-    
-    /* ─── TABS (Professional underline style) ─── */
-    .tabs-container {
-        display: flex;
-        gap: 0.3rem;
-        margin-bottom: 1.25rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        padding-bottom: 0;
-        flex-wrap: wrap;
-    }
-    
-    .tab-item {
-        padding: 0.5rem 1.2rem;
-        border-radius: 8px 8px 0 0;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        color: #666;
-        font-size: 0.85rem;
-        font-weight: 500;
-        border: none !important;
-        background: transparent !important;
-        border-bottom: 2px solid transparent !important;
-        margin-bottom: -1px;
-    }
-    
-    .tab-item:hover {
-        color: #e0e0e0;
-        background: rgba(255, 255, 255, 0.02) !important;
-    }
-    
-    .tab-item.active {
-        color: #00ff88 !important;
-        border-bottom-color: #00ff88 !important;
-        background: rgba(0, 255, 136, 0.05) !important;
-    }
-    
-    .tab-badge {
-        font-size: 0.6rem;
-        background: rgba(0, 255, 136, 0.15);
-        color: #00ff88;
-        padding: 0.1rem 0.5rem;
-        border-radius: 10px;
-        margin-left: 0.3rem;
     }
     
     /* ─── SCREENER CARD ─── */
@@ -351,7 +298,7 @@ PROFESSIONAL_CSS = """
         color: #00ff88;
     }
     
-    /* ─── CHECKBOX STYLING ─── */
+    /* ─── CHECKBOX ─── */
     .stCheckbox label {
         color: #888 !important;
         font-size: 0.8rem !important;
@@ -361,7 +308,7 @@ PROFESSIONAL_CSS = """
         color: #e0e0e0 !important;
     }
     
-    /* ─── DATAFRAME OVERRIDES ─── */
+    /* ─── DATAFRAME ─── */
     .stDataFrame {
         background: transparent !important;
     }
@@ -440,6 +387,23 @@ PROFESSIONAL_CSS = """
         transform: none !important;
     }
     
+    /* ─── SIDEBAR STYLING ─── */
+    .stSidebar .stButton button {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        color: #e0e0e0 !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+        text-align: left !important;
+        padding: 0.5rem 1rem !important;
+    }
+    
+    .stSidebar .stButton button:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(0, 255, 136, 0.2) !important;
+        color: #00ff88 !important;
+    }
+    
     /* ─── RESPONSIVE ─── */
     @media (max-width: 768px) {
         .tradeos-header {
@@ -475,11 +439,6 @@ PROFESSIONAL_CSS = """
             text-align: center;
             padding: 0.5rem 0.75rem;
         }
-        
-        .tab-item {
-            font-size: 0.75rem;
-            padding: 0.4rem 0.8rem;
-        }
     }
     
     /* ─── DEBUG ─── */
@@ -502,40 +461,10 @@ PROFESSIONAL_CSS = """
         color: #888;
     }
     
-    /* ─── SIDEBAR OVERRIDES ─── */
-    .css-1d391kg .st-emotion-cache-1r4qj8v {
-        color: #888 !important;
-    }
-    
-    .css-1d391kg .st-emotion-cache-1r4qj8v:hover {
-        color: #e0e0e0 !important;
-    }
-    
-    /* ─── EXPANDER OVERRIDES ─── */
-    .streamlit-expanderHeader {
-        color: #555 !important;
-        font-size: 0.75rem !important;
-        background: rgba(255, 255, 255, 0.01) !important;
-        border: 1px solid rgba(255, 255, 255, 0.03) !important;
-        border-radius: 8px !important;
-    }
-    
-    .streamlit-expanderContent {
-        background: rgba(0, 0, 0, 0.3) !important;
-        border-radius: 0 0 8px 8px !important;
-        color: #666 !important;
-        font-size: 0.7rem !important;
-        font-family: 'Courier New', monospace !important;
-    }
-    
     .stAlert {
         background: rgba(255, 255, 255, 0.02) !important;
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
         color: #888 !important;
-    }
-    
-    .stAlert svg {
-        fill: #888 !important;
     }
 </style>
 """
@@ -868,30 +797,6 @@ def render_header():
     """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR NAVIGATION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("### ⚡ TradeOS")
-        st.markdown("---")
-        
-        # Navigation links
-        if st.button("📊 Dashboard", use_container_width=True):
-            st.switch_page("pages/1_Dashboard.py")  # Adjust page names as needed
-        if st.button("🔍 Screener", use_container_width=True):
-            st.rerun()  # Already on this page
-        if st.button("📈 Trading", use_container_width=True):
-            st.switch_page("pages/2_Trading.py")
-        if st.button("💰 Portfolio", use_container_width=True):
-            st.switch_page("pages/3_Portfolio.py")
-        if st.button("⚙️ Settings", use_container_width=True):
-            st.switch_page("pages/4_Settings.py")
-        
-        st.markdown("---")
-        st.caption("v3.0 · Professional Trading Platform")
-
-# ─────────────────────────────────────────────────────────────────────────────
 # APPLY CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -900,9 +805,6 @@ st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Render Sidebar
-render_sidebar()
 
 # Render Header
 render_header()
@@ -919,54 +821,14 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
 # ─── Page Header ───
 col1, col2 = st.columns([3, 1])
 with col1:
-    st.markdown('<div class="page-title">🔍 Stock Screeners <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 with col2:
-    # Custom refresh button using st.button with class
     if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
         st.session_state['stage1_data'] = None
         st.rerun()
 
-# ─── Tabs (using HTML for professional look) ───
-tabs_html = f"""
-<div class="tabs-container">
-    <div class="tab-item {'active' if st.session_state['active_tab'] == 'Gap' else ''}" 
-         onclick="parent.document.querySelector('[data-testid=\\'stButton\\']').click()">
-        📊 Gap <span class="tab-badge">50</span>
-    </div>
-    <div class="tab-item {'active' if st.session_state['active_tab'] == 'ORB' else ''}">
-        🎯 ORB <span class="tab-badge">12</span>
-    </div>
-    <div class="tab-item {'active' if st.session_state['active_tab'] == 'Momentum' else ''}">
-        ⚡ Momentum <span class="tab-badge">8</span>
-    </div>
-    <div class="tab-item {'active' if st.session_state['active_tab'] == 'AI' else ''}">
-        🤖 AI <span class="tab-badge">0</span>
-    </div>
-</div>
-"""
-st.markdown(tabs_html, unsafe_allow_html=True)
-
-# Hidden buttons for tab switching (using st.button)
-tab_cols = st.columns(4)
-with tab_cols[0]:
-    if st.button("Gap", key="tab_gap", use_container_width=True):
-        st.session_state['active_tab'] = "Gap"
-        st.rerun()
-with tab_cols[1]:
-    if st.button("ORB", key="tab_orb", use_container_width=True):
-        st.session_state['active_tab'] = "ORB"
-        st.rerun()
-with tab_cols[2]:
-    if st.button("Momentum", key="tab_momentum", use_container_width=True):
-        st.session_state['active_tab'] = "Momentum"
-        st.rerun()
-with tab_cols[3]:
-    if st.button("AI", key="tab_ai", use_container_width=True):
-        st.session_state['active_tab'] = "AI"
-        st.rerun()
-
-# ─── Show only Gap tab content for now ───
-if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
+# ─── Show Gap Screener Content ───
+if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
@@ -1166,9 +1028,6 @@ if st.session_state['active_tab'] == "Gap" and st.session_state['stage1_data']:
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
-
-elif st.session_state['active_tab'] != "Gap":
-    st.info(f"📊 {st.session_state['active_tab']} screener coming soon...")
 
 # ─── Footer ───
 st.markdown("""
