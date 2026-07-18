@@ -1,11 +1,12 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FINAL)
 # - Sidebar: Keep existing items (SwingStrategy, TVScreener, etc.)
-# - Main Content: Only Gap screener (Remove ORB, Momentum, AI tabs)
+# - Main Content: Only Gap screener
 # - Professional dark theme with proper table styling
-# - GAP% column added
+# - GAP% column added with NaN handling
 # - Signal badges colored (BUY=green, HOLD=yellow, SELL=red)
 # - Rel Vol formatted with 'x'
+# - All NaN values handled properly
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -976,7 +977,7 @@ if st.session_state['stage1_data']:
                 num_parts=4
             )
         
-        # ─── Create professional display columns (ADDED gap_percent) ───
+        # ─── Create professional display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -997,14 +998,40 @@ if st.session_state['stage1_data']:
             'sector': 'Sector'
         })
         
-        # ─── Format columns ───
+        # ─── Format columns with NaN handling ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
-        display_df['Chg%'] = display_df['Chg%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
-        display_df['Gap%'] = display_df['Gap%'].apply(lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%")
-        display_df['Volume'] = display_df['Volume'].apply(
-            lambda x: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.1f}K"
-        )
-        display_df['Rel Vol'] = display_df['Rel Vol'].apply(lambda x: f"{x:.2f}x" if x else "0x")
+        
+        def format_chg(x):
+            if pd.isna(x) or x is None:
+                return "0.00%"
+            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
+        
+        display_df['Chg%'] = display_df['Chg%'].apply(format_chg)
+        
+        def format_gap(x):
+            if pd.isna(x) or x is None:
+                return "0.00%"
+            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
+        
+        display_df['Gap%'] = display_df['Gap%'].apply(format_gap)
+        
+        def format_volume(x):
+            if pd.isna(x) or x is None:
+                return "0"
+            if x >= 1e6:
+                return f"{x/1e6:.1f}M"
+            elif x >= 1e3:
+                return f"{x/1e3:.1f}K"
+            return f"{x:.0f}"
+        
+        display_df['Volume'] = display_df['Volume'].apply(format_volume)
+        
+        def format_relvol(x):
+            if pd.isna(x) or x is None:
+                return "0x"
+            return f"{x:.2f}x"
+        
+        display_df['Rel Vol'] = display_df['Rel Vol'].apply(format_relvol)
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
@@ -1028,7 +1055,7 @@ if st.session_state['stage1_data']:
         
         display_df['Signal'] = display_df.apply(get_signal_badge, axis=1)
         
-        # ─── Display table (ADDED Gap% column) ───
+        # ─── Display table ───
         st.dataframe(
             display_df,
             use_container_width=True,
