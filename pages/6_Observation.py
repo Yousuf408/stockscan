@@ -1,6 +1,26 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (SINGLE FILE)
-# All code in one file - no import issues
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# SECTION GUIDE:
+# ==============
+# SECTION 1  : IMPORTS & CONFIGURATION
+# SECTION 2  : SESSION STATE INITIALIZATION
+# SECTION 3  : HARDCODED SETTINGS
+# SECTION 4  : PROFESSIONAL CSS
+# SECTION 5  : BACKEND - DATA FETCHING FUNCTIONS
+# SECTION 6  : BACKEND - CANDLE DATA FUNCTIONS
+# SECTION 7  : BACKEND - DATA LOADER & PROCESSING
+# SECTION 8  : FRONTEND - RENDER FUNCTIONS
+# SECTION 9  : FRONTEND - MAIN APP
+# SECTION 10 : FRONTEND - FILTERS
+# SECTION 11 : FRONTEND - TABLE DISPLAY
+# SECTION 12 : FRONTEND - BUY BUTTONS
+# SECTION 13 : FRONTEND - FOOTER & DEBUG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 1: IMPORTS & CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -36,49 +56,64 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2: SESSION STATE INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def init_session_state():
+    """Initialize all session state variables"""
+    if 'user_capital' not in st.session_state:
+        st.session_state['user_capital'] = 100000.0
+
+    if 'amo_mode' not in st.session_state:
+        st.session_state['amo_mode'] = False
+
+    if 'stage1_data' not in st.session_state:
+        st.session_state['stage1_data'] = None
+
+    if 'stage1_loaded' not in st.session_state:
+        st.session_state['stage1_loaded'] = False
+
+    if 'show_inside_only' not in st.session_state:
+        st.session_state['show_inside_only'] = False
+
+    if 'show_breakout_only' not in st.session_state:
+        st.session_state['show_breakout_only'] = False
+
+    if 'stage1_last_refresh' not in st.session_state:
+        IST = pytz.timezone('Asia/Kolkata')
+        st.session_state['stage1_last_refresh'] = datetime.now(IST)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# SESSION STATE INIT
+# TIMEZONE
 # ─────────────────────────────────────────────────────────────────────────────
 
-if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000.0
+IST = pytz.timezone('Asia/Kolkata')
 
-if 'amo_mode' not in st.session_state:
-    st.session_state['amo_mode'] = False
 
-if 'stage1_data' not in st.session_state:
-    st.session_state['stage1_data'] = None
-
-if 'stage1_loaded' not in st.session_state:
-    st.session_state['stage1_loaded'] = False
-
-if 'show_inside_only' not in st.session_state:
-    st.session_state['show_inside_only'] = False
-
-if 'show_breakout_only' not in st.session_state:
-    st.session_state['show_breakout_only'] = False
-
-if 'stage1_last_refresh' not in st.session_state:
-    IST = pytz.timezone('Asia/Kolkata')
-    st.session_state['stage1_last_refresh'] = datetime.now(IST)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HARDCODED SETTINGS
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3: HARDCODED SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔧 Change these values to modify screener filters
 
 HARDCODED_SETTINGS = {
-    'price_min': 200,
-    'price_max': 2000,
-    'market_cap_min': 41_000_000_000,
-    'stocks_limit': 50
+    'price_min': 200,           # Minimum price filter
+    'price_max': 2000,          # Maximum price filter
+    'market_cap_min': 41_000_000_000,  # Minimum market cap (41B)
+    'stocks_limit': 50          # Number of top stocks to display
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PROFESSIONAL CSS
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 4: PROFESSIONAL CSS
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🎨 Modify this section to change the look and feel
 
 PROFESSIONAL_CSS = """
 <style>
+    /* ─── GLOBAL BACKGROUND ─── */
     .stApp {
         background: #0a0a0f !important;
     }
@@ -94,15 +129,20 @@ PROFESSIONAL_CSS = """
         max-width: 1440px !important;
         background: #0a0a0f !important;
     }
+    
+    /* ─── SIDEBAR ─── */
     .css-1d391kg, .st-emotion-cache-1wmy9hl {
         background: rgba(10, 10, 15, 0.98) !important;
         border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
     }
+    
+    /* ─── HIDE STREAMLIT FOOTER/HEADER ─── */
     #MainMenu {visibility: hidden !important;}
     footer {visibility: hidden !important;}
     header {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     
+    /* ─── HEADER ─── */
     .tradeos-header {
         display: flex;
         justify-content: space-between;
@@ -181,6 +221,7 @@ PROFESSIONAL_CSS = """
         font-variant-numeric: tabular-nums;
     }
     
+    /* ─── PAGE HEADER ─── */
     .page-header {
         display: flex;
         justify-content: space-between;
@@ -200,6 +241,7 @@ PROFESSIONAL_CSS = """
         font-weight: 400;
     }
     
+    /* ─── BUTTONS ─── */
     .stButton button {
         background: rgba(255, 255, 255, 0.05) !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -214,6 +256,7 @@ PROFESSIONAL_CSS = """
         border-color: rgba(0, 255, 136, 0.3) !important;
     }
     
+    /* ─── SCREENER CARD ─── */
     .screener-card {
         background: rgba(255, 255, 255, 0.02);
         border-radius: 16px;
@@ -266,6 +309,18 @@ PROFESSIONAL_CSS = """
         color: #00ff88;
     }
     
+    /* ─── FILTER ROW INSIDE CARD ─── */
+    .filter-row {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.75rem 1.5rem;
+        background: rgba(255, 255, 255, 0.01);
+        border-top: 1px solid rgba(255, 255, 255, 0.03);
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    /* ─── CHECKBOX ─── */
     .stCheckbox label {
         color: #888 !important;
         font-size: 0.8rem !important;
@@ -274,6 +329,7 @@ PROFESSIONAL_CSS = """
         color: #e0e0e0 !important;
     }
     
+    /* ─── DATAFRAME ─── */
     .stDataFrame {
         background: transparent !important;
     }
@@ -328,6 +384,7 @@ PROFESSIONAL_CSS = """
         background: transparent !important;
     }
     
+    /* ─── FOOTER BAR ─── */
     .footer-bar {
         display: flex;
         justify-content: space-between;
@@ -346,6 +403,7 @@ PROFESSIONAL_CSS = """
         color: #00ff88;
     }
     
+    /* ─── BUY BUTTONS ─── */
     .stButton button[kind="secondary"] {
         background: linear-gradient(135deg, #00ff88, #00cc66) !important;
         border: none !important;
@@ -364,6 +422,7 @@ PROFESSIONAL_CSS = """
         transform: none !important;
     }
     
+    /* ─── SIDEBAR STYLING ─── */
     .stSidebar .stButton button {
         background: rgba(255, 255, 255, 0.03) !important;
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
@@ -379,6 +438,7 @@ PROFESSIONAL_CSS = """
         color: #00ff88 !important;
     }
     
+    /* ─── RESPONSIVE ─── */
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -408,8 +468,14 @@ PROFESSIONAL_CSS = """
             text-align: center;
             padding: 0.5rem 0.75rem;
         }
+        .filter-row {
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+        }
     }
     
+    /* ─── DEBUG ─── */
     .debug-section {
         margin-top: 1rem;
         padding: 1rem 1.5rem;
@@ -432,6 +498,7 @@ PROFESSIONAL_CSS = """
         color: #888 !important;
     }
     
+    /* ─── SIGNAL BADGES IN TABLE ─── */
     .signal-buy {
         background: rgba(0, 255, 136, 0.15) !important;
         color: #00ff88 !important;
@@ -459,9 +526,11 @@ PROFESSIONAL_CSS = """
 </style>
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# BACKEND FUNCTIONS (All logic in one file)
-# ─────────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 5: BACKEND - DATA FETCHING FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔧 Modify these functions to change data source or filtering logic
 
 def get_gap_filtered_stocks(df):
     """Filter stocks with gap ±2%"""
@@ -550,6 +619,11 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 6: BACKEND - CANDLE DATA FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔧 Modify these functions to change candle analysis logic
 
 def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     """Fetch intraday data for a single symbol"""
@@ -724,6 +798,23 @@ def check_candle_conditions(df, tickers_list):
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 7: BACKEND - DATA LOADER & PROCESSING
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🔧 Modify these functions to change data loading behavior
+
+def should_refresh_stage1():
+    """Check if Stage 1 data needs refresh (every 1 minute)"""
+    if 'stage1_last_refresh' not in st.session_state:
+        st.session_state['stage1_last_refresh'] = datetime.now(IST)
+        return True
+    
+    time_diff = datetime.now(IST) - st.session_state['stage1_last_refresh']
+    if time_diff.total_seconds() >= 60:
+        return True
+    return False
+
+
 def load_stage1_data():
     """Load all Stage 1 data"""
     with st.spinner("🔄 Loading market data..."):
@@ -786,6 +877,7 @@ def prepare_display_dataframe(display_df, user_capital):
         'sector': 'Sector'
     })
     
+    # ─── Format columns ───
     display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
     
     def format_chg(x):
@@ -822,6 +914,7 @@ def prepare_display_dataframe(display_df, user_capital):
     display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
     display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
     
+    # ─── Signal with colored badges ───
     def get_signal(row):
         if row['Inside 9:15'] == "✅" and row['Breakout'] == "✅":
             return "BUY"
@@ -844,26 +937,13 @@ def prepare_display_dataframe(display_df, user_capital):
     return display_df
 
 
-def should_refresh_stage1():
-    """Check if Stage 1 data needs refresh (every 1 minute)"""
-    if 'stage1_last_refresh' not in st.session_state:
-        st.session_state['stage1_last_refresh'] = datetime.now(IST)
-        return True
-    
-    time_diff = datetime.now(IST) - st.session_state['stage1_last_refresh']
-    if time_diff.total_seconds() >= 60:
-        return True
-    return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RENDER FUNCTIONS
-# ─────────────────────────────────────────────────────────────────────────────
-
-IST = pytz.timezone('Asia/Kolkata')
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 8: FRONTEND - RENDER FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🎨 Modify these functions to change the UI appearance
 
 def render_header():
-    """Render professional header"""
+    """Render professional header with market ticker"""
     current_time = datetime.now(IST)
     
     nifty = "24,856.40"
@@ -893,6 +973,72 @@ def render_header():
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def render_screener_card_header(data, last_refresh, pass_count):
+    """Render the screener card header with stats and badges"""
+    st.markdown(f"""
+    <div class="screener-card">
+        <div class="screener-header">
+            <div class="screener-stats">
+                <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
+                <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
+                <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
+                <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
+            </div>
+            <div class="filter-badges">
+                <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
+                <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
+                <span class="filter-badge active">📈 Gap ±2%</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+
+def render_filters():
+    """Render the filter checkboxes inside the screener card"""
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
+    
+    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+    
+    with filter_col1:
+        if is_after_9_25:
+            show_inside_only = st.checkbox(
+                "📊 Inside 9:15 Range",
+                value=st.session_state['show_inside_only'],
+                key="inside_checkbox"
+            )
+            st.session_state['show_inside_only'] = show_inside_only
+        else:
+            st.info("⏳ 9:20 candle available after 9:25 AM")
+            show_inside_only = False
+    
+    with filter_col2:
+        if is_after_9_30:
+            show_breakout_only = st.checkbox(
+                "⚡ Breakout 9:30-9:45",
+                value=st.session_state['show_breakout_only'],
+                key="breakout_checkbox"
+            )
+            st.session_state['show_breakout_only'] = show_breakout_only
+        else:
+            st.info("⏳ Breakout filter available after 9:30 AM")
+            show_breakout_only = False
+    
+    with filter_col3:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO",
+            value=st.session_state['amo_mode'],
+            key="amo_checkbox"
+        )
+        st.session_state['amo_mode'] = amo_test_mode
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    return show_inside_only, show_breakout_only, amo_test_mode
 
 
 def render_buy_buttons(display_df, amo_test_mode):
@@ -927,17 +1073,34 @@ def render_buy_buttons(display_df, amo_test_mode):
                     display_order_result(symbol, result)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN APP
-# ─────────────────────────────────────────────────────────────────────────────
+def render_footer_bar(display_count, pass_count, last_refresh):
+    """Render the footer bar with refresh info"""
+    st.markdown(f"""
+    <div class="footer-bar">
+        <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
+        <span>📊 <span class="highlight">{display_count}</span> stocks displayed · 
+        <span class="highlight">{pass_count}</span> pass candle check</span>
+        <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
+    </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 9: FRONTEND - MAIN APP
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🚀 Main execution starts here
 
 # Apply CSS
 st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
 
+# Initialize Session State
+init_session_state()
+
 # Render Header
 render_header()
 
-# Check auto-refresh
+# ─── Check auto-refresh ───
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
     if stage1_data:
@@ -946,7 +1109,11 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
-# Page Header
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 10: FRONTEND - PAGE HEADER
+# ═══════════════════════════════════════════════════════════════════════════════
+
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
@@ -955,7 +1122,11 @@ with col2:
         st.session_state['stage1_data'] = None
         st.rerun()
 
-# Show Gap Screener Content
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 11: FRONTEND - MAIN CONTENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
@@ -963,68 +1134,13 @@ if st.session_state['stage1_data']:
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    st.markdown(f"""
-    <div class="screener-card">
-        <div class="screener-header">
-            <div class="screener-stats">
-                <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
-                <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
-                <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
-                <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
-            </div>
-            <div class="filter-badges">
-                <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
-                <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
-                <span class="filter-badge active">📈 Gap ±2%</span>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    # ─── Render Screener Card Header ───
+    render_screener_card_header(data, last_refresh, pass_count)
     
-   # ─── Apply Filters ───
-is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-
-# Create filter row inside the card
-st.markdown('<div class="filter-row">', unsafe_allow_html=True)
-
-# Use columns for checkboxes
-filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
-
-with filter_col1:
-    if is_after_9_25:
-        show_inside_only = st.checkbox(
-            "📊 Inside 9:15 Range",
-            value=st.session_state['show_inside_only'],
-            key="inside_checkbox"
-        )
-        st.session_state['show_inside_only'] = show_inside_only
-    else:
-        st.info("⏳ 9:20 candle available after 9:25 AM")
-        show_inside_only = False
-
-with filter_col2:
-    if is_after_9_30:
-        show_breakout_only = st.checkbox(
-            "⚡ Breakout 9:30-9:45",
-            value=st.session_state['show_breakout_only'],
-            key="breakout_checkbox"
-        )
-        st.session_state['show_breakout_only'] = show_breakout_only
-    else:
-        st.info("⏳ Breakout filter available after 9:30 AM")
-        show_breakout_only = False
-
-with filter_col3:
-    amo_test_mode = st.checkbox(
-        "🌙 AMO",
-        value=st.session_state['amo_mode'],
-        key="amo_checkbox"
-    )
-    st.session_state['amo_mode'] = amo_test_mode
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-    # Apply filters
+    # ─── Render Filters ───
+    show_inside_only, show_breakout_only, amo_test_mode = render_filters()
+    
+    # ─── Apply filters to dataframe ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -1034,8 +1150,10 @@ st.markdown('</div>', unsafe_allow_html=True)
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
+        # ─── Prepare display dataframe ───
         display_df = prepare_display_dataframe(display_df, st.session_state['user_capital'])
         
+        # ─── SECTION 12: FRONTEND - TABLE DISPLAY ───
         st.dataframe(
             display_df,
             use_container_width=True,
@@ -1055,8 +1173,10 @@ st.markdown('</div>', unsafe_allow_html=True)
             }
         )
         
+        # ─── SECTION 13: FRONTEND - BUY BUTTONS ───
         render_buy_buttons(display_df, amo_test_mode)
         
+        # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
@@ -1066,20 +1186,14 @@ st.markdown('</div>', unsafe_allow_html=True)
             use_container_width=True
         )
     
-    st.markdown(f"""
-    <div class="footer-bar">
-        <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
-        <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · 
-        <span class="highlight">{pass_count}</span> pass candle check</span>
-        <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # ─── SECTION 14: FRONTEND - FOOTER & DEBUG ───
+    render_footer_bar(len(display_df) if 'display_df' in locals() else 0, pass_count, last_refresh)
     
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
 
+# ─── Footer ───
 st.markdown("""
 <div style="text-align:center; padding:1.5rem; color:#333; font-size:0.65rem; border-top:1px solid rgba(255,255,255,0.02); margin-top:1rem;">
     ⚡ TradeOS v3.0 · Professional Screener<br>
