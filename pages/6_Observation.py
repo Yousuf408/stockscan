@@ -250,18 +250,17 @@ WHITE_THEME_CSS = """
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.6rem 1.5rem;
+        padding: 1rem 1.5rem;
         background: #f8f9fa;
         border-bottom: 1px solid #e9ecef;
         flex-wrap: wrap;
-        gap: 0.5rem;
+        gap: 0.75rem;
     }
     .screener-stats {
         display: flex;
-        gap: 1.2rem;
-        font-size: 0.75rem;
+        gap: 1.5rem;
+        font-size: 0.8rem;
         flex-wrap: wrap;
-        align-items: center;
     }
     .stat-item {
         color: #888;
@@ -276,15 +275,14 @@ WHITE_THEME_CSS = """
     }
     .filter-badges {
         display: flex;
-        gap: 0.3rem;
+        gap: 0.4rem;
         flex-wrap: wrap;
-        align-items: center;
     }
     .filter-badge {
         background: #f1f3f5;
-        padding: 0.15rem 0.6rem;
+        padding: 0.2rem 0.7rem;
         border-radius: 12px;
-        font-size: 0.65rem;
+        font-size: 0.7rem;
         color: #888;
         border: 1px solid #e9ecef;
     }
@@ -292,6 +290,24 @@ WHITE_THEME_CSS = """
         border-color: #28a745;
         color: #28a745;
         background: #f0fff4;
+    }
+    
+    .filter-row {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.75rem 1.5rem;
+        background: #f8f9fa;
+        border-top: 1px solid #e9ecef;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    .stCheckbox label {
+        color: #555 !important;
+        font-size: 0.8rem !important;
+    }
+    .stCheckbox label span {
+        color: #333 !important;
     }
     
     .stDataFrame {
@@ -434,7 +450,7 @@ WHITE_THEME_CSS = """
         }
         .screener-stats {
             font-size: 0.7rem;
-            gap: 0.6rem;
+            gap: 0.8rem;
         }
         .footer-bar {
             flex-direction: column;
@@ -992,11 +1008,10 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card ───
+    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    # ─── Screener Card Header ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -1018,9 +1033,10 @@ if st.session_state['stage1_data']:
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
-    # ─── Filter Row ───
-    st.markdown('<div style="padding: 0.5rem 1.5rem; background: #f8f9fa; border-top: 1px solid #e9ecef;">', unsafe_allow_html=True)
+    # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
+    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
+    # 5 columns for all controls + auto-buy status
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
     with filter_col1:
@@ -1071,6 +1087,7 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+                # Calculate eligible count safely
                 eligible_count = 0
                 if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
                     eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
