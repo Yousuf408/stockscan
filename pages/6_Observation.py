@@ -42,6 +42,9 @@ st.set_page_config(
 if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
 
+if 'num_parts' not in st.session_state:
+    st.session_state['num_parts'] = 4
+
 if 'amo_mode' not in st.session_state:
     st.session_state['amo_mode'] = False
 
@@ -762,10 +765,40 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.rerun()
 
 # ─── Page Header ───
-col1, col2 = st.columns([3, 1])
+col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
+
 with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
+
 with col2:
+    # ─── Budget Control ───
+    user_capital = st.number_input(
+        "💰",
+        min_value=1000,
+        max_value=10_000_000,
+        value=st.session_state['user_capital'],
+        step=1000,
+        key="capital_input",
+        label_visibility="collapsed",
+        help="Total capital to divide among stocks"
+    )
+    st.session_state['user_capital'] = user_capital
+
+with col3:
+    # ─── Parts Control ───
+    num_parts = st.number_input(
+        "📊",
+        min_value=1,
+        max_value=10,
+        value=st.session_state.get('num_parts', 4),
+        step=1,
+        key="parts_input",
+        label_visibility="collapsed",
+        help="Divide capital into how many parts"
+    )
+    st.session_state['num_parts'] = num_parts
+
+with col4:
     if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
         st.session_state['stage1_data'] = None
         st.rerun()
@@ -861,7 +894,7 @@ if st.session_state['stage1_data']:
             display_df['MaxQty'] = calculate_max_quantity_column(
                 display_df,
                 total_capital=st.session_state['user_capital'],
-                num_parts=4
+                num_parts=st.session_state.get('num_parts', 4)
             )
         
         # ─── Create display columns ───
@@ -938,7 +971,7 @@ if st.session_state['stage1_data']:
             st.dataframe(
                 display_df,
                 use_container_width=True,
-                height=800,
+                height=600,
                 column_config={
                     "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
                     "Price": st.column_config.TextColumn("PRICE", width="small"),
