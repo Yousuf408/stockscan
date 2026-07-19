@@ -499,7 +499,7 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
+def get_intraday_data_for_symbol(yahoo_ticker, period="10d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
