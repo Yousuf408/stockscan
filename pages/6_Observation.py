@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WITH 200 EMA)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -40,7 +40,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000.0
+    st.session_state['user_capital'] = 100000
 
 if 'num_parts' not in st.session_state:
     st.session_state['num_parts'] = 4
@@ -378,6 +378,59 @@ WHITE_THEME_CSS = """
         color: #28a745 !important;
     }
     
+    .buy-col-header {
+        font-size: 0.6rem;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 0.6rem 0.8rem;
+        background: #f8f9fa;
+        border-bottom: 2px solid #e9ecef;
+        margin-bottom: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    .buy-btn-wrap {
+        padding: 0.6rem 0.8rem;
+        border-bottom: 1px solid #f1f3f5;
+    }
+    
+    .buy-btn-wrap .stButton {
+        width: 100%;
+    }
+    
+    .buy-btn-wrap .stButton button {
+        width: 100% !important;
+        background: linear-gradient(135deg, #28a745, #20c997) !important;
+        border: none !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .buy-btn-wrap .stButton button:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
+    }
+    
+    .buy-btn-wrap .stButton button:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+    }
+    
+    .ema-above {
+        color: #28a745 !important;
+    }
+    
+    .ema-below {
+        color: #dc3545 !important;
+    }
+    
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -499,7 +552,8 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
+def get_intraday_data_for_symbol(yahoo_ticker, period="7d", interval="5m"):
+    """Fetch 5-minute data for last 7 days"""
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
@@ -666,6 +720,40 @@ def check_candle_conditions(df, tickers_list):
 
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
+# ─── NEW: Get 200 EMA from 5-min data ───
+def get_200ema_5min(symbol):
+    """
+    Calculate 200 EMA from 5-minute data (last 7 days)
+    Returns: (ema_value, is_above)
+    """
+    try:
+        base = symbol.replace('NSE:', '')
+        yahoo_ticker = base + '.NS'
+        
+        # Fetch 7 days of 5-minute data
+        data = yf.download(
+            yahoo_ticker,
+            period="7d",
+            interval="5m",
+            progress=False,
+            threads=False,
+            auto_adjust=False
+        )
+        
+        if data.empty or len(data) < 200:
+            return None, None
+        
+        # Calculate 200 EMA on 5-min data
+        ema_200 = data['Close'].ewm(span=200, adjust=False).mean().iloc[-1]
+        current_price = data['Close'].iloc[-1]
+        
+        is_above = current_price > ema_200
+        
+        return round(ema_200, 2), is_above
+        
+    except Exception as e:
+        return None, None
+
 def load_stage1_data():
     with st.spinner("🔄 Loading market data..."):
         count, df = get_tradingview_stocks()
@@ -771,7 +859,6 @@ with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 
 with col2:
-    # ─── Budget Control ───
     user_capital = st.number_input(
         "💰",
         min_value=1000,
@@ -785,7 +872,6 @@ with col2:
     st.session_state['user_capital'] = user_capital
 
 with col3:
-    # ─── Parts Control ───
     num_parts = st.number_input(
         "📊",
         min_value=1,
@@ -808,10 +894,13 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    # ─── Screener Card ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -827,14 +916,8 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
         </div>
+        <div class="filter-row">
     """, unsafe_allow_html=True)
-    
-    # ─── Apply Filters ───
-    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-    
-    # ─── Filter Row ───
-    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
     
@@ -871,9 +954,9 @@ if st.session_state['stage1_data']:
         st.session_state['amo_mode'] = amo_test_mode
     
     st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── Apply filters to dataframe ───
+    # ─── Apply filters ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -890,6 +973,21 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
+        # ─── Get 200 EMA for each symbol ───
+        with st.spinner("Calculating 200 EMA..."):
+            ema_values = []
+            for symbol in display_df['ticker']:
+                ema_val, is_above = get_200ema_5min(symbol)
+                if ema_val is not None and is_above is not None:
+                    arrow = '▲' if is_above else '▼'
+                    color_class = 'ema-above' if is_above else 'ema-below'
+                    ema_display = f"₹{ema_val:,.2f} <span class='{color_class}'>{arrow}</span>"
+                else:
+                    ema_display = "N/A"
+                ema_values.append(ema_display)
+            
+            display_df['200 EMA'] = ema_values
+        
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
                 display_df,
@@ -897,7 +995,6 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
         
-        # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -918,7 +1015,7 @@ if st.session_state['stage1_data']:
             'sector': 'Sector'
         })
         
-        # ─── Format columns with NaN handling ───
+        # ─── Format columns ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
         
         def format_chg(x):
@@ -955,10 +1052,9 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns (REMOVED Signal) ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
-            'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
+            'Rel Vol', '200 EMA', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
         ]
         
         existing_cols = [c for c in final_cols if c in display_df.columns]
@@ -979,6 +1075,7 @@ if st.session_state['stage1_data']:
                     "Gap%": st.column_config.TextColumn("GAP%", width="small"),
                     "Volume": st.column_config.TextColumn("VOLUME", width="small"),
                     "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
+                    "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
                     "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
                     "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
                     "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
@@ -987,11 +1084,14 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
+            st.markdown('<div class="buy-col-header">Place Order</div>', unsafe_allow_html=True)
+            
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
                 
+                st.markdown('<div class="buy-btn-wrap">', unsafe_allow_html=True)
                 if st.button(
                     btn_label,
                     key=f"buy_{symbol}_{idx}",
@@ -1007,6 +1107,7 @@ if st.session_state['stage1_data']:
                             amo_time="OPEN"
                         )
                         display_order_result(symbol, result)
+                st.markdown('</div>', unsafe_allow_html=True)
         
         # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
@@ -1028,7 +1129,6 @@ if st.session_state['stage1_data']:
     </div>
     """, unsafe_allow_html=True)
     
-    # ─── Debug Section ───
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
