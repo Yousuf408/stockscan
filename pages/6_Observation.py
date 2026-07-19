@@ -40,7 +40,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000.0
+    st.session_state['user_capital'] = 100000
 
 if 'num_parts' not in st.session_state:
     st.session_state['num_parts'] = 4
@@ -808,10 +808,14 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
+    # ─── Apply Filters ───
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    # ─── Screener Card Header with Filters inside ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -827,68 +831,46 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
         </div>
+        <div class="filter-row">
     """, unsafe_allow_html=True)
     
-  # ─── Apply Filters ───
-is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-
-# ─── Screener Card Header with Filters ───
-st.markdown(f"""
-<div class="screener-card">
-    <div class="screener-header">
-        <div class="screener-stats">
-            <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
-            <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
-            <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
-            <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
-        </div>
-        <div class="filter-badges">
-            <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
-            <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
-            <span class="filter-badge active">📈 Gap ±2%</span>
-        </div>
-    </div>
-    <div class="filter-row">
-""", unsafe_allow_html=True)
-
-# ─── Filters in a single row ───
-filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
-
-with filter_col1:
-    if is_after_9_25:
-        show_inside_only = st.checkbox(
-            "📊 Inside 9:15 Range",
-            value=st.session_state['show_inside_only'],
-            key="inside_checkbox"
+    # ─── Filters in a single row ───
+    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+    
+    with filter_col1:
+        if is_after_9_25:
+            show_inside_only = st.checkbox(
+                "📊 Inside 9:15 Range",
+                value=st.session_state['show_inside_only'],
+                key="inside_checkbox"
+            )
+            st.session_state['show_inside_only'] = show_inside_only
+        else:
+            st.info("⏳ 9:20 candle available after 9:25 AM")
+            show_inside_only = False
+    
+    with filter_col2:
+        if is_after_9_30:
+            show_breakout_only = st.checkbox(
+                "⚡ Breakout 9:30-9:45",
+                value=st.session_state['show_breakout_only'],
+                key="breakout_checkbox"
+            )
+            st.session_state['show_breakout_only'] = show_breakout_only
+        else:
+            st.info("⏳ Breakout filter available after 9:30 AM")
+            show_breakout_only = False
+    
+    with filter_col3:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO",
+            value=st.session_state['amo_mode'],
+            key="amo_checkbox"
         )
-        st.session_state['show_inside_only'] = show_inside_only
-    else:
-        st.info("⏳ 9:20 candle available after 9:25 AM")
-        show_inside_only = False
-
-with filter_col2:
-    if is_after_9_30:
-        show_breakout_only = st.checkbox(
-            "⚡ Breakout 9:30-9:45",
-            value=st.session_state['show_breakout_only'],
-            key="breakout_checkbox"
-        )
-        st.session_state['show_breakout_only'] = show_breakout_only
-    else:
-        st.info("⏳ Breakout filter available after 9:30 AM")
-        show_breakout_only = False
-
-with filter_col3:
-    amo_test_mode = st.checkbox(
-        "🌙 AMO",
-        value=st.session_state['amo_mode'],
-        key="amo_checkbox"
-    )
-    st.session_state['amo_mode'] = amo_test_mode
-
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
+        st.session_state['amo_mode'] = amo_test_mode
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
     # ─── Apply filters to dataframe ───
     display_df = df.copy()
@@ -972,7 +954,7 @@ st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns (REMOVED Signal) ───
+        # ─── Final columns ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
             'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
