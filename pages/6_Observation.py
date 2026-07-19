@@ -552,8 +552,7 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-def get_intraday_data_for_symbol(yahoo_ticker, period="7d", interval="5m"):
-    """Fetch 5-minute data for last 7 days"""
+def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
@@ -567,6 +566,40 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="7d", interval="5m"):
         return data
     except:
         return None
+
+def get_200ema_5min(symbol):
+    """
+    Calculate 200 EMA from 5-minute data (last 7 days)
+    Returns: (ema_value, is_above) where is_above is a Python bool
+    """
+    try:
+        base = symbol.replace('NSE:', '')
+        yahoo_ticker = base + '.NS'
+        
+        # Fetch 7 days of 5-minute data
+        data = yf.download(
+            yahoo_ticker,
+            period="7d",
+            interval="5m",
+            progress=False,
+            threads=False,
+            auto_adjust=False
+        )
+        
+        if data.empty or len(data) < 200:
+            return None, None
+        
+        # Calculate 200 EMA on 5-min data
+        ema_200 = data['Close'].ewm(span=200, adjust=False).mean().iloc[-1]
+        current_price = data['Close'].iloc[-1]
+        
+        # Convert to Python bool (not pandas Series)
+        is_above = bool(current_price > ema_200)
+        
+        return float(ema_200), is_above
+        
+    except Exception as e:
+        return None, None
 
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
@@ -719,40 +752,6 @@ def check_candle_conditions(df, tickers_list):
             failed_to_fetch.append(ticker)
 
     return df, valid_stocks, invalid_stocks, failed_to_fetch
-
-# ─── NEW: Get 200 EMA from 5-min data ───
-def get_200ema_5min(symbol):
-    """
-    Calculate 200 EMA from 5-minute data (last 7 days)
-    Returns: (ema_value, is_above)
-    """
-    try:
-        base = symbol.replace('NSE:', '')
-        yahoo_ticker = base + '.NS'
-        
-        # Fetch 7 days of 5-minute data
-        data = yf.download(
-            yahoo_ticker,
-            period="7d",
-            interval="5m",
-            progress=False,
-            threads=False,
-            auto_adjust=False
-        )
-        
-        if data.empty or len(data) < 200:
-            return None, None
-        
-        # Calculate 200 EMA on 5-min data
-        ema_200 = data['Close'].ewm(span=200, adjust=False).mean().iloc[-1]
-        current_price = data['Close'].iloc[-1]
-        
-        is_above = current_price > ema_200
-        
-        return round(ema_200, 2), is_above
-        
-    except Exception as e:
-        return None, None
 
 def load_stage1_data():
     with st.spinner("🔄 Loading market data..."):
@@ -973,7 +972,7 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-             # ─── Get 200 EMA for each symbol ───
+        # ─── Get 200 EMA for each symbol ───
         with st.spinner("Calculating 200 EMA..."):
             ema_values = []
             for symbol in display_df['ticker']:
@@ -987,7 +986,6 @@ if st.session_state['stage1_data']:
                 ema_values.append(ema_display)
             
             display_df['200 EMA'] = ema_values
-            
         
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
