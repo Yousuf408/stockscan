@@ -973,7 +973,7 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-        # ─── Get 200 EMA for each symbol ───
+             # ─── Get 200 EMA for each symbol ───
         with st.spinner("Calculating 200 EMA..."):
             ema_values = []
             for symbol in display_df['ticker']:
@@ -987,6 +987,7 @@ if st.session_state['stage1_data']:
                 ema_values.append(ema_display)
             
             display_df['200 EMA'] = ema_values
+            
         
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
