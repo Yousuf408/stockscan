@@ -40,7 +40,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000
+    st.session_state['user_capital'] = 100000.0
 
 if 'num_parts' not in st.session_state:
     st.session_state['num_parts'] = 4
@@ -808,14 +808,10 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
+    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    # ─── Apply Filters ───
-    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-    
-    # ─── Screener Card Header with Filters inside ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -831,10 +827,15 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
         </div>
-        <div class="filter-row">
     """, unsafe_allow_html=True)
     
-    # ─── Filters in a single row ───
+    # ─── Apply Filters ───
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    # ─── Filter Row ───
+    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
+    
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
     
     with filter_col1:
@@ -954,7 +955,7 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns ───
+        # ─── Final columns (REMOVED Signal) ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
             'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
