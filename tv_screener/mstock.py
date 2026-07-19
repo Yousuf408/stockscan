@@ -11,6 +11,14 @@ import pyotp
 from typing import Tuple, Dict, Any
 
 # ============================================================================
+# CREDENTIALS (FOR TESTING ONLY - Remove before production!)
+# ============================================================================
+MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
+MSTOCK_CLIENT_CODE = "MA1764118"
+MSTOCK_PASSWORD = "P@ssw0rd"
+MSTOCK_TOTP_SECRET = "CRIJTB7OAMTK7L5UB27PILGM6RHHS6FV"
+
+# ============================================================================
 # CONSTANTS
 # ============================================================================
 MSTOCK_API_BASE = "https://api.mstock.trade/openapi/typeb"
@@ -29,6 +37,26 @@ def get_headers(api_key: str = None, jwt_token: str = None) -> Dict[str, str]:
         headers["X-PrivateKey"] = api_key
         headers["Authorization"] = f"Bearer {jwt_token}"
     return headers
+
+# ============================================================================
+# AUTO-LOGIN (For Testing - uses hardcoded credentials)
+# ============================================================================
+def auto_login() -> Tuple[bool, str, str]:
+    """
+    Auto-login using hardcoded credentials
+    
+    Returns: (success, api_key, jwt_token)
+    WARNING: Only for testing! Remove before production!
+    """
+    if not all([MSTOCK_API_KEY, MSTOCK_CLIENT_CODE, MSTOCK_PASSWORD, MSTOCK_TOTP_SECRET]):
+        return False, "", "Credentials not set in mstock.py"
+    
+    success, jwt = login_with_totp(MSTOCK_CLIENT_CODE, MSTOCK_PASSWORD, MSTOCK_TOTP_SECRET)
+    
+    if success:
+        return True, MSTOCK_API_KEY, jwt
+    else:
+        return False, "", jwt  # jwt contains error message
 
 # ============================================================================
 # AUTHENTICATION
