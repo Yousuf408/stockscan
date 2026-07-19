@@ -108,7 +108,7 @@ def login_with_totp(client_code: str, password: str, totp_secret: str) -> Tuple[
         )
         totp_data = totp_response.json()
         
-        if totp_data.get("status") != True:
+        if totp_data.get("status") != "true":
             return False, totp_data.get("message", "TOTP verification failed")
         
         jwt_token = totp_data.get("data", {}).get("jwtToken")
