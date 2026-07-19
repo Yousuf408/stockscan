@@ -1,6 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# TV SCREENER PAGE (9_TVScreener.py)
-# Main orchestration: Fragment-based live market view + market-closed fallback
+# TV SCREENER PAGE (9_TVScreener.py) - WITH mSTOCK INTEGRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -72,9 +71,9 @@ from tv_screener.database import (
     supabase_save_row, init_session_caches, get_supabase_stats
 )
 from tv_screener.frontend import render_stock_table, render_market_closed_view, fmt_entry_badges, display_order_result
-from tv_screener.algomojo import place_buy_order
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
+from tv_screener import mstock  # ← mStock module
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION: SESSION STATE INITIALIZATION
@@ -84,6 +83,25 @@ init_session_caches()
 
 if 'user_capital' not in st.session_state:
     st.session_state['user_capital'] = 100000.0
+
+# ========== mSTOCK AUTO-LOGIN ==========
+if 'mstock_jwt_token' not in st.session_state:
+    with st.spinner("🔐 Connecting to mStock..."):
+        success, api_key, jwt_token = mstock.auto_login()
+        
+        if success:
+            # Fetch instrument master
+            m_success, symbol_map = mstock.fetch_instrument_master(api_key, jwt_token)
+            
+            if m_success:
+                st.session_state.mstock_api_key = api_key
+                st.session_state.mstock_jwt_token = jwt_token
+                st.session_state.mstock_symbol_map = symbol_map
+                st.success(f"✅ mStock connected: {len(symbol_map)} instruments")
+            else:
+                st.error(f"❌ Master fetch failed: {symbol_map}")
+        else:
+            st.error(f"❌ mStock login failed: {jwt_token}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -535,15 +553,11 @@ def screener_fragment():
         </div>
         """, unsafe_allow_html=True)
 
-    # (checkboxes already defined above, used in logic)
-
     # ── STEP 11.5: MAX QUANTITY ──
     with st.spinner("Calculating max quantity (DhanHQ margin)..."):
         df['MaxQty'] = calculate_max_quantity_column(df, st.session_state['user_capital'], num_parts=4)
 
     # ── STEP 12: RENDER TABLE + DHAN BUY BUTTONS ──
-    # amo_test_mode already set in Row 2 checkboxes above
-
     col_table, col_buttons = st.columns([8.5, 1.5])
 
     with col_table:
@@ -576,19 +590,38 @@ def screener_fragment():
         st.write("**Per-symbol results:**")
         st.json(debug_info.get('per_symbol', {}))
 
-    # ── STEP 13: ALGOMOJO BUY ORDER BUTTONS ──
+    # ── STEP 13: mSTOCK ORDER PLACEMENT (Testing) ──
     st.markdown("---")
-    st.subheader("📊 Buy Orders — AlgoMojo (Manual)")
-
-    algomojo_cols = st.columns(min(4, len(df)))
-    for idx, (_, row) in enumerate(df.iterrows()):
-        col_idx = idx % len(algomojo_cols)
-        with algomojo_cols[col_idx]:
-            symbol = row['Symbol']
-            if st.button(f"Buy {symbol}", key=f"buy_algomojo_{symbol}_{idx}"):
-                with st.spinner(f"Placing order for {symbol} via AlgoMojo..."):
-                    result = place_buy_order(symbol, quantity=1)
-                    display_order_result(symbol, result)
+    st.subheader("📊 Buy Orders — mStock (Testing)")
+    
+    if st.session_state.get('mstock_jwt_token'):
+        st.info("✅ mStock authenticated and ready")
+        
+        mstock_cols = st.columns(min(4, len(df)))
+        for idx, (_, row) in enumerate(df.iterrows()):
+            col_idx = idx % len(mstock_cols)
+            with mstock_cols[col_idx]:
+                symbol = row['Symbol']
+                max_qty_val = int(row.get('MaxQty', 1) or 1)
+                
+                if st.button(f"📤 {symbol} ({max_qty_val})", key=f"buy_mstock_{symbol}_{idx}", use_container_width=True):
+                    with st.spinner(f"Placing mStock order for {symbol}..."):
+                        success, msg = mstock.quick_order(
+                            st.session_state.mstock_api_key,
+                            st.session_state.mstock_jwt_token,
+                            symbol,
+                            max_qty_val,
+                            0,  # Market order
+                            "BUY",
+                            st.session_state.mstock_symbol_map
+                        )
+                        
+                        if success:
+                            st.success(f"✅ {msg}")
+                        else:
+                            st.error(f"❌ {msg}")
+    else:
+        st.warning("⚠️ mStock not authenticated. Check credentials in mstock.py")
 
     # ── DIAGNOSTICS ──
     success_count, errors = get_supabase_stats()
