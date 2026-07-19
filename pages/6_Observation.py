@@ -1033,21 +1033,22 @@ if st.session_state['stage1_data']:
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
-    # ─── Filter Row ───
+    # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+    # 5 columns for all controls + auto-buy status
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
     with filter_col1:
         if is_after_9_25:
             show_inside_only = st.checkbox(
-                "📊 Inside 9:15 Range",
+                "📊 Inside 9:15",
                 value=st.session_state['show_inside_only'],
                 key="inside_checkbox"
             )
             st.session_state['show_inside_only'] = show_inside_only
         else:
-            st.info("⏳ 9:20 candle available after 9:25 AM")
+            st.info("⏳ 9:20 after 9:25 AM")
             show_inside_only = False
     
     with filter_col2:
@@ -1059,7 +1060,7 @@ if st.session_state['stage1_data']:
             )
             st.session_state['show_breakout_only'] = show_breakout_only
         else:
-            st.info("⏳ Breakout filter available after 9:30 AM")
+            st.info("⏳ Breakout after 9:30 AM")
             show_breakout_only = False
     
     with filter_col3:
@@ -1069,6 +1070,39 @@ if st.session_state['stage1_data']:
             key="amo_checkbox"
         )
         st.session_state['amo_mode'] = amo_test_mode
+    
+    with filter_col4:
+        # Auto-Buy Toggle
+        auto_buy_toggle = st.checkbox(
+            "🤖 Auto-Buy",
+            value=st.session_state.get('auto_buy_enabled', False),
+            key="auto_buy_toggle"
+        )
+        st.session_state['auto_buy_enabled'] = auto_buy_toggle
+    
+    with filter_col5:
+        # Auto-Buy Status (Compact)
+        if auto_buy_toggle:
+            if not show_inside_only:
+                st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
+            else:
+                remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+                # Calculate eligible count safely
+                eligible_count = 0
+                if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
+                    eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
+                
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;padding:2px 0;">
+                    <span style="color:#28a745;font-weight:600;">🟢 ACTIVE</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">🎯 {eligible_count}</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">📊 {remaining}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown('<span style="color:#888;font-size:0.7rem;">⚪ Auto-Buy OFF</span>', unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
@@ -1231,104 +1265,31 @@ if st.session_state['stage1_data']:
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-        # ════════════════════════════════════════════════════════════════
-        # ═══ AUTO-BUY SECTION ═══
-        # ════════════════════════════════════════════════════════════════
-        
-        st.markdown("---")
-        
-        # Auto-Buy Header with Toggle
-        ab_header_col1, ab_header_col2, ab_header_col3 = st.columns([1, 3, 1])
-        
-        with ab_header_col1:
-            st.subheader("🤖 Auto-Buy")
-        
-        with ab_header_col2:
-            # Toggle switch for auto-buy
-            auto_buy_toggle = st.checkbox(
-                "Enable Auto-Buy",
-                value=st.session_state.get('auto_buy_enabled', False),
-                key="auto_buy_toggle"
-            )
-            st.session_state['auto_buy_enabled'] = auto_buy_toggle
-        
-        with ab_header_col3:
-            # Show daily count
-            today = datetime.now().date()
-            if st.session_state['auto_buy_date'] != today:
-                st.session_state['auto_buy_bought_today'] = 0
-                st.session_state['auto_buy_stocks_bought'] = []
-                st.session_state['auto_buy_date'] = today
+        # ─── Auto-Buy Execution (Only when enabled) ───
+        if st.session_state.get('auto_buy_enabled', False) and st.session_state.get('show_inside_only', False):
+            eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
             
-            remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-            st.metric("Remaining Today", remaining, delta=None)
-        
-        # Auto-Buy Configuration (only shown when enabled)
-        if auto_buy_toggle:
-            st.markdown('<div class="auto-buy-enabled">', unsafe_allow_html=True)
-            
-            # Check if Inside 9:15 checkbox is active
-            if not st.session_state.get('show_inside_only', False):
-                st.warning("⚠️ **Inside 9:15 Range checkbox must be checked for Auto-Buy to work!**")
-                st.info("Please check the 'Inside 9:15 Range' filter above to enable auto-buy.")
-            else:
-                st.info("📊 Auto-buy is ACTIVE. Stocks meeting all conditions will be bought automatically.")
+            if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
+                with st.spinner("🤖 Auto-buy executing..."):
+                    placed, failed, error = execute_auto_buy(display_df)
                 
-                # Show auto-buy conditions
-                st.markdown("**Auto-Buy Conditions:**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown("✅ Inside 9:15 Range")
-                with col2:
-                    st.markdown("✅ Above 200 EMA")
-                with col3:
-                    st.markdown("✅ Price > 9:15 High + 0.15%")
-                
-                # Show eligible stocks count
-                eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
-                st.info(f"🎯 {eligible_count} stocks currently eligible for auto-buy")
-                
-                # Auto-execute: Check if any stocks need to be bought
-                if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
-                    # Execute auto-buy immediately
-                    with st.spinner("🤖 Auto-buy executing..."):
-                        placed, failed, error = execute_auto_buy(display_df)
+                if error:
+                    st.warning(f"⚠️ {error}")
+                else:
+                    if placed:
+                        st.success(f"✅ {len(placed)} orders placed successfully!")
+                        placed_df = pd.DataFrame(placed)
+                        st.dataframe(placed_df, use_container_width=True)
+                        st.session_state['auto_buy_orders_placed'].extend(placed)
                     
-                    if error:
-                        st.warning(f"⚠️ {error}")
-                    else:
-                        if placed:
-                            st.success(f"✅ {len(placed)} orders placed successfully!")
-                            placed_df = pd.DataFrame(placed)
-                            st.dataframe(placed_df, use_container_width=True)
-                            st.session_state['auto_buy_orders_placed'].extend(placed)
-                        
-                        if failed:
-                            st.warning(f"⚠️ {len(failed)} orders failed")
-                            failed_df = pd.DataFrame(failed)
-                            st.dataframe(failed_df, use_container_width=True)
-                            st.session_state['auto_buy_orders_failed'].extend(failed)
-                        
-                        # Check if daily limit reached
-                        if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-                            st.success(f"🎯 Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached!")
-                
-                elif st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-                    st.success(f"✅ Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached. Auto-buy will resume tomorrow.")
-            
-            # Show today's bought stocks
-            if st.session_state['auto_buy_stocks_bought']:
-                with st.expander("📊 Today's Auto-Buy History"):
-                    st.write(f"Stocks bought: {', '.join(st.session_state['auto_buy_stocks_bought'])}")
-                    if st.session_state['auto_buy_orders_placed']:
-                        st.dataframe(pd.DataFrame(st.session_state['auto_buy_orders_placed']))
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        else:
-            st.markdown('<div class="auto-buy-disabled">', unsafe_allow_html=True)
-            st.info("⚪ Auto-Buy is disabled. Toggle the switch above to enable automatic buying.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    if failed:
+                        st.warning(f"⚠️ {len(failed)} orders failed")
+                        failed_df = pd.DataFrame(failed)
+                        st.dataframe(failed_df, use_container_width=True)
+                        st.session_state['auto_buy_orders_failed'].extend(failed)
+                    
+                    if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+                        st.success(f"🎯 Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached!")
         
         # ─── TABLE + BUY BUTTONS ───
         table_col, button_col = st.columns([8.5, 1.5])
