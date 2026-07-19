@@ -103,7 +103,6 @@ HARDCODED_SETTINGS = {
 
 PROFESSIONAL_CSS = """
 <style>
-    /* Reset */
     .stApp { background: #ffffff !important; }
     .stAppViewContainer { background: #ffffff !important; }
     .main > div { background: #ffffff !important; }
@@ -122,7 +121,6 @@ PROFESSIONAL_CSS = """
     header {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     
-    /* Header */
     .header {
         display: flex;
         justify-content: space-between;
@@ -146,11 +144,9 @@ PROFESSIONAL_CSS = """
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .clock { font-size: 0.8rem; color: #888; }
     
-    /* Page Title */
     .page-title { font-size: 1.3rem; font-weight: 600; color: #1a1a2e; margin: 0.5rem 0 0.75rem 0; }
     .page-title span { font-size: 0.8rem; color: #888; font-weight: 400; }
     
-    /* Screener Card */
     .screener-card {
         background: #ffffff;
         border-radius: 10px;
@@ -182,7 +178,6 @@ PROFESSIONAL_CSS = """
     }
     .filter-badge.active { border-color: #28a745; color: #28a745; background: #f0fff4; }
     
-    /* Filter Row */
     .filter-row {
         display: flex;
         gap: 1.5rem;
@@ -194,7 +189,6 @@ PROFESSIONAL_CSS = """
     }
     .filter-row .stCheckbox label { color: #555 !important; font-size: 0.75rem !important; }
     
-    /* Data Table */
     .stDataFrame { background: #ffffff !important; }
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: #ffffff !important;
@@ -225,7 +219,6 @@ PROFESSIONAL_CSS = """
     .stDataFrame tbody tr:hover td { background: #f8f9fa !important; }
     .stDataFrame tbody tr:last-child td { border-bottom: none !important; }
     
-    /* Buttons */
     .stButton button {
         background: #f1f3f5 !important;
         border: 1px solid #dee2e6 !important;
@@ -248,7 +241,6 @@ PROFESSIONAL_CSS = """
     }
     .stButton button[kind="primary"]:disabled { opacity: 0.3 !important; cursor: not-allowed !important; transform: none !important; }
     
-    /* Footer */
     .footer {
         display: flex;
         justify-content: space-between;
@@ -263,7 +255,6 @@ PROFESSIONAL_CSS = """
     .footer .highlight { color: #555; }
     .footer .live { color: #28a745; }
     
-    /* Auto-Buy Status */
     .status-active { color: #28a745; font-weight: 600; }
     .status-inactive { color: #888; }
     .status-warning { color: #dc3545; font-weight: 600; }
@@ -607,7 +598,7 @@ def check_auto_buy_conditions(row):
     
     ema_status = row.get('price_vs_ema_200')
     if ema_status != 'ABOVE':
-        return False, f"Not above 200 EMA"
+        return False, "Not above 200 EMA"
     
     high_9_15 = row.get('high_9_15', 0)
     current_price = row.get('current_price', 0)
@@ -620,7 +611,7 @@ def check_auto_buy_conditions(row):
     
     required_price = high_9_15 * 1.0015
     if current_price <= required_price:
-        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15%"
+        return False, f"Price not above 9:15 High + 0.15%"
     
     return True, "All conditions met"
 
@@ -632,7 +623,7 @@ def execute_auto_buy(display_df):
         st.session_state['auto_buy_date'] = today
     
     if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-        return [], [], f"Daily limit reached"
+        return [], [], "Daily limit reached"
     
     available_stocks = display_df[
         ~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])
@@ -850,7 +841,10 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-                eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE']) if 'display_df' in locals() else 0
+                # Calculate eligible count safely
+                eligible_count = 0
+                if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
+                    eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
                 
                 st.markdown(f"""
                 <div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;padding:2px 0;">
@@ -905,32 +899,41 @@ if st.session_state['stage1_data']:
             'high_9_15': 'high_9_15', 'current_price': 'current_price'
         })
         
-        # ─── Format Columns ───
+        # ─── Store numeric values for formatting ───
+        # Keep original numeric values for calculations
+        display_df['_price_num'] = display_df['Price']
+        display_df['_change_num'] = display_df['Chg%']
+        display_df['_gap_num'] = display_df['Gap%']
+        display_df['_volume_num'] = display_df['Volume']
+        display_df['_relvol_num'] = display_df['Rel Vol']
+        display_df['_high_9_15_num'] = display_df['high_9_15']
+        
+        # ─── Format Columns for Display ───
         if 'high_9_15' in display_df.columns:
             display_df['9:15 High'] = display_df['high_9_15'].apply(
-                lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
+                lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
             )
         else:
             display_df['9:15 High'] = "N/A"
         
         if 'Price' in display_df.columns:
             display_df['Price'] = display_df['Price'].apply(
-                lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
+                lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
             )
         
         if 'Chg%' in display_df.columns:
             display_df['Chg%'] = display_df['Chg%'].apply(
-                lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+                lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
             )
         
         if 'Gap%' in display_df.columns:
             display_df['Gap%'] = display_df['Gap%'].apply(
-                lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+                lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
             )
         
         if 'Volume' in display_df.columns:
             display_df['Volume'] = display_df['Volume'].apply(
-                lambda x: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.1f}K" if x >= 1e3 else f"{x:.0f}" if pd.notna(x) else "0"
+                lambda x: f"{x/1e6:.1f}M" if pd.notna(x) and x >= 1e6 else f"{x/1e3:.1f}K" if pd.notna(x) and x >= 1e3 else f"{x:.0f}" if pd.notna(x) else "0"
             )
         
         if 'Rel Vol' in display_df.columns:
@@ -956,14 +959,8 @@ if st.session_state['stage1_data']:
             if row.get('200 EMA') != '🟢 ABOVE':
                 return '❌ Below EMA'
             
-            high_9_15 = row.get('high_9_15')
-            current_price = row.get('Price')
-            
-            if isinstance(current_price, str):
-                try:
-                    current_price = float(current_price.replace('₹', '').replace(',', ''))
-                except:
-                    return '❌ Invalid Price'
+            high_9_15 = row.get('_high_9_15_num')
+            current_price = row.get('_price_num')
             
             if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
                 return '❌ No 9:15 High'
