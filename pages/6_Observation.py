@@ -992,109 +992,103 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card with EVERYTHING in ONE ROW ───
+    # ─── Screener Card ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
+    # ─── Screener Card Header ───
     st.markdown(f"""
     <div class="screener-card">
-        <div class="screener-header" style="flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 1.2rem;">
-            <!-- Stats -->
-            <div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <div class="screener-header">
+            <div class="screener-stats">
                 <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
                 <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
                 <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
                 <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
             </div>
-            
-            <!-- Separator -->
-            <span style="color:#dee2e6;">|</span>
-            
-            <!-- Filter Badges -->
-            <div style="display:flex; gap: 0.3rem; flex-wrap: wrap; align-items: center;">
+            <div class="filter-badges">
                 <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
                 <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
-            
-            <!-- Separator -->
-            <span style="color:#dee2e6;">|</span>
-            
-            <!-- Checkboxes in ONE ROW -->
-            <div style="display:flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        </div>
     """, unsafe_allow_html=True)
     
-    # ─── Checkboxes using HTML (no Streamlit columns) ───
+    # ─── Apply Filters ───
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
-    # Inside 9:15 checkbox
-    if is_after_9_25:
-        show_inside_only = st.checkbox(
-            "📊 Inside 9:15",
-            value=st.session_state['show_inside_only'],
-            key="inside_checkbox_inline"
-        )
-        st.session_state['show_inside_only'] = show_inside_only
-    else:
-        st.info("⏳ 9:20 after 9:25 AM")
-        show_inside_only = False
+    # ─── Filter Row ───
+    st.markdown('<div style="padding: 0.5rem 1.5rem; background: #f8f9fa; border-top: 1px solid #e9ecef;">', unsafe_allow_html=True)
     
-    # Breakout checkbox
-    if is_after_9_30:
-        show_breakout_only = st.checkbox(
-            "⚡ Breakout 9:30-9:45",
-            value=st.session_state['show_breakout_only'],
-            key="breakout_checkbox_inline"
-        )
-        st.session_state['show_breakout_only'] = show_breakout_only
-    else:
-        st.info("⏳ Breakout after 9:30 AM")
-        show_breakout_only = False
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
-    # AMO checkbox
-    amo_test_mode = st.checkbox(
-        "🌙 AMO",
-        value=st.session_state['amo_mode'],
-        key="amo_checkbox_inline"
-    )
-    st.session_state['amo_mode'] = amo_test_mode
-    
-    # Auto-Buy checkbox
-    auto_buy_toggle = st.checkbox(
-        "🤖 Auto-Buy",
-        value=st.session_state.get('auto_buy_enabled', False),
-        key="auto_buy_toggle_inline"
-    )
-    st.session_state['auto_buy_enabled'] = auto_buy_toggle
-    
-    # Auto-Buy Status
-    if auto_buy_toggle:
-        if not show_inside_only:
-            st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
+    with filter_col1:
+        if is_after_9_25:
+            show_inside_only = st.checkbox(
+                "📊 Inside 9:15",
+                value=st.session_state['show_inside_only'],
+                key="inside_checkbox"
+            )
+            st.session_state['show_inside_only'] = show_inside_only
         else:
-            remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-            eligible_count = 0
-            if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
-                eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
-            
-            st.markdown(f"""
-            <span style="display:inline-flex;align-items:center;gap:6px;font-size:0.7rem;">
-                <span style="color:#28a745;font-weight:600;">🟢 ACTIVE</span>
-                <span style="color:#888;">|</span>
-                <span style="color:#333;">🎯 {eligible_count}</span>
-                <span style="color:#888;">|</span>
-                <span style="color:#333;">📊 {remaining}</span>
-            </span>
-            """, unsafe_allow_html=True)
-    else:
-        st.markdown('<span style="color:#888;font-size:0.7rem;">⚪ Auto-Buy OFF</span>', unsafe_allow_html=True)
+            st.info("⏳ 9:20 after 9:25 AM")
+            show_inside_only = False
     
-    st.markdown("""
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    with filter_col2:
+        if is_after_9_30:
+            show_breakout_only = st.checkbox(
+                "⚡ Breakout 9:30-9:45",
+                value=st.session_state['show_breakout_only'],
+                key="breakout_checkbox"
+            )
+            st.session_state['show_breakout_only'] = show_breakout_only
+        else:
+            st.info("⏳ Breakout after 9:30 AM")
+            show_breakout_only = False
+    
+    with filter_col3:
+        amo_test_mode = st.checkbox(
+            "🌙 AMO",
+            value=st.session_state['amo_mode'],
+            key="amo_checkbox"
+        )
+        st.session_state['amo_mode'] = amo_test_mode
+    
+    with filter_col4:
+        # Auto-Buy Toggle
+        auto_buy_toggle = st.checkbox(
+            "🤖 Auto-Buy",
+            value=st.session_state.get('auto_buy_enabled', False),
+            key="auto_buy_toggle"
+        )
+        st.session_state['auto_buy_enabled'] = auto_buy_toggle
+    
+    with filter_col5:
+        # Auto-Buy Status (Compact)
+        if auto_buy_toggle:
+            if not show_inside_only:
+                st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
+            else:
+                remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+                eligible_count = 0
+                if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
+                    eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
+                
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;padding:2px 0;">
+                    <span style="color:#28a745;font-weight:600;">🟢 ACTIVE</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">🎯 {eligible_count}</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">📊 {remaining}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown('<span style="color:#888;font-size:0.7rem;">⚪ Auto-Buy OFF</span>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
     # ─── Apply filters to dataframe ───
     display_df = df.copy()
