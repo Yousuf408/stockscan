@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL GAP SCREENER WITH AUTO-BUY
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL GAP SCREENER WITH AUTO-BUY (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -270,7 +270,7 @@ PROFESSIONAL_CSS = """
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS
+# FUNCTIONS - All your existing functions (unchanged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_gap_filtered_stocks(df):
@@ -611,7 +611,7 @@ def check_auto_buy_conditions(row):
     
     required_price = high_9_15 * 1.0015
     if current_price <= required_price:
-        return False, f"Price not above 9:15 High + 0.15%"
+        return False, "Price not above 9:15 High + 0.15%"
     
     return True, "All conditions met"
 
@@ -841,7 +841,6 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-                # Calculate eligible count safely
                 eligible_count = 0
                 if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
                     eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
@@ -874,8 +873,14 @@ if st.session_state['stage1_data']:
         # ─── Prepare Data ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
-        display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
+        
+        # Keep original numeric values
+        display_df['_price'] = display_df['close']
+        display_df['_change'] = display_df['change']
+        display_df['_gap'] = display_df['gap_percent']
+        display_df['_volume'] = display_df['volume']
+        display_df['_relvol'] = display_df['relative_volume']
         
         with st.spinner("Calculating quantities..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
@@ -885,72 +890,68 @@ if st.session_state['stage1_data']:
             )
         
         # ─── Rename Columns ───
-        display_cols = ['name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
-                       'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector',
-                       'high_9_15', 'current_price']
+        display_cols = ['name', '_price', '_change', '_gap', '_volume', '_relvol',
+                       'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 
+                       'MaxQty', 'sector', 'high_9_15', 'current_price']
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
         
         display_df = display_df.rename(columns={
-            'name': 'Symbol', 'close': 'Price', 'change': 'Chg%', 'gap_percent': 'Gap%',
-            'volume': 'Volume', 'relative_volume': 'Rel Vol',
-            'inside_9_15': 'Inside 9:15', 'breakout_9_30_to_9_45': 'Breakout',
-            'price_vs_ema_200': '200 EMA', 'MaxQty': 'MaxQty', 'sector': 'Sector',
-            'high_9_15': 'high_9_15', 'current_price': 'current_price'
+            'name': 'Symbol',
+            '_price': 'Price',
+            '_change': 'Chg%',
+            '_gap': 'Gap%',
+            '_volume': 'Volume',
+            '_relvol': 'Rel Vol',
+            'inside_9_15': 'Inside 9:15',
+            'breakout_9_30_to_9_45': 'Breakout',
+            'price_vs_ema_200': '200 EMA',
+            'MaxQty': 'MaxQty',
+            'sector': 'Sector',
+            'high_9_15': 'high_9_15',
+            'current_price': 'current_price'
         })
         
-        # ─── Store numeric values for formatting ───
-        # Keep original numeric values for calculations
-        display_df['_price_num'] = display_df['Price']
-        display_df['_change_num'] = display_df['Chg%']
-        display_df['_gap_num'] = display_df['Gap%']
-        display_df['_volume_num'] = display_df['Volume']
-        display_df['_relvol_num'] = display_df['Rel Vol']
-        display_df['_high_9_15_num'] = display_df['high_9_15']
+        # ─── Create Display Columns (Formatted) ───
+        display_df['Price_Display'] = display_df['Price'].apply(
+            lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
+        )
         
-        # ─── Format Columns for Display ───
-        if 'high_9_15' in display_df.columns:
-            display_df['9:15 High'] = display_df['high_9_15'].apply(
-                lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
-            )
-        else:
-            display_df['9:15 High'] = "N/A"
+        display_df['Chg%_Display'] = display_df['Chg%'].apply(
+            lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+        )
         
-        if 'Price' in display_df.columns:
-            display_df['Price'] = display_df['Price'].apply(
-                lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
-            )
+        display_df['Gap%_Display'] = display_df['Gap%'].apply(
+            lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+        )
         
-        if 'Chg%' in display_df.columns:
-            display_df['Chg%'] = display_df['Chg%'].apply(
-                lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
-            )
+        display_df['Volume_Display'] = display_df['Volume'].apply(
+            lambda x: f"{x/1e6:.1f}M" if pd.notna(x) and x >= 1e6 else f"{x/1e3:.1f}K" if pd.notna(x) and x >= 1e3 else f"{x:.0f}" if pd.notna(x) else "0"
+        )
         
-        if 'Gap%' in display_df.columns:
-            display_df['Gap%'] = display_df['Gap%'].apply(
-                lambda x: f"+{x:.2f}%" if pd.notna(x) and x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
-            )
+        display_df['Rel Vol_Display'] = display_df['Rel Vol'].apply(
+            lambda x: f"{x:.2f}x" if pd.notna(x) else "0x"
+        )
         
-        if 'Volume' in display_df.columns:
-            display_df['Volume'] = display_df['Volume'].apply(
-                lambda x: f"{x/1e6:.1f}M" if pd.notna(x) and x >= 1e6 else f"{x/1e3:.1f}K" if pd.notna(x) and x >= 1e3 else f"{x:.0f}" if pd.notna(x) else "0"
-            )
+        # ─── Replace with formatted values ───
+        display_df['Price'] = display_df['Price_Display']
+        display_df['Chg%'] = display_df['Chg%_Display']
+        display_df['Gap%'] = display_df['Gap%_Display']
+        display_df['Volume'] = display_df['Volume_Display']
+        display_df['Rel Vol'] = display_df['Rel Vol_Display']
         
-        if 'Rel Vol' in display_df.columns:
-            display_df['Rel Vol'] = display_df['Rel Vol'].apply(
-                lambda x: f"{x:.2f}x" if pd.notna(x) else "0x"
-            )
+        # ─── Boolean columns ───
+        display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
+        display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        if 'Inside 9:15' in display_df.columns:
-            display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
+        display_df['200 EMA'] = display_df['200 EMA'].apply(
+            lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
+        )
         
-        if 'Breakout' in display_df.columns:
-            display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
-        
-        if '200 EMA' in display_df.columns:
-            display_df['200 EMA'] = display_df['200 EMA'].apply(
-                lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
-            )
+        # ─── 9:15 High ───
+        display_df['9:15 High'] = display_df['high_9_15'].apply(
+            lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
+        )
         
         # ─── Auto-Buy Eligibility ───
         def check_auto_buy_eligible(row):
@@ -959,8 +960,8 @@ if st.session_state['stage1_data']:
             if row.get('200 EMA') != '🟢 ABOVE':
                 return '❌ Below EMA'
             
-            high_9_15 = row.get('_high_9_15_num')
-            current_price = row.get('_price_num')
+            high_9_15 = row.get('high_9_15')
+            current_price = row.get('current_price')
             
             if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
                 return '❌ No 9:15 High'
@@ -975,6 +976,10 @@ if st.session_state['stage1_data']:
                 return f'❌ Need > {required_price:.2f}'
         
         display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
+        
+        # ─── Drop temporary display columns ───
+        display_df.drop(['Price_Display', 'Chg%_Display', 'Gap%_Display', 
+                         'Volume_Display', 'Rel Vol_Display'], axis=1, inplace=True)
         
         # ─── Final Columns ───
         final_cols = ['Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 'Rel Vol',
