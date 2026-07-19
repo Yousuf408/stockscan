@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (FINAL FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -76,7 +76,7 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS - WHITE THEME
+# CSS - WHITE THEME (UPDATED)
 # ─────────────────────────────────────────────────────────────────────────────
 
 WHITE_THEME_CSS = """
@@ -376,6 +376,52 @@ WHITE_THEME_CSS = """
     .stSidebar .stButton button:hover {
         background: #f1f3f5 !important;
         color: #28a745 !important;
+    }
+    
+    /* ─── BUY BUTTON COLUMN ALIGNMENT ─── */
+    .buy-col-header {
+        font-size: 0.6rem;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 0.6rem 0.8rem;
+        background: #f8f9fa;
+        border-bottom: 2px solid #e9ecef;
+        margin-bottom: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    .buy-btn-wrap {
+        padding: 0.6rem 0.8rem;
+        border-bottom: 1px solid #f1f3f5;
+    }
+    
+    .buy-btn-wrap .stButton {
+        width: 100%;
+    }
+    
+    .buy-btn-wrap .stButton button {
+        width: 100% !important;
+        background: linear-gradient(135deg, #28a745, #20c997) !important;
+        border: none !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .buy-btn-wrap .stButton button:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
+    }
+    
+    .buy-btn-wrap .stButton button:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
     }
     
     @media (max-width: 768px) {
@@ -771,7 +817,6 @@ with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 
 with col2:
-    # ─── Budget Control ───
     user_capital = st.number_input(
         "💰",
         min_value=1000,
@@ -785,7 +830,6 @@ with col2:
     st.session_state['user_capital'] = user_capital
 
 with col3:
-    # ─── Parts Control ───
     num_parts = st.number_input(
         "📊",
         min_value=1,
@@ -808,14 +852,13 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header with Filters inside ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    # ─── Apply Filters ───
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
+    # ─── Screener Card ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -834,7 +877,6 @@ if st.session_state['stage1_data']:
         <div class="filter-row">
     """, unsafe_allow_html=True)
     
-    # ─── Filters inside Screener Card ───
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
     
     with filter_col1:
@@ -870,9 +912,9 @@ if st.session_state['stage1_data']:
         st.session_state['amo_mode'] = amo_test_mode
     
     st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── Apply filters to dataframe ───
+    # ─── Apply filters ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -896,7 +938,6 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
         
-        # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -917,7 +958,7 @@ if st.session_state['stage1_data']:
             'sector': 'Sector'
         })
         
-        # ─── Format columns with NaN handling ───
+        # ─── Format columns ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
         
         def format_chg(x):
@@ -954,7 +995,6 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
             'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
@@ -986,17 +1026,15 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
-            # ─── Spacer to align with table header ───
-            st.markdown('<div style="height:28px;"></div>', unsafe_allow_html=True)
-            
             # ─── Place Order Header ───
-            st.markdown('<div style="font-size:0.6rem; font-weight:600; color:#888; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:4px; border-bottom:1px solid #e9ecef; margin-bottom:6px;">Place Order</div>', unsafe_allow_html=True)
+            st.markdown('<div class="buy-col-header">Place Order</div>', unsafe_allow_html=True)
             
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
                 
+                st.markdown('<div class="buy-btn-wrap">', unsafe_allow_html=True)
                 if st.button(
                     btn_label,
                     key=f"buy_{symbol}_{idx}",
@@ -1012,6 +1050,7 @@ if st.session_state['stage1_data']:
                             amo_time="OPEN"
                         )
                         display_order_result(symbol, result)
+                st.markdown('</div>', unsafe_allow_html=True)
         
         # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
@@ -1033,7 +1072,6 @@ if st.session_state['stage1_data']:
     </div>
     """, unsafe_allow_html=True)
     
-    # ─── Debug Section ───
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
