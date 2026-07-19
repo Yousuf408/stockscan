@@ -1,144 +1,135 @@
-import requests, math, pyotp
-from concurrent.futures import ThreadPoolExecutor, as_completed
+"""
+TradeOS — Main Entry Point
+Simple routing: Login → Broker Setup → Screener
+"""
 
-# ─── CREDENTIALS (replace with your own or use st.secrets) ───
-MSTOCK_BASE_URL = "https://api.mstock.trade/openapi/typeb"
-MSTOCK_API_KEY = "E5wDwGTEetqDyO52sUkD+ya8Xcvj2b+q5u1bmtqnS3g="
-MSTOCK_USER_ID = "MA1764118"
-MSTOCK_PASSWORD = "P@ssw0rd"
-MSTOCK_TOTP_SECRET = "CRIJTB7OAMTK7L5UB27PILGM6RHHS6FV"
+import streamlit as st
 
-def _mstock_headers(jwt=None):
-    headers = {"X-Mirae-Version": "1"}
-    if jwt:
-        headers["Authorization"] = f"Bearer {jwt}"
-    return headers
+# ── Page Config ──
+st.set_page_config(
+    page_title="TradeOS",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def _mstock_token():
-    totp = pyotp.TOTP(MSTOCK_TOTP_SECRET).now()
-    resp = requests.post(f"{MSTOCK_BASE_URL}/connect/login", json={"clientcode": MSTOCK_USER_ID, "password": MSTOCK_PASSWORD, "totp": totp, "state": ""}, headers=_mstock_headers(), timeout=10)
-    if resp.status_code != 200:
-        return None
-    data = resp.json()
-    return data.get('data', {}).get('jwtToken') if data.get('status') else None
+# ── Session State Init ──
+if 'user' not in st.session_state:
+    st.session_state['user'] = None
 
-@st.cache_data(ttl=86400)
-def _mstock_token_map():
-    """Returns {symbol: token} for NSE Equity only."""
-    token_map = {}
-    jwt = _mstock_token()
-    if not jwt:
-        return token_map
-    resp = requests.get(f"{MSTOCK_BASE_URL}/instruments/OpenAPIScripMaster", headers=_mstock_headers(jwt), timeout=30)
-    if resp.status_code != 200:
-        return token_map
-    data = resp.json()
-    instruments = data.get('data', []) if isinstance(data, dict) else data
-    for item in instruments:
-        if item.get('instrumenttype', '').upper() not in ('EQ', 'EQUITY', 'E'):
-            continue
-        sym = item.get('symbol') or item.get('trading_symbol')
-        tok = item.get('token') or item.get('instrument_token')
-        if sym and tok:
-            token_map[sym.upper()] = str(tok)
-    return token_map
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
 
-def calculate_margin_and_qty(df, total_capital, num_parts=4):
-    """
-    Adds three columns to the input DataFrame (must have 'Symbol' and 'Price'):
-        - Margin/Share (₹)  : margin required for 1 share (MIS)
-        - Leverage (x)      : price / margin
-        - Max Qty           : floor( (capital/parts) / margin )
-    """
-    if df.empty or total_capital <= 0:
-        df['Margin/Share (₹)'] = 0
-        df['Leverage (x)'] = 0
-        df['Max Qty'] = 0
-        return df
+if 'broker_configured' not in st.session_state:
+    st.session_state['broker_configured'] = False
 
-    token_map = _mstock_token_map()
-    if not token_map:
-        df['Margin/Share (₹)'] = 0
-        df['Leverage (x)'] = 0
-        df['Max Qty'] = 0
-        return df
+if 'current_page' not in st.session_state:
+    st.session_state['current_page'] = 'login'
 
-    # Ensure Price is numeric
-    df['Price'] = pd.to_numeric(df['Price'], errors='coerce').fillna(0)
+# ── Import modules ──
+from tv_screener.auth import login_user, signup_user, logout_user, get_user
+from tv_screener.pages.broker_setup import render_broker_setup
 
-    # Cache margins in session
-    if 'margin_cache' not in st.session_state:
-        st.session_state['margin_cache'] = {}
+# ═══════════════════════════════════════════════════════════
+# CHECK LOGIN
+# ═══════════════════════════════════════════════════════════
 
-    part_capital = total_capital / num_parts
+user = get_user()
 
-    # Identify symbols that need margin fetch (not in cache and have token and positive price)
-    symbols = df['Symbol'].str.upper().str.strip().tolist()
-    missing = [s for s in symbols if s not in st.session_state['margin_cache'] and token_map.get(s) and df[df['Symbol'].str.upper()==s]['Price'].iloc[0] > 0]
+if user is None:
+    # ═══════════════════════════════════════════════════════
+    # LOGIN PAGE
+    # ═══════════════════════════════════════════════════════
+    
+    st.markdown("""
+    <div style="text-align:center; padding:3rem 0 1rem 0;">
+        <h1 style="color:#1a1a2e; font-size:2.5rem; margin:0;">📊 TradeOS</h1>
+        <p style="color:#888; font-size:1rem;">Semi-Automated Trading Workstation</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    
+    with col2:
+        tab1, tab2 = st.tabs(["🔐 Login", "✨ Create Account"])
+        
+        with tab1:
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            
+            if st.button("Login", type="primary", use_container_width=True):
+                if not email or not password:
+                    st.error("Please fill all fields")
+                else:
+                    with st.spinner("Logging in..."):
+                        user_obj, error = login_user(email, password)
+                        if error:
+                            st.error(f"Login failed: {error}")
+                        else:
+                            st.session_state['user'] = user_obj
+                            st.session_state['authenticated'] = True
+                            st.success("✅ Login successful!")
+                            st.rerun()
+        
+        with tab2:
+            name = st.text_input("Full Name", key="signup_name")
+            email = st.text_input("Email", key="signup_email")
+            password = st.text_input("Password", type="password", key="signup_password")
+            
+            if st.button("Create Account", type="primary", use_container_width=True):
+                if not name or not email or not password:
+                    st.error("Please fill all fields")
+                elif len(password) < 6:
+                    st.error("Password must be at least 6 characters")
+                else:
+                    with st.spinner("Creating account..."):
+                        user_obj, error = signup_user(email, password, name)
+                        if error:
+                            st.error(f"Signup failed: {error}")
+                        else:
+                            st.success("✅ Account created! Check your email to verify, then login.")
+    
+    # Stop here — don't show anything else
+    st.stop()
 
-    def fetch_margin(sym):
-        token = token_map.get(sym)
-        price = df[df['Symbol'].str.upper()==sym]['Price'].iloc[0]
-        if not token or price <= 0:
-            return sym, None
-        # Call margin API
-        headers = _mstock_headers(jwt)
-        headers["Content-Type"] = "application/json"
-        payload = {
-            "orders": [{
-                "product_type": "MIS",
-                "transaction_type": "BUY",
-                "quantity": "1",
-                "price": "0",
-                "exchange": "NSE",
-                "symbol_name": "",
-                "token": token,
-                "trigger_price": 0
-            }]
-        }
-        try:
-            resp = requests.post(f"{MSTOCK_BASE_URL}/margins/orders", json=payload, headers=headers, timeout=10)
-            if resp.status_code != 200:
-                return sym, None
-            data = resp.json()
-            if not data.get('status'):
-                return sym, None
-            margin = data.get('data', {}).get('total', 0)
-            return sym, float(margin) if margin > 0 else None
-        except:
-            return sym, None
+# ═══════════════════════════════════════════════════════════
+# USER IS LOGGED IN
+# ═══════════════════════════════════════════════════════════
 
-    if missing:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(fetch_margin, s): s for s in missing}
-            for future in as_completed(futures):
-                sym, margin = future.result()
-                if margin is not None and margin > 0:
-                    st.session_state['margin_cache'][sym] = margin
+# ── Sidebar ──
+with st.sidebar:
+    st.markdown(f"### 👤 {user.email}")
+    st.markdown("---")
+    
+    # Navigation
+    if st.button("🔍 Screener", use_container_width=True):
+        st.session_state['current_page'] = 'screener'
+        st.rerun()
+    
+    if st.button("⚙️ Broker Setup", use_container_width=True):
+        st.session_state['current_page'] = 'setup'
+        st.rerun()
+    
+    st.markdown("---")
+    
+    if st.button("🚪 Logout", use_container_width=True):
+        logout_user()
+        st.rerun()
 
-    # Compute new columns
-    margins = []
-    leverages = []
-    qties = []
-    for sym in symbols:
-        margin = st.session_state['margin_cache'].get(sym)
-        if margin is None or margin <= 0:
-            margins.append(None)
-            leverages.append(None)
-            qties.append(0)
-        else:
-            price = df[df['Symbol'].str.upper()==sym]['Price'].iloc[0]
-            if price <= 0:
-                margins.append(None)
-                leverages.append(None)
-                qties.append(0)
-            else:
-                margins.append(round(margin, 2))
-                leverages.append(round(price / margin, 1))
-                qties.append(math.floor(part_capital / margin))
+# ── Page Router ──
+current_page = st.session_state.get('current_page', 'setup')
 
-    df['Margin/Share (₹)'] = margins
-    df['Leverage (x)'] = leverages
-    df['Max Qty'] = qties
-
-    return df
+if current_page == 'setup':
+    render_broker_setup()
+    
+elif current_page == 'screener':
+    # Check if broker is configured
+    if not st.session_state.get('broker_configured', False):
+        st.warning("⚠️ Please configure your broker first")
+        if st.button("Go to Broker Setup"):
+            st.session_state['current_page'] = 'setup'
+            st.rerun()
+    else:
+        # Run your existing screener code
+        # Import and execute observation.py logic
+        import observation  # or exec(open("observation.py").read())
