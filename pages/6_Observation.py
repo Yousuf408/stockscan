@@ -40,7 +40,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000.0
+    st.session_state['user_capital'] = 100000
 
 if 'num_parts' not in st.session_state:
     st.session_state['num_parts'] = 4
@@ -808,9 +808,13 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
+    # ─── Screener Card Header with Filters inside ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
+    
+    # ─── Apply Filters ───
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
     st.markdown(f"""
     <div class="screener-card">
@@ -827,15 +831,10 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
         </div>
+        <div class="filter-row">
     """, unsafe_allow_html=True)
     
-    # ─── Apply Filters ───
-    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-    
-    # ─── Filter Row ───
-    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
-    
+    # ─── Filters inside Screener Card ───
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
     
     with filter_col1:
@@ -955,7 +954,7 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns (REMOVED Signal) ───
+        # ─── Final columns ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
             'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
@@ -987,6 +986,12 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
+            # ─── Spacer to align with table header ───
+            st.markdown('<div style="height:28px;"></div>', unsafe_allow_html=True)
+            
+            # ─── Place Order Header ───
+            st.markdown('<div style="font-size:0.6rem; font-weight:600; color:#888; text-transform:uppercase; letter-spacing:0.5px; padding-bottom:4px; border-bottom:1px solid #e9ecef; margin-bottom:6px;">Place Order</div>', unsafe_allow_html=True)
+            
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
