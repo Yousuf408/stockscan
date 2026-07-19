@@ -936,12 +936,15 @@ def handle_token_input():
         # Update session state
         st.session_state['user_manual_access_token'] = token
         st.session_state['token_save_success'] = True
-        # Show success message
-        st.success("✅ Token saved to Supabase successfully!")
         # Close the input box after saving
         st.session_state['show_token_input'] = False
-        # Force rerun to update
+        # Show success message
+        st.success("✅ Token saved to Supabase successfully!")
         st.rerun()
+
+def toggle_token_input():
+    """Toggle the token input visibility"""
+    st.session_state['show_token_input'] = not st.session_state.get('show_token_input', False)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
@@ -979,21 +982,9 @@ def render_header():
                 <span>Live</span>
             </div>
             <span class="clock">{current_time.strftime('%H:%M:%S')} IST</span>
-            <!-- Gear Icon for Token Input -->
-            <button class="gear-btn {'active' if st.session_state.get('show_token_input', False) else ''}" 
-                    onclick="document.getElementById('token_toggle').click();">
-                ⚙️
-            </button>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Hidden button to toggle token input (used by gear icon)
-    if st.button("", key="token_toggle", help="Toggle Token Input", 
-                 use_container_width=False, 
-                 style="display:none;"):
-        st.session_state['show_token_input'] = not st.session_state.get('show_token_input', False)
-        st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # APPLY CSS
@@ -1007,6 +998,14 @@ st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 
 # Render Header
 render_header()
+
+# ─── Token Gear Icon and Toggle ───
+col_gear, col_spacer = st.columns([1, 20])
+with col_gear:
+    # Gear icon to toggle token input
+    gear_label = "⚙️" + (" 🔓" if st.session_state.get('show_token_input', False) else "")
+    if st.button(gear_label, key="gear_toggle", help="Toggle Token Input"):
+        toggle_token_input()
 
 # ─── Token Input Box (Shows when gear icon is clicked) ───
 if st.session_state.get('show_token_input', False):
