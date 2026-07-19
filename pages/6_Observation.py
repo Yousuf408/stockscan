@@ -499,7 +499,7 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
+def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
@@ -514,6 +514,17 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
     except:
         return None
 
+def calculate_ema_200(data_5min):
+    """Calculate 200 EMA on 5-minute data"""
+    if data_5min is None or len(data_5min) < 200:
+        return None
+    try:
+        close_prices = data_5min['Close'].astype(float)
+        ema = close_prices.ewm(span=200, adjust=False).mean()
+        return float(ema.iloc[-1])
+    except:
+        return None
+
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
     symbol_formats = ['.NS', '-NS', '']
@@ -522,7 +533,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
         base_ticker = ticker.replace('NSE:', '')
         for suffix in symbol_formats:
             yahoo_ticker = base_ticker + suffix
-            data = get_intraday_data_for_symbol(yahoo_ticker)
+            data = get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m")
             if data is not None and not data.empty:
                 ist = pytz.timezone('Asia/Kolkata')
                 today = datetime.now(ist).date()
@@ -580,6 +591,17 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     gap_percent = 0.0
                     prev_close = float(first_candle['Close'])
 
+                # Calculate 200 EMA
+                ema_200 = calculate_ema_200(data)
+                
+                # Get current price for EMA comparison
+                current_price = float(data['Close'].iloc[-1])
+                ema_status = None
+                if ema_200 is not None:
+                    ema_status = 'ABOVE' if current_price > ema_200 else 'BELOW'
+                else:
+                    ema_status = 'NO DATA'
+
                 result = {
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
@@ -594,7 +616,9 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'prev_close': prev_close,
                     'gap_percent': gap_percent,
                     'yahoo_ticker': yahoo_ticker,
-                    'data_date': today.strftime("%Y-%m-%d")
+                    'data_date': today.strftime("%Y-%m-%d"),
+                    'ema_200_5m': ema_200,
+                    'price_vs_ema_200': ema_status
                 }
                 return base_ticker, result
         return None, None
@@ -616,7 +640,8 @@ def check_candle_conditions(df, tickers_list):
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
-                     'candle_check_status', 'yahoo_ticker', 'inside_9_15']:
+                     'candle_check_status', 'yahoo_ticker', 'inside_9_15',
+                     'ema_200_5m', 'price_vs_ema_200']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -632,7 +657,8 @@ def check_candle_conditions(df, tickers_list):
             for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_20',
                         'high_9_20', 'low_9_20', 'close_9_20', 'max_high_up_to_10_15',
                         'hit_low_9_20_to_35', 'breakout_9_30_to_9_45', 'prev_close',
-                        'gap_percent', 'yahoo_ticker', 'data_date']:
+                        'gap_percent', 'yahoo_ticker', 'data_date',
+                        'ema_200_5m', 'price_vs_ema_200']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
@@ -900,7 +926,7 @@ if st.session_state['stage1_data']:
         # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
-            'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
+            'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector'
         ]
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
@@ -914,6 +940,7 @@ if st.session_state['stage1_data']:
             'relative_volume': 'Rel Vol',
             'inside_9_15': 'Inside 9:15',
             'breakout_9_30_to_9_45': 'Breakout',
+            'price_vs_ema_200': '200 EMA',
             'MaxQty': 'MaxQty',
             'sector': 'Sector'
         })
@@ -955,10 +982,15 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Final columns (REMOVED Signal) ───
+        # Format 200 EMA column
+        display_df['200 EMA'] = display_df['200 EMA'].apply(
+            lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
+        )
+        
+        # ─── Final columns ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
-            'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
+            'Rel Vol', 'Inside 9:15', 'Breakout', '200 EMA', 'MaxQty', 'Sector'
         ]
         
         existing_cols = [c for c in final_cols if c in display_df.columns]
@@ -981,6 +1013,7 @@ if st.session_state['stage1_data']:
                     "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
                     "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
                     "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
+                    "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
                     "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
                     "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
                 }
