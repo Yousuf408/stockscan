@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WITH 200 EMA)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -40,7 +40,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 if 'user_capital' not in st.session_state:
-    st.session_state['user_capital'] = 100000
+    st.session_state['user_capital'] = 100000.0
 
 if 'num_parts' not in st.session_state:
     st.session_state['num_parts'] = 4
@@ -76,7 +76,7 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS - WHITE THEME (FIXED BUTTON GAPS)
+# CSS - WHITE THEME
 # ─────────────────────────────────────────────────────────────────────────────
 
 WHITE_THEME_CSS = """
@@ -378,30 +378,6 @@ WHITE_THEME_CSS = """
         color: #28a745 !important;
     }
     
-    .buy-col-header {
-        font-size: 0.6rem;
-        font-weight: 600;
-        color: #888;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 0.6rem 0.8rem;
-        background: #f8f9fa;
-        border-bottom: 2px solid #e9ecef;
-        margin-bottom: 0;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    
-    /* ─── FIX: Button row alignment ─── */
-    .stButton > button {
-        min-height: 28px !important;
-        height: auto !important;
-        padding: 4px 8px !important;
-        font-size: 0.7rem !important;
-        line-height: 1.2 !important;
-        margin: 0 !important;
-        width: 100% !important;
-    }
-    
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -537,40 +513,6 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="2d", interval="5m"):
         return data
     except:
         return None
-
-def get_200ema_5min(symbol):
-    """
-    Calculate 200 EMA from 5-minute data (last 7 days)
-    Returns: (ema_value, is_above) where is_above is a Python bool
-    """
-    try:
-        base = symbol.replace('NSE:', '')
-        yahoo_ticker = base + '.NS'
-        
-        # Fetch 7 days of 5-minute data
-        data = yf.download(
-            yahoo_ticker,
-            period="7d",
-            interval="5m",
-            progress=False,
-            threads=False,
-            auto_adjust=False
-        )
-        
-        if data.empty or len(data) < 200:
-            return None, None
-        
-        # Calculate 200 EMA on 5-min data
-        ema_200 = data['Close'].ewm(span=200, adjust=False).mean().iloc[-1]
-        current_price = data['Close'].iloc[-1]
-        
-        # Convert to Python bool (not pandas Series)
-        is_above = bool(current_price > ema_200)
-        
-        return float(ema_200), is_above
-        
-    except Exception as e:
-        return None, None
 
 def get_candle_data_bulk(tickers_list, max_workers=20):
     results = {}
@@ -829,6 +771,7 @@ with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 
 with col2:
+    # ─── Budget Control ───
     user_capital = st.number_input(
         "💰",
         min_value=1000,
@@ -842,6 +785,7 @@ with col2:
     st.session_state['user_capital'] = user_capital
 
 with col3:
+    # ─── Parts Control ───
     num_parts = st.number_input(
         "📊",
         min_value=1,
@@ -864,13 +808,10 @@ if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
+    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
-    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-    
-    # ─── Screener Card ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -886,8 +827,14 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ±2%</span>
             </div>
         </div>
-        <div class="filter-row">
     """, unsafe_allow_html=True)
+    
+    # ─── Apply Filters ───
+    is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
+    is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    
+    # ─── Filter Row ───
+    st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
     filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
     
@@ -924,9 +871,9 @@ if st.session_state['stage1_data']:
         st.session_state['amo_mode'] = amo_test_mode
     
     st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
-    # ─── Apply filters ───
+    # ─── Apply filters to dataframe ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -943,20 +890,6 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-        # ─── Get 200 EMA for each symbol ───
-        with st.spinner("Calculating 200 EMA..."):
-            ema_values = []
-            for symbol in display_df['ticker']:
-                ema_val, is_above = get_200ema_5min(symbol)
-                if ema_val is not None and is_above is not None:
-                    arrow = '▲' if is_above else '▼'
-                    ema_display = f"₹{ema_val:,.2f} {arrow}"
-                else:
-                    ema_display = "N/A"
-                ema_values.append(ema_display)
-            
-            display_df['200 EMA'] = ema_values
-        
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
                 display_df,
@@ -964,6 +897,7 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
         
+        # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', 'MaxQty', 'sector'
@@ -984,7 +918,7 @@ if st.session_state['stage1_data']:
             'sector': 'Sector'
         })
         
-        # ─── Format columns ───
+        # ─── Format columns with NaN handling ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
         
         def format_chg(x):
@@ -1021,9 +955,10 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
+        # ─── Final columns (REMOVED Signal) ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
-            'Rel Vol', '200 EMA', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
+            'Rel Vol', 'Inside 9:15', 'Breakout', 'MaxQty', 'Sector'
         ]
         
         existing_cols = [c for c in final_cols if c in display_df.columns]
@@ -1044,7 +979,6 @@ if st.session_state['stage1_data']:
                     "Gap%": st.column_config.TextColumn("GAP%", width="small"),
                     "Volume": st.column_config.TextColumn("VOLUME", width="small"),
                     "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
-                    "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
                     "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
                     "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
                     "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
@@ -1053,8 +987,6 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
-            st.markdown('<div class="buy-col-header">Place Order</div>', unsafe_allow_html=True)
-            
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
@@ -1096,6 +1028,7 @@ if st.session_state['stage1_data']:
     </div>
     """, unsafe_allow_html=True)
     
+    # ─── Debug Section ───
     with st.expander("🔍 Debug: Max Qty Calculation"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
