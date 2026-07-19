@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL GAP SCREENER WITH AUTO-BUY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -12,7 +12,6 @@ import pytz
 import concurrent.futures
 import warnings
 import math
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Import DhanHQ modules ──
@@ -81,9 +80,6 @@ if 'auto_buy_orders_placed' not in st.session_state:
 if 'auto_buy_orders_failed' not in st.session_state:
     st.session_state['auto_buy_orders_failed'] = []
 
-if 'auto_buy_last_check' not in st.session_state:
-    st.session_state['auto_buy_last_check'] = None
-
 if 'auto_buy_stocks_bought' not in st.session_state:
     st.session_state['auto_buy_stocks_bought'] = []
 
@@ -102,21 +98,16 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS - WHITE THEME
+# CSS - PROFESSIONAL CLEAN THEME
 # ─────────────────────────────────────────────────────────────────────────────
 
-WHITE_THEME_CSS = """
+PROFESSIONAL_CSS = """
 <style>
-    .stApp {
-        background: #ffffff !important;
-    }
-    .stAppViewContainer {
-        background: #ffffff !important;
-    }
-    .main > div {
-        background: #ffffff !important;
-    }
-    .block-container {
+    /* Reset */
+    .stApp { background: #ffffff !important; }
+    .stAppViewContainer { background: #ffffff !important; }
+    .main > div { background: #ffffff !important; }
+    .block-container { 
         padding-top: 0 !important;
         padding-bottom: 0 !important;
         max-width: 1440px !important;
@@ -131,11 +122,12 @@ WHITE_THEME_CSS = """
     header {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     
-    .tradeos-header {
+    /* Header */
+    .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.6rem 2rem;
+        padding: 0.5rem 2rem;
         background: #ffffff;
         border-bottom: 1px solid #e9ecef;
         margin: -0.5rem -1rem 0.5rem -1rem;
@@ -145,318 +137,143 @@ WHITE_THEME_CSS = """
         top: 0;
         z-index: 999;
     }
-    .header-left {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-    .logo {
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #1a1a2e;
-    }
-    .version {
-        font-size: 0.6rem;
-        color: #888;
-        background: #f1f3f5;
-        padding: 0.1rem 0.5rem;
-        border-radius: 12px;
-    }
-    .header-center {
-        display: flex;
-        gap: 1.5rem;
-        font-size: 0.8rem;
-        flex-wrap: wrap;
-    }
-    .ticker-item {
-        display: flex;
-        gap: 0.4rem;
-        align-items: center;
-        color: #333;
-    }
+    .logo { font-size: 1.2rem; font-weight: 700; color: #1a1a2e; }
+    .version { font-size: 0.6rem; color: #888; background: #f1f3f5; padding: 0.1rem 0.5rem; border-radius: 12px; }
+    .ticker-item { display: flex; gap: 0.4rem; align-items: center; color: #333; font-size: 0.8rem; }
     .ticker-green { color: #28a745; }
     .ticker-red { color: #dc3545; }
-    .header-right {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    .status-indicator {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        font-size: 0.8rem;
-        color: #333;
-    }
-    .status-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: #28a745;
-        animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-    }
-    .clock {
-        font-size: 0.8rem;
-        color: #888;
-        font-variant-numeric: tabular-nums;
-    }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #28a745; animation: pulse 2s infinite; display: inline-block; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .clock { font-size: 0.8rem; color: #888; }
     
-    .page-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin: 1rem 0 1.25rem 0;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-    }
-    .page-title {
-        font-size: 1.4rem;
-        font-weight: 600;
-        color: #1a1a2e;
-    }
-    .page-title span {
-        font-size: 0.8rem;
-        color: #888;
-        font-weight: 400;
-    }
+    /* Page Title */
+    .page-title { font-size: 1.3rem; font-weight: 600; color: #1a1a2e; margin: 0.5rem 0 0.75rem 0; }
+    .page-title span { font-size: 0.8rem; color: #888; font-weight: 400; }
     
-    .stButton button {
-        background: #f1f3f5 !important;
-        border: 1px solid #dee2e6 !important;
-        color: #333 !important;
-        border-radius: 8px !important;
-        padding: 0.4rem 1.2rem !important;
-        font-size: 0.8rem !important;
-        transition: all 0.3s ease !important;
-    }
-    .stButton button:hover {
-        background: #e9ecef !important;
-        border-color: #adb5bd !important;
-    }
-    
+    /* Screener Card */
     .screener-card {
         background: #ffffff;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid #e9ecef;
         overflow: hidden;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .screener-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 1rem 1.5rem;
+        padding: 0.6rem 1.5rem;
         background: #f8f9fa;
         border-bottom: 1px solid #e9ecef;
         flex-wrap: wrap;
-        gap: 0.75rem;
+        gap: 0.5rem;
     }
-    .screener-stats {
-        display: flex;
-        gap: 1.5rem;
-        font-size: 0.8rem;
-        flex-wrap: wrap;
-    }
-    .stat-item {
-        color: #888;
-    }
-    .stat-item strong {
-        color: #1a1a2e;
-        font-weight: 600;
-    }
-    .stat-count {
-        color: #28a745;
-        font-weight: 600;
-    }
-    .filter-badges {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-    }
+    .stat-item { color: #888; font-size: 0.75rem; }
+    .stat-item strong { color: #1a1a2e; font-weight: 600; }
+    .stat-count { color: #28a745; font-weight: 600; }
     .filter-badge {
         background: #f1f3f5;
-        padding: 0.2rem 0.7rem;
+        padding: 0.15rem 0.6rem;
         border-radius: 12px;
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         color: #888;
         border: 1px solid #e9ecef;
     }
-    .filter-badge.active {
-        border-color: #28a745;
-        color: #28a745;
-        background: #f0fff4;
-    }
+    .filter-badge.active { border-color: #28a745; color: #28a745; background: #f0fff4; }
     
+    /* Filter Row */
     .filter-row {
         display: flex;
         gap: 1.5rem;
-        padding: 0.75rem 1.5rem;
+        padding: 0.5rem 1.5rem;
         background: #f8f9fa;
         border-top: 1px solid #e9ecef;
         flex-wrap: wrap;
         align-items: center;
     }
+    .filter-row .stCheckbox label { color: #555 !important; font-size: 0.75rem !important; }
     
-    .stCheckbox label {
-        color: #555 !important;
-        font-size: 0.8rem !important;
-    }
-    .stCheckbox label span {
-        color: #333 !important;
-    }
-    
-    .stDataFrame {
-        background: #ffffff !important;
-    }
+    /* Data Table */
+    .stDataFrame { background: #ffffff !important; }
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: #ffffff !important;
-        border: 1px solid #e9ecef !important;
-        border-radius: 8px !important;
+        border: none !important;
+        border-radius: 0 !important;
     }
-    .stDataFrame table {
-        background: #ffffff !important;
-    }
-    .stDataFrame tbody {
-        background: #ffffff !important;
-    }
-    .stDataFrame tr {
-        background: #ffffff !important;
-    }
+    .stDataFrame table { background: #ffffff !important; }
+    .stDataFrame tbody { background: #ffffff !important; }
+    .stDataFrame tr { background: #ffffff !important; }
     .stDataFrame thead tr th {
         background: #f8f9fa !important;
         color: #888 !important;
-        font-size: 0.6rem !important;
+        font-size: 0.55rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.5px !important;
         border-bottom: 2px solid #e9ecef !important;
-        padding: 0.6rem 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
         font-weight: 600 !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
     .stDataFrame tbody tr td {
         background: #ffffff !important;
         color: #333 !important;
-        padding: 0.6rem 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
         border: none !important;
         border-bottom: 1px solid #f1f3f5 !important;
-        font-size: 0.85rem !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        font-size: 0.75rem !important;
     }
-    .stDataFrame tbody tr:hover td {
-        background: #f8f9fa !important;
-    }
-    .stDataFrame tbody tr:last-child td {
-        border-bottom: none !important;
-    }
+    .stDataFrame tbody tr:hover td { background: #f8f9fa !important; }
+    .stDataFrame tbody tr:last-child td { border-bottom: none !important; }
     
-    .footer-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.75rem 1.5rem;
-        border-top: 1px solid #e9ecef;
-        font-size: 0.7rem;
-        color: #888;
-        flex-wrap: wrap;
-        gap: 0.5rem;
+    /* Buttons */
+    .stButton button {
+        background: #f1f3f5 !important;
+        border: 1px solid #dee2e6 !important;
+        color: #333 !important;
+        border-radius: 6px !important;
+        padding: 0.25rem 1rem !important;
+        font-size: 0.75rem !important;
+        transition: all 0.2s ease !important;
     }
-    .footer-bar .highlight {
-        color: #555;
-    }
-    .footer-bar .live {
-        color: #28a745;
-    }
-    
-    .stButton button[kind="secondary"] {
+    .stButton button:hover { background: #e9ecef !important; border-color: #adb5bd !important; }
+    .stButton button[kind="primary"] {
         background: linear-gradient(135deg, #28a745, #20c997) !important;
         border: none !important;
         color: #fff !important;
         font-weight: 600 !important;
-        border-radius: 6px !important;
-        transition: all 0.3s ease !important;
     }
-    .stButton button[kind="secondary"]:hover {
-        transform: scale(1.05) !important;
-        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
+    .stButton button[kind="primary"]:hover {
+        transform: scale(1.03) !important;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.25) !important;
     }
-    .stButton button[kind="secondary"]:disabled {
-        opacity: 0.3 !important;
-        cursor: not-allowed !important;
-        transform: none !important;
-    }
+    .stButton button[kind="primary"]:disabled { opacity: 0.3 !important; cursor: not-allowed !important; transform: none !important; }
     
-    .stSidebar .stButton button {
-        background: transparent !important;
-        border: none !important;
-        color: #333 !important;
-        border-radius: 8px !important;
-        transition: all 0.3s ease !important;
-        text-align: left !important;
-        padding: 0.5rem 1rem !important;
+    /* Footer */
+    .footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.4rem 1.5rem;
+        border-top: 1px solid #e9ecef;
+        font-size: 0.6rem;
+        color: #888;
+        flex-wrap: wrap;
+        gap: 0.3rem;
     }
-    .stSidebar .stButton button:hover {
-        background: #f1f3f5 !important;
-        color: #28a745 !important;
-    }
+    .footer .highlight { color: #555; }
+    .footer .live { color: #28a745; }
     
-    /* Auto-buy styles */
-    .auto-buy-enabled {
-        background: #f0fff4 !important;
-        border: 2px solid #28a745 !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-        margin: 0.5rem 0 !important;
-    }
-    .auto-buy-disabled {
-        background: #f8f9fa !important;
-        border: 2px solid #dee2e6 !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-        margin: 0.5rem 0 !important;
-    }
-    .auto-buy-status-active {
-        color: #28a745 !important;
-        font-weight: 600 !important;
-    }
-    .auto-buy-status-inactive {
-        color: #888 !important;
-        font-weight: 600 !important;
-    }
+    /* Auto-Buy Status */
+    .status-active { color: #28a745; font-weight: 600; }
+    .status-inactive { color: #888; }
+    .status-warning { color: #dc3545; font-weight: 600; }
     
     @media (max-width: 768px) {
-        .tradeos-header {
-            padding: 0.5rem 0.75rem;
-            flex-direction: column;
-            gap: 0.3rem;
-            margin: -0.5rem -0.5rem 0.5rem -0.5rem;
-        }
-        .header-center {
-            font-size: 0.7rem;
-            gap: 0.8rem;
-            justify-content: center;
-        }
-        .page-title {
-            font-size: 1.1rem;
-        }
-        .screener-header {
-            flex-direction: column;
-            align-items: flex-start;
-            padding: 0.75rem;
-        }
-        .screener-stats {
-            font-size: 0.7rem;
-            gap: 0.8rem;
-        }
-        .footer-bar {
-            flex-direction: column;
-            text-align: center;
-            padding: 0.5rem 0.75rem;
-        }
+        .header { padding: 0.3rem 0.75rem; flex-direction: column; gap: 0.2rem; }
+        .filter-row { padding: 0.3rem 0.75rem; gap: 0.5rem; }
+        .screener-header { padding: 0.4rem 0.75rem; flex-direction: column; align-items: flex-start; }
+        .stat-item { font-size: 0.65rem; }
+        .page-title { font-size: 1rem; }
     }
 </style>
 """
@@ -565,7 +382,6 @@ def get_intraday_data_for_symbol(yahoo_ticker, period="10d", interval="5m"):
         return None
 
 def calculate_ema_200(data_5min):
-    """Calculate 200 EMA on 5-minute data"""
     if data_5min is None or len(data_5min) < 200:
         return None
     try:
@@ -641,10 +457,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     gap_percent = 0.0
                     prev_close = float(first_candle['Close'])
 
-                # Calculate 200 EMA
                 ema_200 = calculate_ema_200(data)
-                
-                # Get current price for EMA comparison
                 current_price = float(data['Close'].iloc[-1])
                 ema_status = None
                 if ema_200 is not None:
@@ -683,7 +496,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
     return results
 
 def check_candle_conditions(df, tickers_list):
-    with st.spinner('Fetching intraday data from Yahoo Finance...'):
+    with st.spinner('Fetching intraday data...'):
         candle_data = get_candle_data_bulk(tickers_list)
 
     for col_name in ['candle_9_15_high', 'candle_9_15_low', 'candle_9_20_open',
@@ -744,7 +557,7 @@ def check_candle_conditions(df, tickers_list):
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
 def load_stage1_data():
-    with st.spinner("🔄 Loading market data..."):
+    with st.spinner("Loading market data..."):
         count, df = get_tradingview_stocks()
         if count == 0:
             return None
@@ -789,24 +602,13 @@ def should_refresh_stage1():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_auto_buy_conditions(row):
-    """
-    Check if a stock meets all auto-buy conditions.
-    
-    Conditions:
-    1. Inside 9:15 checkbox is checked (filter active)
-    2. Current price > 200 EMA
-    3. Current price > (9:15 High * 1.0015) [0.15% above]
-    """
-    # Condition 1: Inside 9:15 must be True
     if row.get('inside_9_15') != True:
         return False, "Not inside 9:15 range"
     
-    # Condition 2: Current price > 200 EMA
     ema_status = row.get('price_vs_ema_200')
     if ema_status != 'ABOVE':
-        return False, f"Not above 200 EMA (Status: {ema_status})"
+        return False, f"Not above 200 EMA"
     
-    # Condition 3: Current price > 9:15 High * 1.0015 (0.15% above)
     high_9_15 = row.get('high_9_15', 0)
     current_price = row.get('current_price', 0)
     
@@ -818,27 +620,20 @@ def check_auto_buy_conditions(row):
     
     required_price = high_9_15 * 1.0015
     if current_price <= required_price:
-        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({required_price:.2f})"
+        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15%"
     
     return True, "All conditions met"
 
 def execute_auto_buy(display_df):
-    """
-    Execute auto-buy for stocks meeting all conditions.
-    Returns: (placed_orders, failed_orders, error_message)
-    """
-    # Check if we've reached daily limit
     today = datetime.now().date()
     if st.session_state['auto_buy_date'] != today:
-        # New day - reset counter
         st.session_state['auto_buy_bought_today'] = 0
         st.session_state['auto_buy_stocks_bought'] = []
         st.session_state['auto_buy_date'] = today
     
     if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-        return [], [], f"Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached"
+        return [], [], f"Daily limit reached"
     
-    # Filter stocks that haven't been bought yet
     available_stocks = display_df[
         ~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])
     ].copy()
@@ -850,34 +645,22 @@ def execute_auto_buy(display_df):
     failed_orders = []
     stocks_bought = []
     
-    # Check each stock
     for idx, row in available_stocks.iterrows():
-        # Check if daily limit reached
         if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
             break
         
         symbol = row['Symbol']
-        
-        # Check conditions
         meets_conditions, reason = check_auto_buy_conditions(row)
         
         if not meets_conditions:
-            failed_orders.append({
-                'symbol': symbol,
-                'reason': reason
-            })
+            failed_orders.append({'symbol': symbol, 'reason': reason})
             continue
         
-        # Check quantity
         max_qty = row.get('MaxQty', 0)
         if max_qty <= 0:
-            failed_orders.append({
-                'symbol': symbol,
-                'reason': 'No quantity available (insufficient margin)'
-            })
+            failed_orders.append({'symbol': symbol, 'reason': 'Insufficient margin'})
             continue
         
-        # Place order
         result = place_dhan_order(
             symbol=symbol,
             quantity=int(max_qty),
@@ -890,7 +673,6 @@ def execute_auto_buy(display_df):
                 'symbol': symbol,
                 'quantity': int(max_qty),
                 'price': row.get('current_price', 0),
-                'high_9_15': row.get('high_9_15', 0),
                 'order_id': result.get('order_id', 'N/A')
             })
             stocks_bought.append(symbol)
@@ -902,9 +684,7 @@ def execute_auto_buy(display_df):
                 'reason': result.get('error', 'Unknown error')
             })
     
-    # Update bought stocks list
     st.session_state['auto_buy_stocks_bought'].extend(stocks_bought)
-    
     return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -914,29 +694,20 @@ def execute_auto_buy(display_df):
 def render_header():
     current_time = datetime.now(IST)
     
-    nifty = "24,856.40"
-    nifty_chg = "+0.87%"
-    sensex = "81,234.56"
-    sensex_chg = "+0.92%"
-    bank_nifty = "52,345.67"
-    bank_chg = "-0.23%"
-    
     st.markdown(f"""
-    <div class="tradeos-header">
-        <div class="header-left">
+    <div class="header">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
             <span class="logo">📊 Gap Screener</span>
             <span class="version">v1.0</span>
         </div>
-        <div class="header-center">
-            <span class="ticker-item">NIFTY 50 {nifty} <span class="ticker-green">▲ {nifty_chg}</span></span>
-            <span class="ticker-item">SENSEX {sensex} <span class="ticker-green">▲ {sensex_chg}</span></span>
-            <span class="ticker-item">BANK NIFTY {bank_nifty} <span class="ticker-red">▼ {bank_chg}</span></span>
+        <div style="display:flex;gap:1.2rem;flex-wrap:wrap;">
+            <span class="ticker-item">NIFTY 50 24,856.40 <span class="ticker-green">▲ +0.87%</span></span>
+            <span class="ticker-item">SENSEX 81,234.56 <span class="ticker-green">▲ +0.92%</span></span>
+            <span class="ticker-item">BANK NIFTY 52,345.67 <span class="ticker-red">▼ -0.23%</span></span>
         </div>
-        <div class="header-right">
-            <div class="status-indicator">
-                <span class="status-dot"></span>
-                <span>Live</span>
-            </div>
+        <div style="display:flex;align-items:center;gap:0.8rem;">
+            <span class="status-dot"></span>
+            <span style="font-size:0.8rem;color:#333;">Live</span>
             <span class="clock">{current_time.strftime('%H:%M:%S')} IST</span>
         </div>
     </div>
@@ -946,13 +717,12 @@ def render_header():
 # APPLY CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
+st.markdown(PROFESSIONAL_CSS, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN APP
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Render Header
 render_header()
 
 # ─── Check auto-refresh ───
@@ -964,64 +734,60 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
-# ─── Page Header ───
-col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
+# ─── Page Controls ───
+ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([2.5, 1.2, 0.8, 0.8])
 
-with col1:
+with ctrl_col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 
-with col2:
-    # ─── Budget Control ───
+with ctrl_col2:
     user_capital = st.number_input(
-        "💰",
+        "💰 Capital",
         min_value=1000,
         max_value=10000000,
         value=int(st.session_state['user_capital']),
         step=1000,
         key="capital_input",
-        label_visibility="collapsed",
-        help="Total capital to divide among stocks"
+        label_visibility="collapsed"
     )
     st.session_state['user_capital'] = user_capital
 
-with col3:
-    # ─── Parts Control ───
+with ctrl_col3:
     num_parts = st.number_input(
-        "📊",
+        "📊 Parts",
         min_value=1,
         max_value=10,
         value=int(st.session_state.get('num_parts', 4)),
         step=1,
         key="parts_input",
-        label_visibility="collapsed",
-        help="Divide capital into how many parts"
+        label_visibility="collapsed"
     )
     st.session_state['num_parts'] = num_parts
 
-with col4:
+with ctrl_col4:
     if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
         st.session_state['stage1_data'] = None
         st.rerun()
 
-# ─── Show Gap Screener Content ───
+# ─── Show Screener ───
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
+    # ─── Screener Card ───
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
-            <div class="screener-stats">
+            <div style="display:flex;gap:1.2rem;flex-wrap:wrap;">
                 <span class="stat-item">📊 Total: <strong class="stat-count">{data['total_count']}</strong></span>
                 <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
                 <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
                 <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
             </div>
-            <div class="filter-badges">
+            <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
                 <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
                 <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
                 <span class="filter-badge active">📈 Gap ±2%</span>
@@ -1029,28 +795,28 @@ if st.session_state['stage1_data']:
         </div>
     """, unsafe_allow_html=True)
     
-    # ─── Apply Filters ───
+    # ─── Time checks ───
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
     # ─── Filter Row ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+    fcol1, fcol2, fcol3, fcol4, fcol5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
-    with filter_col1:
+    with fcol1:
         if is_after_9_25:
             show_inside_only = st.checkbox(
-                "📊 Inside 9:15 Range",
+                "📊 Inside 9:15",
                 value=st.session_state['show_inside_only'],
                 key="inside_checkbox"
             )
             st.session_state['show_inside_only'] = show_inside_only
         else:
-            st.info("⏳ 9:20 candle available after 9:25 AM")
+            st.info("⏳ 9:20 candle after 9:25 AM")
             show_inside_only = False
     
-    with filter_col2:
+    with fcol2:
         if is_after_9_30:
             show_breakout_only = st.checkbox(
                 "⚡ Breakout 9:30-9:45",
@@ -1059,10 +825,10 @@ if st.session_state['stage1_data']:
             )
             st.session_state['show_breakout_only'] = show_breakout_only
         else:
-            st.info("⏳ Breakout filter available after 9:30 AM")
+            st.info("⏳ Breakout after 9:30 AM")
             show_breakout_only = False
     
-    with filter_col3:
+    with fcol3:
         amo_test_mode = st.checkbox(
             "🌙 AMO",
             value=st.session_state['amo_mode'],
@@ -1070,10 +836,38 @@ if st.session_state['stage1_data']:
         )
         st.session_state['amo_mode'] = amo_test_mode
     
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
+    with fcol4:
+        auto_buy_toggle = st.checkbox(
+            "🤖 Auto-Buy",
+            value=st.session_state.get('auto_buy_enabled', False),
+            key="auto_buy_toggle"
+        )
+        st.session_state['auto_buy_enabled'] = auto_buy_toggle
     
-    # ─── Apply filters to dataframe ───
+    with fcol5:
+        if auto_buy_toggle:
+            if not show_inside_only:
+                st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
+            else:
+                remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+                eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE']) if 'display_df' in locals() else 0
+                
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;padding:2px 0;">
+                    <span style="color:#28a745;font-weight:600;">🟢 ACTIVE</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">🎯 {eligible_count}</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#333;">📊 {remaining}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown('<span style="color:#888;font-size:0.7rem;">⚪ Auto-Buy OFF</span>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # ─── Apply Filters ───
     display_df = df.copy()
     if show_breakout_only:
         display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
@@ -1083,47 +877,35 @@ if st.session_state['stage1_data']:
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
-        # ─── Prepare display dataframe ───
+        # ─── Prepare Data ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
-        
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+        with st.spinner("Calculating quantities..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
                 display_df,
                 total_capital=st.session_state['user_capital'],
                 num_parts=st.session_state.get('num_parts', 4)
             )
         
-        # ─── Create display columns ───
-        display_cols = [
-            'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
-            'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector',
-            'high_9_15', 'current_price'
-        ]
+        # ─── Rename Columns ───
+        display_cols = ['name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
+                       'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector',
+                       'high_9_15', 'current_price']
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
         
         display_df = display_df.rename(columns={
-            'name': 'Symbol',
-            'close': 'Price',
-            'change': 'Chg%',
-            'gap_percent': 'Gap%',
-            'volume': 'Volume',
-            'relative_volume': 'Rel Vol',
-            'inside_9_15': 'Inside 9:15',
-            'breakout_9_30_to_9_45': 'Breakout',
-            'price_vs_ema_200': '200 EMA',
-            'MaxQty': 'MaxQty',
-            'sector': 'Sector',
-            'high_9_15': 'high_9_15',
-            'current_price': 'current_price'
+            'name': 'Symbol', 'close': 'Price', 'change': 'Chg%', 'gap_percent': 'Gap%',
+            'volume': 'Volume', 'relative_volume': 'Rel Vol',
+            'inside_9_15': 'Inside 9:15', 'breakout_9_30_to_9_45': 'Breakout',
+            'price_vs_ema_200': '200 EMA', 'MaxQty': 'MaxQty', 'sector': 'Sector',
+            'high_9_15': 'high_9_15', 'current_price': 'current_price'
         })
         
-        # ─── Format columns with NaN handling ───
-        # Add 9:15 High column (from existing high_9_15 data)
+        # ─── Format Columns ───
         if 'high_9_15' in display_df.columns:
             display_df['9:15 High'] = display_df['high_9_15'].apply(
                 lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
@@ -1131,47 +913,30 @@ if st.session_state['stage1_data']:
         else:
             display_df['9:15 High'] = "N/A"
         
-        # Format existing Price column
         if 'Price' in display_df.columns:
             display_df['Price'] = display_df['Price'].apply(
                 lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
             )
         
-        def format_chg(x):
-            if pd.isna(x) or x is None:
-                return "0.00%"
-            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
-        
         if 'Chg%' in display_df.columns:
-            display_df['Chg%'] = display_df['Chg%'].apply(format_chg)
-        
-        def format_gap(x):
-            if pd.isna(x) or x is None:
-                return "0.00%"
-            return f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%"
+            display_df['Chg%'] = display_df['Chg%'].apply(
+                lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+            )
         
         if 'Gap%' in display_df.columns:
-            display_df['Gap%'] = display_df['Gap%'].apply(format_gap)
-        
-        def format_volume(x):
-            if pd.isna(x) or x is None:
-                return "0"
-            if x >= 1e6:
-                return f"{x/1e6:.1f}M"
-            elif x >= 1e3:
-                return f"{x/1e3:.1f}K"
-            return f"{x:.0f}"
+            display_df['Gap%'] = display_df['Gap%'].apply(
+                lambda x: f"+{x:.2f}%" if x >= 0 else f"{x:.2f}%" if pd.notna(x) else "0.00%"
+            )
         
         if 'Volume' in display_df.columns:
-            display_df['Volume'] = display_df['Volume'].apply(format_volume)
-        
-        def format_relvol(x):
-            if pd.isna(x) or x is None:
-                return "0x"
-            return f"{x:.2f}x"
+            display_df['Volume'] = display_df['Volume'].apply(
+                lambda x: f"{x/1e6:.1f}M" if x >= 1e6 else f"{x/1e3:.1f}K" if x >= 1e3 else f"{x:.0f}" if pd.notna(x) else "0"
+            )
         
         if 'Rel Vol' in display_df.columns:
-            display_df['Rel Vol'] = display_df['Rel Vol'].apply(format_relvol)
+            display_df['Rel Vol'] = display_df['Rel Vol'].apply(
+                lambda x: f"{x:.2f}x" if pd.notna(x) else "0x"
+            )
         
         if 'Inside 9:15' in display_df.columns:
             display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
@@ -1184,23 +949,16 @@ if st.session_state['stage1_data']:
                 lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
             )
         
-        # ─── Auto-Buy Eligibility Check ───
+        # ─── Auto-Buy Eligibility ───
         def check_auto_buy_eligible(row):
-            # Check Inside 9:15
-            inside_value = row.get('Inside 9:15')
-            if inside_value != '✅':
+            if row.get('Inside 9:15') != '✅':
                 return '❌ Not Inside'
-            
-            # Check 200 EMA
-            ema_value = row.get('200 EMA')
-            if ema_value != '🟢 ABOVE':
+            if row.get('200 EMA') != '🟢 ABOVE':
                 return '❌ Below EMA'
             
-            # Check 0.15% above 9:15 High
             high_9_15 = row.get('high_9_15')
             current_price = row.get('Price')
             
-            # Clean price if it's formatted
             if isinstance(current_price, str):
                 try:
                     current_price = float(current_price.replace('₹', '').replace(',', ''))
@@ -1221,132 +979,54 @@ if st.session_state['stage1_data']:
         
         display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
         
-        # ─── Final columns ───
-        final_cols = [
-            'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
-            'Rel Vol', 'Inside 9:15', 'Breakout', '200 EMA',
-            '9:15 High', 'Auto-Buy Status', 'MaxQty', 'Sector'
-        ]
-        
+        # ─── Final Columns ───
+        final_cols = ['Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 'Rel Vol',
+                     'Inside 9:15', 'Breakout', '200 EMA', '9:15 High', 
+                     'Auto-Buy Status', 'MaxQty', 'Sector']
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-        # ════════════════════════════════════════════════════════════════
-        # ═══ AUTO-BUY SECTION ═══
-        # ════════════════════════════════════════════════════════════════
-        
-        st.markdown("---")
-        
-        # Auto-Buy Header with Toggle
-        ab_header_col1, ab_header_col2, ab_header_col3 = st.columns([1, 3, 1])
-        
-        with ab_header_col1:
-            st.subheader("🤖 Auto-Buy")
-        
-        with ab_header_col2:
-            # Toggle switch for auto-buy
-            auto_buy_toggle = st.checkbox(
-                "Enable Auto-Buy",
-                value=st.session_state.get('auto_buy_enabled', False),
-                key="auto_buy_toggle"
-            )
-            st.session_state['auto_buy_enabled'] = auto_buy_toggle
-        
-        with ab_header_col3:
-            # Show daily count
-            today = datetime.now().date()
-            if st.session_state['auto_buy_date'] != today:
-                st.session_state['auto_buy_bought_today'] = 0
-                st.session_state['auto_buy_stocks_bought'] = []
-                st.session_state['auto_buy_date'] = today
+        # ─── Auto-Buy Execution ───
+        if st.session_state.get('auto_buy_enabled', False) and st.session_state.get('show_inside_only', False):
+            eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
             
-            remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-            st.metric("Remaining Today", remaining, delta=None)
-        
-        # Auto-Buy Configuration (only shown when enabled)
-        if auto_buy_toggle:
-            st.markdown('<div class="auto-buy-enabled">', unsafe_allow_html=True)
-            
-            # Check if Inside 9:15 checkbox is active
-            if not st.session_state.get('show_inside_only', False):
-                st.warning("⚠️ **Inside 9:15 Range checkbox must be checked for Auto-Buy to work!**")
-                st.info("Please check the 'Inside 9:15 Range' filter above to enable auto-buy.")
-            else:
-                st.info("📊 Auto-buy is ACTIVE. Stocks meeting all conditions will be bought automatically.")
+            if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
+                with st.spinner("🤖 Auto-buy executing..."):
+                    placed, failed, error = execute_auto_buy(display_df)
                 
-                # Show auto-buy conditions
-                st.markdown("**Auto-Buy Conditions:**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown("✅ Inside 9:15 Range")
-                with col2:
-                    st.markdown("✅ Above 200 EMA")
-                with col3:
-                    st.markdown("✅ Price > 9:15 High + 0.15%")
-                
-                # Show eligible stocks count
-                eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
-                st.info(f"🎯 {eligible_count} stocks currently eligible for auto-buy")
-                
-                # Auto-execute: Check if any stocks need to be bought
-                if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
-                    # Execute auto-buy immediately
-                    with st.spinner("🤖 Auto-buy executing..."):
-                        placed, failed, error = execute_auto_buy(display_df)
+                if error:
+                    st.warning(f"⚠️ {error}")
+                else:
+                    if placed:
+                        st.success(f"✅ {len(placed)} orders placed")
+                        st.dataframe(pd.DataFrame(placed), use_container_width=True)
+                        st.session_state['auto_buy_orders_placed'].extend(placed)
                     
-                    if error:
-                        st.warning(f"⚠️ {error}")
-                    else:
-                        if placed:
-                            st.success(f"✅ {len(placed)} orders placed successfully!")
-                            placed_df = pd.DataFrame(placed)
-                            st.dataframe(placed_df, use_container_width=True)
-                            st.session_state['auto_buy_orders_placed'].extend(placed)
-                        
-                        if failed:
-                            st.warning(f"⚠️ {len(failed)} orders failed")
-                            failed_df = pd.DataFrame(failed)
-                            st.dataframe(failed_df, use_container_width=True)
-                            st.session_state['auto_buy_orders_failed'].extend(failed)
-                        
-                        # Check if daily limit reached
-                        if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-                            st.success(f"🎯 Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached!")
-                
-                elif st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
-                    st.success(f"✅ Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached. Auto-buy will resume tomorrow.")
-            
-            # Show today's bought stocks
-            if st.session_state['auto_buy_stocks_bought']:
-                with st.expander("📊 Today's Auto-Buy History"):
-                    st.write(f"Stocks bought: {', '.join(st.session_state['auto_buy_stocks_bought'])}")
-                    if st.session_state['auto_buy_orders_placed']:
-                        st.dataframe(pd.DataFrame(st.session_state['auto_buy_orders_placed']))
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+                    if failed:
+                        st.warning(f"⚠️ {len(failed)} failed")
+                        st.dataframe(pd.DataFrame(failed), use_container_width=True)
+                        st.session_state['auto_buy_orders_failed'].extend(failed)
+                    
+                    if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+                        st.success(f"🎯 Daily limit of {st.session_state['auto_buy_max_stocks']} reached")
         
-        else:
-            st.markdown('<div class="auto-buy-disabled">', unsafe_allow_html=True)
-            st.info("⚪ Auto-Buy is disabled. Toggle the switch above to enable automatic buying.")
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # ─── TABLE + BUY BUTTONS ───
-        table_col, button_col = st.columns([8.5, 1.5])
+        # ─── Table + Buy Buttons ───
+        table_col, btn_col = st.columns([8.5, 1.5])
         
         with table_col:
             st.dataframe(
                 display_df,
                 use_container_width=True,
-                height=600,
+                height=500,
                 column_config={
                     "Symbol": st.column_config.TextColumn("SYMBOL", width="small"),
                     "Price": st.column_config.TextColumn("PRICE", width="small"),
                     "Chg%": st.column_config.TextColumn("CHG%", width="small"),
                     "Gap%": st.column_config.TextColumn("GAP%", width="small"),
-                    "Volume": st.column_config.TextColumn("VOLUME", width="small"),
+                    "Volume": st.column_config.TextColumn("VOL", width="small"),
                     "Rel Vol": st.column_config.TextColumn("RELVOL", width="small"),
                     "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
-                    "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
+                    "Breakout": st.column_config.TextColumn("BREAK", width="small"),
                     "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
                     "9:15 High": st.column_config.TextColumn("9:15 HIGH", width="small"),
                     "Auto-Buy Status": st.column_config.TextColumn("AUTO-BUY", width="small"),
@@ -1355,17 +1035,16 @@ if st.session_state['stage1_data']:
                 }
             )
         
-        with button_col:
+        with btn_col:
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
-                btn_label = f"{symbol}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
+                disabled = max_qty <= 0 or st.session_state.get('auto_buy_enabled', False)
                 
-                # Disable manual buttons when auto-buy is enabled
                 if st.button(
-                    btn_label,
+                    symbol,
                     key=f"buy_{symbol}_{idx}",
-                    disabled=(max_qty <= 0 or st.session_state.get('auto_buy_enabled', False)),
+                    disabled=disabled,
                     use_container_width=True
                 ):
                     with st.spinner(f"Placing order for {symbol}..."):
@@ -1378,41 +1057,39 @@ if st.session_state['stage1_data']:
                         )
                         display_order_result(symbol, result)
             
-            # Show note when auto-buy is enabled
             if st.session_state.get('auto_buy_enabled', False):
-                st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
+                st.caption("🔒 Auto-Buy ON")
         
-        # ─── Download CSV ───
+        # ─── Download ───
         csv = display_df.to_csv(index=False)
         st.download_button(
-            label="📥 Download CSV",
+            label="📥 CSV",
             data=csv,
-            file_name=f'screener_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+            file_name=f'screener_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
             mime='text/csv',
             use_container_width=True
         )
     
-    # ─── Footer Bar ───
+    # ─── Footer ───
     st.markdown(f"""
-    <div class="footer-bar">
-        <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
-        <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · 
-        <span class="highlight">{pass_count}</span> pass candle check</span>
-        <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
-        <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · 
+    <div class="footer">
+        <span>🔄 Refreshes every <span class="live">1 min</span></span>
+        <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks · 
+        <span class="highlight">{pass_count}</span> pass candle</span>
+        <span>🤖 Auto-Buy: <span class="{'status-active' if st.session_state.get('auto_buy_enabled', False) else 'status-inactive'}">
+        {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'}</span> · 
         {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
     </div>
     """, unsafe_allow_html=True)
     
-    # ─── Debug Section ───
-    with st.expander("🔍 Debug: Max Qty Calculation"):
+    # ─── Debug ───
+    with st.expander("🔍 Debug"):
         debug_info = get_qty_calc_debug()
         st.json(debug_info)
 
 # ─── Footer ───
 st.markdown("""
-<div style="text-align:center; padding:1.5rem; color:#888; font-size:0.65rem; border-top:1px solid #e9ecef; margin-top:1rem;">
-    📊 Gap Screener · Professional Trading Scanner<br>
-    Data: TradingView · Yahoo Finance · DhanHQ
+<div style="text-align:center;padding:0.8rem;color:#888;font-size:0.6rem;border-top:1px solid #e9ecef;margin-top:0.5rem;">
+    📊 Gap Screener · Data: TradingView · Yahoo Finance · DhanHQ
 </div>
 """, unsafe_allow_html=True)
