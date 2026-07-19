@@ -270,7 +270,7 @@ PROFESSIONAL_CSS = """
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS - All your existing functions (unchanged)
+# FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_gap_filtered_stocks(df):
@@ -593,20 +593,30 @@ def should_refresh_stage1():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_auto_buy_conditions(row):
+    # Check if row has the required columns
+    if 'inside_9_15' not in row.index:
+        return False, "Missing inside_9_15 data"
+    
     if row.get('inside_9_15') != True:
         return False, "Not inside 9:15 range"
+    
+    if 'price_vs_ema_200' not in row.index:
+        return False, "Missing EMA data"
     
     ema_status = row.get('price_vs_ema_200')
     if ema_status != 'ABOVE':
         return False, "Not above 200 EMA"
     
+    if 'high_9_15' not in row.index or 'current_price' not in row.index:
+        return False, "Missing price data"
+    
     high_9_15 = row.get('high_9_15', 0)
     current_price = row.get('current_price', 0)
     
-    if high_9_15 <= 0:
+    if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
         return False, "No 9:15 High data"
     
-    if current_price <= 0:
+    if current_price is None or pd.isna(current_price) or current_price <= 0:
         return False, "No current price data"
     
     required_price = high_9_15 * 1.0015
@@ -624,6 +634,10 @@ def execute_auto_buy(display_df):
     
     if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
         return [], [], "Daily limit reached"
+    
+    # Check if 'Symbol' column exists
+    if 'Symbol' not in display_df.columns:
+        return [], [], "Symbol column not found"
     
     available_stocks = display_df[
         ~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])
@@ -652,6 +666,9 @@ def execute_auto_buy(display_df):
             failed_orders.append({'symbol': symbol, 'reason': 'Insufficient margin'})
             continue
         
+        # Get current price from the row
+        current_price = row.get('current_price', 0)
+        
         result = place_dhan_order(
             symbol=symbol,
             quantity=int(max_qty),
@@ -663,7 +680,7 @@ def execute_auto_buy(display_df):
             placed_orders.append({
                 'symbol': symbol,
                 'quantity': int(max_qty),
-                'price': row.get('current_price', 0),
+                'price': current_price,
                 'order_id': result.get('order_id', 'N/A')
             })
             stocks_bought.append(symbol)
@@ -863,9 +880,11 @@ if st.session_state['stage1_data']:
     # ─── Apply Filters ───
     display_df = df.copy()
     if show_breakout_only:
-        display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
+        if 'breakout_9_30_to_9_45' in display_df.columns:
+            display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     if show_inside_only and is_after_9_25:
-        display_df = display_df[display_df['inside_9_15'] == True]
+        if 'inside_9_15' in display_df.columns:
+            display_df = display_df[display_df['inside_9_15'] == True]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
@@ -875,12 +894,31 @@ if st.session_state['stage1_data']:
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
         display_df['Symbol'] = display_df['name']
         
-        # Keep original numeric values
-        display_df['_price'] = display_df['close']
-        display_df['_change'] = display_df['change']
-        display_df['_gap'] = display_df['gap_percent']
-        display_df['_volume'] = display_df['volume']
-        display_df['_relvol'] = display_df['relative_volume']
+        # Keep original numeric values (safely)
+        if 'close' in display_df.columns:
+            display_df['_price'] = display_df['close']
+        else:
+            display_df['_price'] = 0
+            
+        if 'change' in display_df.columns:
+            display_df['_change'] = display_df['change']
+        else:
+            display_df['_change'] = 0
+            
+        if 'gap_percent' in display_df.columns:
+            display_df['_gap'] = display_df['gap_percent']
+        else:
+            display_df['_gap'] = 0
+            
+        if 'volume' in display_df.columns:
+            display_df['_volume'] = display_df['volume']
+        else:
+            display_df['_volume'] = 0
+            
+        if 'relative_volume' in display_df.columns:
+            display_df['_relvol'] = display_df['relative_volume']
+        else:
+            display_df['_relvol'] = 0
         
         with st.spinner("Calculating quantities..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
@@ -889,13 +927,7 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
         
-        # ─── Rename Columns ───
-        display_cols = ['name', '_price', '_change', '_gap', '_volume', '_relvol',
-                       'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 
-                       'MaxQty', 'sector', 'high_9_15', 'current_price']
-        available = [c for c in display_cols if c in display_df.columns]
-        display_df = display_df[available].copy()
-        
+        # ─── Rename Columns safely ───
         display_df = display_df.rename(columns={
             'name': 'Symbol',
             '_price': 'Price',
@@ -903,14 +935,28 @@ if st.session_state['stage1_data']:
             '_gap': 'Gap%',
             '_volume': 'Volume',
             '_relvol': 'Rel Vol',
-            'inside_9_15': 'Inside 9:15',
-            'breakout_9_30_to_9_45': 'Breakout',
-            'price_vs_ema_200': '200 EMA',
-            'MaxQty': 'MaxQty',
-            'sector': 'Sector',
-            'high_9_15': 'high_9_15',
-            'current_price': 'current_price'
         })
+        
+        # Copy existing columns if they exist
+        if 'inside_9_15' in display_df.columns:
+            display_df['Inside 9:15'] = display_df['inside_9_15']
+        else:
+            display_df['Inside 9:15'] = False
+            
+        if 'breakout_9_30_to_9_45' in display_df.columns:
+            display_df['Breakout'] = display_df['breakout_9_30_to_9_45']
+        else:
+            display_df['Breakout'] = False
+            
+        if 'price_vs_ema_200' in display_df.columns:
+            display_df['200 EMA'] = display_df['price_vs_ema_200']
+        else:
+            display_df['200 EMA'] = 'NO DATA'
+            
+        if 'sector' in display_df.columns:
+            display_df['Sector'] = display_df['sector']
+        else:
+            display_df['Sector'] = 'N/A'
         
         # ─── Create Display Columns (Formatted) ───
         display_df['Price_Display'] = display_df['Price'].apply(
@@ -948,10 +994,19 @@ if st.session_state['stage1_data']:
             lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
         )
         
-        # ─── 9:15 High ───
-        display_df['9:15 High'] = display_df['high_9_15'].apply(
-            lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
-        )
+        # ─── 9:15 High (safely) ───
+        if 'high_9_15' in display_df.columns:
+            display_df['9:15 High'] = display_df['high_9_15'].apply(
+                lambda x: f"₹{x:,.2f}" if pd.notna(x) and x > 0 else "N/A"
+            )
+        else:
+            display_df['9:15 High'] = "N/A"
+        
+        # ─── Store current_price for auto-buy ───
+        if 'current_price' in display_df.columns:
+            display_df['_current_price'] = display_df['current_price']
+        else:
+            display_df['_current_price'] = 0
         
         # ─── Auto-Buy Eligibility ───
         def check_auto_buy_eligible(row):
@@ -960,8 +1015,9 @@ if st.session_state['stage1_data']:
             if row.get('200 EMA') != '🟢 ABOVE':
                 return '❌ Below EMA'
             
-            high_9_15 = row.get('high_9_15')
-            current_price = row.get('current_price')
+            # Get high_9_15 and current_price from original columns
+            high_9_15 = row.get('high_9_15', 0)
+            current_price = row.get('_current_price', 0)
             
             if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
                 return '❌ No 9:15 High'
