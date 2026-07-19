@@ -18,9 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ── Import DhanHQ modules ──
 from tv_screener.quantity_calculator import (
     calculate_max_quantity_column,
-    get_qty_calc_debug,
-    get_access_token,
-    _supabase_save_token
+    get_qty_calc_debug
 )
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
@@ -92,16 +90,6 @@ if 'auto_buy_stocks_bought' not in st.session_state:
 if 'auto_buy_date' not in st.session_state:
     st.session_state['auto_buy_date'] = datetime.now().date()
 
-# ─── TOKEN SESSION STATE ───
-if 'show_token_input' not in st.session_state:
-    st.session_state['show_token_input'] = False
-
-if 'user_manual_access_token' not in st.session_state:
-    st.session_state['user_manual_access_token'] = ''
-
-if 'token_save_success' not in st.session_state:
-    st.session_state['token_save_success'] = False
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -114,7 +102,7 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS - WHITE THEME (RESTORED)
+# CSS - WHITE THEME
 # ─────────────────────────────────────────────────────────────────────────────
 
 WHITE_THEME_CSS = """
@@ -206,7 +194,6 @@ WHITE_THEME_CSS = """
         border-radius: 50%;
         background: #28a745;
         animation: pulse 2s infinite;
-        display: inline-block;
     }
     @keyframes pulse {
         0%, 100% { opacity: 1; }
@@ -263,7 +250,7 @@ WHITE_THEME_CSS = """
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.8rem 1.5rem;
+        padding: 1rem 1.5rem;
         background: #f8f9fa;
         border-bottom: 1px solid #e9ecef;
         flex-wrap: wrap;
@@ -441,18 +428,6 @@ WHITE_THEME_CSS = """
         font-weight: 600 !important;
     }
     
-    /* Token Input */
-    .token-input-container {
-        background: #f8f9fa;
-        padding: 0.8rem 1.5rem;
-        border-bottom: 1px solid #e9ecef;
-        margin: -0.5rem -1rem 0.5rem -1rem;
-    }
-    .token-input-container .stTextInput input {
-        font-size: 0.8rem !important;
-        padding: 0.4rem 0.8rem !important;
-    }
-    
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -481,10 +456,6 @@ WHITE_THEME_CSS = """
             flex-direction: column;
             text-align: center;
             padding: 0.5rem 0.75rem;
-        }
-        .filter-row {
-            padding: 0.5rem 0.75rem;
-            gap: 0.5rem;
         }
     }
 </style>
@@ -937,26 +908,6 @@ def execute_auto_buy(display_df):
     return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TOKEN INPUT HANDLER
-# ─────────────────────────────────────────────────────────────────────────────
-
-def handle_token_input():
-    """Handle token input and save to Supabase on Enter key"""
-    token = st.session_state.get('token_input_value', '').strip()
-    if token:
-        # Save to Supabase
-        _supabase_save_token(token)
-        # Update session state
-        st.session_state['user_manual_access_token'] = token
-        st.session_state['token_save_success'] = True
-        st.success("✅ Token saved to Supabase successfully!")
-        st.rerun()
-
-def toggle_token_input():
-    """Toggle the token input visibility"""
-    st.session_state['show_token_input'] = not st.session_state.get('show_token_input', False)
-
-# ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -970,17 +921,11 @@ def render_header():
     bank_nifty = "52,345.67"
     bank_chg = "-0.23%"
     
-    # Check if token exists
-    token_exists = bool(st.session_state.get('user_manual_access_token', ''))
-    token_status = "🟢" if token_exists else "🔴"
-    
     st.markdown(f"""
     <div class="tradeos-header">
         <div class="header-left">
             <span class="logo">📊 Gap Screener</span>
             <span class="version">v1.0</span>
-            <span style="font-size:0.6rem;color:#888;margin-left:0.3rem;">Token: {token_status}</span>
-            <!-- Gear icon as clickable button -->
         </div>
         <div class="header-center">
             <span class="ticker-item">NIFTY 50 {nifty} <span class="ticker-green">▲ {nifty_chg}</span></span>
@@ -1010,41 +955,6 @@ st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 # Render Header
 render_header()
 
-# ─── Token Gear Icon and Input (Below Header) ───
-col_gear, col_spacer = st.columns([0.3, 20])
-with col_gear:
-    # Gear icon to toggle token input
-    if st.button("⚙️", key="gear_toggle", help="Toggle Token Input"):
-        toggle_token_input()
-
-# ─── Token Input Box (Shows when gear icon is clicked) ───
-if st.session_state.get('show_token_input', False):
-    with st.container():
-        st.markdown("---")
-        st.markdown("#### 🔑 Dhan Access Token")
-        
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            st.text_input(
-                "Enter your Dhan Access Token",
-                value=st.session_state.get('user_manual_access_token', ''),
-                key="token_input_value",
-                type="password",
-                placeholder="Paste your access token here...",
-                label_visibility="collapsed",
-                on_change=handle_token_input
-            )
-        with col2:
-            if st.button("💾 Save", use_container_width=True):
-                handle_token_input()
-        with col3:
-            if st.button("❌ Close", use_container_width=True):
-                st.session_state['show_token_input'] = False
-                st.rerun()
-        
-        st.caption("💡 Token will be saved to Supabase and used for all Dhan API calls.")
-        st.markdown("---")
-
 # ─── Check auto-refresh ───
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
@@ -1054,12 +964,51 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
+# ─── Page Header ───
+col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
+
+with col1:
+    st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
+
+with col2:
+    # ─── Budget Control ───
+    user_capital = st.number_input(
+        "💰",
+        min_value=1000,
+        max_value=10000000,
+        value=int(st.session_state['user_capital']),
+        step=1000,
+        key="capital_input",
+        label_visibility="collapsed",
+        help="Total capital to divide among stocks"
+    )
+    st.session_state['user_capital'] = user_capital
+
+with col3:
+    # ─── Parts Control ───
+    num_parts = st.number_input(
+        "📊",
+        min_value=1,
+        max_value=10,
+        value=int(st.session_state.get('num_parts', 4)),
+        step=1,
+        key="parts_input",
+        label_visibility="collapsed",
+        help="Divide capital into how many parts"
+    )
+    st.session_state['num_parts'] = num_parts
+
+with col4:
+    if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
+        st.session_state['stage1_data'] = None
+        st.rerun()
+
 # ─── Show Gap Screener Content ───
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card ───
+    # ─── Screener Card Header ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
@@ -1084,9 +1033,10 @@ if st.session_state['stage1_data']:
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
-    # ─── Filter Row ───
+    # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
+    # 5 columns for all controls + auto-buy status
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
     with filter_col1:
@@ -1137,6 +1087,7 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+                # Calculate eligible count safely
                 eligible_count = 0
                 if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
                     eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
@@ -1172,38 +1123,6 @@ if st.session_state['stage1_data']:
         
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
-        
-        # Capital and Parts controls in a row
-        col_cap, col_parts, col_refresh = st.columns([0.8, 0.6, 0.5])
-        
-        with col_cap:
-            user_capital = st.number_input(
-                "💰 Capital",
-                min_value=1000,
-                max_value=10000000,
-                value=int(st.session_state['user_capital']),
-                step=1000,
-                key="capital_input_main",
-                help="Total capital to divide among stocks"
-            )
-            st.session_state['user_capital'] = user_capital
-        
-        with col_parts:
-            num_parts = st.number_input(
-                "📊 Parts",
-                min_value=1,
-                max_value=10,
-                value=int(st.session_state.get('num_parts', 4)),
-                step=1,
-                key="parts_input_main",
-                help="Divide capital into how many parts"
-            )
-            st.session_state['num_parts'] = num_parts
-        
-        with col_refresh:
-            if st.button("🔄 Refresh", key="refresh_btn_main", use_container_width=True):
-                st.session_state['stage1_data'] = None
-                st.rerun()
         
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
@@ -1443,7 +1362,6 @@ if st.session_state['stage1_data']:
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
         <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · 
         {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
-        <span>🔑 Token: {'✅' if st.session_state.get('user_manual_access_token', '') else '❌'}</span>
     </div>
     """, unsafe_allow_html=True)
     
