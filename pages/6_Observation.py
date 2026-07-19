@@ -18,7 +18,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ── Import DhanHQ modules ──
 from tv_screener.quantity_calculator import (
     calculate_max_quantity_column,
-    get_qty_calc_debug
+    get_qty_calc_debug,
+    get_access_token,
+    _supabase_save_token
 )
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
@@ -90,6 +92,16 @@ if 'auto_buy_stocks_bought' not in st.session_state:
 if 'auto_buy_date' not in st.session_state:
     st.session_state['auto_buy_date'] = datetime.now().date()
 
+# ─── TOKEN SESSION STATE ───
+if 'show_token_input' not in st.session_state:
+    st.session_state['show_token_input'] = False
+
+if 'user_manual_access_token' not in st.session_state:
+    st.session_state['user_manual_access_token'] = ''
+
+if 'token_save_success' not in st.session_state:
+    st.session_state['token_save_success'] = False
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,12 +147,12 @@ WHITE_THEME_CSS = """
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.6rem 2rem;
+        padding: 0.4rem 2rem;
         background: #ffffff;
         border-bottom: 1px solid #e9ecef;
-        margin: -0.5rem -1rem 0.5rem -1rem;
+        margin: -0.5rem -1rem 0.3rem -1rem;
         flex-wrap: wrap;
-        gap: 0.5rem;
+        gap: 0.3rem;
         position: sticky;
         top: 0;
         z-index: 999;
@@ -151,12 +163,12 @@ WHITE_THEME_CSS = """
         gap: 0.75rem;
     }
     .logo {
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: #1a1a2e;
     }
     .version {
-        font-size: 0.6rem;
+        font-size: 0.55rem;
         color: #888;
         background: #f1f3f5;
         padding: 0.1rem 0.5rem;
@@ -164,13 +176,13 @@ WHITE_THEME_CSS = """
     }
     .header-center {
         display: flex;
-        gap: 1.5rem;
-        font-size: 0.8rem;
+        gap: 1.2rem;
+        font-size: 0.75rem;
         flex-wrap: wrap;
     }
     .ticker-item {
         display: flex;
-        gap: 0.4rem;
+        gap: 0.3rem;
         align-items: center;
         color: #333;
     }
@@ -179,88 +191,57 @@ WHITE_THEME_CSS = """
     .header-right {
         display: flex;
         align-items: center;
-        gap: 1rem;
+        gap: 0.8rem;
     }
     .status-indicator {
         display: flex;
         align-items: center;
-        gap: 0.4rem;
-        font-size: 0.8rem;
+        gap: 0.3rem;
+        font-size: 0.75rem;
         color: #333;
     }
     .status-dot {
-        width: 7px;
-        height: 7px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
         background: #28a745;
         animation: pulse 2s infinite;
+        display: inline-block;
     }
     @keyframes pulse {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
     }
     .clock {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         color: #888;
         font-variant-numeric: tabular-nums;
     }
     
-    .page-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin: 1rem 0 1.25rem 0;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-    }
-    .page-title {
-        font-size: 1.4rem;
-        font-weight: 600;
-        color: #1a1a2e;
-    }
-    .page-title span {
-        font-size: 0.8rem;
-        color: #888;
-        font-weight: 400;
-    }
-    
-    .stButton button {
-        background: #f1f3f5 !important;
-        border: 1px solid #dee2e6 !important;
-        color: #333 !important;
-        border-radius: 8px !important;
-        padding: 0.4rem 1.2rem !important;
-        font-size: 0.8rem !important;
-        transition: all 0.3s ease !important;
-    }
-    .stButton button:hover {
-        background: #e9ecef !important;
-        border-color: #adb5bd !important;
-    }
-    
     .screener-card {
         background: #ffffff;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid #e9ecef;
         overflow: hidden;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     .screener-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 1rem 1.5rem;
+        padding: 0.4rem 1.2rem;
         background: #f8f9fa;
         border-bottom: 1px solid #e9ecef;
         flex-wrap: wrap;
-        gap: 0.75rem;
+        gap: 0.4rem;
     }
     .screener-stats {
         display: flex;
-        gap: 1.5rem;
-        font-size: 0.8rem;
+        gap: 1.2rem;
+        font-size: 0.75rem;
         flex-wrap: wrap;
+        align-items: center;
     }
     .stat-item {
         color: #888;
@@ -273,16 +254,30 @@ WHITE_THEME_CSS = """
         color: #28a745;
         font-weight: 600;
     }
+    .screener-controls {
+        display: flex;
+        gap: 0.8rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .screener-controls .stNumberInput {
+        width: 80px !important;
+    }
+    .screener-controls .stButton button {
+        padding: 0.2rem 0.8rem !important;
+        font-size: 0.7rem !important;
+    }
+    
     .filter-badges {
         display: flex;
-        gap: 0.4rem;
+        gap: 0.3rem;
         flex-wrap: wrap;
     }
     .filter-badge {
         background: #f1f3f5;
-        padding: 0.2rem 0.7rem;
+        padding: 0.15rem 0.6rem;
         border-radius: 12px;
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         color: #888;
         border: 1px solid #e9ecef;
     }
@@ -295,7 +290,7 @@ WHITE_THEME_CSS = """
     .filter-row {
         display: flex;
         gap: 1.5rem;
-        padding: 0.75rem 1.5rem;
+        padding: 0.5rem 1.2rem;
         background: #f8f9fa;
         border-top: 1px solid #e9ecef;
         flex-wrap: wrap;
@@ -304,7 +299,7 @@ WHITE_THEME_CSS = """
     
     .stCheckbox label {
         color: #555 !important;
-        font-size: 0.8rem !important;
+        font-size: 0.75rem !important;
     }
     .stCheckbox label span {
         color: #333 !important;
@@ -315,8 +310,8 @@ WHITE_THEME_CSS = """
     }
     .stDataFrame [data-testid="stDataFrameResizable"] {
         background: #ffffff !important;
-        border: 1px solid #e9ecef !important;
-        border-radius: 8px !important;
+        border: none !important;
+        border-radius: 0 !important;
     }
     .stDataFrame table {
         background: #ffffff !important;
@@ -330,22 +325,20 @@ WHITE_THEME_CSS = """
     .stDataFrame thead tr th {
         background: #f8f9fa !important;
         color: #888 !important;
-        font-size: 0.6rem !important;
+        font-size: 0.55rem !important;
         text-transform: uppercase !important;
         letter-spacing: 0.5px !important;
         border-bottom: 2px solid #e9ecef !important;
-        padding: 0.6rem 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
         font-weight: 600 !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
     .stDataFrame tbody tr td {
         background: #ffffff !important;
         color: #333 !important;
-        padding: 0.6rem 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
         border: none !important;
         border-bottom: 1px solid #f1f3f5 !important;
-        font-size: 0.85rem !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        font-size: 0.75rem !important;
     }
     .stDataFrame tbody tr:hover td {
         background: #f8f9fa !important;
@@ -354,16 +347,45 @@ WHITE_THEME_CSS = """
         border-bottom: none !important;
     }
     
+    .stButton button {
+        background: #f1f3f5 !important;
+        border: 1px solid #dee2e6 !important;
+        color: #333 !important;
+        border-radius: 6px !important;
+        padding: 0.25rem 0.8rem !important;
+        font-size: 0.75rem !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton button:hover {
+        background: #e9ecef !important;
+        border-color: #adb5bd !important;
+    }
+    .stButton button[kind="primary"] {
+        background: linear-gradient(135deg, #28a745, #20c997) !important;
+        border: none !important;
+        color: #fff !important;
+        font-weight: 600 !important;
+    }
+    .stButton button[kind="primary"]:hover {
+        transform: scale(1.03) !important;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.25) !important;
+    }
+    .stButton button[kind="primary"]:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+    }
+    
     .footer-bar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.75rem 1.5rem;
+        padding: 0.4rem 1.2rem;
         border-top: 1px solid #e9ecef;
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         color: #888;
         flex-wrap: wrap;
-        gap: 0.5rem;
+        gap: 0.3rem;
     }
     .footer-bar .highlight {
         color: #555;
@@ -372,90 +394,84 @@ WHITE_THEME_CSS = """
         color: #28a745;
     }
     
-    .stButton button[kind="secondary"] {
-        background: linear-gradient(135deg, #28a745, #20c997) !important;
-        border: none !important;
-        color: #fff !important;
-        font-weight: 600 !important;
+    .token-input-container {
+        position: relative;
+        display: inline-block;
+    }
+    .token-input-container .stTextInput {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .token-input-container .stTextInput input {
+        font-size: 0.75rem !important;
+        padding: 0.2rem 0.5rem !important;
+        height: 28px !important;
         border-radius: 6px !important;
-        transition: all 0.3s ease !important;
+        border: 1px solid #dee2e6 !important;
     }
-    .stButton button[kind="secondary"]:hover {
-        transform: scale(1.05) !important;
-        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
+    .token-input-container .stTextInput input:focus {
+        border-color: #28a745 !important;
+        box-shadow: 0 0 0 1px #28a745 !important;
     }
-    .stButton button[kind="secondary"]:disabled {
-        opacity: 0.3 !important;
-        cursor: not-allowed !important;
-        transform: none !important;
+    .token-status {
+        font-size: 0.6rem;
+        color: #28a745;
+        margin-left: 0.3rem;
+    }
+    .token-status.error {
+        color: #dc3545;
     }
     
-    .stSidebar .stButton button {
+    /* Gear icon button */
+    .gear-btn {
         background: transparent !important;
         border: none !important;
-        color: #333 !important;
-        border-radius: 8px !important;
-        transition: all 0.3s ease !important;
-        text-align: left !important;
-        padding: 0.5rem 1rem !important;
-    }
-    .stSidebar .stButton button:hover {
-        background: #f1f3f5 !important;
-        color: #28a745 !important;
-    }
-    
-    /* Auto-buy styles */
-    .auto-buy-enabled {
-        background: #f0fff4 !important;
-        border: 2px solid #28a745 !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-        margin: 0.5rem 0 !important;
-    }
-    .auto-buy-disabled {
-        background: #f8f9fa !important;
-        border: 2px solid #dee2e6 !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-        margin: 0.5rem 0 !important;
-    }
-    .auto-buy-status-active {
-        color: #28a745 !important;
-        font-weight: 600 !important;
-    }
-    .auto-buy-status-inactive {
         color: #888 !important;
-        font-weight: 600 !important;
+        font-size: 1rem !important;
+        padding: 0 0.3rem !important;
+        cursor: pointer !important;
+    }
+    .gear-btn:hover {
+        color: #333 !important;
+    }
+    .gear-btn.active {
+        color: #28a745 !important;
     }
     
     @media (max-width: 768px) {
         .tradeos-header {
-            padding: 0.5rem 0.75rem;
+            padding: 0.3rem 0.75rem;
             flex-direction: column;
-            gap: 0.3rem;
-            margin: -0.5rem -0.5rem 0.5rem -0.5rem;
-        }
-        .header-center {
-            font-size: 0.7rem;
-            gap: 0.8rem;
-            justify-content: center;
-        }
-        .page-title {
-            font-size: 1.1rem;
+            gap: 0.2rem;
         }
         .screener-header {
             flex-direction: column;
             align-items: flex-start;
-            padding: 0.75rem;
+            padding: 0.4rem 0.75rem;
         }
         .screener-stats {
-            font-size: 0.7rem;
-            gap: 0.8rem;
+            font-size: 0.65rem;
+            gap: 0.6rem;
+        }
+        .filter-row {
+            padding: 0.3rem 0.75rem;
+            gap: 0.5rem;
         }
         .footer-bar {
             flex-direction: column;
             text-align: center;
-            padding: 0.5rem 0.75rem;
+            padding: 0.3rem 0.75rem;
+        }
+        .header-center {
+            font-size: 0.65rem;
+            gap: 0.6rem;
+            justify-content: center;
+        }
+        .screener-controls {
+            gap: 0.4rem;
+        }
+        .screener-controls .stNumberInput {
+            width: 60px !important;
         }
     }
 </style>
@@ -908,6 +924,26 @@ def execute_auto_buy(display_df):
     return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOKEN INPUT HANDLER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def handle_token_input():
+    """Handle token input and save to Supabase on Enter key"""
+    token = st.session_state.get('token_input_value', '').strip()
+    if token:
+        # Save to Supabase
+        _supabase_save_token(token)
+        # Update session state
+        st.session_state['user_manual_access_token'] = token
+        st.session_state['token_save_success'] = True
+        # Show success message
+        st.success("✅ Token saved to Supabase successfully!")
+        # Close the input box after saving
+        st.session_state['show_token_input'] = False
+        # Force rerun to update
+        st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -921,11 +957,16 @@ def render_header():
     bank_nifty = "52,345.67"
     bank_chg = "-0.23%"
     
+    # Check if token exists
+    token_exists = bool(st.session_state.get('user_manual_access_token', ''))
+    token_status = "🟢" if token_exists else "🔴"
+    
     st.markdown(f"""
     <div class="tradeos-header">
         <div class="header-left">
             <span class="logo">📊 Gap Screener</span>
             <span class="version">v1.0</span>
+            <span style="font-size:0.6rem;color:#888;margin-left:0.3rem;">Token: {token_status}</span>
         </div>
         <div class="header-center">
             <span class="ticker-item">NIFTY 50 {nifty} <span class="ticker-green">▲ {nifty_chg}</span></span>
@@ -938,9 +979,21 @@ def render_header():
                 <span>Live</span>
             </div>
             <span class="clock">{current_time.strftime('%H:%M:%S')} IST</span>
+            <!-- Gear Icon for Token Input -->
+            <button class="gear-btn {'active' if st.session_state.get('show_token_input', False) else ''}" 
+                    onclick="document.getElementById('token_toggle').click();">
+                ⚙️
+            </button>
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Hidden button to toggle token input (used by gear icon)
+    if st.button("", key="token_toggle", help="Toggle Token Input", 
+                 use_container_width=False, 
+                 style="display:none;"):
+        st.session_state['show_token_input'] = not st.session_state.get('show_token_input', False)
+        st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # APPLY CSS
@@ -955,6 +1008,34 @@ st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 # Render Header
 render_header()
 
+# ─── Token Input Box (Shows when gear icon is clicked) ───
+if st.session_state.get('show_token_input', False):
+    with st.container():
+        st.markdown("---")
+        st.markdown("#### 🔑 Dhan Access Token")
+        
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            st.text_input(
+                "Enter your Dhan Access Token",
+                value=st.session_state.get('user_manual_access_token', ''),
+                key="token_input_value",
+                type="password",
+                placeholder="Paste your access token here...",
+                label_visibility="collapsed",
+                on_change=handle_token_input
+            )
+        with col2:
+            if st.button("💾 Save", use_container_width=True):
+                handle_token_input()
+        with col3:
+            if st.button("❌ Close", use_container_width=True):
+                st.session_state['show_token_input'] = False
+                st.rerun()
+        
+        st.caption("💡 Token will be saved to Supabase and used for all Dhan API calls.")
+        st.markdown("---")
+
 # ─── Check auto-refresh ───
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
@@ -964,51 +1045,12 @@ if should_refresh_stage1() or st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
-# ─── Page Header ───
-col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
-
-with col1:
-    st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
-
-with col2:
-    # ─── Budget Control ───
-    user_capital = st.number_input(
-        "💰",
-        min_value=1000,
-        max_value=10000000,
-        value=int(st.session_state['user_capital']),
-        step=1000,
-        key="capital_input",
-        label_visibility="collapsed",
-        help="Total capital to divide among stocks"
-    )
-    st.session_state['user_capital'] = user_capital
-
-with col3:
-    # ─── Parts Control ───
-    num_parts = st.number_input(
-        "📊",
-        min_value=1,
-        max_value=10,
-        value=int(st.session_state.get('num_parts', 4)),
-        step=1,
-        key="parts_input",
-        label_visibility="collapsed",
-        help="Divide capital into how many parts"
-    )
-    st.session_state['num_parts'] = num_parts
-
-with col4:
-    if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
-        st.session_state['stage1_data'] = None
-        st.rerun()
-
 # ─── Show Gap Screener Content ───
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
     df = data['df'].copy()
     
-    # ─── Screener Card Header ───
+    # ─── Screener Card ───
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
@@ -1021,22 +1063,52 @@ if st.session_state['stage1_data']:
                 <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
                 <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
             </div>
-            <div class="filter-badges">
-                <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
-                <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
-                <span class="filter-badge active">📈 Gap ±2%</span>
-            </div>
-        </div>
+            <div class="screener-controls">
+                <span style="font-size:0.7rem;color:#888;">💰</span>
     """, unsafe_allow_html=True)
+    
+    # Capital Input
+    user_capital = st.number_input(
+        "",
+        min_value=1000,
+        max_value=10000000,
+        value=int(st.session_state['user_capital']),
+        step=1000,
+        key="capital_input_header",
+        label_visibility="collapsed",
+        help="Total capital to divide among stocks"
+    )
+    st.session_state['user_capital'] = user_capital
+    
+    st.markdown('<span style="font-size:0.7rem;color:#888;margin-left:0.5rem;">📊</span>', unsafe_allow_html=True)
+    
+    # Parts Control
+    num_parts = st.number_input(
+        "",
+        min_value=1,
+        max_value=10,
+        value=int(st.session_state.get('num_parts', 4)),
+        step=1,
+        key="parts_input_header",
+        label_visibility="collapsed",
+        help="Divide capital into how many parts"
+    )
+    st.session_state['num_parts'] = num_parts
+    
+    # Refresh Button
+    if st.button("🔄", key="refresh_btn_header", use_container_width=False):
+        st.session_state['stage1_data'] = None
+        st.rerun()
+    
+    st.markdown('</div></div>', unsafe_allow_html=True)
     
     # ─── Apply Filters ───
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     
-    # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
+    # ─── Filter Row ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
-    # 5 columns for all controls + auto-buy status
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
     with filter_col1:
@@ -1087,7 +1159,6 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-                # Calculate eligible count safely
                 eligible_count = 0
                 if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
                     eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
@@ -1362,6 +1433,7 @@ if st.session_state['stage1_data']:
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
         <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · 
         {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
+        <span>🔑 Token: {'✅' if st.session_state.get('user_manual_access_token', '') else '❌'}</span>
     </div>
     """, unsafe_allow_html=True)
     
