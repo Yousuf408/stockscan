@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME)
+# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -12,6 +12,7 @@ import pytz
 import concurrent.futures
 import warnings
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Import DhanHQ modules ──
@@ -63,6 +64,31 @@ if 'show_breakout_only' not in st.session_state:
 if 'stage1_last_refresh' not in st.session_state:
     IST = pytz.timezone('Asia/Kolkata')
     st.session_state['stage1_last_refresh'] = datetime.now(IST)
+
+# ─── AUTO-BUY SESSION STATE ───
+if 'auto_buy_enabled' not in st.session_state:
+    st.session_state['auto_buy_enabled'] = False
+
+if 'auto_buy_bought_today' not in st.session_state:
+    st.session_state['auto_buy_bought_today'] = 0
+
+if 'auto_buy_max_stocks' not in st.session_state:
+    st.session_state['auto_buy_max_stocks'] = 5
+
+if 'auto_buy_orders_placed' not in st.session_state:
+    st.session_state['auto_buy_orders_placed'] = []
+
+if 'auto_buy_orders_failed' not in st.session_state:
+    st.session_state['auto_buy_orders_failed'] = []
+
+if 'auto_buy_last_check' not in st.session_state:
+    st.session_state['auto_buy_last_check'] = None
+
+if 'auto_buy_stocks_bought' not in st.session_state:
+    st.session_state['auto_buy_stocks_bought'] = []
+
+if 'auto_buy_date' not in st.session_state:
+    st.session_state['auto_buy_date'] = datetime.now().date()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
@@ -378,6 +404,30 @@ WHITE_THEME_CSS = """
         color: #28a745 !important;
     }
     
+    /* Auto-buy styles */
+    .auto-buy-enabled {
+        background: #f0fff4 !important;
+        border: 2px solid #28a745 !important;
+        border-radius: 12px !important;
+        padding: 1rem !important;
+        margin: 0.5rem 0 !important;
+    }
+    .auto-buy-disabled {
+        background: #f8f9fa !important;
+        border: 2px solid #dee2e6 !important;
+        border-radius: 12px !important;
+        padding: 1rem !important;
+        margin: 0.5rem 0 !important;
+    }
+    .auto-buy-status-active {
+        color: #28a745 !important;
+        font-weight: 600 !important;
+    }
+    .auto-buy-status-inactive {
+        color: #888 !important;
+        font-weight: 600 !important;
+    }
+    
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -618,7 +668,8 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
                     'ema_200_5m': ema_200,
-                    'price_vs_ema_200': ema_status
+                    'price_vs_ema_200': ema_status,
+                    'current_price': float(data['Close'].iloc[-1])  # Add current price
                 }
                 return base_ticker, result
         return None, None
@@ -641,7 +692,7 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_5m', 'price_vs_ema_200']:
+                     'ema_200_5m', 'price_vs_ema_200', 'current_price']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -658,7 +709,7 @@ def check_candle_conditions(df, tickers_list):
                         'high_9_20', 'low_9_20', 'close_9_20', 'max_high_up_to_10_15',
                         'hit_low_9_20_to_35', 'breakout_9_30_to_9_45', 'prev_close',
                         'gap_percent', 'yahoo_ticker', 'data_date',
-                        'ema_200_5m', 'price_vs_ema_200']:
+                        'ema_200_5m', 'price_vs_ema_200', 'current_price']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
@@ -732,6 +783,131 @@ def should_refresh_stage1():
     if time_diff.total_seconds() >= 60:
         return True
     return False
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTO-BUY FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_auto_buy_conditions(row, high_9_15, current_price):
+    """
+    Check if a stock meets all auto-buy conditions.
+    
+    Conditions:
+    1. Inside 9:15 checkbox is checked (filter active)
+    2. Current price > 200 EMA
+    3. Current price > (9:15 High * 1.0015) [0.15% above]
+    """
+    # Condition 1: Inside 9:15 must be True
+    if row.get('inside_9_15') != True:
+        return False, "Not inside 9:15 range"
+    
+    # Condition 2: Current price > 200 EMA
+    ema_status = row.get('price_vs_ema_200')
+    if ema_status != 'ABOVE':
+        return False, f"Not above 200 EMA (Status: {ema_status})"
+    
+    # Condition 3: Current price > 9:15 High * 1.0015 (0.15% above)
+    required_price = high_9_15 * 1.0015
+    if current_price <= required_price:
+        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({required_price:.2f})"
+    
+    return True, "All conditions met"
+
+def execute_auto_buy(display_df):
+    """
+    Execute auto-buy for stocks meeting all conditions.
+    Returns: (placed_orders, failed_orders, stocks_bought)
+    """
+    # Check if we've reached daily limit
+    today = datetime.now().date()
+    if st.session_state['auto_buy_date'] != today:
+        # New day - reset counter
+        st.session_state['auto_buy_bought_today'] = 0
+        st.session_state['auto_buy_stocks_bought'] = []
+        st.session_state['auto_buy_date'] = today
+    
+    if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+        return [], [], f"Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached"
+    
+    # Filter stocks that haven't been bought yet
+    available_stocks = display_df[
+        ~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])
+    ].copy()
+    
+    if available_stocks.empty:
+        return [], [], "No new stocks available"
+    
+    placed_orders = []
+    failed_orders = []
+    stocks_bought = []
+    
+    # Check each stock
+    for idx, row in available_stocks.iterrows():
+        # Check if daily limit reached
+        if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+            break
+        
+        symbol = row['Symbol']
+        
+        # Get 9:15 high (from the original data)
+        high_9_15 = row.get('high_9_15', 0)
+        current_price = row.get('current_price', 0)
+        
+        if high_9_15 <= 0 or current_price <= 0:
+            failed_orders.append({
+                'symbol': symbol,
+                'reason': 'Missing price data'
+            })
+            continue
+        
+        # Check conditions
+        meets_conditions, reason = check_auto_buy_conditions(row, high_9_15, current_price)
+        
+        if not meets_conditions:
+            failed_orders.append({
+                'symbol': symbol,
+                'reason': reason
+            })
+            continue
+        
+        # Check quantity
+        max_qty = row.get('MaxQty', 0)
+        if max_qty <= 0:
+            failed_orders.append({
+                'symbol': symbol,
+                'reason': 'No quantity available (insufficient margin)'
+            })
+            continue
+        
+        # Place order
+        result = place_dhan_order(
+            symbol=symbol,
+            quantity=int(max_qty),
+            product_type="INTRADAY",
+            after_market_order=st.session_state.get('amo_mode', False)
+        )
+        
+        if result['success']:
+            placed_orders.append({
+                'symbol': symbol,
+                'quantity': int(max_qty),
+                'price': current_price,
+                'high_9_15': high_9_15,
+                'order_id': result.get('order_id', 'N/A')
+            })
+            stocks_bought.append(symbol)
+            st.session_state['auto_buy_bought_today'] += 1
+        else:
+            failed_orders.append({
+                'symbol': symbol,
+                'quantity': int(max_qty),
+                'reason': result.get('error', 'Unknown error')
+            })
+    
+    # Update bought stocks list
+    st.session_state['auto_buy_stocks_bought'].extend(stocks_bought)
+    
+    return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
@@ -926,7 +1102,8 @@ if st.session_state['stage1_data']:
         # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
-            'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector'
+            'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector',
+            'high_9_15', 'current_price'  # Added for auto-buy
         ]
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
@@ -942,11 +1119,15 @@ if st.session_state['stage1_data']:
             'breakout_9_30_to_9_45': 'Breakout',
             'price_vs_ema_200': '200 EMA',
             'MaxQty': 'MaxQty',
-            'sector': 'Sector'
+            'sector': 'Sector',
+            'high_9_15': '9:15 High',
+            'current_price': 'Current Price'
         })
         
         # ─── Format columns with NaN handling ───
         display_df['Price'] = display_df['Price'].apply(lambda x: f"₹{x:,.2f}")
+        display_df['9:15 High'] = display_df['9:15 High'].apply(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+        display_df['Current Price'] = display_df['Current Price'].apply(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
         
         def format_chg(x):
             if pd.isna(x) or x is None:
@@ -982,21 +1163,141 @@ if st.session_state['stage1_data']:
         display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
         
-        # Format 200 EMA column
         display_df['200 EMA'] = display_df['200 EMA'].apply(
             lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
         )
         
+        # ─── Add auto-buy eligible column ───
+        def check_auto_buy_eligible(row):
+            if row.get('Inside 9:15') != '✅':
+                return '❌ Not Inside'
+            if row.get('200 EMA') != '🟢 ABOVE':
+                return '❌ Below EMA'
+            
+            # Check 0.15% above 9:15 High
+            high_9_15 = row.get('9:15 High')
+            if high_9_15 != 'N/A':
+                try:
+                    high_val = float(high_9_15.replace('₹', '').replace(',', ''))
+                    current_price = row.get('Current Price')
+                    if current_price != 'N/A':
+                        current_val = float(current_price.replace('₹', '').replace(',', ''))
+                        required_price = high_val * 1.0015
+                        if current_val > required_price:
+                            return '✅ ELIGIBLE'
+                        else:
+                            return f'❌ Need > {required_price:.2f}'
+                except:
+                    return '❌ No Data'
+            return '❌ No Data'
+        
+        display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
+        
         # ─── Final columns ───
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
-            'Rel Vol', 'Inside 9:15', 'Breakout', '200 EMA', 'MaxQty', 'Sector'
+            'Rel Vol', 'Inside 9:15', 'Breakout', '200 EMA',
+            '9:15 High', 'Current Price', 'Auto-Buy Status', 'MaxQty', 'Sector'
         ]
         
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-        # ─── 85/15 SPLIT: TABLE + BUY BUTTONS ───
+        # ════════════════════════════════════════════════════════════════
+        # ═══ AUTO-BUY SECTION ═══
+        # ════════════════════════════════════════════════════════════════
+        
+        st.markdown("---")
+        
+        # Auto-Buy Header with Toggle
+        ab_header_col1, ab_header_col2, ab_header_col3 = st.columns([1, 3, 1])
+        
+        with ab_header_col1:
+            st.subheader("🤖 Auto-Buy")
+        
+        with ab_header_col2:
+            # Toggle switch for auto-buy
+            auto_buy_toggle = st.checkbox(
+                "Enable Auto-Buy",
+                value=st.session_state.get('auto_buy_enabled', False),
+                key="auto_buy_toggle"
+            )
+            st.session_state['auto_buy_enabled'] = auto_buy_toggle
+        
+        with ab_header_col3:
+            # Show daily count
+            today = datetime.now().date()
+            if st.session_state['auto_buy_date'] != today:
+                st.session_state['auto_buy_bought_today'] = 0
+                st.session_state['auto_buy_stocks_bought'] = []
+                st.session_state['auto_buy_date'] = today
+            
+            remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
+            st.metric("Remaining Today", remaining, delta=None)
+        
+        # Auto-Buy Configuration (only shown when enabled)
+        if auto_buy_toggle:
+            st.markdown('<div class="auto-buy-enabled">', unsafe_allow_html=True)
+            
+            st.info("📊 Auto-buy is ACTIVE. Stocks meeting all conditions will be bought automatically.")
+            
+            # Show auto-buy conditions
+            st.markdown("**Auto-Buy Conditions:**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("✅ Inside 9:15 Range")
+            with col2:
+                st.markdown("✅ Above 200 EMA")
+            with col3:
+                st.markdown("✅ Price > 9:15 High + 0.15%")
+            
+            # Show eligible stocks count
+            eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
+            st.info(f"🎯 {eligible_count} stocks currently eligible for auto-buy")
+            
+            # Auto-execute: Check if any stocks need to be bought
+            if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
+                # Execute auto-buy immediately
+                with st.spinner("🤖 Auto-buy executing..."):
+                    placed, failed, error = execute_auto_buy(display_df)
+                
+                if error:
+                    st.warning(f"⚠️ {error}")
+                else:
+                    if placed:
+                        st.success(f"✅ {len(placed)} orders placed successfully!")
+                        placed_df = pd.DataFrame(placed)
+                        st.dataframe(placed_df, use_container_width=True)
+                        st.session_state['auto_buy_orders_placed'].extend(placed)
+                    
+                    if failed:
+                        st.warning(f"⚠️ {len(failed)} orders failed")
+                        failed_df = pd.DataFrame(failed)
+                        st.dataframe(failed_df, use_container_width=True)
+                        st.session_state['auto_buy_orders_failed'].extend(failed)
+                    
+                    # Check if daily limit reached
+                    if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+                        st.success(f"🎯 Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached!")
+            
+            elif st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
+                st.success(f"✅ Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached. Auto-buy will resume tomorrow.")
+            
+            # Show today's bought stocks
+            if st.session_state['auto_buy_stocks_bought']:
+                with st.expander("📊 Today's Auto-Buy History"):
+                    st.write(f"Stocks bought: {', '.join(st.session_state['auto_buy_stocks_bought'])}")
+                    if st.session_state['auto_buy_orders_placed']:
+                        st.dataframe(pd.DataFrame(st.session_state['auto_buy_orders_placed']))
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        else:
+            st.markdown('<div class="auto-buy-disabled">', unsafe_allow_html=True)
+            st.info("⚪ Auto-Buy is disabled. Toggle the switch above to enable automatic buying.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        # ─── TABLE + BUY BUTTONS ───
         table_col, button_col = st.columns([8.5, 1.5])
         
         with table_col:
@@ -1014,6 +1315,9 @@ if st.session_state['stage1_data']:
                     "Inside 9:15": st.column_config.TextColumn("INSIDE", width="small"),
                     "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
                     "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
+                    "9:15 High": st.column_config.TextColumn("9:15 HIGH", width="small"),
+                    "Current Price": st.column_config.TextColumn("CURRENT", width="small"),
+                    "Auto-Buy Status": st.column_config.TextColumn("AUTO-BUY", width="small"),
                     "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
                     "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
                 }
@@ -1023,12 +1327,12 @@ if st.session_state['stage1_data']:
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 symbol = row['Symbol']
                 max_qty = row['MaxQty']
-                btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
+                btn_label = f"{symbol}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
                 
                 if st.button(
                     btn_label,
                     key=f"buy_{symbol}_{idx}",
-                    disabled=(max_qty <= 0),
+                    disabled=(max_qty <= 0 or st.session_state.get('auto_buy_enabled', False)),
                     use_container_width=True
                 ):
                     with st.spinner(f"Placing order for {symbol}..."):
@@ -1036,10 +1340,14 @@ if st.session_state['stage1_data']:
                             symbol,
                             quantity=int(max_qty),
                             product_type="INTRADAY",
-                            after_market_order=amo_test_mode,
+                            after_market_order=st.session_state.get('amo_mode', False),
                             amo_time="OPEN"
                         )
                         display_order_result(symbol, result)
+            
+            # Show note when auto-buy is enabled
+            if st.session_state.get('auto_buy_enabled', False):
+                st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
         
         # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
@@ -1058,6 +1366,8 @@ if st.session_state['stage1_data']:
         <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · 
         <span class="highlight">{pass_count}</span> pass candle check</span>
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
+        <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · 
+        {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
     </div>
     """, unsafe_allow_html=True)
     
