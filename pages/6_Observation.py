@@ -391,50 +391,15 @@ WHITE_THEME_CSS = """
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
-    .buy-btn-wrap {
-        padding: 0.6rem 0.8rem;
-        border-bottom: 1px solid #f1f3f5;
-        line-height: 1;
-    }
-    
-    .buy-btn-wrap .stButton {
-        width: 100%;
-        margin: 0;
-        padding: 0;
-    }
-    
-    .buy-btn-wrap .stButton button {
-        width: 100% !important;
-        background: linear-gradient(135deg, #28a745, #20c997) !important;
-        border: none !important;
-        color: #fff !important;
-        font-weight: 600 !important;
-        border-radius: 6px !important;
-        padding: 4px 8px !important;
-        font-size: 0.7rem !important;
-        transition: all 0.3s ease !important;
+    /* ─── FIX: Button row alignment ─── */
+    .stButton > button {
         min-height: 28px !important;
         height: auto !important;
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
         line-height: 1.2 !important;
-    }
-    
-    .buy-btn-wrap .stButton button:hover {
-        transform: scale(1.05) !important;
-        box-shadow: 0 0 20px rgba(40, 167, 69, 0.3) !important;
-    }
-    
-    .buy-btn-wrap .stButton button:disabled {
-        opacity: 0.3 !important;
-        cursor: not-allowed !important;
-        transform: none !important;
-    }
-    
-    .ema-above {
-        color: #28a745 !important;
-    }
-    
-    .ema-below {
-        color: #dc3545 !important;
+        margin: 0 !important;
+        width: 100% !important;
     }
     
     @media (max-width: 768px) {
@@ -985,8 +950,7 @@ if st.session_state['stage1_data']:
                 ema_val, is_above = get_200ema_5min(symbol)
                 if ema_val is not None and is_above is not None:
                     arrow = '▲' if is_above else '▼'
-                    color_class = 'ema-above' if is_above else 'ema-below'
-                    ema_display = f"₹{ema_val:,.2f} <span class='{color_class}'>{arrow}</span>"
+                    ema_display = f"₹{ema_val:,.2f} {arrow}"
                 else:
                     ema_display = "N/A"
                 ema_values.append(ema_display)
@@ -1096,7 +1060,6 @@ if st.session_state['stage1_data']:
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if amo_test_mode else "")
                 
-                st.markdown('<div class="buy-btn-wrap">', unsafe_allow_html=True)
                 if st.button(
                     btn_label,
                     key=f"buy_{symbol}_{idx}",
@@ -1112,7 +1075,6 @@ if st.session_state['stage1_data']:
                             amo_time="OPEN"
                         )
                         display_order_result(symbol, result)
-                st.markdown('</div>', unsafe_allow_html=True)
         
         # ─── Download CSV ───
         csv = display_df.to_csv(index=False)
