@@ -76,7 +76,7 @@ HARDCODED_SETTINGS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS - WHITE THEME
+# CSS - WHITE THEME (FIXED BUTTON GAPS)
 # ─────────────────────────────────────────────────────────────────────────────
 
 WHITE_THEME_CSS = """
@@ -394,10 +394,13 @@ WHITE_THEME_CSS = """
     .buy-btn-wrap {
         padding: 0.6rem 0.8rem;
         border-bottom: 1px solid #f1f3f5;
+        line-height: 1;
     }
     
     .buy-btn-wrap .stButton {
         width: 100%;
+        margin: 0;
+        padding: 0;
     }
     
     .buy-btn-wrap .stButton button {
@@ -410,6 +413,9 @@ WHITE_THEME_CSS = """
         padding: 4px 8px !important;
         font-size: 0.7rem !important;
         transition: all 0.3s ease !important;
+        min-height: 28px !important;
+        height: auto !important;
+        line-height: 1.2 !important;
     }
     
     .buy-btn-wrap .stButton button:hover {
