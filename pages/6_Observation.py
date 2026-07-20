@@ -1157,8 +1157,11 @@ if st.session_state['stage1_data']:
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
         
+        # Store original symbols before any modification
+        display_df['_original_symbol'] = display_df['name']
+        
         display_df = display_df.rename(columns={
-            'name': 'Symbol',
+            'name': 'Symbol_display',
             'close': 'Price',
             'change': 'Chg%',
             'gap_percent': 'Gap%',
@@ -1173,41 +1176,30 @@ if st.session_state['stage1_data']:
             'current_price': 'current_price'
         })
         
-        # ─── Make Symbol Clickable to Copy (with auto-reset after 1 second) ───
-        # Store original symbols for display
-        display_df['_original_symbol'] = display_df['Symbol']
-        
-        # Create clickable HTML for each symbol
-        def make_clickable_symbol(symbol):
-            """Make symbol clickable to copy with auto-reset after 1 second"""
-            # Escape any special characters in symbol
+        # ─── Make Symbol Clickable to Copy ───
+        # Create HTML for clickable symbols
+        def make_clickable_html(symbol):
             safe_symbol = str(symbol).replace("'", "\\'")
             return f'<span class="clickable-symbol" onclick="copySymbol(\'{safe_symbol}\')">{safe_symbol}</span>'
         
-        display_df['Symbol'] = display_df['Symbol'].apply(make_clickable_symbol)
+        # Apply to Symbol column
+        display_df['Symbol'] = display_df['Symbol_display'].apply(make_clickable_html)
         
-        # Add JavaScript for copy + auto-reset after 1 second
+        # Add JavaScript for copy + auto-reset
         st.markdown("""
         <script>
         function copySymbol(symbol) {
-            // Copy to clipboard
             navigator.clipboard.writeText(symbol);
-            
-            // Find all elements with this symbol and update them
             let elements = document.querySelectorAll('.clickable-symbol');
             elements.forEach(el => {
                 if (el.textContent === symbol) {
-                    // Save original text
                     el.dataset.original = symbol;
-                    // Change to "Copied!" state
                     el.textContent = '✅ ' + symbol + ' (Copied!)';
                     el.style.color = '#28a745';
                     el.style.textDecoration = 'none';
                     el.classList.add('copied');
                 }
             });
-            
-            // Reset after 1 second
             setTimeout(function() {
                 elements.forEach(el => {
                     if (el.dataset.original === symbol) {
@@ -1286,8 +1278,8 @@ if st.session_state['stage1_data']:
         
         # ─── Auto-Buy Eligibility Check ───
         def check_auto_buy_eligible(row):
-            # Check Inside 9:15 (use original column, not HTML formatted)
-            inside_value = row.get('_original_inside', row.get('Inside 9:15'))
+            # Check Inside 9:15
+            inside_value = row.get('Inside 9:15')
             if inside_value != '✅':
                 return '❌ Not Inside'
             
@@ -1319,8 +1311,6 @@ if st.session_state['stage1_data']:
             else:
                 return f'❌ Need > {required_price:.2f}'
         
-        # Store original inside value for eligibility check
-        display_df['_original_inside'] = display_df['Inside 9:15']
         display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
         
         # ─── Final columns ───
@@ -1339,7 +1329,10 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    placed, failed, error = execute_auto_buy(display_df)
+                    # Need to pass original data for auto-buy
+                    auto_buy_df = df.copy()
+                    auto_buy_df['Symbol'] = auto_buy_df['name']
+                    placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
                     st.warning(f"⚠️ {error}")
@@ -1385,8 +1378,12 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
-            for idx, (_, row) in enumerate(display_df.iterrows()):
-                symbol = row['_original_symbol']
+            for idx, row in display_df.iterrows():
+                # Get original symbol from the stored column
+                symbol = row.get('_original_symbol', '')
+                if not symbol:
+                    # Fallback: try to extract from Symbol HTML
+                    continue
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
                 
@@ -1412,10 +1409,9 @@ if st.session_state['stage1_data']:
                 st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
         
         # ─── Download CSV ───
-        # Create a clean copy for CSV (without HTML)
         csv_df = display_df.copy()
         csv_df['Symbol'] = csv_df['_original_symbol']
-        csv_df = csv_df.drop(columns=['_original_symbol', '_original_inside'], errors='ignore')
+        csv_df = csv_df.drop(columns=['_original_symbol'], errors='ignore')
         csv = csv_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
