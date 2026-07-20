@@ -1393,15 +1393,10 @@ if st.session_state['stage1_data']:
         # ─── Auto-Buy Execution (Only when enabled) ───
         if st.session_state.get('auto_buy_enabled', False) and st.session_state.get('show_inside_only', False):
             eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
-            
+               
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Create a copy of df with Symbol column for auto-buy
-                    auto_buy_df = df.copy()
-                    auto_buy_df['Symbol'] = auto_buy_df['name']
-                    # Add Price and 9:15 High columns for auto-buy
-                    auto_buy_df['Price'] = auto_buy_df['close']
-                    auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
+                
                     placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
