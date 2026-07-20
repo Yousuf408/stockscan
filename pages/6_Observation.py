@@ -801,7 +801,7 @@ def check_auto_buy_conditions(row):
     # So we skip this check - table only has Inside 9:15 stocks
     
     # Condition 2: Current price > 200 EMA
-    ema_status = row.get('price_vs_ema_200')
+    ema_status = row.get('200 EMA')
     if ema_status != 'ABOVE':
         return False, f"Not above 200 EMA (Status: {ema_status})"
     
