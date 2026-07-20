@@ -1161,19 +1161,29 @@ if st.session_state['stage1_data']:
             display_df = display_df[display_df['_real_time_breakout'] == True]
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
-        # --- INSIDE 9:15 FILTER (WITH 200 EMA CONDITION - SAFE) ---
+    
+    # --- INSIDE 9:15 FILTER (WITH SAFE 200 EMA CONDITION) ---
     if show_inside_only and is_after_9_25:
-        # Check if required columns exist
+        # Check if required columns exist and have valid data
         if 'close_9_15' in display_df.columns and 'ema_200_5m' in display_df.columns:
-            # Filter with both conditions, handling NaN values
-            display_df = display_df[
+            # Create a mask for valid comparisons (both columns not null)
+            mask = (
                 (display_df['inside_9_15'] == True) & 
-                (display_df['close_9_15'] > display_df['ema_200_5m'])
-            ]
-            
+                (display_df['close_9_15'].notna()) & 
+                (display_df['ema_200_5m'].notna())
+            )
+            # Apply the comparison only where both values exist
+            if mask.any():
+                display_df = display_df[
+                    mask & 
+                    (display_df['close_9_15'] > display_df['ema_200_5m'])
+                ]
+            else:
+                display_df = display_df[mask]
         else:
             # If columns missing, fallback to only inside_9_15 check
-            display_df = display_df[display_df['inside_9_15'] == True]    
+            display_df = display_df[display_df['inside_9_15'] == True]
+    
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
@@ -1292,10 +1302,24 @@ if st.session_state['stage1_data']:
         
         display_df['Breakout'] = display_df.apply(get_breakout_display, axis=1)
         
-        if '200 EMA' in display_df.columns:
-            display_df['200 EMA'] = display_df['200 EMA'].apply(
-                lambda x: "🟢 ABOVE" if x == 'ABOVE' else ("🔴 BELOW" if x == 'BELOW' else "⚪ NO DATA")
-            )
+        # ─── 200 EMA Column - Show actual price with color ───
+        def format_ema_with_color(row):
+            ema_value = row.get('ema_200_5m')
+            current_price = row.get('current_price', 0)
+            
+            if ema_value is None or pd.isna(ema_value) or ema_value <= 0:
+                return "⚪ N/A"
+            
+            # Get the 200 EMA status from the original column
+            status = row.get('200 EMA')
+            if status == 'ABOVE':
+                return f'<span style="color:#28a745;font-weight:600;">🟢 ₹{ema_value:,.2f}</span>'
+            elif status == 'BELOW':
+                return f'<span style="color:#dc3545;font-weight:600;">🔴 ₹{ema_value:,.2f}</span>'
+            else:
+                return f'⚪ ₹{ema_value:,.2f}'
+        
+        display_df['200 EMA'] = display_df.apply(format_ema_with_color, axis=1)
         
         # ─── Auto-Buy Eligibility Check ───
         def check_auto_buy_eligible(row):
@@ -1304,9 +1328,9 @@ if st.session_state['stage1_data']:
             if inside_value != '✅':
                 return '❌ Not Inside'
             
-            # Check 200 EMA
-            ema_value = row.get('200 EMA')
-            if ema_value != '🟢 ABOVE':
+            # Check 200 EMA status
+            ema_status = row.get('200 EMA')
+            if 'ABOVE' not in ema_status:
                 return '❌ Below EMA'
             
             # Check 0.15% above 9:15 High
