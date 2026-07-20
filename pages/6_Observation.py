@@ -668,7 +668,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
                     'ema_200_5m': ema_200,
-                    'price_vs_ema_200': ema_status,
+                    '200 EMA': ema_status,
                     'current_price': float(data['Close'].iloc[-1])
                 }
                 return base_ticker, result
@@ -692,7 +692,7 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_5m', 'price_vs_ema_200', 'current_price']:
+                     'ema_200_5m', '200 EMA', 'current_price']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -709,7 +709,7 @@ def check_candle_conditions(df, tickers_list):
                         'high_9_20', 'low_9_20', 'close_9_20', 'max_high_up_to_10_15',
                         'hit_low_9_20_to_35', 'breakout_9_30_to_9_45', 'prev_close',
                         'gap_percent', 'yahoo_ticker', 'data_date',
-                        'ema_200_5m', 'price_vs_ema_200', 'current_price']:
+                        'ema_200_5m', '200 EMA', 'current_price']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
@@ -1161,13 +1161,13 @@ if st.session_state['stage1_data']:
             display_df['_real_time_breakout'] = display_df.apply(check_real_time_breakout, axis=1)
             display_df = display_df[
                 (display_df['_real_time_breakout'] == True) & 
-                (display_df['price_vs_ema_200'] == 'ABOVE')
+                (display_df['200 EMA'] == 'ABOVE')
             ]
         else:  # 'locked' - after 9:45 AM
             # Use the captured breakout_9_30_to_9_45 column (LOCKED)
             display_df = display_df[
                 (display_df['breakout_9_30_to_9_45'] == True) & 
-                (display_df['price_vs_ema_200'] == 'ABOVE')
+                (display_df['200 EMA'] == 'ABOVE')
             ]
     
     if show_inside_only and is_after_9_25:
@@ -1193,7 +1193,7 @@ if st.session_state['stage1_data']:
         # ─── Create display columns ───
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
-            'inside_9_15', 'breakout_9_30_to_9_45', 'price_vs_ema_200', 'MaxQty', 'sector',
+            'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
             'high_9_15', 'current_price'
         ]
         available = [c for c in display_cols if c in display_df.columns]
@@ -1208,7 +1208,6 @@ if st.session_state['stage1_data']:
             'relative_volume': 'Rel Vol',
             'inside_9_15': 'Inside 9:15',
             'breakout_9_30_to_9_45': 'Breakout',
-            'price_vs_ema_200': '200 EMA',
             'MaxQty': 'MaxQty',
             'sector': 'Sector',
             'high_9_15': 'high_9_15',
