@@ -1161,14 +1161,19 @@ if st.session_state['stage1_data']:
             display_df = display_df[display_df['_real_time_breakout'] == True]
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
-    
-    # --- INSIDE 9:15 FILTER (WITH NEW 200 EMA CONDITION) ---
+        # --- INSIDE 9:15 FILTER (WITH 200 EMA CONDITION - SAFE) ---
     if show_inside_only and is_after_9_25:
-        display_df = display_df[
-            (display_df['inside_9_15'] == True) & 
-            (display_df['close_9_15'] > display_df['ema_200_5m'])
-        ]
-    
+        # Check if required columns exist
+        if 'close_9_15' in display_df.columns and 'ema_200_5m' in display_df.columns:
+            # Filter with both conditions, handling NaN values
+            display_df = display_df[
+                (display_df['inside_9_15'] == True) & 
+                (display_df['close_9_15'] > display_df['ema_200_5m'])
+            ]
+            
+        else:
+            # If columns missing, fallback to only inside_9_15 check
+            display_df = display_df[display_df['inside_9_15'] == True]    
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
