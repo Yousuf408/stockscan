@@ -1210,16 +1210,23 @@ if st.session_state['stage1_data']:
         # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
-        
-        display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
-        
+
+        # --- Calculate MaxQty FIRST (using numeric close price) ---
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            display_df['MaxQty'] = calculate_max_quantity_column(
-                display_df,
+            temp_df = display_df.copy()
+            temp_df['Price'] = temp_df['close']  # Numeric price
+            temp_df['MaxQty'] = calculate_max_quantity_column(
+                temp_df,
                 total_capital=st.session_state['user_capital'],
                 num_parts=st.session_state.get('num_parts', 4)
             )
+            display_df['MaxQty'] = temp_df['MaxQty']
+
+        # --- Now format Price for display ---
+        display_df['Price'] = display_df['close'].apply(
+            lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
+        )
         
         # ─── Create display columns ───
         display_cols = [
@@ -1396,12 +1403,13 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Create a copy of df with Symbol column for auto-buy
+                    # Create auto_buy_df with all needed columns
                     auto_buy_df = df.copy()
                     auto_buy_df['Symbol'] = auto_buy_df['name']
-                    # Add Price and 9:15 High columns for auto-buy
                     auto_buy_df['Price'] = auto_buy_df['close']
                     auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
+                    auto_buy_df['MaxQty'] = display_df['MaxQty']  # Copy calculated MaxQty
+                    
                     placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
