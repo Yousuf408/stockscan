@@ -1396,8 +1396,15 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Use display_df directly - it already has MaxQty calculated!
-                    placed, failed, error = execute_auto_buy(display_df)
+                    # Create df with original numeric data + MaxQty from display_df
+                    auto_buy_df = df.copy()
+                    auto_buy_df['Symbol'] = auto_buy_df['name']
+                    auto_buy_df['Price'] = auto_buy_df['close']
+                    auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
+                    # Add MaxQty from display_df (already calculated)
+                    maxqty_dict = display_df.set_index('Symbol')['MaxQty'].to_dict()
+                    auto_buy_df['MaxQty'] = auto_buy_df['Symbol'].map(maxqty_dict).fillna(0)
+                    placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
                     st.warning(f"⚠️ {error}")
