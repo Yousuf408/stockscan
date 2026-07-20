@@ -428,23 +428,6 @@ WHITE_THEME_CSS = """
         font-weight: 600 !important;
     }
     
-    /* Clickable symbol styles */
-    .clickable-symbol {
-        cursor: pointer;
-        color: #1a73e8;
-        font-weight: 600;
-        text-decoration: underline;
-        user-select: all;
-        transition: all 0.3s ease;
-    }
-    .clickable-symbol:hover {
-        color: #0d47a1;
-    }
-    .clickable-symbol.copied {
-        color: #28a745;
-        text-decoration: none;
-    }
-    
     @media (max-width: 768px) {
         .tradeos-header {
             padding: 0.5rem 0.75rem;
@@ -1157,11 +1140,8 @@ if st.session_state['stage1_data']:
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
         
-        # Store original symbols before any modification
-        display_df['_original_symbol'] = display_df['name']
-        
         display_df = display_df.rename(columns={
-            'name': 'Symbol_display',
+            'name': 'Symbol',
             'close': 'Price',
             'change': 'Chg%',
             'gap_percent': 'Gap%',
@@ -1175,44 +1155,6 @@ if st.session_state['stage1_data']:
             'high_9_15': 'high_9_15',
             'current_price': 'current_price'
         })
-        
-        # ─── Make Symbol Clickable to Copy ───
-        # Create HTML for clickable symbols
-        def make_clickable_html(symbol):
-            safe_symbol = str(symbol).replace("'", "\\'")
-            return f'<span class="clickable-symbol" onclick="copySymbol(\'{safe_symbol}\')">{safe_symbol}</span>'
-        
-        # Apply to Symbol column
-        display_df['Symbol'] = display_df['Symbol_display'].apply(make_clickable_html)
-        
-        # Add JavaScript for copy + auto-reset
-        st.markdown("""
-        <script>
-        function copySymbol(symbol) {
-            navigator.clipboard.writeText(symbol);
-            let elements = document.querySelectorAll('.clickable-symbol');
-            elements.forEach(el => {
-                if (el.textContent === symbol) {
-                    el.dataset.original = symbol;
-                    el.textContent = '✅ ' + symbol + ' (Copied!)';
-                    el.style.color = '#28a745';
-                    el.style.textDecoration = 'none';
-                    el.classList.add('copied');
-                }
-            });
-            setTimeout(function() {
-                elements.forEach(el => {
-                    if (el.dataset.original === symbol) {
-                        el.textContent = el.dataset.original;
-                        el.style.color = '#1a73e8';
-                        el.style.textDecoration = 'underline';
-                        el.classList.remove('copied');
-                    }
-                });
-            }, 1000);
-        }
-        </script>
-        """, unsafe_allow_html=True)
         
         # ─── Format columns with NaN handling ───
         # Add 9:15 High column (from existing high_9_15 data)
@@ -1329,10 +1271,7 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Need to pass original data for auto-buy
-                    auto_buy_df = df.copy()
-                    auto_buy_df['Symbol'] = auto_buy_df['name']
-                    placed, failed, error = execute_auto_buy(auto_buy_df)
+                    placed, failed, error = execute_auto_buy(display_df)
                 
                 if error:
                     st.warning(f"⚠️ {error}")
@@ -1378,12 +1317,8 @@ if st.session_state['stage1_data']:
             )
         
         with button_col:
-            for idx, row in display_df.iterrows():
-                # Get original symbol from the stored column
-                symbol = row.get('_original_symbol', '')
-                if not symbol:
-                    # Fallback: try to extract from Symbol HTML
-                    continue
+            for idx, (_, row) in enumerate(display_df.iterrows()):
+                symbol = row['Symbol']
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
                 
@@ -1409,10 +1344,7 @@ if st.session_state['stage1_data']:
                 st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
         
         # ─── Download CSV ───
-        csv_df = display_df.copy()
-        csv_df['Symbol'] = csv_df['_original_symbol']
-        csv_df = csv_df.drop(columns=['_original_symbol'], errors='ignore')
-        csv = csv_df.to_csv(index=False)
+        csv = display_df.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
             data=csv,
