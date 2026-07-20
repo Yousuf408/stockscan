@@ -883,24 +883,8 @@ def execute_auto_buy(display_df):
             })
             continue
         
-        # --- FIX: Handle MaxQty with NaN check ---
+        # Check quantity
         max_qty = row.get('MaxQty', 0)
-        # Convert to float, handle None/NaN
-        try:
-            max_qty = float(max_qty)
-        except (ValueError, TypeError):
-            max_qty = 0
-        
-        # Check for NaN and <= 0
-        if pd.isna(max_qty) or max_qty <= 0:
-            failed_orders.append({
-                'symbol': symbol,
-                'reason': 'No quantity available (insufficient margin)'
-            })
-            continue
-        
-        # Convert to int safely
-        max_qty = int(max_qty)
         if max_qty <= 0:
             failed_orders.append({
                 'symbol': symbol,
@@ -919,7 +903,7 @@ def execute_auto_buy(display_df):
         # Place order
         result = place_dhan_order(
             symbol=symbol,
-            quantity=max_qty,
+            quantity=int(max_qty),
             product_type="INTRADAY",
             after_market_order=st.session_state.get('amo_mode', False)
         )
@@ -927,7 +911,7 @@ def execute_auto_buy(display_df):
         if result['success']:
             placed_orders.append({
                 'symbol': symbol,
-                'quantity': max_qty,
+                'quantity': int(max_qty),
                 'price': current_price,
                 'order_id': result.get('order_id', 'N/A')
             })
@@ -936,7 +920,7 @@ def execute_auto_buy(display_df):
         else:
             failed_orders.append({
                 'symbol': symbol,
-                'quantity': max_qty,
+                'quantity': int(max_qty),
                 'reason': result.get('error', 'Unknown error')
             })
     
@@ -944,6 +928,7 @@ def execute_auto_buy(display_df):
     st.session_state['auto_buy_stocks_bought'].extend(stocks_bought)
     
     return placed_orders, failed_orders, None
+
 # ─────────────────────────────────────────────────────────────────────────────
 # BREAKOUT HELPER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1225,23 +1210,16 @@ if st.session_state['stage1_data']:
         # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
+        
+        display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
-
-        # --- Calculate MaxQty FIRST (using numeric close price) ---
+        
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            temp_df = display_df.copy()
-            temp_df['Price'] = temp_df['close']  # Numeric price
-            temp_df['MaxQty'] = calculate_max_quantity_column(
-                temp_df,
+            display_df['MaxQty'] = calculate_max_quantity_column(
+                display_df,
                 total_capital=st.session_state['user_capital'],
                 num_parts=st.session_state.get('num_parts', 4)
             )
-            display_df['MaxQty'] = temp_df['MaxQty']
-
-        # --- Now format Price for display ---
-        display_df['Price'] = display_df['close'].apply(
-            lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
-        )
         
         # ─── Create display columns ───
         display_cols = [
@@ -1412,14 +1390,19 @@ if st.session_state['stage1_data']:
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-              # ─── Auto-Buy Execution (Only when enabled) ───
+        # ─── Auto-Buy Execution (Only when enabled) ───
         if st.session_state.get('auto_buy_enabled', False) and st.session_state.get('show_inside_only', False):
             eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Pass display_df directly - it has all needed columns
-                    placed, failed, error = execute_auto_buy(display_df)
+                    # Create a copy of df with Symbol column for auto-buy
+                    auto_buy_df = df.copy()
+                    auto_buy_df['Symbol'] = auto_buy_df['name']
+                    # Add Price and 9:15 High columns for auto-buy
+                    auto_buy_df['Price'] = auto_buy_df['close']
+                    auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
+                    placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
                     st.warning(f"⚠️ {error}")
