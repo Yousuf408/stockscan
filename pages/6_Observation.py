@@ -1299,24 +1299,22 @@ if st.session_state['stage1_data']:
         
         display_df['Breakout'] = display_df.apply(get_breakout_display, axis=1)
         
-        # ─── 200 EMA Column - Show actual price with color ───
-        def format_ema_with_color(row):
+               # ─── 200 EMA Column - Show price with color using emoji ───
+        def format_ema_simple(row):
             ema_value = row.get('ema_200_5m')
-            current_price = row.get('current_price', 0)
             
             if ema_value is None or pd.isna(ema_value) or ema_value <= 0:
                 return "⚪ N/A"
             
-            # Get the 200 EMA status from the original column
             status = row.get('200 EMA')
             if status == 'ABOVE':
-                return f'<span style="color:#28a745;font-weight:600;">🟢 ₹{ema_value:,.2f}</span>'
+                return f"🟢 ₹{ema_value:,.2f}"
             elif status == 'BELOW':
-                return f'<span style="color:#dc3545;font-weight:600;">🔴 ₹{ema_value:,.2f}</span>'
+                return f"🔴 ₹{ema_value:,.2f}"
             else:
-                return f'⚪ ₹{ema_value:,.2f}'
+                return f"⚪ ₹{ema_value:,.2f}"
         
-        display_df['200 EMA'] = display_df.apply(format_ema_with_color, axis=1)
+        display_df['200 EMA'] = display_df.apply(format_ema_simple, axis=1)
         
         # ─── Auto-Buy Eligibility Check ───
         def check_auto_buy_eligible(row):
