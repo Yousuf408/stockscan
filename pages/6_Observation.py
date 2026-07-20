@@ -13,7 +13,7 @@ import concurrent.futures
 import warnings
 import math
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completedd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Import DhanHQ modules ──
 from tv_screener.quantity_calculator import (
