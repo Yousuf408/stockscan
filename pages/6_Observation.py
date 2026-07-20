@@ -1385,7 +1385,7 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    placed, failed, error = execute_auto_buy(display_df)
+                    placed, failed, error = execute_auto_buy(df)
                 
                 if error:
                     st.warning(f"⚠️ {error}")
