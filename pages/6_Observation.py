@@ -1159,16 +1159,10 @@ if st.session_state['stage1_data']:
         elif breakout_status == 'live_checking':
             # 9:30 AM - 9:45 AM: Use REAL-TIME breakout check
             display_df['_real_time_breakout'] = display_df.apply(check_real_time_breakout, axis=1)
-            display_df = display_df[
-                (display_df['_real_time_breakout'] == True) & 
-                (display_df['200 EMA'] == 'ABOVE')
-            ]
+            display_df = display_df[display_df['_real_time_breakout'] == True]
         else:  # 'locked' - after 9:45 AM
             # Use the captured breakout_9_30_to_9_45 column (LOCKED)
-            display_df = display_df[
-                (display_df['breakout_9_30_to_9_45'] == True) & 
-                (display_df['200 EMA'] == 'ABOVE')
-            ]
+            display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
