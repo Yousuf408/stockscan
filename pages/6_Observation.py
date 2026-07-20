@@ -869,7 +869,7 @@ def execute_auto_buy(display_df):
         
         symbol = row['Symbol']
         
-        # Check conditions (EMA and Price only)
+        # Check conditions (Price only - 0.15% above 9:15 High)
         meets_conditions, reason = check_auto_buy_conditions(row)
         
         if not meets_conditions:
@@ -888,6 +888,14 @@ def execute_auto_buy(display_df):
             })
             continue
         
+        # Get current price from Price column
+        current_price = row.get('Price', 0)
+        if isinstance(current_price, str):
+            try:
+                current_price = float(current_price.replace('₹', '').replace(',', ''))
+            except:
+                current_price = 0
+        
         # Place order
         result = place_dhan_order(
             symbol=symbol,
@@ -900,7 +908,7 @@ def execute_auto_buy(display_df):
             placed_orders.append({
                 'symbol': symbol,
                 'quantity': int(max_qty),
-                'price': row.get('current_price', 0),
+                'price': current_price,
                 'high_9_15': row.get('high_9_15', 0),
                 'order_id': result.get('order_id', 'N/A')
             })
@@ -917,7 +925,7 @@ def execute_auto_buy(display_df):
     st.session_state['auto_buy_stocks_bought'].extend(stocks_bought)
     
     return placed_orders, failed_orders, None
-
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # BREAKOUT HELPER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
