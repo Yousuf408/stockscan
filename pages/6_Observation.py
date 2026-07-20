@@ -907,7 +907,7 @@ def execute_auto_buy(display_df):
     return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REAL-TIME BREAKOUT CHECK
+# BREAKOUT HELPER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_real_time_breakout(row):
@@ -926,6 +926,22 @@ def check_real_time_breakout(row):
     
     # Breakout if current price > 9:15 High
     return current_price > high_9_15
+
+def get_breakout_time_status():
+    """
+    Returns the current breakout time status
+    Returns: ('before_9_30', 'live_checking', 'locked')
+    """
+    current_time = datetime.now(IST)
+    time_9_30 = current_time.replace(hour=9, minute=30, second=0)
+    time_9_45 = current_time.replace(hour=9, minute=45, second=0)
+    
+    if current_time < time_9_30:
+        return 'before_9_30'
+    elif time_9_30 <= current_time <= time_9_45:
+        return 'live_checking'
+    else:
+        return 'locked'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
@@ -1052,6 +1068,7 @@ if st.session_state['stage1_data']:
     # ─── Apply Filters ───
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+    is_after_9_45 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=45, second=0)
     
     # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
@@ -1072,16 +1089,18 @@ if st.session_state['stage1_data']:
             show_inside_only = False
     
     with filter_col2:
-        if is_after_9_30:
+        # Breakout checkbox with time-based availability
+        breakout_status = get_breakout_time_status()
+        if breakout_status == 'before_9_30':
+            st.info("⏳ Breakout after 9:30 AM")
+            show_breakout_only = False
+        else:
             show_breakout_only = st.checkbox(
                 "⚡ Breakout 9:30-9:45",
                 value=st.session_state['show_breakout_only'],
                 key="breakout_checkbox"
             )
             st.session_state['show_breakout_only'] = show_breakout_only
-        else:
-            st.info("⏳ Breakout after 9:30 AM")
-            show_breakout_only = False
     
     with filter_col3:
         amo_test_mode = st.checkbox(
@@ -1130,20 +1149,26 @@ if st.session_state['stage1_data']:
     # ─── Apply filters to dataframe ───
     display_df = df.copy()
     
+    # Get breakout time status
+    breakout_status = get_breakout_time_status()
+    
     if show_breakout_only:
-        # Check if we're past 9:30 AM
-        is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
-        
-        if is_after_9_30:
-            # Calculate real-time breakout using current price
+        if breakout_status == 'before_9_30':
+            # Should not reach here as checkbox is disabled
+            pass
+        elif breakout_status == 'live_checking':
+            # 9:30 AM - 9:45 AM: Use REAL-TIME breakout check
             display_df['_real_time_breakout'] = display_df.apply(check_real_time_breakout, axis=1)
             display_df = display_df[
                 (display_df['_real_time_breakout'] == True) & 
                 (display_df['price_vs_ema_200'] == 'ABOVE')
             ]
-        else:
-            st.info("⏳ Breakout filter available after 9:30 AM")
-            show_breakout_only = False  # Reset to show all stocks
+        else:  # 'locked' - after 9:45 AM
+            # Use the captured breakout_9_30_to_9_45 column (LOCKED)
+            display_df = display_df[
+                (display_df['breakout_9_30_to_9_45'] == True) & 
+                (display_df['price_vs_ema_200'] == 'ABOVE')
+            ]
     
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
@@ -1244,8 +1269,28 @@ if st.session_state['stage1_data']:
         if 'Inside 9:15' in display_df.columns:
             display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         
-        if 'Breakout' in display_df.columns:
-            display_df['Breakout'] = display_df['Breakout'].apply(lambda x: "✅" if x else "❌")
+        # ─── Breakout Column - Show real-time status during live checking, else use captured data ───
+        def get_breakout_display(row):
+            breakout_status = get_breakout_time_status()
+            
+            if breakout_status == 'before_9_30':
+                return "⏳ Waiting"
+            elif breakout_status == 'live_checking':
+                # Show real-time status
+                high_9_15 = row.get('high_9_15', 0)
+                current_price = row.get('current_price', 0)
+                if high_9_15 <= 0 or current_price <= 0:
+                    return "⚪ N/A"
+                if current_price > high_9_15:
+                    return "✅ BREAKOUT"
+                else:
+                    return "❌ Below 9:15 High"
+            else:  # locked - after 9:45
+                # Use captured breakout data
+                breakout_val = row.get('Breakout', False)
+                return "✅" if breakout_val else "❌"
+        
+        display_df['Breakout'] = display_df.apply(get_breakout_display, axis=1)
         
         if '200 EMA' in display_df.columns:
             display_df['200 EMA'] = display_df['200 EMA'].apply(
