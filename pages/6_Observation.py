@@ -13,7 +13,7 @@ import concurrent.futures
 import warnings
 import math
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completedd
 
 # ── Import DhanHQ modules ──
 from tv_screener.quantity_calculator import (
@@ -1107,16 +1107,21 @@ if st.session_state['stage1_data']:
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
-    # ─── Apply filters to dataframe ───
+      # ─── Apply filters to dataframe ───
     display_df = df.copy()
     if show_breakout_only:
-        display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
+        # Breakout filter: Must have breakout AND be above 200 EMA
+        display_df = display_df[
+            (display_df['breakout_9_30_to_9_45'] == True) & 
+            (display_df['price_vs_ema_200'] == 'ABOVE')
+        ]
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
+        
         # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
