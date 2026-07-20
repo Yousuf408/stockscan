@@ -907,6 +907,27 @@ def execute_auto_buy(display_df):
     return placed_orders, failed_orders, None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# REAL-TIME BREAKOUT CHECK
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_real_time_breakout(row):
+    """
+    Check if stock is breaking out in real-time (9:30 onwards)
+    Uses current_price instead of waiting for 9:45 candle
+    """
+    high_9_15 = row.get('high_9_15', 0)
+    current_price = row.get('current_price', 0)
+    
+    if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
+        return False
+    
+    if current_price is None or pd.isna(current_price) or current_price <= 0:
+        return False
+    
+    # Breakout if current price > 9:15 High
+    return current_price > high_9_15
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1106,21 +1127,30 @@ if st.session_state['stage1_data']:
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
-      # ─── Apply filters to dataframe ───
+    # ─── Apply filters to dataframe ───
     display_df = df.copy()
+    
     if show_breakout_only:
-        # Breakout filter: Must have breakout AND be above 200 EMA
-        display_df = display_df[
-            (display_df['breakout_9_30_to_9_45'] == True) & 
-            (display_df['price_vs_ema_200'] == 'ABOVE')
-        ]
+        # Check if we're past 9:30 AM
+        is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
+        
+        if is_after_9_30:
+            # Calculate real-time breakout using current price
+            display_df['_real_time_breakout'] = display_df.apply(check_real_time_breakout, axis=1)
+            display_df = display_df[
+                (display_df['_real_time_breakout'] == True) & 
+                (display_df['price_vs_ema_200'] == 'ABOVE')
+            ]
+        else:
+            st.info("⏳ Breakout filter available after 9:30 AM")
+            show_breakout_only = False  # Reset to show all stocks
+    
     if show_inside_only and is_after_9_25:
         display_df = display_df[display_df['inside_9_15'] == True]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
-        
         # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['market_cap_b'] = (display_df['market_cap_basic'] / 1e9).round(1)
@@ -1258,6 +1288,11 @@ if st.session_state['stage1_data']:
                 return f'❌ Need > {required_price:.2f}'
         
         display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
+        
+        # ─── Reset index to show proper sequential numbering ───
+        display_df = display_df.reset_index(drop=True)
+        # Add index column starting from 1
+        display_df.index = display_df.index + 1
         
         # ─── Final columns ───
         final_cols = [
