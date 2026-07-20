@@ -812,18 +812,12 @@ def check_auto_buy_conditions(row):
     
     Conditions:
     1. Inside 9:15 checkbox is checked (filter active) - ALREADY FILTERED BY TABLE
-    2. Current price > 200 EMA (current)
-    3. Current price > (9:15 High * 1.0015) [0.15% above]
+    2. Current price > (9:15 High * 1.0015) [0.15% above]
     """
     # Condition 1: Inside 9:15 is already filtered by display_df
     # So we skip this check - table only has Inside 9:15 stocks
     
-    # Condition 2: Current price > 200 EMA (using current_200_ema_status)
-    ema_status = row.get('current_200_ema_status')
-    if ema_status != 'ABOVE':
-        return False, f"Not above 200 EMA (Status: {ema_status})"
-    
-    # Condition 3: Current price > 9:15 High * 1.0015 (0.15% above)
+    # Condition 2: Current price > 9:15 High * 1.0015 (0.15% above)
     high_9_15 = row.get('high_9_15', 0)
     current_price = row.get('current_price', 0)
     
