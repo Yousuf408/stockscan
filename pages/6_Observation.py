@@ -1146,7 +1146,7 @@ if st.session_state['stage1_data']:
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
-    # ─── Apply filters to dataframe ───
+       # ─── Apply filters to dataframe ───
     display_df = df.copy()
     
     # Get breakout time status
@@ -1164,22 +1164,19 @@ if st.session_state['stage1_data']:
     
     # --- INSIDE 9:15 FILTER (WITH SAFE 200 EMA CONDITION) ---
     if show_inside_only and is_after_9_25:
-        # Check if required columns exist and have valid data
+        # Check if required columns exist
         if 'close_9_15' in display_df.columns and 'ema_200_5m' in display_df.columns:
-            # Create a mask for valid comparisons (both columns not null)
-            mask = (
+            # Convert columns to numeric, coercing errors to NaN
+            display_df['close_9_15'] = pd.to_numeric(display_df['close_9_15'], errors='coerce')
+            display_df['ema_200_5m'] = pd.to_numeric(display_df['ema_200_5m'], errors='coerce')
+            
+            # Filter: inside_9_15 is True AND close_9_15 > ema_200_5m (both not NaN)
+            display_df = display_df[
                 (display_df['inside_9_15'] == True) & 
                 (display_df['close_9_15'].notna()) & 
-                (display_df['ema_200_5m'].notna())
-            )
-            # Apply the comparison only where both values exist
-            if mask.any():
-                display_df = display_df[
-                    mask & 
-                    (display_df['close_9_15'] > display_df['ema_200_5m'])
-                ]
-            else:
-                display_df = display_df[mask]
+                (display_df['ema_200_5m'].notna()) &
+                (display_df['close_9_15'] > display_df['ema_200_5m'])
+            ]
         else:
             # If columns missing, fallback to only inside_9_15 check
             display_df = display_df[display_df['inside_9_15'] == True]
