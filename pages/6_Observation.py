@@ -1164,8 +1164,11 @@ if st.session_state['stage1_data']:
             # Use the captured breakout_9_30_to_9_45 column (LOCKED)
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
-    if show_inside_only and is_after_9_25:
-        display_df = display_df[display_df['inside_9_15'] == True]
+   if show_inside_only and is_after_9_25:
+    display_df = display_df[
+        (display_df['inside_9_15'] == True) & 
+        (display_df['close_9_15'] > display_df['ema_200_5m'])
+    ]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
