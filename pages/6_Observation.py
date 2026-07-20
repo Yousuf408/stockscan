@@ -1152,23 +1152,22 @@ if st.session_state['stage1_data']:
     # Get breakout time status
     breakout_status = get_breakout_time_status()
     
+    # --- BREAKOUT FILTER ---
     if show_breakout_only:
         if breakout_status == 'before_9_30':
-            # Should not reach here as checkbox is disabled
             pass
         elif breakout_status == 'live_checking':
-            # 9:30 AM - 9:45 AM: Use REAL-TIME breakout check
             display_df['_real_time_breakout'] = display_df.apply(check_real_time_breakout, axis=1)
             display_df = display_df[display_df['_real_time_breakout'] == True]
-        else:  # 'locked' - after 9:45 AM
-            # Use the captured breakout_9_30_to_9_45 column (LOCKED)
+        else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
-   if show_inside_only and is_after_9_25:
-    display_df = display_df[
-        (display_df['inside_9_15'] == True) & 
-        (display_df['close_9_15'] > display_df['ema_200_5m'])
-    ]
+    # --- INSIDE 9:15 FILTER (WITH NEW 200 EMA CONDITION) ---
+    if show_inside_only and is_after_9_25:
+        display_df = display_df[
+            (display_df['inside_9_15'] == True) & 
+            (display_df['close_9_15'] > display_df['ema_200_5m'])
+        ]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
@@ -1191,7 +1190,7 @@ if st.session_state['stage1_data']:
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
-            'high_9_15', 'current_price'
+            'high_9_15', 'current_price', 'close_9_15', 'ema_200_5m'
         ]
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
