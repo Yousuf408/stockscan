@@ -641,16 +641,32 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     gap_percent = 0.0
                     prev_close = float(first_candle['Close'])
 
-                # Calculate 200 EMA
-                ema_200 = calculate_ema_200(data)
+                # Get the exact time of the 9:15 candle
+                first_candle_time = first_candle.name
+                
+                # --- Calculate 200 EMA at 9:15 AM ONLY ---
+                # Get data up to 9:15 AM (the first candle time)
+                data_until_9_15 = data[data.index <= first_candle_time]
+                ema_200_9_15 = calculate_ema_200(data_until_9_15)
+                
+                # --- Calculate current 200 EMA for display (using all data) ---
+                ema_200_current = calculate_ema_200(data)
                 
                 # Get current price for EMA comparison
                 current_price = float(data['Close'].iloc[-1])
-                ema_status = None
-                if ema_200 is not None:
-                    ema_status = 'ABOVE' if current_price > ema_200 else 'BELOW'
+                
+                # Determine if 9:15 Open is above 200 EMA at 9:15 AM
+                close_9_15 = float(first_candle['Close'])
+                if ema_200_9_15 is not None and close_9_15 > ema_200_9_15:
+                    ema_status_9_15 = 'ABOVE'
                 else:
-                    ema_status = 'NO DATA'
+                    ema_status_9_15 = 'BELOW'
+                
+                # Current status (for auto-buy)
+                if ema_200_current is not None and current_price > ema_200_current:
+                    ema_status_current = 'ABOVE'
+                else:
+                    ema_status_current = 'BELOW'
 
                 result = {
                     'high_9_15': float(first_candle['High']),
@@ -667,8 +683,10 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'gap_percent': gap_percent,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
-                    'ema_200_5m': ema_200,
-                    '200 EMA': ema_status,
+                    'ema_200_9_15': ema_200_9_15,  # 200 EMA at 9:15 AM
+                    'ema_200_current': ema_200_current,  # Current 200 EMA
+                    '200 EMA': ema_status_9_15,  # 9:15 Open vs 200 EMA at 9:15
+                    'current_200_ema_status': ema_status_current,  # For auto-buy
                     'current_price': float(data['Close'].iloc[-1])
                 }
                 return base_ticker, result
@@ -692,7 +710,7 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_5m', '200 EMA', 'current_price']:
+                     'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -709,7 +727,7 @@ def check_candle_conditions(df, tickers_list):
                         'high_9_20', 'low_9_20', 'close_9_20', 'max_high_up_to_10_15',
                         'hit_low_9_20_to_35', 'breakout_9_30_to_9_45', 'prev_close',
                         'gap_percent', 'yahoo_ticker', 'data_date',
-                        'ema_200_5m', '200 EMA', 'current_price']:
+                        'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
@@ -794,14 +812,14 @@ def check_auto_buy_conditions(row):
     
     Conditions:
     1. Inside 9:15 checkbox is checked (filter active) - ALREADY FILTERED BY TABLE
-    2. Current price > 200 EMA
+    2. Current price > 200 EMA (current)
     3. Current price > (9:15 High * 1.0015) [0.15% above]
     """
     # Condition 1: Inside 9:15 is already filtered by display_df
     # So we skip this check - table only has Inside 9:15 stocks
     
-    # Condition 2: Current price > 200 EMA
-    ema_status = row.get('200 EMA')
+    # Condition 2: Current price > 200 EMA (using current_200_ema_status)
+    ema_status = row.get('current_200_ema_status')
     if ema_status != 'ABOVE':
         return False, f"Not above 200 EMA (Status: {ema_status})"
     
@@ -1146,7 +1164,7 @@ if st.session_state['stage1_data']:
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)  # Close screener-card
     
-       # ─── Apply filters to dataframe ───
+    # ─── Apply filters to dataframe ───
     display_df = df.copy()
     
     # Get breakout time status
@@ -1162,20 +1180,20 @@ if st.session_state['stage1_data']:
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
-    # --- INSIDE 9:15 FILTER (WITH SAFE 200 EMA CONDITION) ---
+    # --- INSIDE 9:15 FILTER (WITH CORRECT 200 EMA AT 9:15 AM CONDITION) ---
     if show_inside_only and is_after_9_25:
         # Check if required columns exist
-        if 'close_9_15' in display_df.columns and 'ema_200_5m' in display_df.columns:
+        if 'close_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
             # Convert columns to numeric, coercing errors to NaN
             display_df['close_9_15'] = pd.to_numeric(display_df['close_9_15'], errors='coerce')
-            display_df['ema_200_5m'] = pd.to_numeric(display_df['ema_200_5m'], errors='coerce')
+            display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
             
-            # Filter: inside_9_15 is True AND close_9_15 > ema_200_5m (both not NaN)
+            # Filter: inside_9_15 is True AND close_9_15 > ema_200_9_15 (both not NaN)
             display_df = display_df[
                 (display_df['inside_9_15'] == True) & 
                 (display_df['close_9_15'].notna()) & 
-                (display_df['ema_200_5m'].notna()) &
-                (display_df['close_9_15'] > display_df['ema_200_5m'])
+                (display_df['ema_200_9_15'].notna()) &
+                (display_df['close_9_15'] > display_df['ema_200_9_15'])
             ]
         else:
             # If columns missing, fallback to only inside_9_15 check
@@ -1202,7 +1220,8 @@ if st.session_state['stage1_data']:
         display_cols = [
             'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
-            'high_9_15', 'current_price', 'close_9_15', 'ema_200_5m'
+            'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15', 'ema_200_current',
+            'current_200_ema_status'
         ]
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
@@ -1299,22 +1318,20 @@ if st.session_state['stage1_data']:
         
         display_df['Breakout'] = display_df.apply(get_breakout_display, axis=1)
         
-               # ─── 200 EMA Column - Show price with color using emoji ───
-        def format_ema_simple(row):
-            ema_value = row.get('ema_200_5m')
+        # ─── 200 EMA Column - Show 200 EMA at 9:15 AM with color ───
+        def format_ema_with_color(row):
+            ema_value = row.get('ema_200_9_15')
             
             if ema_value is None or pd.isna(ema_value) or ema_value <= 0:
                 return "⚪ N/A"
             
-            status = row.get('200 EMA')
-            if status == 'ABOVE':
+            close_9_15 = row.get('close_9_15', 0)
+            if close_9_15 > ema_value:
                 return f"🟢 ₹{ema_value:,.2f}"
-            elif status == 'BELOW':
-                return f"🔴 ₹{ema_value:,.2f}"
             else:
-                return f"⚪ ₹{ema_value:,.2f}"
+                return f"🔴 ₹{ema_value:,.2f}"
         
-        display_df['200 EMA'] = display_df.apply(format_ema_simple, axis=1)
+        display_df['200 EMA'] = display_df.apply(format_ema_with_color, axis=1)
         
         # ─── Auto-Buy Eligibility Check ───
         def check_auto_buy_eligible(row):
@@ -1323,9 +1340,9 @@ if st.session_state['stage1_data']:
             if inside_value != '✅':
                 return '❌ Not Inside'
             
-            # Check 200 EMA status
-            ema_status = row.get('200 EMA')
-            if 'ABOVE' not in ema_status:
+            # Check 200 EMA status (using current_200_ema_status for auto-buy)
+            ema_status = row.get('current_200_ema_status')
+            if ema_status != 'ABOVE':
                 return '❌ Below EMA'
             
             # Check 0.15% above 9:15 High
