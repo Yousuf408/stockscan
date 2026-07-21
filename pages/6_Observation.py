@@ -764,15 +764,14 @@ def load_stage1_data():
             return None
         
         # Step 2: Apply gap filter (<= 2% from TradingView's 'gap' column)
-        rejected_gap = pd.DataFrame()  # Empty placeholder
+        df, rejected_gap = filter_by_gap(df)
         if df.empty:
             return {
                 'df': pd.DataFrame(),
                 'valid': [],
                 'invalid': [],
                 'failed': [],
-                #'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
-                'rejected': [],  # ← CHANGE THIS to empty list (was: rejected_gap.to_dict('records'))
+                'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
                 'total_count': count,
                 'filtered_count': 0,
                 'timestamp': datetime.now(IST)
