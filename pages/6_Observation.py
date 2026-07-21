@@ -97,6 +97,35 @@ if 'inside_pass_date' not in st.session_state:
     st.session_state['inside_pass_date'] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR - 200 EMA DISTANCE CONTROL
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("### 📈 200 EMA Distance %")
+    st.markdown("---")
+    
+    ema_gap_threshold = st.slider(
+        "Max distance from 200 EMA",
+        min_value=0.5,
+        max_value=10.0,
+        value=3.0,
+        step=0.25,
+        key="ema_gap_threshold_slider",
+        help="9:15 Open must be within this % above 200 EMA"
+    )
+    
+    # Show current value
+    st.caption(f"Current: **{ema_gap_threshold}%**")
+    
+    # Show count of stocks that would pass
+    if 'stage1_data' in st.session_state and st.session_state['stage1_data'] is not None:
+        df = st.session_state['stage1_data']['df']
+        if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
+            df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
+            count = len(df[df['_ema_gap_pct'] <= (ema_gap_threshold / 100)])
+            st.caption(f"📊 Stocks passing: **{count}**")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -469,30 +498,6 @@ WHITE_THEME_CSS = """
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR - 200 EMA DISTANCE CONTROL
-# ─────────────────────────────────────────────────────────────────────────────
-
-with st.sidebar:
-    st.markdown("### 📈 200 EMA Distance %")
-    st.markdown("---")
-    
-    ema_gap_threshold = st.slider(
-        "Max distance from 200 EMA",
-        min_value=0.5,
-        max_value=10.0,
-        value=3.0,
-        step=0.25,
-        key="ema_gap_threshold_slider",
-        help="9:15 Open must be within this % above 200 EMA"
-    )
-    
-    # Show current value
-    st.caption(f"Current: **{ema_gap_threshold}%**")
-    
-    # Update HARDCODED_SETTINGS
-    HARDCODED_SETTINGS['ema_gap_threshold'] = ema_gap_threshold / 100
-
-# ─────────────────────────────────────────────────────────────────────────────
 # BACKEND FUNCTIONS (Data & Logic)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -779,10 +784,11 @@ def load_stage1_data():
     1. Fetch ALL stocks from TV
     2. Apply gap filter (<= 2% from TV)
     3. Fetch candle data (including 200 EMA at 9:15)
-    4. Return ALL stocks that pass gap filter (no 200 EMA filter yet)
+    4. Apply 200 EMA filter from sidebar slider
+    5. Return filtered stocks
     """
     with st.spinner("🔄 Loading market data..."):
-        # Step 1: Fetch ALL stocks from TradingView (no limit)
+        # Step 1: Fetch ALL stocks from TradingView
         count, df = get_tradingview_stocks()
         if count == 0:
             return None
@@ -808,8 +814,27 @@ def load_stage1_data():
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
-        # Step 5: NO 200 EMA filter here - applied by "Inside 9:15" checkbox in frontend
-        # Step 6: Show ALL stocks that pass gap filter (no limit)
+        # Step 5: APPLY 200 EMA FILTER FROM SIDEBAR SLIDER
+        if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
+            df['open_9_15'] = pd.to_numeric(df['open_9_15'], errors='coerce')
+            df['ema_200_9_15'] = pd.to_numeric(df['ema_200_9_15'], errors='coerce')
+            df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
+            
+            # Get EMA gap from sidebar (default 3%)
+            ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
+            
+            mask = (
+                (df['open_9_15'].notna()) &
+                (df['ema_200_9_15'].notna()) &
+                (df['ema_200_9_15'] > 0) &
+                (df['open_9_15'] > df['ema_200_9_15']) &
+                (df['_ema_gap_pct'] <= ema_gap_limit)
+            )
+            df = df[mask].copy()
+            if '_ema_gap_pct' in df.columns:
+                df = df.drop(columns=['_ema_gap_pct'])
+        
+        # Step 6: Show ALL stocks that pass filters
         df = df.sort_values('change', ascending=False)
         
         # Update valid list based on final df
@@ -1030,6 +1055,17 @@ st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 # Render Header
 render_header()
 
+# ─── Check if slider changed → reload data ───
+# Track previous slider value to detect changes
+if 'prev_ema_slider' not in st.session_state:
+    st.session_state['prev_ema_slider'] = st.session_state.get('ema_gap_threshold_slider', 3.0)
+
+# If slider changed, reload data
+current_slider = st.session_state.get('ema_gap_threshold_slider', 3.0)
+if current_slider != st.session_state['prev_ema_slider']:
+    st.session_state['prev_ema_slider'] = current_slider
+    st.session_state['stage1_data'] = None
+
 # ─── Check auto-refresh ───
 if should_refresh_stage1() or st.session_state['stage1_data'] is None:
     stage1_data = load_stage1_data()
@@ -1105,6 +1141,7 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
                 <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
                 <span class="filter-badge active">📈 Gap ≤ 2%</span>
+                <span class="filter-badge active">📈 EMA ≤ {st.session_state.get('ema_gap_threshold_slider', 3.0)}%</span>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -1188,28 +1225,13 @@ if st.session_state['stage1_data']:
             # Use cached symbols
             display_df = display_df[display_df['ticker'].isin(st.session_state['inside_pass_symbols'])]
         else:
-            # Compute the filter condition (inside_9_15 AND open > 200 EMA AND gap ≤ 3%)
-            if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
-                display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
-                display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
-                display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
-                
-                # Get EMA gap from sidebar (default 3%)
-                ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
-                
-                mask = (
-                    (display_df['inside_9_15'] == True) &
-                    (display_df['open_9_15'].notna()) &
-                    (display_df['ema_200_9_15'].notna()) &
-                    (display_df['ema_200_9_15'] > 0) &
-                    (display_df['open_9_15'] > display_df['ema_200_9_15']) &
-                    (display_df['_ema_gap_pct'] <= ema_gap_limit)
-                )
+            # Compute the filter condition (inside_9_15 only - EMA already filtered)
+            if 'inside_9_15' in display_df.columns:
+                mask = display_df['inside_9_15'] == True
                 pass_symbols = display_df.loc[mask, 'ticker'].tolist()
                 st.session_state['inside_pass_symbols'] = pass_symbols
                 st.session_state['inside_pass_date'] = today
                 display_df = display_df[mask].copy()
-                display_df = display_df.drop(columns=['_ema_gap_pct'])
             else:
                 display_df = display_df[display_df['inside_9_15'] == True]
     
