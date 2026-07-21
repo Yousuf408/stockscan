@@ -97,12 +97,27 @@ if 'inside_pass_date' not in st.session_state:
     st.session_state['inside_pass_date'] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR - 200 EMA DISTANCE CONTROL
+# HARDCODED SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+
+HARDCODED_SETTINGS = {
+    'price_min': 200,
+    'price_max': 3000,
+    'market_cap_min': 41_000_000_000,
+    'gap_threshold': 2.0,            # Gap ≤ 2%
+    'ema_gap_threshold': 0.03        # 3% max gap between open and 200 EMA
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR CONTROLS
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("### 📈 200 EMA Distance %")
+    st.markdown("### ⚙️ Filter Settings")
     st.markdown("---")
+    
+    # ─── SECTION 1: 200 EMA DISTANCE ───
+    st.markdown("### 📈 200 EMA Distance %")
     
     ema_gap_threshold = st.slider(
         "Max distance from 200 EMA",
@@ -114,28 +129,38 @@ with st.sidebar:
         help="9:15 Open must be within this % above 200 EMA"
     )
     
-    # Show current value
     st.caption(f"Current: **{ema_gap_threshold}%**")
     
-    # Show count of stocks that would pass
+    # Show count of stocks that pass EMA filter
     if 'stage1_data' in st.session_state and st.session_state['stage1_data'] is not None:
         df = st.session_state['stage1_data']['df']
         if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
             df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
             count = len(df[df['_ema_gap_pct'] <= (ema_gap_threshold / 100)])
             st.caption(f"📊 Stocks passing: **{count}**")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HARDCODED SETTINGS
-# ─────────────────────────────────────────────────────────────────────────────
-
-HARDCODED_SETTINGS = {
-    'price_min': 200,
-    'price_max': 3000,
-    'market_cap_min': 41_000_000_000,
-    'gap_threshold': 2.0,            # Gap ≤ 2%
-    'ema_gap_threshold': 0.03        # 3% max gap between open and 200 EMA
-}
+    
+    st.markdown("---")
+    
+    # ─── SECTION 2: ABOVE PREVIOUS HIGH ───
+    st.markdown("### 📊 Previous Day High Filter")
+    
+    st.checkbox(
+        "9:15 High > Previous Day High",
+        key="filter_above_prev_high",
+        help="Show only stocks where 9:15 candle high is above yesterday's high"
+    )
+    
+    if st.session_state.get('filter_above_prev_high', False):
+        st.caption("✅ Active: 9:15 High must be above previous day high")
+    else:
+        st.caption("⚪ Off: No filter applied")
+    
+    st.markdown("---")
+    
+    # Show current filters summary
+    st.markdown("**🔍 Active Filters**")
+    st.caption(f"📈 EMA Distance: ≤ {ema_gap_threshold}%")
+    st.caption(f"📊 Above Prev High: {'✅ ON' if st.session_state.get('filter_above_prev_high', False) else '❌ OFF'}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CSS - WHITE THEME
@@ -529,7 +554,7 @@ def get_tradingview_stocks():
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            .limit(200)
+            .limit(1000)
             .get_scanner_data()
         )
         return count, df
@@ -584,7 +609,7 @@ def calculate_ema_200(data_5min):
 def get_candle_data_bulk(tickers_list, max_workers=20):
     """
     For a list of tickers (NSE:...), fetch 5‑min data and extract key candle values
-    (9:15, 9:20, breakout, 200 EMA at 9:15, etc.).
+    (9:15, 9:20, breakout, 200 EMA at 9:15, prev_high, etc.).
     Returns a dict {base_ticker: result_dict}.
     """
     results = {}
@@ -600,6 +625,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 today_data = data[data.index.date == today]
                 yesterday_data = data[data.index.date < today]
                 prev_close = float(yesterday_data.iloc[-1]['Close']) if len(yesterday_data) > 0 else None
+                prev_high = float(yesterday_data['High'].max()) if len(yesterday_data) > 0 else None  # <-- NEW
                 if today_data.empty:
                     continue
                 df_day = today_data
@@ -689,6 +715,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'hit_low_9_20_to_35': hit_low_9_20_to_35,
                     'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
                     'prev_close': prev_close,
+                    'prev_high': prev_high,  # <-- NEW
                     'gap_percent_fallback': gap_percent_fallback,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
@@ -722,6 +749,7 @@ def check_candle_conditions(df, tickers_list):
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
+                     'prev_high',  # <-- NEW
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
@@ -741,7 +769,8 @@ def check_candle_conditions(df, tickers_list):
             for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',
                         'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
                         'max_high_up_to_10_15', 'hit_low_9_20_to_35',
-                        'breakout_9_30_to_9_45', 'prev_close', 'gap_percent_fallback',
+                        'breakout_9_30_to_9_45', 'prev_close', 'prev_high',  # <-- NEW
+                        'gap_percent_fallback',
                         'yahoo_ticker', 'data_date', 'ema_200_9_15', 'ema_200_current',
                         '200 EMA', 'current_200_ema_status', 'current_price']:
                 df.at[idx, key] = data[key]
@@ -783,9 +812,10 @@ def load_stage1_data():
     Load and process all data for stage1:
     1. Fetch ALL stocks from TV
     2. Apply gap filter (<= 2% from TV)
-    3. Fetch candle data (including 200 EMA at 9:15)
+    3. Fetch candle data (including 200 EMA at 9:15, prev_high)
     4. Apply 200 EMA filter from sidebar slider
-    5. Return filtered stocks
+    5. Apply Above Previous High filter from sidebar checkbox
+    6. Return filtered stocks
     """
     with st.spinner("🔄 Loading market data..."):
         # Step 1: Fetch ALL stocks from TradingView
@@ -834,7 +864,21 @@ def load_stage1_data():
             if '_ema_gap_pct' in df.columns:
                 df = df.drop(columns=['_ema_gap_pct'])
         
-        # Step 6: Show ALL stocks that pass filters
+        # Step 6: APPLY ABOVE PREVIOUS HIGH FILTER (if checkbox is checked)
+        if st.session_state.get('filter_above_prev_high', False):
+            if 'high_9_15' in df.columns and 'prev_high' in df.columns:
+                df['high_9_15'] = pd.to_numeric(df['high_9_15'], errors='coerce')
+                df['prev_high'] = pd.to_numeric(df['prev_high'], errors='coerce')
+                
+                mask = (
+                    df['high_9_15'].notna() &
+                    df['prev_high'].notna() &
+                    (df['prev_high'] > 0) &
+                    (df['high_9_15'] >= df['prev_high'])  # Above previous high
+                )
+                df = df[mask].copy()
+        
+        # Step 7: Show ALL stocks that pass filters
         df = df.sort_values('change', ascending=False)
         
         # Update valid list based on final df
@@ -1055,15 +1099,19 @@ st.markdown(WHITE_THEME_CSS, unsafe_allow_html=True)
 # Render Header
 render_header()
 
-# ─── Check if slider changed → reload data ───
-# Track previous slider value to detect changes
+# ─── Check if slider/checkbox changed → reload data ───
 if 'prev_ema_slider' not in st.session_state:
     st.session_state['prev_ema_slider'] = st.session_state.get('ema_gap_threshold_slider', 3.0)
 
-# If slider changed, reload data
 current_slider = st.session_state.get('ema_gap_threshold_slider', 3.0)
-if current_slider != st.session_state['prev_ema_slider']:
+current_checkbox = st.session_state.get('filter_above_prev_high', False)
+
+if 'prev_checkbox' not in st.session_state:
+    st.session_state['prev_checkbox'] = current_checkbox
+
+if (current_slider != st.session_state['prev_ema_slider']) or (current_checkbox != st.session_state['prev_checkbox']):
     st.session_state['prev_ema_slider'] = current_slider
+    st.session_state['prev_checkbox'] = current_checkbox
     st.session_state['stage1_data'] = None
 
 # ─── Check auto-refresh ───
@@ -1142,6 +1190,7 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
                 <span class="filter-badge active">📈 Gap ≤ 2%</span>
                 <span class="filter-badge active">📈 EMA ≤ {st.session_state.get('ema_gap_threshold_slider', 3.0)}%</span>
+                {f'<span class="filter-badge active">📊 Above Prev High ✅</span>' if st.session_state.get('filter_above_prev_high', False) else ''}
             </div>
         </div>
     """, unsafe_allow_html=True)
