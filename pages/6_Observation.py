@@ -544,7 +544,7 @@ def get_tradingview_stocks():
                 'relative_volume',
                 'market_cap_basic',
                 'sector',
-                'gap'              # <-- USING TRADINGVIEW'S GAP COLUMN
+                'gap'
             )
             .set_markets('india')
             .where(
@@ -749,7 +749,7 @@ def check_candle_conditions(df, tickers_list):
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
-                     'prev_high',  # <-- FIXED: Added prev_high here
+                     'prev_high',
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
@@ -874,7 +874,7 @@ def load_stage1_data():
                     df['high_9_15'].notna() &
                     df['prev_high'].notna() &
                     (df['prev_high'] > 0) &
-                    (df['high_9_15'] >= df['prev_high'])  # Above previous high
+                    (df['high_9_15'] >= df['prev_high'])
                 )
                 df = df[mask].copy()
         
@@ -1316,7 +1316,7 @@ if st.session_state['stage1_data']:
             'name', 'close', 'change', 'gap', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
             'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15', 'ema_200_current',
-            'current_200_ema_status'
+            'current_200_ema_status', 'prev_high'  # <-- ADDED
         ]
         available = [c for c in display_cols if c in display_df.columns]
         display_df = display_df[available].copy()
@@ -1333,7 +1333,8 @@ if st.session_state['stage1_data']:
             'MaxQty': 'MaxQty',
             'sector': 'Sector',
             'high_9_15': 'high_9_15',
-            'current_price': 'current_price'
+            'current_price': 'current_price',
+            'prev_high': 'Prev Day High'  # <-- ADDED
         })
         
         # ─── Format columns with NaN handling ───
@@ -1343,6 +1344,13 @@ if st.session_state['stage1_data']:
             )
         else:
             display_df['9:15 High'] = "N/A"
+        
+        if 'Prev Day High' in display_df.columns:  # <-- ADDED
+            display_df['Prev Day High'] = display_df['Prev Day High'].apply(
+                lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
+            )
+        else:
+            display_df['Prev Day High'] = "N/A"
         
         if 'Price' in display_df.columns:
             display_df['Price'] = display_df['Price'].apply(
@@ -1465,7 +1473,7 @@ if st.session_state['stage1_data']:
         final_cols = [
             'Symbol', 'Price', 'Chg%', 'Gap%', 'Volume', 
             'Rel Vol', 'Inside 9:15', 'Breakout', '200 EMA',
-            '9:15 High', 'Auto-Buy Status', 'MaxQty', 'Sector'
+            '9:15 High', 'Prev Day High', 'Auto-Buy Status', 'MaxQty', 'Sector'  # <-- ADDED
         ]
         
         existing_cols = [c for c in final_cols if c in display_df.columns]
@@ -1526,6 +1534,7 @@ if st.session_state['stage1_data']:
                     "Breakout": st.column_config.TextColumn("BREAKOUT", width="small"),
                     "200 EMA": st.column_config.TextColumn("200 EMA", width="small"),
                     "9:15 High": st.column_config.TextColumn("9:15 HIGH", width="small"),
+                    "Prev Day High": st.column_config.TextColumn("PREV HIGH", width="small"),  # <-- ADDED
                     "Auto-Buy Status": st.column_config.TextColumn("AUTO-BUY", width="small"),
                     "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
                     "Sector": st.column_config.TextColumn("SECTOR", width="medium"),
