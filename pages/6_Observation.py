@@ -729,7 +729,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 'hit_low_9_20_to_35': hit_low_9_20_to_35,
                 'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
                 'prev_close': prev_close,
-                'prev_high': prev_high,  # ← Now from daily data (Colab method)
+                'prev_high': prev_high,
                 'gap_percent_fallback': gap_percent_fallback,
                 'yahoo_ticker': yahoo_ticker,
                 'data_date': today.strftime("%Y-%m-%d"),
@@ -742,13 +742,25 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
             return base_ticker, result
         return None, None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_ticker = {executor.submit(fetch_one, ticker): ticker for ticker in tickers_list}
-        for future in concurrent.futures.as_completed(future_to_ticker):
-            base, data = future.result()
-            if base and data:
-                results[base] = data
-    return results
+    # CACHE THE ENTIRE BULK FETCH - 24 HOURS
+    # Only ONE Yahoo call per day for ALL stocks!
+    @st.cache_data(ttl=86400)  # 24 hours
+    def _get_cached_candle_data_bulk(tickers_tuple):
+        """Cached version - runs only once per day."""
+        tickers_list = list(tickers_tuple)
+        results = {}
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            future_to_ticker = {executor.submit(fetch_one, ticker): ticker for ticker in tickers_list}
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                base, data = future.result()
+                if base and data:
+                    results[base] = data
+        return results
+    
+    # Convert list to tuple for caching (hashable)
+    tickers_tuple = tuple(tickers_list)
+    return _get_cached_candle_data_bulk(tickers_tuple)
 
 
 def check_candle_conditions(df, tickers_list):
@@ -763,7 +775,7 @@ def check_candle_conditions(df, tickers_list):
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
-                     'prev_high',  # <-- ADDED
+                     'prev_high',
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
@@ -783,7 +795,7 @@ def check_candle_conditions(df, tickers_list):
             for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',
                         'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
                         'max_high_up_to_10_15', 'hit_low_9_20_to_35',
-                        'breakout_9_30_to_9_45', 'prev_close', 'prev_high',  # <-- ADDED
+                        'breakout_9_30_to_9_45', 'prev_close', 'prev_high',
                         'gap_percent_fallback',
                         'yahoo_ticker', 'data_date', 'ema_200_9_15', 'ema_200_current',
                         '200 EMA', 'current_200_ema_status', 'current_price']:
@@ -826,7 +838,7 @@ def load_stage1_data():
     Load and process all data for stage1:
     1. Fetch ALL stocks from TV
     2. Apply gap filter (<= 2% from TV)
-    3. Fetch candle data (including 200 EMA at 9:15, prev_high)
+    3. Fetch candle data (cached for 24 hours)
     4. Apply 200 EMA filter from sidebar slider
     5. Apply Above Previous High filter from sidebar checkbox
     6. Return filtered stocks
@@ -854,7 +866,7 @@ def load_stage1_data():
         # Step 3: Sort by change (gainers)
         df = df.sort_values('change', ascending=False)
         
-        # Step 4: Fetch candle data for ALL gap-filtered stocks
+        # Step 4: Fetch candle data for ALL gap-filtered stocks (CACHED 24 HOURS)
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
@@ -888,7 +900,7 @@ def load_stage1_data():
                     df['high_9_15'].notna() &
                     df['prev_high'].notna() &
                     (df['prev_high'] > 0) &
-                    (df['high_9_15'] >= df['prev_high'])  # 9:15 High >= Previous Day High
+                    (df['high_9_15'] >= df['prev_high'])
                 )
                 df = df[mask].copy()
         
