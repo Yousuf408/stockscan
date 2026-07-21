@@ -1219,6 +1219,8 @@ if st.session_state['stage1_data']:
                 {f'<span class="filter-badge active">📊 Above Prev High ✅</span>' if st.session_state.get('filter_above_prev_high', False) else ''}
             </div>
         </div>
+        </div>
+        
     """, unsafe_allow_html=True)
     
     # ─── Apply Filters ───
