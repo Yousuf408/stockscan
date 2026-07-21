@@ -104,7 +104,7 @@ HARDCODED_SETTINGS = {
     'price_min': 200,
     'price_max': 3000,              # ← UPDATED from 2000 to 3000
     'market_cap_min': 41_000_000_000,
-    'stocks_limit': 50,              # Show top 50 after all filters
+    'stocks_limit': 999,              # Show top 50 after all filters
     'gap_threshold': 2.0,            # Gap ≥ 2%
     'ema_gap_threshold': 0.03        # 3% max gap between open and 200 EMA
 }
