@@ -90,6 +90,13 @@ if 'auto_buy_stocks_bought' not in st.session_state:
 if 'auto_buy_date' not in st.session_state:
     st.session_state['auto_buy_date'] = datetime.now().date()
 
+# ─── INSIDE 9:15 CACHE ───                        # <--- NEW
+if 'inside_pass_symbols' not in st.session_state:
+    st.session_state['inside_pass_symbols'] = []
+
+if 'inside_pass_date' not in st.session_state:
+    st.session_state['inside_pass_date'] = None
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -670,7 +677,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 result = {
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
-                    'open_9_15': open_9_15,                     # <--- NEW
+                    'open_9_15': open_9_15,
                     'close_9_15': float(first_candle['Close']),
                     'open_9_20': float(second_candle['Open']),
                     'high_9_20': float(second_candle['High']),
@@ -711,7 +718,7 @@ def check_candle_conditions(df, tickers_list):
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
-                     'open_9_15']:                   # <--- NEW
+                     'open_9_15']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -724,7 +731,7 @@ def check_candle_conditions(df, tickers_list):
         base_ticker = ticker.replace('NSE:', '')
         if base_ticker in candle_data:
             data = candle_data[base_ticker]
-            for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',   # <--- NEW
+            for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',
                         'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
                         'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                         'breakout_9_30_to_9_45', 'prev_close', 'gap_percent',
@@ -1176,6 +1183,40 @@ if st.session_state['stage1_data']:
     # Get breakout time status
     breakout_status = get_breakout_time_status()
     
+    # --- INSIDE 9:15 FILTER (with caching) ---   # <--- MODIFIED
+    if st.session_state.get('show_inside_only', False) and is_after_9_25:
+        today = datetime.now().date()
+        # Check if we have a cached list for today
+        if st.session_state.get('inside_pass_date') == today and st.session_state.get('inside_pass_symbols'):
+            # Use cached symbols
+            display_df = display_df[display_df['ticker'].isin(st.session_state['inside_pass_symbols'])]
+        else:
+            # Compute the filter condition
+            if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
+                display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
+                display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
+                display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
+                
+                mask = (
+                    (display_df['inside_9_15'] == True) &
+                    (display_df['open_9_15'].notna()) &
+                    (display_df['ema_200_9_15'].notna()) &
+                    (display_df['ema_200_9_15'] > 0) &
+                    (display_df['open_9_15'] > display_df['ema_200_9_15']) &
+                    (display_df['_ema_gap_pct'] <= 0.03)
+                )
+                # Extract symbols that pass
+                pass_symbols = display_df.loc[mask, 'ticker'].tolist()
+                # Cache them
+                st.session_state['inside_pass_symbols'] = pass_symbols
+                st.session_state['inside_pass_date'] = today
+                # Apply filter
+                display_df = display_df[mask].copy()
+                display_df = display_df.drop(columns=['_ema_gap_pct'])
+            else:
+                # Fallback
+                display_df = display_df[display_df['inside_9_15'] == True]
+    
     # --- BREAKOUT FILTER ---
     if st.session_state.get('show_breakout_only', False):
         if breakout_status == 'before_9_30':
@@ -1185,35 +1226,6 @@ if st.session_state['stage1_data']:
             display_df = display_df[display_df['_real_time_breakout'] == True]
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
-    
-    # --- INSIDE 9:15 FILTER (UPDATED: open > 200 EMA && gap ≤ 3%) ---
-    if st.session_state.get('show_inside_only', False) and is_after_9_25:
-        # Check if required columns exist
-        if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
-            # Convert to numeric
-            display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
-            display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
-            
-            # Compute percentage gap (as fraction) between open and EMA
-            display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
-            
-            # Apply filters:
-            # 1. inside_9_15 = True
-            # 2. open_9_15 > ema_200_9_15 (both not NaN)
-            # 3. gap <= 3% (i.e., 0.03)
-            display_df = display_df[
-                (display_df['inside_9_15'] == True) &
-                (display_df['open_9_15'].notna()) &
-                (display_df['ema_200_9_15'].notna()) &
-                (display_df['ema_200_9_15'] > 0) &
-                (display_df['open_9_15'] > display_df['ema_200_9_15']) &
-                (display_df['_ema_gap_pct'] <= 0.03)
-            ]
-            # Drop helper column
-            display_df = display_df.drop(columns=['_ema_gap_pct'])
-        else:
-            # Fallback to old logic if columns missing (avoid breaking)
-            display_df = display_df[display_df['inside_9_15'] == True]
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
