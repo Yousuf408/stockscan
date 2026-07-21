@@ -1183,22 +1183,25 @@ if st.session_state['stage1_data']:
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
-    # --- INSIDE 9:15 FILTER (WITH 200 EMA AT 9:15 AM CONDITION) ---
     if st.session_state.get('show_inside_only', False) and is_after_9_25:
-        # Check if required columns exist
-        if 'close_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
-            # Convert columns to numeric, coercing errors to NaN
-            display_df['close_9_15'] = pd.to_numeric(display_df['close_9_15'], errors='coerce')
-            display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
-            
-            # Filter: inside_9_15 is True AND close_9_15 > ema_200_9_15 (both not NaN)
-            display_df = display_df[
-                (display_df['inside_9_15'] == True) & 
-                (display_df['close_9_15'].notna()) & 
-                (display_df['ema_200_9_15'].notna()) &
-                (display_df['close_9_15'] > display_df['ema_200_9_15'])
-            ]
-        else:
+    # Ensure columns exist and are numeric
+    if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
+        display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
+        display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
+        
+        # Compute percentage difference (as fraction)
+        display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
+        
+        display_df = display_df[
+            (display_df['inside_9_15'] == True) &
+            (display_df['open_9_15'].notna()) &
+            (display_df['ema_200_9_15'].notna()) &
+            (display_df['ema_200_9_15'] > 0) &
+            (display_df['open_9_15'] > display_df['ema_200_9_15']) &
+            (display_df['_ema_gap_pct'] <= 0.03)   # ≤ 3%
+        ]
+        # Optionally drop the helper column
+        display_df.drop(columns=['_ema_gap_pct'], inplace=True)        else:
             # If columns missing, fallback to only inside_9_15 check
             display_df = display_df[display_df['inside_9_15'] == True]
     
