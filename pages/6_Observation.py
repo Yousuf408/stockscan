@@ -1,12 +1,11 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# PAGES / 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
+# 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from tradingview_screener import Query
-from tradingview_screener.column import col
+from tradingview_screener import Query, col
 from datetime import datetime, timedelta
 import pytz
 import concurrent.futures
@@ -90,7 +89,7 @@ if 'auto_buy_stocks_bought' not in st.session_state:
 if 'auto_buy_date' not in st.session_state:
     st.session_state['auto_buy_date'] = datetime.now().date()
 
-# ─── INSIDE 9:15 CACHE ───                        # <--- NEW
+# ─── INSIDE 9:15 CACHE ───
 if 'inside_pass_symbols' not in st.session_state:
     st.session_state['inside_pass_symbols'] = []
 
@@ -98,14 +97,16 @@ if 'inside_pass_date' not in st.session_state:
     st.session_state['inside_pass_date'] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HARDCODED SETTINGS
+# HARDCODED SETTINGS (UPDATED: Max price ₹3000)
 # ─────────────────────────────────────────────────────────────────────────────
 
 HARDCODED_SETTINGS = {
     'price_min': 200,
-    'price_max': 2000,
+    'price_max': 3000,              # ← UPDATED from 2000 to 3000
     'market_cap_min': 41_000_000_000,
-    'stocks_limit': 50
+    'stocks_limit': 50,              # Show top 50 after all filters
+    'gap_threshold': 2.0,            # Gap ≥ 2%
+    'ema_gap_threshold': 0.03        # 3% max gap between open and 200 EMA
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -469,76 +470,27 @@ WHITE_THEME_CSS = """
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCTIONS
+# BACKEND FUNCTIONS (Data & Logic)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_gap_filtered_stocks(df):
-    yahoo_tickers = []
-    ticker_map = {}
-    for row in df.itertuples():
-        base = row.ticker.replace('NSE:', '')
-        yahoo_ticker = base + '.NS'
-        yahoo_tickers.append(yahoo_ticker)
-        ticker_map[yahoo_ticker] = row.ticker
-
-    data = yf.download(
-        tickers=yahoo_tickers,
-        period="10d",
-        interval="1d",
-        group_by='ticker',
-        progress=False,
-        threads=True,
-        auto_adjust=False
-    )
-
-    filtered = []
-    rejected = []
-
-    for yahoo_ticker, original_ticker in ticker_map.items():
-        if yahoo_ticker not in data:
-            filtered.append(original_ticker)
-            continue
-
-        hist = data[yahoo_ticker]
-        if hist.empty or len(hist) < 2:
-            filtered.append(original_ticker)
-            continue
-
-        latest_date = hist.index[-1].date()
-        latest_data = hist[hist.index.date == latest_date]
-        if latest_data.empty:
-            filtered.append(original_ticker)
-            continue
-        today_open = float(latest_data.iloc[0]['Open'])
-
-        prev_rows = hist[hist.index.date < latest_date]
-        if prev_rows.empty:
-            filtered.append(original_ticker)
-            continue
-        prev_close = float(prev_rows.iloc[-1]['Close'])
-        if prev_close == 0:
-            filtered.append(original_ticker)
-            continue
-        gap_percent = ((today_open - prev_close) / prev_close) * 100
-
-        if abs(gap_percent) >= 2.0:
-            rejected.append({
-                'ticker': original_ticker,
-                'gap_percent': gap_percent,
-                'type': 'Gap UP' if gap_percent > 0 else 'Gap DOWN',
-                'reason': f"Gap {gap_percent:.2f}%"
-            })
-        else:
-            filtered.append(original_ticker)
-
-    return filtered, rejected
+IST = pytz.timezone('Asia/Kolkata')
 
 def get_tradingview_stocks():
+    """
+    Fetch ALL stocks meeting price & market cap filters (no limit).
+    Uses 'gap' column directly from TradingView.
+    """
     try:
         count, df = (Query()
             .select(
-                'name', 'close', 'change', 'volume',
-                'relative_volume', 'market_cap_basic', 'sector'
+                'name', 
+                'close', 
+                'change', 
+                'volume',
+                'relative_volume', 
+                'market_cap_basic', 
+                'sector',
+                'gap'              # <-- USING TRADINGVIEW'S GAP COLUMN
             )
             .set_markets('india')
             .where(
@@ -548,7 +500,7 @@ def get_tradingview_stocks():
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            .limit(HARDCODED_SETTINGS['stocks_limit'])
+            # NO limit() - fetch ALL stocks
             .get_scanner_data()
         )
         return count, df
@@ -556,23 +508,40 @@ def get_tradingview_stocks():
         st.error(f"Error fetching from TradingView: {str(e)}")
         return 0, pd.DataFrame()
 
-def get_intraday_data_for_symbol(yahoo_ticker, period="10d", interval="5m"):
+
+def filter_by_gap(df):
+    """
+    Filter stocks with absolute gap >= 2% using TradingView's 'gap' column.
+    Returns (filtered_df, rejected_df).
+    """
+    df['gap'] = pd.to_numeric(df['gap'], errors='coerce')
+    mask = df['gap'].notna() & (abs(df['gap']) >= HARDCODED_SETTINGS['gap_threshold'])
+    filtered = df[mask].copy()
+    rejected = df[~mask].copy()
+    rejected['rejection_reason'] = rejected['gap'].apply(
+        lambda x: f"Gap {x:.2f}%" if pd.notna(x) else "No gap data"
+    )
+    return filtered, rejected
+
+
+def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
+    """Fetch 5‑min intraday data for a single symbol and convert to IST."""
     try:
         data = yf.download(yahoo_ticker, period=period, interval=interval,
                            progress=False, auto_adjust=False, threads=False)
         if data.empty:
             return None
-        ist = pytz.timezone('Asia/Kolkata')
         if data.index.tz is None:
-            data.index = data.index.tz_localize('UTC').tz_convert(ist)
+            data.index = data.index.tz_localize('UTC').tz_convert(IST)
         else:
-            data.index = data.index.tz_convert(ist)
+            data.index = data.index.tz_convert(IST)
         return data
     except:
         return None
 
+
 def calculate_ema_200(data_5min):
-    """Calculate 200 EMA on 5-minute data"""
+    """Calculate 200 EMA on 5‑minute data (last value)."""
     if data_5min is None or len(data_5min) < 200:
         return None
     try:
@@ -582,7 +551,13 @@ def calculate_ema_200(data_5min):
     except:
         return None
 
+
 def get_candle_data_bulk(tickers_list, max_workers=20):
+    """
+    For a list of tickers (NSE:...), fetch 5‑min data and extract key candle values
+    (9:15, 9:20, breakout, 200 EMA at 9:15, etc.).
+    Returns a dict {base_ticker: result_dict}.
+    """
     results = {}
     symbol_formats = ['.NS', '-NS', '']
 
@@ -592,8 +567,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
             yahoo_ticker = base_ticker + suffix
             data = get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m")
             if data is not None and not data.empty:
-                ist = pytz.timezone('Asia/Kolkata')
-                today = datetime.now(ist).date()
+                today = datetime.now(IST).date()
                 today_data = data[data.index.date == today]
                 yesterday_data = data[data.index.date < today]
                 prev_close = float(yesterday_data.iloc[-1]['Close']) if len(yesterday_data) > 0 else None
@@ -601,6 +575,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     continue
                 df_day = today_data
 
+                # 9:15 candle (approx 9:10–9:20)
                 mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
                 if mask_first.sum() == 0:
                     mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
@@ -611,6 +586,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     first_candle = df_day[mask_first].iloc[0]
 
+                # 9:20 candle (approx 9:20–9:25)
                 mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
                 if mask_second.sum() == 0:
                     if len(df_day) >= 2:
@@ -620,6 +596,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 else:
                     second_candle = df_day[mask_second].iloc[0]
 
+                # Max high up to 10:15
                 mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
                                ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
                 if mask_morning.sum() > 0:
@@ -643,32 +620,28 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
 
                 if prev_close is not None and prev_close > 0:
                     high_9_20 = float(second_candle['High'])
-                    gap_percent = ((high_9_20 - prev_close) / prev_close) * 100
+                    gap_percent_fallback = ((high_9_20 - prev_close) / prev_close) * 100
                 else:
-                    gap_percent = 0.0
+                    gap_percent_fallback = 0.0
                     prev_close = float(first_candle['Close'])
 
-                # Get the exact time of the 9:15 candle
                 first_candle_time = first_candle.name
-                
-                # --- Calculate 200 EMA at 9:15 AM ONLY ---
+
+                # 200 EMA at 9:15
                 data_until_9_15 = data[data.index <= first_candle_time]
                 ema_200_9_15 = calculate_ema_200(data_until_9_15)
-                
-                # --- Calculate current 200 EMA for display ---
+
+                # Current 200 EMA (for auto‑buy eligibility)
                 ema_200_current = calculate_ema_200(data)
-                
-                # Get current price for EMA comparison
+
                 current_price = float(data['Close'].iloc[-1])
-                
-                # Determine if 9:15 Open is above 200 EMA at 9:15 AM
+
                 open_9_15 = float(first_candle['Open'])
                 if ema_200_9_15 is not None and open_9_15 > ema_200_9_15:
                     ema_status_9_15 = 'ABOVE'
                 else:
                     ema_status_9_15 = 'BELOW'
-                
-                # Current status (for auto-buy)
+
                 if ema_200_current is not None and current_price > ema_200_current:
                     ema_status_current = 'ABOVE'
                 else:
@@ -687,7 +660,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'hit_low_9_20_to_35': hit_low_9_20_to_35,
                     'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
                     'prev_close': prev_close,
-                    'gap_percent': gap_percent,
+                    'gap_percent_fallback': gap_percent_fallback,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
                     'ema_200_9_15': ema_200_9_15,
@@ -707,7 +680,12 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 results[base] = data
     return results
 
+
 def check_candle_conditions(df, tickers_list):
+    """
+    Enrich dataframe with candle data and compute inside_9_15 and candle pass/fail.
+    Returns enriched df, valid_stocks, invalid_stocks, failed_to_fetch.
+    """
     with st.spinner('Fetching intraday data from Yahoo Finance...'):
         candle_data = get_candle_data_bulk(tickers_list)
 
@@ -715,7 +693,7 @@ def check_candle_conditions(df, tickers_list):
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
-                     'gap_percent', 'open_gap_percent', 'passes_candle_check',
+                     'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
                      'open_9_15']:
@@ -734,11 +712,11 @@ def check_candle_conditions(df, tickers_list):
             for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',
                         'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
                         'max_high_up_to_10_15', 'hit_low_9_20_to_35',
-                        'breakout_9_30_to_9_45', 'prev_close', 'gap_percent',
+                        'breakout_9_30_to_9_45', 'prev_close', 'gap_percent_fallback',
                         'yahoo_ticker', 'data_date', 'ema_200_9_15', 'ema_200_current',
                         '200 EMA', 'current_200_ema_status', 'current_price']:
                 df.at[idx, key] = data[key]
-            df.at[idx, 'open_gap_percent'] = data['gap_percent']
+            df.at[idx, 'open_gap_percent'] = data['gap_percent_fallback']
 
             inside_9_15 = (data['high_9_20'] <= data['high_9_15']) and (data['low_9_20'] >= data['low_9_15'])
             df.at[idx, 'inside_9_15'] = inside_9_15
@@ -770,36 +748,84 @@ def check_candle_conditions(df, tickers_list):
 
     return df, valid_stocks, invalid_stocks, failed_to_fetch
 
+
 def load_stage1_data():
+    """
+    Load and process all data for stage1:
+    1. Fetch ALL stocks from TV
+    2. Apply gap filter (>= 2%)
+    3. Fetch candle data (including 200 EMA at 9:15)
+    4. Apply 200 EMA condition (open > 200 EMA AND gap ≤ 3%)
+    5. Return top 50 stocks that pass ALL conditions
+    """
     with st.spinner("🔄 Loading market data..."):
+        # Step 1: Fetch ALL stocks from TradingView (no limit)
         count, df = get_tradingview_stocks()
         if count == 0:
             return None
         
-        filtered_tickers, rejected = get_gap_filtered_stocks(df)
-        df = df[df['ticker'].isin(filtered_tickers)].copy()
-        df = df.sort_values('change', ascending=False)
-        df = df.head(HARDCODED_SETTINGS['stocks_limit'])
+        # Step 2: Apply gap filter (>= 2% from TradingView's 'gap' column)
+        df, rejected_gap = filter_by_gap(df)
+        if df.empty:
+            return {
+                'df': pd.DataFrame(),
+                'valid': [],
+                'invalid': [],
+                'failed': [],
+                'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
+                'total_count': count,
+                'filtered_count': 0,
+                'timestamp': datetime.now(IST)
+            }
         
+        # Step 3: Sort by change (gainers)
+        df = df.sort_values('change', ascending=False)
+        
+        # Step 4: Fetch candle data for ALL gap-filtered stocks
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
+        # Step 5: Apply 200 EMA condition (open > 200 EMA AND gap ≤ 3%)
+        if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
+            df['open_9_15'] = pd.to_numeric(df['open_9_15'], errors='coerce')
+            df['ema_200_9_15'] = pd.to_numeric(df['ema_200_9_15'], errors='coerce')
+            df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
+            
+            mask = (
+                (df['open_9_15'].notna()) &
+                (df['ema_200_9_15'].notna()) &
+                (df['ema_200_9_15'] > 0) &
+                (df['open_9_15'] > df['ema_200_9_15']) &
+                (df['_ema_gap_pct'] <= HARDCODED_SETTINGS['ema_gap_threshold'])
+            )
+            df = df[mask].copy()
+            df = df.drop(columns=['_ema_gap_pct'])
+        
+        # Step 6: Apply Inside 9:15 condition (pre-filter for display)
+        # We'll keep this as a column, the frontend will apply the checkbox filter
+        
+        # Step 7: Sort and limit to top 50
+        df = df.sort_values('change', ascending=False)
+        df = df.head(HARDCODED_SETTINGS['stocks_limit'])
+        
+        # Update valid list based on final df
+        final_valid = df[df['passes_candle_check'] == True]['ticker'].tolist()
+        
         return {
             'df': df,
-            'valid': valid,
-            'invalid': invalid,
+            'valid': final_valid,
+            'invalid': [],  # Will be computed in frontend
             'failed': failed,
-            'rejected': rejected,
+            'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
             'total_count': count,
             'filtered_count': len(df),
             'timestamp': datetime.now(IST)
         }
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO-REFRESH LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
-
-IST = pytz.timezone('Asia/Kolkata')
 
 def should_refresh_stage1():
     if 'stage1_last_refresh' not in st.session_state:
@@ -810,6 +836,7 @@ def should_refresh_stage1():
     if time_diff.total_seconds() >= 60:
         return True
     return False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO-BUY FUNCTIONS
@@ -823,11 +850,9 @@ def check_auto_buy_conditions(row):
     1. Inside 9:15 checkbox is checked (filter active) - ALREADY FILTERED BY TABLE
     2. Current price > (9:15 High * 1.0015) [0.15% above]
     """
-    # Using the SAME column names as displayed in the table
-    high_9_15 = row.get('9:15 High', 0)    # Matches table column "9:15 HIGH"
-    current_price = row.get('Price', 0)    # Matches table column "PRICE"
+    high_9_15 = row.get('9:15 High', 0)
+    current_price = row.get('Price', 0)
     
-    # Clean price if it's formatted (remove ₹ and commas)
     if isinstance(current_price, str):
         try:
             current_price = float(current_price.replace('₹', '').replace(',', ''))
@@ -852,10 +877,8 @@ def execute_auto_buy(display_df):
     Execute auto-buy for stocks meeting all conditions.
     Returns: (placed_orders, failed_orders, error_message)
     """
-    # Check if we've reached daily limit
     today = datetime.now().date()
     if st.session_state['auto_buy_date'] != today:
-        # New day - reset counter
         st.session_state['auto_buy_bought_today'] = 0
         st.session_state['auto_buy_stocks_bought'] = []
         st.session_state['auto_buy_date'] = today
@@ -863,7 +886,6 @@ def execute_auto_buy(display_df):
     if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
         return [], [], f"Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached"
     
-    # Filter stocks that haven't been bought yet
     available_stocks = display_df[
         ~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])
     ].copy()
@@ -875,34 +897,22 @@ def execute_auto_buy(display_df):
     failed_orders = []
     stocks_bought = []
     
-    # Check each stock
     for idx, row in available_stocks.iterrows():
-        # Check if daily limit reached
         if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
             break
         
         symbol = row['Symbol']
-        
-        # Check conditions
         meets_conditions, reason = check_auto_buy_conditions(row)
         
         if not meets_conditions:
-            failed_orders.append({
-                'symbol': symbol,
-                'reason': reason
-            })
+            failed_orders.append({'symbol': symbol, 'reason': reason})
             continue
         
-        # Check quantity
         max_qty = row.get('MaxQty', 0)
         if max_qty <= 0:
-            failed_orders.append({
-                'symbol': symbol,
-                'reason': 'No quantity available (insufficient margin)'
-            })
+            failed_orders.append({'symbol': symbol, 'reason': 'No quantity available (insufficient margin)'})
             continue
         
-        # Get price from the same column
         current_price = row.get('Price', 0)
         if isinstance(current_price, str):
             try:
@@ -910,7 +920,6 @@ def execute_auto_buy(display_df):
             except:
                 current_price = 0
         
-        # Place order
         result = place_dhan_order(
             symbol=symbol,
             quantity=int(max_qty),
@@ -934,37 +943,28 @@ def execute_auto_buy(display_df):
                 'reason': result.get('error', 'Unknown error')
             })
     
-    # Update bought stocks list
     st.session_state['auto_buy_stocks_bought'].extend(stocks_bought)
-    
     return placed_orders, failed_orders, None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BREAKOUT HELPER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_real_time_breakout(row):
-    """
-    Check if stock is breaking out in real-time (9:30 onwards)
-    Uses current_price instead of waiting for 9:45 candle
-    """
+    """Check if stock is breaking out in real-time (9:30 onwards)"""
     high_9_15 = row.get('high_9_15', 0)
     current_price = row.get('current_price', 0)
     
     if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
         return False
-    
     if current_price is None or pd.isna(current_price) or current_price <= 0:
         return False
-    
-    # Breakout if current price > 9:15 High
     return current_price > high_9_15
 
+
 def get_breakout_time_status():
-    """
-    Returns the current breakout time status
-    Returns: ('before_9_30', 'live_checking', 'locked')
-    """
+    """Returns: ('before_9_30', 'live_checking', 'locked')"""
     current_time = datetime.now(IST)
     time_9_30 = current_time.replace(hour=9, minute=30, second=0)
     time_9_45 = current_time.replace(hour=9, minute=45, second=0)
@@ -975,6 +975,7 @@ def get_breakout_time_status():
         return 'live_checking'
     else:
         return 'locked'
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RENDER HEADER
@@ -1011,6 +1012,7 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # APPLY CSS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1040,7 +1042,6 @@ with col1:
     st.markdown('<div class="page-title">🔍 Gap Screener <span>· Professional Trading Scanner</span></div>', unsafe_allow_html=True)
 
 with col2:
-    # ─── Budget Control ───
     user_capital = st.number_input(
         "💰",
         min_value=1000,
@@ -1054,7 +1055,6 @@ with col2:
     st.session_state['user_capital'] = user_capital
 
 with col3:
-    # ─── Parts Control ───
     num_parts = st.number_input(
         "📊",
         min_value=1,
@@ -1069,7 +1069,6 @@ with col3:
 
 with col4:
     def refresh_table_only():
-        # Only refresh the table data, not entire page
         st.session_state['stage1_data'] = None
         st.session_state['force_table_refresh'] = True
     
@@ -1077,7 +1076,7 @@ with col4:
         "🔄 Refresh", 
         key="refresh_btn", 
         use_container_width=True,
-        on_click=refresh_table_only  # Uses callback instead of st.rerun()
+        on_click=refresh_table_only
     )
 
 # ─── Show Gap Screener Content ───
@@ -1111,10 +1110,9 @@ if st.session_state['stage1_data']:
     is_after_9_30 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=30, second=0)
     is_after_9_45 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=45, second=0)
     
-    # ─── Filter Row (ALL CHECKBOXES IN ONE ROW) ───
+    # ─── Filter Row ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
-    # 5 columns for all controls + auto-buy status
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
     
     with filter_col1:
@@ -1127,7 +1125,6 @@ if st.session_state['stage1_data']:
             st.info("⏳ 9:20 after 9:25 AM")
     
     with filter_col2:
-        # Breakout checkbox with time-based availability
         breakout_status = get_breakout_time_status()
         if breakout_status == 'before_9_30':
             st.info("⏳ Breakout after 9:30 AM")
@@ -1144,20 +1141,17 @@ if st.session_state['stage1_data']:
         )
     
     with filter_col4:
-        # Auto-Buy Toggle
         st.checkbox(
             "🤖 Auto-Buy",
             key="auto_buy_enabled"
         )
     
     with filter_col5:
-        # Auto-Buy Status (Compact)
         if st.session_state.get('auto_buy_enabled', False):
             if not st.session_state.get('show_inside_only', False):
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-                # Calculate eligible count safely
                 eligible_count = 0
                 if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
                     eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
@@ -1183,15 +1177,14 @@ if st.session_state['stage1_data']:
     # Get breakout time status
     breakout_status = get_breakout_time_status()
     
-    # --- INSIDE 9:15 FILTER (with caching) ---   # <--- MODIFIED
+    # --- INSIDE 9:15 FILTER (with caching) ---
     if st.session_state.get('show_inside_only', False) and is_after_9_25:
         today = datetime.now().date()
-        # Check if we have a cached list for today
         if st.session_state.get('inside_pass_date') == today and st.session_state.get('inside_pass_symbols'):
             # Use cached symbols
             display_df = display_df[display_df['ticker'].isin(st.session_state['inside_pass_symbols'])]
         else:
-            # Compute the filter condition
+            # Compute the filter condition (open > 200 EMA AND gap ≤ 3%)
             if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
                 display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
                 display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
@@ -1205,16 +1198,12 @@ if st.session_state['stage1_data']:
                     (display_df['open_9_15'] > display_df['ema_200_9_15']) &
                     (display_df['_ema_gap_pct'] <= 0.03)
                 )
-                # Extract symbols that pass
                 pass_symbols = display_df.loc[mask, 'ticker'].tolist()
-                # Cache them
                 st.session_state['inside_pass_symbols'] = pass_symbols
                 st.session_state['inside_pass_date'] = today
-                # Apply filter
                 display_df = display_df[mask].copy()
                 display_df = display_df.drop(columns=['_ema_gap_pct'])
             else:
-                # Fallback
                 display_df = display_df[display_df['inside_9_15'] == True]
     
     # --- BREAKOUT FILTER ---
@@ -1246,7 +1235,7 @@ if st.session_state['stage1_data']:
         
         # ─── Create display columns ───
         display_cols = [
-            'name', 'close', 'change', 'gap_percent', 'volume', 'relative_volume',
+            'name', 'close', 'change', 'gap', 'volume', 'relative_volume',
             'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
             'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15', 'ema_200_current',
             'current_200_ema_status'
@@ -1258,7 +1247,7 @@ if st.session_state['stage1_data']:
             'name': 'Symbol',
             'close': 'Price',
             'change': 'Chg%',
-            'gap_percent': 'Gap%',
+            'gap': 'Gap%',
             'volume': 'Volume',
             'relative_volume': 'Rel Vol',
             'inside_9_15': 'Inside 9:15',
@@ -1270,7 +1259,6 @@ if st.session_state['stage1_data']:
         })
         
         # ─── Format columns with NaN handling ───
-        # Add 9:15 High column (from existing high_9_15 data)
         if 'high_9_15' in display_df.columns:
             display_df['9:15 High'] = display_df['high_9_15'].apply(
                 lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
@@ -1278,7 +1266,6 @@ if st.session_state['stage1_data']:
         else:
             display_df['9:15 High'] = "N/A"
         
-        # Format existing Price column
         if 'Price' in display_df.columns:
             display_df['Price'] = display_df['Price'].apply(
                 lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A"
@@ -1323,14 +1310,13 @@ if st.session_state['stage1_data']:
         if 'Inside 9:15' in display_df.columns:
             display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
         
-        # ─── Breakout Column - Show real-time status during live checking, else use captured data ───
+        # ─── Breakout Column - Show real-time status during live checking ───
         def get_breakout_display(row):
             breakout_status = get_breakout_time_status()
             
             if breakout_status == 'before_9_30':
                 return "⏳ Waiting"
             elif breakout_status == 'live_checking':
-                # Show real-time status
                 high_9_15 = row.get('high_9_15', 0)
                 current_price = row.get('current_price', 0)
                 if high_9_15 <= 0 or current_price <= 0:
@@ -1339,8 +1325,7 @@ if st.session_state['stage1_data']:
                     return "✅ BREAKOUT"
                 else:
                     return "❌ Below 9:15 High"
-            else:  # locked - after 9:45
-                # Use captured breakout data
+            else:
                 breakout_val = row.get('Breakout', False)
                 return "✅" if breakout_val else "❌"
         
@@ -1363,21 +1348,17 @@ if st.session_state['stage1_data']:
         
         # ─── Auto-Buy Eligibility Check ───
         def check_auto_buy_eligible(row):
-            # Check Inside 9:15
             inside_value = row.get('Inside 9:15')
             if inside_value != '✅':
                 return '❌ Not Inside'
             
-            # Check 200 EMA status (using current_200_ema_status for auto-buy)
             ema_status = row.get('current_200_ema_status')
             if ema_status != 'ABOVE':
                 return '❌ Below EMA'
             
-            # Check 0.15% above 9:15 High
             high_9_15 = row.get('high_9_15')
             current_price = row.get('Price')
             
-            # Clean price if it's formatted
             if isinstance(current_price, str):
                 try:
                     current_price = float(current_price.replace('₹', '').replace(',', ''))
@@ -1398,9 +1379,8 @@ if st.session_state['stage1_data']:
         
         display_df['Auto-Buy Status'] = display_df.apply(check_auto_buy_eligible, axis=1)
         
-        # ─── Reset index to show proper sequential numbering ───
+        # ─── Reset index ───
         display_df = display_df.reset_index(drop=True)
-        # Add index column starting from 1
         display_df.index = display_df.index + 1
         
         # ─── Final columns ───
@@ -1413,23 +1393,19 @@ if st.session_state['stage1_data']:
         existing_cols = [c for c in final_cols if c in display_df.columns]
         display_df = display_df[existing_cols]
         
-        # ─── Auto-Buy Execution (Only when enabled) ───
+        # ─── Auto-Buy Execution ───
         if st.session_state.get('auto_buy_enabled', False) and st.session_state.get('show_inside_only', False):
             eligible_count = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Only process stocks shown in filtered table (display_df)
-                    # Get symbols from display_df (already filtered)
                     filtered_symbols = display_df['Symbol'].tolist()
                     
-                    # Create df with ONLY filtered stocks + numeric data + MaxQty
                     auto_buy_df = df[df['name'].isin(filtered_symbols)].copy()
                     auto_buy_df['Symbol'] = auto_buy_df['name']
                     auto_buy_df['Price'] = auto_buy_df['close']
                     auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
                     
-                    # Add MaxQty from display_df (already calculated)
                     maxqty_dict = display_df.set_index('Symbol')['MaxQty'].to_dict()
                     auto_buy_df['MaxQty'] = auto_buy_df['Symbol'].map(maxqty_dict).fillna(0)
                     
@@ -1484,7 +1460,6 @@ if st.session_state['stage1_data']:
                 max_qty = row['MaxQty']
                 btn_label = f"{symbol}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
                 
-                # Disable manual buttons when auto-buy is enabled
                 if st.button(
                     btn_label,
                     key=f"buy_{symbol}_{idx}",
@@ -1501,7 +1476,6 @@ if st.session_state['stage1_data']:
                         )
                         display_order_result(symbol, result)
             
-            # Show note when auto-buy is enabled
             if st.session_state.get('auto_buy_enabled', False):
                 st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
         
