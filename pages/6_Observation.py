@@ -97,15 +97,14 @@ if 'inside_pass_date' not in st.session_state:
     st.session_state['inside_pass_date'] = None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HARDCODED SETTINGS (UPDATED: Max price ₹3000)
+# HARDCODED SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
 HARDCODED_SETTINGS = {
     'price_min': 200,
-    'price_max': 3000,              # ← UPDATED from 2000 to 3000
+    'price_max': 3000,
     'market_cap_min': 41_000_000_000,
-    'stocks_limit': 999,              # Show top 50 after all filters
-    'gap_threshold': 2.0,            # Gap ≥ 2%
+    'gap_threshold': 2.0,            # Gap ≤ 2%
     'ema_gap_threshold': 0.03        # 3% max gap between open and 200 EMA
 }
 
@@ -513,35 +512,23 @@ def get_tradingview_stocks():
 def filter_by_gap(df):
     """
     Filter stocks with absolute gap <= 2% using TradingView's 'gap' column.
-    KEEPS stocks with gap <= 2%, REJECTS stocks with gap > 2%.
-    Returns (filtered_df, rejected_df).
+    KEEPS stocks with gap <= 2%.
     """
     df['gap'] = pd.to_numeric(df['gap'], errors='coerce')
-    
-    # KEEP stocks with gap <= 2% (0% to 2%)
     mask = df['gap'].notna() & (abs(df['gap']) <= HARDCODED_SETTINGS['gap_threshold'])
-    
     filtered = df[mask].copy()
     rejected = df[~mask].copy()
-    
     rejected['rejection_reason'] = rejected['gap'].apply(
         lambda x: f"Gap {x:.2f}% (> 2%)" if pd.notna(x) else "No gap data"
     )
-    
     return filtered, rejected
 
 
 def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
     """Fetch 5‑min intraday data for a single symbol and convert to IST."""
     try:
-        data = yf.download(
-            yahoo_ticker,
-            period=period,
-            interval=interval,
-            progress=False,
-            auto_adjust=False,
-            threads=False
-        )
+        data = yf.download(yahoo_ticker, period=period, interval=interval,
+                           progress=False, auto_adjust=False, threads=False)
         if data.empty:
             return None
         if data.index.tz is None:
@@ -584,7 +571,6 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 today_data = data[data.index.date == today]
                 yesterday_data = data[data.index.date < today]
                 prev_close = float(yesterday_data.iloc[-1]['Close']) if len(yesterday_data) > 0 else None
-                
                 if today_data.empty:
                     continue
                 df_day = today_data
@@ -709,8 +695,8 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_9_15', 'ema_200_current', '200 EMA',
-                     'current_200_ema_status', 'current_price', 'open_9_15']:
+                     'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
+                     'open_9_15']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -767,10 +753,9 @@ def load_stage1_data():
     """
     Load and process all data for stage1:
     1. Fetch ALL stocks from TV
-    2. Apply gap filter (<= 2%)
+    2. Apply gap filter (<= 2% from TV)
     3. Fetch candle data (including 200 EMA at 9:15)
-    4. Apply 200 EMA condition (open > 200 EMA AND gap ≤ 3%)
-    5. Return ALL stocks that pass ALL conditions (no limit)
+    4. Return ALL stocks that pass gap filter (no 200 EMA filter yet)
     """
     with st.spinner("🔄 Loading market data..."):
         # Step 1: Fetch ALL stocks from TradingView (no limit)
@@ -799,27 +784,9 @@ def load_stage1_data():
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
-        # Step 5: Apply 200 EMA condition (open > 200 EMA AND gap ≤ 3%)
-        if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
-            df['open_9_15'] = pd.to_numeric(df['open_9_15'], errors='coerce')
-            df['ema_200_9_15'] = pd.to_numeric(df['ema_200_9_15'], errors='coerce')
-            df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
-            
-            mask = (
-                (df['open_9_15'].notna()) &
-                (df['ema_200_9_15'].notna()) &
-                (df['ema_200_9_15'] > 0) &
-                (df['open_9_15'] > df['ema_200_9_15']) &
-                (df['_ema_gap_pct'] <= HARDCODED_SETTINGS['ema_gap_threshold'])
-            )
-            df = df[mask].copy()
-            df = df.drop(columns=['_ema_gap_pct'])
-        
-        # Step 6: Sort by change (gainers)
+        # Step 5: NO 200 EMA filter here - applied by "Inside 9:15" checkbox in frontend
+        # Step 6: Show ALL stocks that pass gap filter (no limit)
         df = df.sort_values('change', ascending=False)
-        
-        # Step 7: NO LIMIT - Show ALL stocks that pass all conditions
-        # df = df.head(HARDCODED_SETTINGS['stocks_limit'])  # ← REMOVED
         
         # Update valid list based on final df
         final_valid = df[df['passes_candle_check'] == True]['ticker'].tolist()
@@ -827,13 +794,14 @@ def load_stage1_data():
         return {
             'df': df,
             'valid': final_valid,
-            'invalid': [],  # Will be computed in frontend
+            'invalid': invalid,
             'failed': failed,
             'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
             'total_count': count,
             'filtered_count': len(df),
             'timestamp': datetime.now(IST)
         }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO-REFRESH LOGIC
@@ -1112,7 +1080,7 @@ if st.session_state['stage1_data']:
             <div class="filter-badges">
                 <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
                 <span class="filter-badge active">📊 ≥{HARDCODED_SETTINGS['market_cap_min']/1e9:.0f}B</span>
-                <span class="filter-badge active">📈 Gap ±2%</span>
+                <span class="filter-badge active">📈 Gap ≤ 2%</span>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -1196,7 +1164,7 @@ if st.session_state['stage1_data']:
             # Use cached symbols
             display_df = display_df[display_df['ticker'].isin(st.session_state['inside_pass_symbols'])]
         else:
-            # Compute the filter condition (open > 200 EMA AND gap ≤ 3%)
+            # Compute the filter condition (inside_9_15 AND open > 200 EMA AND gap ≤ 3%)
             if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
                 display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
                 display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
