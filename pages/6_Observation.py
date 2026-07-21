@@ -500,7 +500,7 @@ def get_tradingview_stocks():
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            # NO limit() - fetch ALL stocks
+            .limit(500)
             .get_scanner_data()
         )
         return count, df
