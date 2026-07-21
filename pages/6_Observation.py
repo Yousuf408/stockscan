@@ -771,7 +771,8 @@ def load_stage1_data():
                 'valid': [],
                 'invalid': [],
                 'failed': [],
-                'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
+                #'rejected': rejected_gap.to_dict('records') if not rejected_gap.empty else [],
+                'rejected': [],  # ← CHANGE THIS to empty list (was: rejected_gap.to_dict('records'))
                 'total_count': count,
                 'filtered_count': 0,
                 'timestamp': datetime.now(IST)
