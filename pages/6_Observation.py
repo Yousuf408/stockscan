@@ -764,7 +764,7 @@ def load_stage1_data():
             return None
         
         # Step 2: Apply gap filter (<= 2% from TradingView's 'gap' column)
-        df, rejected_gap = filter_by_gap(df)
+        rejected_gap = pd.DataFrame()  # Empty placeholder
         if df.empty:
             return {
                 'df': pd.DataFrame(),
