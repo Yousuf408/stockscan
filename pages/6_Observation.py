@@ -469,6 +469,30 @@ WHITE_THEME_CSS = """
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR - 200 EMA DISTANCE CONTROL
+# ─────────────────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("### 📈 200 EMA Distance %")
+    st.markdown("---")
+    
+    ema_gap_threshold = st.slider(
+        "Max distance from 200 EMA",
+        min_value=0.5,
+        max_value=10.0,
+        value=3.0,
+        step=0.25,
+        key="ema_gap_threshold_slider",
+        help="9:15 Open must be within this % above 200 EMA"
+    )
+    
+    # Show current value
+    st.caption(f"Current: **{ema_gap_threshold}%**")
+    
+    # Update HARDCODED_SETTINGS
+    HARDCODED_SETTINGS['ema_gap_threshold'] = ema_gap_threshold / 100
+
+# ─────────────────────────────────────────────────────────────────────────────
 # BACKEND FUNCTIONS (Data & Logic)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1170,13 +1194,16 @@ if st.session_state['stage1_data']:
                 display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
                 display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
                 
+                # Get EMA gap from sidebar (default 3%)
+                ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
+                
                 mask = (
                     (display_df['inside_9_15'] == True) &
                     (display_df['open_9_15'].notna()) &
                     (display_df['ema_200_9_15'].notna()) &
                     (display_df['ema_200_9_15'] > 0) &
                     (display_df['open_9_15'] > display_df['ema_200_9_15']) &
-                    (display_df['_ema_gap_pct'] <= 0.03)
+                    (display_df['_ema_gap_pct'] <= ema_gap_limit)
                 )
                 pass_symbols = display_df.loc[mask, 'ticker'].tolist()
                 st.session_state['inside_pass_symbols'] = pass_symbols
