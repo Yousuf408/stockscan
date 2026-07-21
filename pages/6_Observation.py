@@ -655,8 +655,8 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 current_price = float(data['Close'].iloc[-1])
                 
                 # Determine if 9:15 Open is above 200 EMA at 9:15 AM
-                close_9_15 = float(first_candle['Close'])
-                if ema_200_9_15 is not None and close_9_15 > ema_200_9_15:
+                open_9_15 = float(first_candle['Open'])
+                if ema_200_9_15 is not None and open_9_15 > ema_200_9_15:
                     ema_status_9_15 = 'ABOVE'
                 else:
                     ema_status_9_15 = 'BELOW'
@@ -670,6 +670,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 result = {
                     'high_9_15': float(first_candle['High']),
                     'low_9_15': low_9_15,
+                    'open_9_15': open_9_15,                     # <--- NEW
                     'close_9_15': float(first_candle['Close']),
                     'open_9_20': float(second_candle['Open']),
                     'high_9_20': float(second_candle['High']),
@@ -709,7 +710,8 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price']:
+                     'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
+                     'open_9_15']:                   # <--- NEW
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -722,11 +724,12 @@ def check_candle_conditions(df, tickers_list):
         base_ticker = ticker.replace('NSE:', '')
         if base_ticker in candle_data:
             data = candle_data[base_ticker]
-            for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_20',
-                        'high_9_20', 'low_9_20', 'close_9_20', 'max_high_up_to_10_15',
-                        'hit_low_9_20_to_35', 'breakout_9_30_to_9_45', 'prev_close',
-                        'gap_percent', 'yahoo_ticker', 'data_date',
-                        'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price']:
+            for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',   # <--- NEW
+                        'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
+                        'max_high_up_to_10_15', 'hit_low_9_20_to_35',
+                        'breakout_9_30_to_9_45', 'prev_close', 'gap_percent',
+                        'yahoo_ticker', 'data_date', 'ema_200_9_15', 'ema_200_current',
+                        '200 EMA', 'current_200_ema_status', 'current_price']:
                 df.at[idx, key] = data[key]
             df.at[idx, 'open_gap_percent'] = data['gap_percent']
 
@@ -1183,26 +1186,33 @@ if st.session_state['stage1_data']:
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
+    # --- INSIDE 9:15 FILTER (UPDATED: open > 200 EMA && gap ≤ 3%) ---
     if st.session_state.get('show_inside_only', False) and is_after_9_25:
-    # Ensure columns exist and are numeric
-    if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
-        display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
-        display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
-        
-        # Compute percentage difference (as fraction)
-        display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
-        
-        display_df = display_df[
-            (display_df['inside_9_15'] == True) &
-            (display_df['open_9_15'].notna()) &
-            (display_df['ema_200_9_15'].notna()) &
-            (display_df['ema_200_9_15'] > 0) &
-            (display_df['open_9_15'] > display_df['ema_200_9_15']) &
-            (display_df['_ema_gap_pct'] <= 0.03)   # ≤ 3%
-        ]
-        # Optionally drop the helper column
-        display_df.drop(columns=['_ema_gap_pct'], inplace=True)        else:
-            # If columns missing, fallback to only inside_9_15 check
+        # Check if required columns exist
+        if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
+            # Convert to numeric
+            display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
+            display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
+            
+            # Compute percentage gap (as fraction) between open and EMA
+            display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
+            
+            # Apply filters:
+            # 1. inside_9_15 = True
+            # 2. open_9_15 > ema_200_9_15 (both not NaN)
+            # 3. gap <= 3% (i.e., 0.03)
+            display_df = display_df[
+                (display_df['inside_9_15'] == True) &
+                (display_df['open_9_15'].notna()) &
+                (display_df['ema_200_9_15'].notna()) &
+                (display_df['ema_200_9_15'] > 0) &
+                (display_df['open_9_15'] > display_df['ema_200_9_15']) &
+                (display_df['_ema_gap_pct'] <= 0.03)
+            ]
+            # Drop helper column
+            display_df = display_df.drop(columns=['_ema_gap_pct'])
+        else:
+            # Fallback to old logic if columns missing (avoid breaking)
             display_df = display_df[display_df['inside_9_15'] == True]
     
     if display_df.empty:
