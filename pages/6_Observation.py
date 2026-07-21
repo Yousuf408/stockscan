@@ -475,6 +475,7 @@ WHITE_THEME_CSS = """
 
 IST = pytz.timezone('Asia/Kolkata')
 
+
 def get_tradingview_stocks():
     """
     Fetch ALL stocks meeting price & market cap filters (no limit).
@@ -483,12 +484,12 @@ def get_tradingview_stocks():
     try:
         count, df = (Query()
             .select(
-                'name', 
-                'close', 
-                'change', 
+                'name',
+                'close',
+                'change',
                 'volume',
-                'relative_volume', 
-                'market_cap_basic', 
+                'relative_volume',
+                'market_cap_basic',
                 'sector',
                 'gap'              # <-- USING TRADINGVIEW'S GAP COLUMN
             )
@@ -511,24 +512,36 @@ def get_tradingview_stocks():
 
 def filter_by_gap(df):
     """
-    Filter stocks with absolute gap >= 2% using TradingView's 'gap' column.
+    Filter stocks with absolute gap <= 2% using TradingView's 'gap' column.
+    KEEPS stocks with gap <= 2%, REJECTS stocks with gap > 2%.
     Returns (filtered_df, rejected_df).
     """
     df['gap'] = pd.to_numeric(df['gap'], errors='coerce')
-    mask = df['gap'].notna() & (abs(df['gap']) >= HARDCODED_SETTINGS['gap_threshold'])
+    
+    # KEEP stocks with gap <= 2% (0% to 2%)
+    mask = df['gap'].notna() & (abs(df['gap']) <= HARDCODED_SETTINGS['gap_threshold'])
+    
     filtered = df[mask].copy()
     rejected = df[~mask].copy()
+    
     rejected['rejection_reason'] = rejected['gap'].apply(
-        lambda x: f"Gap {x:.2f}%" if pd.notna(x) else "No gap data"
+        lambda x: f"Gap {x:.2f}% (> 2%)" if pd.notna(x) else "No gap data"
     )
+    
     return filtered, rejected
 
 
 def get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m"):
     """Fetch 5‑min intraday data for a single symbol and convert to IST."""
     try:
-        data = yf.download(yahoo_ticker, period=period, interval=interval,
-                           progress=False, auto_adjust=False, threads=False)
+        data = yf.download(
+            yahoo_ticker,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=False,
+            threads=False
+        )
         if data.empty:
             return None
         if data.index.tz is None:
@@ -571,6 +584,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 today_data = data[data.index.date == today]
                 yesterday_data = data[data.index.date < today]
                 prev_close = float(yesterday_data.iloc[-1]['Close']) if len(yesterday_data) > 0 else None
+                
                 if today_data.empty:
                     continue
                 df_day = today_data
@@ -695,8 +709,8 @@ def check_candle_conditions(df, tickers_list):
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
-                     'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
-                     'open_9_15']:
+                     'ema_200_9_15', 'ema_200_current', '200 EMA',
+                     'current_200_ema_status', 'current_price', 'open_9_15']:
         df[col_name] = None if col_name != 'inside_9_15' else False
     df['inside_9_15'] = False
 
@@ -753,10 +767,10 @@ def load_stage1_data():
     """
     Load and process all data for stage1:
     1. Fetch ALL stocks from TV
-    2. Apply gap filter (>= 2%)
+    2. Apply gap filter (<= 2%)
     3. Fetch candle data (including 200 EMA at 9:15)
     4. Apply 200 EMA condition (open > 200 EMA AND gap ≤ 3%)
-    5. Return top 50 stocks that pass ALL conditions
+    5. Return ALL stocks that pass ALL conditions (no limit)
     """
     with st.spinner("🔄 Loading market data..."):
         # Step 1: Fetch ALL stocks from TradingView (no limit)
@@ -764,7 +778,7 @@ def load_stage1_data():
         if count == 0:
             return None
         
-        # Step 2: Apply gap filter (>= 2% from TradingView's 'gap' column)
+        # Step 2: Apply gap filter (<= 2% from TradingView's 'gap' column)
         df, rejected_gap = filter_by_gap(df)
         if df.empty:
             return {
@@ -801,12 +815,11 @@ def load_stage1_data():
             df = df[mask].copy()
             df = df.drop(columns=['_ema_gap_pct'])
         
-        # Step 6: Apply Inside 9:15 condition (pre-filter for display)
-        # We'll keep this as a column, the frontend will apply the checkbox filter
-        
-        # Step 7: Sort and limit to top 50
+        # Step 6: Sort by change (gainers)
         df = df.sort_values('change', ascending=False)
-        df = df.head(HARDCODED_SETTINGS['stocks_limit'])
+        
+        # Step 7: NO LIMIT - Show ALL stocks that pass all conditions
+        # df = df.head(HARDCODED_SETTINGS['stocks_limit'])  # ← REMOVED
         
         # Update valid list based on final df
         final_valid = df[df['passes_candle_check'] == True]['ticker'].tolist()
@@ -821,7 +834,6 @@ def load_stage1_data():
             'filtered_count': len(df),
             'timestamp': datetime.now(IST)
         }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTO-REFRESH LOGIC
