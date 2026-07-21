@@ -625,7 +625,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                 today_data = data[data.index.date == today]
                 yesterday_data = data[data.index.date < today]
                 prev_close = float(yesterday_data.iloc[-1]['Close']) if len(yesterday_data) > 0 else None
-                prev_high = float(yesterday_data['High'].max()) if len(yesterday_data) > 0 else None  # <-- NEW
+                prev_high = float(yesterday_data['High'].max()) if len(yesterday_data) > 0 else None
                 if today_data.empty:
                     continue
                 df_day = today_data
@@ -715,7 +715,7 @@ def get_candle_data_bulk(tickers_list, max_workers=20):
                     'hit_low_9_20_to_35': hit_low_9_20_to_35,
                     'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
                     'prev_close': prev_close,
-                    'prev_high': prev_high,  # <-- NEW
+                    'prev_high': prev_high,
                     'gap_percent_fallback': gap_percent_fallback,
                     'yahoo_ticker': yahoo_ticker,
                     'data_date': today.strftime("%Y-%m-%d"),
@@ -749,7 +749,7 @@ def check_candle_conditions(df, tickers_list):
                      'candle_9_20_high', 'candle_9_20_low', 'candle_9_20_close',
                      'max_high_up_to_10_15', 'hit_low_9_20_to_35',
                      'breakout_9_30_to_9_45', 'data_date', 'prev_close',
-                     'prev_high',  # <-- NEW
+                     'prev_high',  # <-- FIXED: Added prev_high here
                      'gap_percent_fallback', 'open_gap_percent', 'passes_candle_check',
                      'candle_check_status', 'yahoo_ticker', 'inside_9_15',
                      'ema_200_9_15', 'ema_200_current', '200 EMA', 'current_200_ema_status', 'current_price',
@@ -769,7 +769,7 @@ def check_candle_conditions(df, tickers_list):
             for key in ['high_9_15', 'low_9_15', 'close_9_15', 'open_9_15',
                         'open_9_20', 'high_9_20', 'low_9_20', 'close_9_20',
                         'max_high_up_to_10_15', 'hit_low_9_20_to_35',
-                        'breakout_9_30_to_9_45', 'prev_close', 'prev_high',  # <-- NEW
+                        'breakout_9_30_to_9_45', 'prev_close', 'prev_high',
                         'gap_percent_fallback',
                         'yahoo_ticker', 'data_date', 'ema_200_9_15', 'ema_200_current',
                         '200 EMA', 'current_200_ema_status', 'current_price']:
