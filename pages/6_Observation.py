@@ -1058,9 +1058,17 @@ with col3:
     st.session_state['num_parts'] = num_parts
 
 with col4:
-    if st.button("🔄 Refresh", key="refresh_btn", use_container_width=True):
+    def refresh_table_only():
+        # Only refresh the table data, not entire page
         st.session_state['stage1_data'] = None
-        st.rerun()
+        st.session_state['force_table_refresh'] = True
+    
+    st.button(
+        "🔄 Refresh", 
+        key="refresh_btn", 
+        use_container_width=True,
+        on_click=refresh_table_only  # Uses callback instead of st.rerun()
+    )
 
 # ─── Show Gap Screener Content ───
 if st.session_state['stage1_data']:
@@ -1101,51 +1109,41 @@ if st.session_state['stage1_data']:
     
     with filter_col1:
         if is_after_9_25:
-            show_inside_only = st.checkbox(
+            st.checkbox(
                 "📊 Inside 9:15",
-                value=st.session_state['show_inside_only'],
-                key="inside_checkbox"
+                key="show_inside_only"
             )
-            st.session_state['show_inside_only'] = show_inside_only
         else:
             st.info("⏳ 9:20 after 9:25 AM")
-            show_inside_only = False
     
     with filter_col2:
         # Breakout checkbox with time-based availability
         breakout_status = get_breakout_time_status()
         if breakout_status == 'before_9_30':
             st.info("⏳ Breakout after 9:30 AM")
-            show_breakout_only = False
         else:
-            show_breakout_only = st.checkbox(
+            st.checkbox(
                 "⚡ Breakout 9:30-9:45",
-                value=st.session_state['show_breakout_only'],
-                key="breakout_checkbox"
+                key="show_breakout_only"
             )
-            st.session_state['show_breakout_only'] = show_breakout_only
     
     with filter_col3:
-        amo_test_mode = st.checkbox(
+        st.checkbox(
             "🌙 AMO",
-            value=st.session_state['amo_mode'],
-            key="amo_checkbox"
+            key="amo_mode"
         )
-        st.session_state['amo_mode'] = amo_test_mode
     
     with filter_col4:
         # Auto-Buy Toggle
-        auto_buy_toggle = st.checkbox(
+        st.checkbox(
             "🤖 Auto-Buy",
-            value=st.session_state.get('auto_buy_enabled', False),
-            key="auto_buy_toggle"
+            key="auto_buy_enabled"
         )
-        st.session_state['auto_buy_enabled'] = auto_buy_toggle
     
     with filter_col5:
         # Auto-Buy Status (Compact)
-        if auto_buy_toggle:
-            if not show_inside_only:
+        if st.session_state.get('auto_buy_enabled', False):
+            if not st.session_state.get('show_inside_only', False):
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 remaining = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
@@ -1176,7 +1174,7 @@ if st.session_state['stage1_data']:
     breakout_status = get_breakout_time_status()
     
     # --- BREAKOUT FILTER ---
-    if show_breakout_only:
+    if st.session_state.get('show_breakout_only', False):
         if breakout_status == 'before_9_30':
             pass
         elif breakout_status == 'live_checking':
@@ -1186,7 +1184,7 @@ if st.session_state['stage1_data']:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
     # --- INSIDE 9:15 FILTER (WITH 200 EMA AT 9:15 AM CONDITION) ---
-    if show_inside_only and is_after_9_25:
+    if st.session_state.get('show_inside_only', False) and is_after_9_25:
         # Check if required columns exist
         if 'close_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
             # Convert columns to numeric, coercing errors to NaN
@@ -1396,14 +1394,20 @@ if st.session_state['stage1_data']:
             
             if eligible_count > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
                 with st.spinner("🤖 Auto-buy executing..."):
-                    # Create df with original numeric data + MaxQty from display_df
-                    auto_buy_df = df.copy()
+                    # Only process stocks shown in filtered table (display_df)
+                    # Get symbols from display_df (already filtered)
+                    filtered_symbols = display_df['Symbol'].tolist()
+                    
+                    # Create df with ONLY filtered stocks + numeric data + MaxQty
+                    auto_buy_df = df[df['name'].isin(filtered_symbols)].copy()
                     auto_buy_df['Symbol'] = auto_buy_df['name']
                     auto_buy_df['Price'] = auto_buy_df['close']
                     auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
+                    
                     # Add MaxQty from display_df (already calculated)
                     maxqty_dict = display_df.set_index('Symbol')['MaxQty'].to_dict()
                     auto_buy_df['MaxQty'] = auto_buy_df['Symbol'].map(maxqty_dict).fillna(0)
+                    
                     placed, failed, error = execute_auto_buy(auto_buy_df)
                 
                 if error:
