@@ -60,6 +60,9 @@ if 'show_inside_only' not in st.session_state:
 if 'show_breakout_only' not in st.session_state:
     st.session_state['show_breakout_only'] = False
 
+if 'show_small_candle' not in st.session_state:
+    st.session_state['show_small_candle'] = False
+
 if 'stage1_last_refresh' not in st.session_state:
     IST = pytz.timezone('Asia/Kolkata')
     st.session_state['stage1_last_refresh'] = datetime.now(IST)
@@ -554,7 +557,7 @@ def get_tradingview_stocks():
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            .limit(100)
+            .limit(1000)
             .get_scanner_data()
         )
         return count, df
@@ -1217,8 +1220,9 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 Gap ≤ 2%</span>
                 <span class="filter-badge active">📈 EMA ≤ {st.session_state.get('ema_gap_threshold_slider', 3.0)}%</span>
                 {f'<span class="filter-badge active">📊 Above Prev High ✅</span>' if st.session_state.get('filter_above_prev_high', False) else ''}
-               
-              
+            </div>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
     
     # ─── Apply Filters ───
@@ -1229,7 +1233,7 @@ if st.session_state['stage1_data']:
     # ─── Filter Row ───
     st.markdown('<div class="filter-row">', unsafe_allow_html=True)
     
-    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8])
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5, filter_col6 = st.columns([1.8, 1.8, 1.2, 1.2, 1.8, 1.8])
     
     with filter_col1:
         if is_after_9_25:
@@ -1252,17 +1256,24 @@ if st.session_state['stage1_data']:
     
     with filter_col3:
         st.checkbox(
+            "📏 Small Candle (≤ 1.5%)",
+            key="show_small_candle",
+            help="Show only stocks where 9:15 candle range (High - Low) is ≤ 1.5%"
+        )
+    
+    with filter_col4:
+        st.checkbox(
             "🌙 AMO",
             key="amo_mode"
         )
     
-    with filter_col4:
+    with filter_col5:
         st.checkbox(
             "🤖 Auto-Buy",
             key="auto_buy_enabled"
         )
     
-    with filter_col5:
+    with filter_col6:
         if st.session_state.get('auto_buy_enabled', False):
             if not st.session_state.get('show_inside_only', False):
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
@@ -1319,6 +1330,22 @@ if st.session_state['stage1_data']:
             display_df = display_df[display_df['_real_time_breakout'] == True]
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
+    
+    # --- SMALL CANDLE FILTER (≤ 1.5%) ---
+    if st.session_state.get('show_small_candle', False):
+        if 'high_9_15' in display_df.columns and 'low_9_15' in display_df.columns:
+            display_df['high_9_15'] = pd.to_numeric(display_df['high_9_15'], errors='coerce')
+            display_df['low_9_15'] = pd.to_numeric(display_df['low_9_15'], errors='coerce')
+            
+            # Calculate candle range %
+            display_df['_candle_range_pct'] = ((display_df['high_9_15'] - display_df['low_9_15']) / display_df['low_9_15']) * 100
+            
+            mask = (
+                display_df['_candle_range_pct'].notna() &
+                (display_df['_candle_range_pct'] <= 1.5)  # ≤ 1.5%
+            )
+            display_df = display_df[mask].copy()
+            display_df = display_df.drop(columns=['_candle_range_pct'])
     
     if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
