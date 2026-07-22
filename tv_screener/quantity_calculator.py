@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHAN_CLIENT_ID = "1102302753"
-DHAN_PIN = ""                  # 4/6-digit trading PIN
+DHAN_PIN = "786786"                  # 4/6-digit trading PIN
 DHAN_TOTP_SECRET = "THWBRO5KI5N7ACJUNY7W3JUDKL4M2LML"  # From Profile > DhanHQ Trading APIs > Set-up TOTP
 
 # TEMPORARY/BACKUP MANUAL OVERRIDE — paste a token generated via Dhan
