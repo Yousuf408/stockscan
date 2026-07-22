@@ -1358,7 +1358,7 @@ if st.session_state['stage1_data']:
             display_df = display_df[mask].copy()
             display_df = display_df.drop(columns=['_candle_range_pct'])
     
-    if display_df.empty:
+        if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
@@ -1370,19 +1370,20 @@ if st.session_state['stage1_data']:
         
         # ─── Calculate MaxQty using cached margins ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            # Get symbols as tuple (for caching)
             symbols_tuple = tuple(display_df['Symbol'].tolist())
-            
-            # Get cached margin per share (ONCE per day)
             margin_per_share = get_cached_margin_for_symbols(symbols_tuple)
-            
-            # Apply capital/parts dynamically (no API call)
             part_capital = st.session_state['user_capital'] / st.session_state.get('num_parts', 4)
             
-            # Calculate MaxQty from cached margin
-            display_df['MaxQty'] = (part_capital / margin_per_share).apply(
-                lambda x: int(x) if x > 0 else 0
-            )
+            def safe_int(x):
+                """Safely convert to int, handling inf, nan, and overflow."""
+                if pd.isna(x) or not np.isfinite(x) or x <= 0:
+                    return 0
+                try:
+                    return int(x)
+                except (OverflowError, ValueError):
+                    return 0
+            
+            display_df['MaxQty'] = (part_capital / margin_per_share).apply(safe_int)
         
         # ─── Create display columns ───
         display_cols = [
