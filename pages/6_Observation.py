@@ -22,6 +22,17 @@ from tv_screener.quantity_calculator import (
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
 
+# ─── Storing Margin values in RAM ───
+@st.cache_data(ttl=86400)  # Cache for 24 hours
+def get_cached_max_qty(df, total_capital, num_parts):
+    """Calculate max quantity for ALL stocks at once (cached for 24 hours)."""
+    return calculate_max_quantity_column(
+        df,
+        total_capital=total_capital,
+        num_parts=num_parts
+    )
+# ─── END OF ADDED CODE ───
+
 warnings.filterwarnings('ignore')
 
 # ─────────────────────────────────────────────────────────────────────────────
