@@ -1343,7 +1343,7 @@ if st.session_state['stage1_data']:
         else:
             display_df = display_df[display_df['breakout_9_30_to_9_45'] == True]
     
-    # --- SMALL CANDLE FILTER (≤ 1.5%) ---
+        # --- SMALL CANDLE FILTER (≤ 1.5%) ---
     if st.session_state.get('show_small_candle', False):
         if 'high_9_15' in display_df.columns and 'low_9_15' in display_df.columns:
             display_df['high_9_15'] = pd.to_numeric(display_df['high_9_15'], errors='coerce')
@@ -1359,7 +1359,7 @@ if st.session_state['stage1_data']:
             display_df = display_df[mask].copy()
             display_df = display_df.drop(columns=['_candle_range_pct'])
     
-                if display_df.empty:
+    if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
@@ -1413,6 +1413,8 @@ if st.session_state['stage1_data']:
             'current_price': 'current_price',
             'prev_high': 'Prev Day High'
         })
+        
+        # ─── Continue with your existing code ───
         
         # ─── Format columns with NaN handling ───
         if 'high_9_15' in display_df.columns:
