@@ -22,11 +22,12 @@ from tv_screener.quantity_calculator import (
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
 
-# ─── CACHED MAX QTY ───
+# ─── CACHED MARGIN PER SYMBOL ───
 @st.cache_data(ttl=86400)  # Cache for 24 hours
-def get_cached_max_qty(df, total_capital, num_parts):
-    """Calculate max quantity. Cache automatically updates when capital/parts change."""
-    return calculate_max_quantity_column(df, total_capital, num_parts)
+def get_cached_margin_for_symbol(symbol):
+    """Get margin for a single symbol (cached for 24 hours)."""
+    from tv_screener.quantity_calculator import get_margin_for_symbol
+    return get_margin_for_symbol(symbol)
 
 warnings.filterwarnings('ignore')
 
@@ -1367,8 +1368,21 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
+        # ─── Calculate MaxQty using cached margins per symbol ───
+        def calculate_max_qty_fast(df, total_capital, num_parts):
+            """Calculate max quantity using cached margins per symbol."""
+            part_capital = total_capital / num_parts
+            
+            def get_qty(symbol):
+                margin = get_cached_margin_for_symbol(symbol)
+                if margin and margin > 0:
+                    return int(part_capital / margin)
+                return 0
+            
+            return df['Symbol'].apply(get_qty)
+
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            display_df['MaxQty'] = get_cached_max_qty(
+            display_df['MaxQty'] = calculate_max_qty_fast(
                 display_df,
                 st.session_state['user_capital'],
                 st.session_state.get('num_parts', 4)
