@@ -593,8 +593,8 @@ if st.session_state['stage1_data']:
                 <span class="filter-badge active">📈 EMA ≤ {st.session_state.get('ema_gap_threshold_slider', 3.0)}%</span>
                 {f'<span class="filter-badge active">📊 Above Prev High ✅</span>' if st.session_state.get('filter_above_prev_high', False) else ''}
             </div>
-        </div>
-    </div>
+        
+    
     """, unsafe_allow_html=True)
 
     is_after_9_25 = datetime.now(IST) >= datetime.now(IST).replace(hour=9, minute=25, second=0)
