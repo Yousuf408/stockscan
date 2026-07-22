@@ -1359,7 +1359,7 @@ if st.session_state['stage1_data']:
             display_df = display_df[mask].copy()
             display_df = display_df.drop(columns=['_candle_range_pct'])
     
-        if display_df.empty:
+            if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
