@@ -134,7 +134,7 @@ with st.sidebar:
     
     st.caption(f"Current: **{ema_gap_threshold}%**")
     
-    # Show count of stocks that pass EMA filter
+    # Show count of stocks that pass EMA filter (using cached data)
     if 'stage1_data' in st.session_state and st.session_state['stage1_data'] is not None:
         df = st.session_state['stage1_data']['df']
         if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
@@ -609,161 +609,165 @@ def calculate_ema_200(data_5min):
         return None
 
 
+def process_candle_data_for_symbol(base_ticker, yahoo_ticker):
+    """
+    Process 5-min data and extract key candle values for a single symbol.
+    Returns result dict or None.
+    """
+    symbol_formats = ['.NS', '-NS', '']
+    
+    for suffix in symbol_formats:
+        yahoo_ticker = base_ticker + suffix
+        
+        # ─── FETCH 5-MIN INTRADAY DATA ───
+        data = get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m")
+        if data is None or data.empty:
+            continue
+        
+        today = datetime.now(IST).date()
+        today_data = data[data.index.date == today]
+        if today_data.empty:
+            continue
+        
+        # ─── FETCH PREVIOUS DAY DATA USING COLAB METHOD ───
+        daily_data = yf.download(yahoo_ticker, period='2d', progress=False)
+        if daily_data.empty or len(daily_data) < 2:
+            prev_close = None
+            prev_high = None
+        else:
+            yesterday = daily_data.iloc[-2]
+            prev_close = float(yesterday['Close'].iloc[0]) if hasattr(yesterday['Close'], 'iloc') else float(yesterday['Close'])
+            prev_high = float(yesterday['High'].iloc[0]) if hasattr(yesterday['High'], 'iloc') else float(yesterday['High'])
+        
+        df_day = today_data
+
+        # 9:15 candle (approx 9:10–9:20)
+        mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
+        if mask_first.sum() == 0:
+            mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
+            if mask_first.sum() == 0:
+                first_candle = df_day.iloc[0]
+            else:
+                first_candle = df_day[mask_first].iloc[0]
+        else:
+            first_candle = df_day[mask_first].iloc[0]
+
+        # 9:20 candle (approx 9:20–9:25)
+        mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
+        if mask_second.sum() == 0:
+            if len(df_day) >= 2:
+                second_candle = df_day.iloc[1]
+            else:
+                continue
+        else:
+            second_candle = df_day[mask_second].iloc[0]
+
+        # Max high up to 10:15
+        mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
+                       ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
+        if mask_morning.sum() > 0:
+            max_high = float(df_day.loc[mask_morning, 'High'].max())
+        else:
+            max_high = float(second_candle['High'])
+
+        low_9_15 = float(first_candle['Low'])
+        mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
+        hit_low_9_20_to_35 = False
+        if mask_20_to_35.sum() > 0:
+            candles = df_day.loc[mask_20_to_35]
+            hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
+
+        high_9_15 = float(first_candle['High'])
+        mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
+        breakout_9_30_to_9_45 = False
+        if mask_30_to_45.sum() > 0:
+            candles = df_day.loc[mask_30_to_45]
+            breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
+
+        if prev_close is not None and prev_close > 0:
+            high_9_20 = float(second_candle['High'])
+            gap_percent_fallback = ((high_9_20 - prev_close) / prev_close) * 100
+        else:
+            gap_percent_fallback = 0.0
+            prev_close = float(first_candle['Close'])
+
+        first_candle_time = first_candle.name
+
+        # 200 EMA at 9:15
+        data_until_9_15 = data[data.index <= first_candle_time]
+        ema_200_9_15 = calculate_ema_200(data_until_9_15)
+
+        # Current 200 EMA (for auto‑buy eligibility)
+        ema_200_current = calculate_ema_200(data)
+
+        current_price = float(data['Close'].iloc[-1])
+
+        open_9_15 = float(first_candle['Open'])
+        if ema_200_9_15 is not None and open_9_15 > ema_200_9_15:
+            ema_status_9_15 = 'ABOVE'
+        else:
+            ema_status_9_15 = 'BELOW'
+
+        if ema_200_current is not None and current_price > ema_200_current:
+            ema_status_current = 'ABOVE'
+        else:
+            ema_status_current = 'BELOW'
+
+        result = {
+            'high_9_15': float(first_candle['High']),
+            'low_9_15': low_9_15,
+            'open_9_15': open_9_15,
+            'close_9_15': float(first_candle['Close']),
+            'open_9_20': float(second_candle['Open']),
+            'high_9_20': float(second_candle['High']),
+            'low_9_20': float(second_candle['Low']),
+            'close_9_20': float(second_candle['Close']),
+            'max_high_up_to_10_15': max_high,
+            'hit_low_9_20_to_35': hit_low_9_20_to_35,
+            'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
+            'prev_close': prev_close,
+            'prev_high': prev_high,
+            'gap_percent_fallback': gap_percent_fallback,
+            'yahoo_ticker': yahoo_ticker,
+            'data_date': today.strftime("%Y-%m-%d"),
+            'ema_200_9_15': ema_200_9_15,
+            'ema_200_current': ema_200_current,
+            '200 EMA': ema_status_9_15,
+            'current_200_ema_status': ema_status_current,
+            'current_price': float(data['Close'].iloc[-1])
+        }
+        return result
+    
+    return None
+
+
 def get_candle_data_bulk(tickers_list, max_workers=20):
     """
     For a list of tickers (NSE:...), fetch 5‑min data and extract key candle values
     (9:15, 9:20, breakout, 200 EMA at 9:15, prev_high, etc.).
     Returns a dict {base_ticker: result_dict}.
     """
-    results = {}
-    symbol_formats = ['.NS', '-NS', '']
-
-    def fetch_one(ticker):
-        base_ticker = ticker.replace('NSE:', '')
-        for suffix in symbol_formats:
-            yahoo_ticker = base_ticker + suffix
-            
-            # ─── FETCH 5-MIN INTRADAY DATA ───
-            data = get_intraday_data_for_symbol(yahoo_ticker, period="5d", interval="5m")
-            if data is None or data.empty:
-                continue
-            
-            today = datetime.now(IST).date()
-            today_data = data[data.index.date == today]
-            if today_data.empty:
-                continue
-            
-            # ─── FETCH PREVIOUS DAY DATA USING COLAB METHOD ───
-            # Download last 2 days of daily data
-            daily_data = yf.download(yahoo_ticker, period='2d', progress=False)
-            if daily_data.empty or len(daily_data) < 2:
-                prev_close = None
-                prev_high = None
-            else:
-                # Get yesterday's data (second last row)
-                yesterday = daily_data.iloc[-2]
-                prev_close = float(yesterday['Close'].iloc[0]) if hasattr(yesterday['Close'], 'iloc') else float(yesterday['Close'])
-                prev_high = float(yesterday['High'].iloc[0]) if hasattr(yesterday['High'], 'iloc') else float(yesterday['High'])
-            
-            df_day = today_data
-
-            # 9:15 candle (approx 9:10–9:20)
-            mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
-            if mask_first.sum() == 0:
-                mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
-                if mask_first.sum() == 0:
-                    first_candle = df_day.iloc[0]
-                else:
-                    first_candle = df_day[mask_first].iloc[0]
-            else:
-                first_candle = df_day[mask_first].iloc[0]
-
-            # 9:20 candle (approx 9:20–9:25)
-            mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
-            if mask_second.sum() == 0:
-                if len(df_day) >= 2:
-                    second_candle = df_day.iloc[1]
-                else:
-                    continue
-            else:
-                second_candle = df_day[mask_second].iloc[0]
-
-            # Max high up to 10:15
-            mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | \
-                           ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
-            if mask_morning.sum() > 0:
-                max_high = float(df_day.loc[mask_morning, 'High'].max())
-            else:
-                max_high = float(second_candle['High'])
-
-            low_9_15 = float(first_candle['Low'])
-            mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
-            hit_low_9_20_to_35 = False
-            if mask_20_to_35.sum() > 0:
-                candles = df_day.loc[mask_20_to_35]
-                hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
-
-            high_9_15 = float(first_candle['High'])
-            mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
-            breakout_9_30_to_9_45 = False
-            if mask_30_to_45.sum() > 0:
-                candles = df_day.loc[mask_30_to_45]
-                breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
-
-            if prev_close is not None and prev_close > 0:
-                high_9_20 = float(second_candle['High'])
-                gap_percent_fallback = ((high_9_20 - prev_close) / prev_close) * 100
-            else:
-                gap_percent_fallback = 0.0
-                prev_close = float(first_candle['Close'])
-
-            first_candle_time = first_candle.name
-
-            # 200 EMA at 9:15
-            data_until_9_15 = data[data.index <= first_candle_time]
-            ema_200_9_15 = calculate_ema_200(data_until_9_15)
-
-            # Current 200 EMA (for auto‑buy eligibility)
-            ema_200_current = calculate_ema_200(data)
-
-            current_price = float(data['Close'].iloc[-1])
-
-            open_9_15 = float(first_candle['Open'])
-            if ema_200_9_15 is not None and open_9_15 > ema_200_9_15:
-                ema_status_9_15 = 'ABOVE'
-            else:
-                ema_status_9_15 = 'BELOW'
-
-            if ema_200_current is not None and current_price > ema_200_current:
-                ema_status_current = 'ABOVE'
-            else:
-                ema_status_current = 'BELOW'
-
-            result = {
-                'high_9_15': float(first_candle['High']),
-                'low_9_15': low_9_15,
-                'open_9_15': open_9_15,
-                'close_9_15': float(first_candle['Close']),
-                'open_9_20': float(second_candle['Open']),
-                'high_9_20': float(second_candle['High']),
-                'low_9_20': float(second_candle['Low']),
-                'close_9_20': float(second_candle['Close']),
-                'max_high_up_to_10_15': max_high,
-                'hit_low_9_20_to_35': hit_low_9_20_to_35,
-                'breakout_9_30_to_9_45': breakout_9_30_to_9_45,
-                'prev_close': prev_close,
-                'prev_high': prev_high,
-                'gap_percent_fallback': gap_percent_fallback,
-                'yahoo_ticker': yahoo_ticker,
-                'data_date': today.strftime("%Y-%m-%d"),
-                'ema_200_9_15': ema_200_9_15,
-                'ema_200_current': ema_200_current,
-                '200 EMA': ema_status_9_15,
-                'current_200_ema_status': ema_status_current,
-                'current_price': float(data['Close'].iloc[-1])
-            }
-            return base_ticker, result
-        return None, None
-
-    # CACHE THE ENTIRE BULK FETCH - 24 HOURS
-    # Only ONE Yahoo call per day for ALL stocks!
+    # CACHE THE ENTIRE PROCESSED DATA - 24 HOURS
+    # This caches BOTH raw data AND processed values (EMA, 9:15 data, etc.)
     @st.cache_data(ttl=86400)  # 24 hours
-    def _get_cached_candle_data_bulk(tickers_tuple):
-        """Cached version - runs only once per day."""
-        tickers_list = list(tickers_tuple)
+    def _get_cached_processed_candle_data(tickers_tuple):
+        """Cached version - runs only once per day. Returns fully processed data."""
         results = {}
+        tickers_list = list(tickers_tuple)
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            future_to_ticker = {executor.submit(fetch_one, ticker): ticker for ticker in tickers_list}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_ticker = {executor.submit(process_candle_data_for_symbol, ticker.replace('NSE:', ''), ticker): ticker for ticker in tickers_list}
             for future in concurrent.futures.as_completed(future_to_ticker):
-                base, data = future.result()
-                if base and data:
-                    results[base] = data
+                ticker = future_to_ticker[future]
+                base_ticker = ticker.replace('NSE:', '')
+                data = future.result()
+                if data:
+                    results[base_ticker] = data
         return results
     
     # Convert list to tuple for caching (hashable)
     tickers_tuple = tuple(tickers_list)
-    return _get_cached_candle_data_bulk(tickers_tuple)
+    return _get_cached_processed_candle_data(tickers_tuple)
 
 
 def check_candle_conditions(df, tickers_list):
@@ -841,10 +845,9 @@ def load_stage1_data():
     Load and process all data for stage1:
     1. Fetch ALL stocks from TV
     2. Apply gap filter (<= 2% from TV)
-    3. Fetch candle data (cached for 24 hours)
-    4. Apply 200 EMA filter from sidebar slider
-    5. Apply Above Previous High filter from sidebar checkbox
-    6. Return filtered stocks
+    3. Fetch candle data (CACHED for 24 hours - includes 9:15 Open, 200 EMA)
+    4. Apply filters (re-applied on each refresh, but data is cached)
+    5. Return filtered stocks
     """
     with st.spinner("🔄 Loading market data..."):
         # Step 1: Fetch ALL stocks from TradingView
@@ -870,44 +873,14 @@ def load_stage1_data():
         df = df.sort_values('change', ascending=False)
         
         # Step 4: Fetch candle data for ALL gap-filtered stocks (CACHED 24 HOURS)
+        # This includes 9:15 Open, 200 EMA, prev_high, etc.
         tickers_list = df['ticker'].tolist()
         df, valid, invalid, failed = check_candle_conditions(df, tickers_list)
         
-        # Step 5: APPLY 200 EMA FILTER FROM SIDEBAR SLIDER
-        if 'open_9_15' in df.columns and 'ema_200_9_15' in df.columns:
-            df['open_9_15'] = pd.to_numeric(df['open_9_15'], errors='coerce')
-            df['ema_200_9_15'] = pd.to_numeric(df['ema_200_9_15'], errors='coerce')
-            df['_ema_gap_pct'] = (df['open_9_15'] - df['ema_200_9_15']) / df['ema_200_9_15']
-            
-            # Get EMA gap from sidebar (default 3%)
-            ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
-            
-            mask = (
-                (df['open_9_15'].notna()) &
-                (df['ema_200_9_15'].notna()) &
-                (df['ema_200_9_15'] > 0) &
-                (df['open_9_15'] > df['ema_200_9_15']) &
-                (df['_ema_gap_pct'] <= ema_gap_limit)
-            )
-            df = df[mask].copy()
-            if '_ema_gap_pct' in df.columns:
-                df = df.drop(columns=['_ema_gap_pct'])
+        # Step 5: Apply filters (these are re-applied on each refresh)
+        # The data is already cached, so this is FAST
         
-        # Step 6: APPLY ABOVE PREVIOUS HIGH FILTER (if checkbox is checked)
-        if st.session_state.get('filter_above_prev_high', False):
-            if 'high_9_15' in df.columns and 'prev_high' in df.columns:
-                df['high_9_15'] = pd.to_numeric(df['high_9_15'], errors='coerce')
-                df['prev_high'] = pd.to_numeric(df['prev_high'], errors='coerce')
-                
-                mask = (
-                    df['high_9_15'].notna() &
-                    df['prev_high'].notna() &
-                    (df['prev_high'] > 0) &
-                    (df['high_9_15'] >= df['prev_high'])
-                )
-                df = df[mask].copy()
-        
-        # Step 7: Show ALL stocks that pass filters
+        # Step 6: Show ALL stocks that pass filters
         df = df.sort_values('change', ascending=False)
         
         # Update valid list based on final df
@@ -1138,19 +1111,21 @@ current_checkbox = st.session_state.get('filter_above_prev_high', False)
 if 'prev_checkbox' not in st.session_state:
     st.session_state['prev_checkbox'] = current_checkbox
 
+# DON'T reload data on slider/checkbox change - just re-filter existing data
 if (current_slider != st.session_state['prev_ema_slider']) or (current_checkbox != st.session_state['prev_checkbox']):
     st.session_state['prev_ema_slider'] = current_slider
     st.session_state['prev_checkbox'] = current_checkbox
-    st.session_state['stage1_data'] = None
+    # Data is already loaded - just re-filter
 
-# ─── Check auto-refresh ───
-if should_refresh_stage1() or st.session_state['stage1_data'] is None:
-    stage1_data = load_stage1_data()
-    if stage1_data:
-        st.session_state['stage1_data'] = stage1_data
-        st.session_state['stage1_last_refresh'] = datetime.now(IST)
-        st.session_state['stage1_loaded'] = True
-        st.rerun()
+# ─── Check auto-refresh (only if data is not loaded) ───
+if st.session_state['stage1_data'] is None:
+    if should_refresh_stage1() or st.session_state['stage1_data'] is None:
+        stage1_data = load_stage1_data()
+        if stage1_data:
+            st.session_state['stage1_data'] = stage1_data
+            st.session_state['stage1_last_refresh'] = datetime.now(IST)
+            st.session_state['stage1_loaded'] = True
+            st.rerun()
 
 # ─── Page Header ───
 col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
@@ -1304,6 +1279,35 @@ if st.session_state['stage1_data']:
     # Get breakout time status
     breakout_status = get_breakout_time_status()
     
+    # --- Apply EMA Filter (FROM CACHED DATA - INSTANT) ---
+    ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
+    if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
+        display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
+        display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
+        display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
+        
+        mask = (
+            display_df['_ema_gap_pct'].notna() &
+            (display_df['_ema_gap_pct'] <= ema_gap_limit)
+        )
+        display_df = display_df[mask].copy()
+        if '_ema_gap_pct' in display_df.columns:
+            display_df = display_df.drop(columns=['_ema_gap_pct'])
+    
+    # --- ABOVE PREVIOUS HIGH FILTER ---
+    if st.session_state.get('filter_above_prev_high', False):
+        if 'high_9_15' in display_df.columns and 'prev_high' in display_df.columns:
+            display_df['high_9_15'] = pd.to_numeric(display_df['high_9_15'], errors='coerce')
+            display_df['prev_high'] = pd.to_numeric(display_df['prev_high'], errors='coerce')
+            
+            mask = (
+                display_df['high_9_15'].notna() &
+                display_df['prev_high'].notna() &
+                (display_df['prev_high'] > 0) &
+                (display_df['high_9_15'] >= display_df['prev_high'])
+            )
+            display_df = display_df[mask].copy()
+    
     # --- INSIDE 9:15 FILTER (with caching) ---
     if st.session_state.get('show_inside_only', False) and is_after_9_25:
         today = datetime.now().date()
@@ -1311,7 +1315,7 @@ if st.session_state['stage1_data']:
             # Use cached symbols
             display_df = display_df[display_df['ticker'].isin(st.session_state['inside_pass_symbols'])]
         else:
-            # Compute the filter condition (inside_9_15 only - EMA already filtered)
+            # Compute the filter condition (inside_9_15 only)
             if 'inside_9_15' in display_df.columns:
                 mask = display_df['inside_9_15'] == True
                 pass_symbols = display_df.loc[mask, 'ticker'].tolist()
@@ -1342,7 +1346,7 @@ if st.session_state['stage1_data']:
             
             mask = (
                 display_df['_candle_range_pct'].notna() &
-                (display_df['_candle_range_pct'] <= 1.5)  # ≤ 1.5%
+                (display_df['_candle_range_pct'] <= 1.5)
             )
             display_df = display_df[mask].copy()
             display_df = display_df.drop(columns=['_candle_range_pct'])
