@@ -557,7 +557,7 @@ def get_tradingview_stocks():
                 col('exchange') == 'NSE'
             )
             .order_by('change', ascending=False)
-            .limit(1000)
+            .limit(150)
             .get_scanner_data()
         )
         return count, df
