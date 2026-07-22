@@ -12,6 +12,7 @@ import concurrent.futures
 import warnings
 import math
 import time
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Import DhanHQ modules ──
