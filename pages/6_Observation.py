@@ -22,11 +22,12 @@ from tv_screener.quantity_calculator import (
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
 
-# ─── CACHED MAX QTY ───
-@st.cache_data(ttl=86400)  # Cache for 24 hours
-def get_cached_max_qty(df, total_capital, num_parts):
-    """Calculate max quantity. Cache automatically updates when capital/parts change."""
-    return calculate_max_quantity_column(df, total_capital, num_parts)
+# ─── CACHED MARGIN PER SYMBOL ───
+@st.cache_data(ttl=86400)  # 24 hours
+def get_cached_margin_for_symbols(symbols_tuple):
+    """Cache margin per symbol (not capital/parts)."""
+    df = pd.DataFrame({'Symbol': list(symbols_tuple)})
+    return calculate_max_quantity_column(df, 1, 1)
 
 warnings.filterwarnings('ignore')
 
@@ -859,7 +860,8 @@ def load_stage1_data():
         # Step 1: Fetch ALL stocks from TradingView
         count, df = get_tradingview_stocks()
         if count == 0:
-            return None        
+            return None
+        
         # Step 2: Apply gap filter (<= 2% from TradingView's 'gap' column)
         df, rejected_gap = filter_by_gap(df)
         if df.empty:
@@ -1366,12 +1368,20 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-        # ─── Calculate MaxQty using cached data ───
+        # ─── Calculate MaxQty using cached margins ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            display_df['MaxQty'] = get_cached_max_qty(
-                display_df,
-                st.session_state['user_capital'],
-                st.session_state.get('num_parts', 4)
+            # Get symbols as tuple (for caching)
+            symbols_tuple = tuple(display_df['Symbol'].tolist())
+            
+            # Get cached margin per share (ONCE per day)
+            margin_per_share = get_cached_margin_for_symbols(symbols_tuple)
+            
+            # Apply capital/parts dynamically (no API call)
+            part_capital = st.session_state['user_capital'] / st.session_state.get('num_parts', 4)
+            
+            # Calculate MaxQty from cached margin
+            display_df['MaxQty'] = (part_capital / margin_per_share).apply(
+                lambda x: int(x) if x > 0 else 0
             )
         
         # ─── Create display columns ───
