@@ -1369,19 +1369,22 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-        # ─── Calculate MaxQty using cached margins ───
+               # ─── Calculate MaxQty using cached margins ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             symbols_tuple = tuple(display_df['Symbol'].tolist())
             margin_per_share = get_cached_margin_for_symbols(symbols_tuple)
             part_capital = st.session_state['user_capital'] / st.session_state.get('num_parts', 4)
             
+            # Simple safe conversion
             def safe_int(x):
-                """Safely convert to int, handling inf, nan, and overflow."""
-                if pd.isna(x) or not np.isfinite(x) or x <= 0:
-                    return 0
                 try:
-                    return int(x)
-                except (OverflowError, ValueError):
+                    if pd.isna(x):
+                        return 0
+                    val = float(x)
+                    if val <= 0 or val > 1000000000:
+                        return 0
+                    return int(val)
+                except:
                     return 0
             
             display_df['MaxQty'] = (part_capital / margin_per_share).apply(safe_int)
