@@ -678,12 +678,13 @@ if st.session_state['stage1_data']:
         display_df['Symbol'] = display_df['name']
 
         # ─── MaxQty Calculation ───
-with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-    display_df['MaxQty'] = calculate_max_quantity_column(
-        display_df,
-        total_capital=st.session_state['user_capital'],
-        num_parts=st.session_state.get('num_parts', 4)
-    )
+        with st.spinner("Calculating max quantity (DhanHQ margin)..."):
+            display_df['MaxQty'] = calculate_max_quantity_column(
+                display_df,
+                total_capital=st.session_state['user_capital'],
+                num_parts=st.session_state.get('num_parts', 4)
+            )
+
         # ─── Columns & Formatting ───
         cols = ['name', 'close', 'change', 'gap', 'volume', 'relative_volume',
                 'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
