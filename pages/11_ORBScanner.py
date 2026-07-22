@@ -646,14 +646,39 @@ if st.session_state['stage1_data']:
                                         "Auto-Buy Status": st.column_config.TextColumn("AUTO-BUY", width="small"),
                                         "MaxQty": st.column_config.NumberColumn("MAXQTY", width="small"),
                                         "Sector": st.column_config.TextColumn("SECTOR", width="medium")})
-        with btn:
-            for idx, (_, row) in enumerate(display_df.iterrows()):
-                sym = row['Symbol']; mq = row['MaxQty']
-                if st.button(f"{sym}" + (" 🌙" if st.session_state.get('amo_mode', False) else ""), key=f"buy_{sym}_{idx}", disabled=(mq <= 0 or st.session_state.get('auto_buy_enabled', False)), use_container_width=True):
-                    with st.spinner(f"Placing order for {sym}..."):
-                        display_order_result(sym, place_dhan_order(sym, int(mq), "INTRADAY", st.session_state.get('amo_mode', False), "OPEN"))
-            if st.session_state.get('auto_buy_enabled', False): st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
-
+       with button_col:
+    for idx, (_, row) in enumerate(display_df.iterrows()):
+        sym = row['Symbol']
+        mq = row['MaxQty']
+        
+        # Skip if quantity is invalid
+        if mq is None or pd.isna(mq) or mq <= 0:
+            continue
+            
+        btn_label = f"{sym}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
+        
+        if st.button(
+            btn_label,
+            key=f"buy_{sym}_{idx}",
+            disabled=(mq <= 0 or st.session_state.get('auto_buy_enabled', False)),
+            use_container_width=True
+        ):
+            with st.spinner(f"Placing order for {sym}..."):
+                try:
+                    result = place_dhan_order(
+                        sym,
+                        quantity=int(mq),
+                        product_type="INTRADAY",
+                        after_market_order=st.session_state.get('amo_mode', False),
+                        amo_time="OPEN"
+                    )
+                    display_order_result(sym, result)
+                except Exception as e:
+                    st.error(f"❌ Order failed: {str(e)}")
+    
+    if st.session_state.get('auto_buy_enabled', False):
+        st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
+        
         st.download_button("📥 Download CSV", display_df.to_csv(index=False), f'screener_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv', 'text/csv', use_container_width=True)
 
     # ─── Footer ───
