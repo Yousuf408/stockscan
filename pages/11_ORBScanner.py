@@ -625,7 +625,9 @@ if st.session_state['stage1_data']:
                 st.markdown('<span style="color:#dc3545;font-size:0.7rem;font-weight:600;">⚠️ Need Inside 9:15</span>', unsafe_allow_html=True)
             else:
                 rem = st.session_state['auto_buy_max_stocks'] - st.session_state['auto_buy_bought_today']
-                eligible = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE']) if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns else 0
+                eligible = 0
+                if 'display_df' in locals() and not display_df.empty and 'Auto-Buy Status' in display_df.columns:
+                    eligible = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
                 st.markdown(f'<div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;padding:2px 0;"><span style="color:#28a745;font-weight:600;">🟢 ACTIVE</span><span style="color:#888;">|</span><span style="color:#333;">🎯 {eligible}</span><span style="color:#888;">|</span><span style="color:#333;">📊 {rem}</span></div>', unsafe_allow_html=True)
         else:
             st.markdown('<span style="color:#888;font-size:0.7rem;">⚪ Auto-Buy OFF</span>', unsafe_allow_html=True)
@@ -803,29 +805,31 @@ if st.session_state['stage1_data']:
                 }
             )
 
+        # ─── Manual Buy Buttons ───
         with btn:
             for idx, (_, row) in enumerate(display_df.iterrows()):
                 sym = row['Symbol']
                 mq = row['MaxQty']
-                if mq is None or pd.isna(mq) or mq <= 0:
-                    continue
                 btn_label = f"{sym}" + (" 🌙" if st.session_state.get('amo_mode', False) else "")
                 if st.button(
                     btn_label,
                     key=f"buy_{sym}_{idx}",
-                    disabled=(mq <= 0 or st.session_state.get('auto_buy_enabled', False)),
+                    disabled=(mq is None or pd.isna(mq) or mq <= 0 or st.session_state.get('auto_buy_enabled', False)),
                     use_container_width=True
                 ):
                     with st.spinner(f"Placing order for {sym}..."):
                         try:
-                            result = place_dhan_order(
-                                sym,
-                                quantity=int(mq),
-                                product_type="INTRADAY",
-                                after_market_order=st.session_state.get('amo_mode', False),
-                                amo_time="OPEN"
-                            )
-                            display_order_result(sym, result)
+                            if mq is None or pd.isna(mq) or mq <= 0:
+                                st.error(f"❌ Invalid quantity for {sym}")
+                            else:
+                                result = place_dhan_order(
+                                    sym,
+                                    quantity=int(mq),
+                                    product_type="INTRADAY",
+                                    after_market_order=st.session_state.get('amo_mode', False),
+                                    amo_time="OPEN"
+                                )
+                                display_order_result(sym, result)
                         except Exception as e:
                             st.error(f"❌ Order failed: {str(e)}")
             if st.session_state.get('auto_buy_enabled', False):
