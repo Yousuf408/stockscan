@@ -1288,19 +1288,22 @@ if st.session_state['stage1_data']:
     breakout_status = get_breakout_time_status()
     
     # --- Apply EMA Filter (FROM CACHED DATA - INSTANT) ---
-    ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
-    if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
-        display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
-        display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
-        display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
-        
-        mask = (
-            display_df['_ema_gap_pct'].notna() &
-            (display_df['_ema_gap_pct'] <= ema_gap_limit)
-        )
-        display_df = display_df[mask].copy()
-        if '_ema_gap_pct' in display_df.columns:
-            display_df = display_df.drop(columns=['_ema_gap_pct'])
+ema_gap_limit = st.session_state.get('ema_gap_threshold_slider', 3.0) / 100
+if 'open_9_15' in display_df.columns and 'ema_200_9_15' in display_df.columns:
+    display_df['open_9_15'] = pd.to_numeric(display_df['open_9_15'], errors='coerce')
+    display_df['ema_200_9_15'] = pd.to_numeric(display_df['ema_200_9_15'], errors='coerce')
+    display_df['_ema_gap_pct'] = (display_df['open_9_15'] - display_df['ema_200_9_15']) / display_df['ema_200_9_15']
+    
+    mask = (
+        display_df['open_9_15'].notna() &
+        display_df['ema_200_9_15'].notna() &
+        (display_df['ema_200_9_15'] > 0) &
+        (display_df['open_9_15'] > display_df['ema_200_9_15']) &  # ← ADD THIS LINE
+        (display_df['_ema_gap_pct'] <= ema_gap_limit)
+    )
+    display_df = display_df[mask].copy()
+    if '_ema_gap_pct' in display_df.columns:
+        display_df = display_df.drop(columns=['_ema_gap_pct'])
     
     # --- ABOVE PREVIOUS HIGH FILTER ---
     if st.session_state.get('filter_above_prev_high', False):
