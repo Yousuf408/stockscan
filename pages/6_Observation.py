@@ -22,16 +22,11 @@ from tv_screener.quantity_calculator import (
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
 
-# ─── Storing Margin values in RAM ───
+# ─── CACHED MAX QTY ───
 @st.cache_data(ttl=86400)  # Cache for 24 hours
 def get_cached_max_qty(df, total_capital, num_parts):
-    """Calculate max quantity for ALL stocks at once (cached for 24 hours)."""
-    return calculate_max_quantity_column(
-        df,
-        total_capital=total_capital,
-        num_parts=num_parts
-    )
-# ─── END OF ADDED CODE ───
+    """Calculate max quantity. Cache automatically updates when capital/parts change."""
+    return calculate_max_quantity_column(df, total_capital, num_parts)
 
 warnings.filterwarnings('ignore')
 
@@ -1373,10 +1368,10 @@ if st.session_state['stage1_data']:
         display_df['Symbol'] = display_df['name']
         
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
-            display_df['MaxQty'] = calculate_max_quantity_column(
+            display_df['MaxQty'] = get_cached_max_qty(
                 display_df,
-                total_capital=st.session_state['user_capital'],
-                num_parts=st.session_state.get('num_parts', 4)
+                st.session_state['user_capital'],
+                st.session_state.get('num_parts', 4)
             )
         
         # ─── Create display columns ───
