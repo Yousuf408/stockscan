@@ -1359,7 +1359,7 @@ if st.session_state['stage1_data']:
             display_df = display_df[mask].copy()
             display_df = display_df.drop(columns=['_candle_range_pct'])
     
-            if display_df.empty:
+                if display_df.empty:
         st.warning("⚠️ No stocks match the selected filters.")
     else:
         # ─── Prepare display dataframe ───
@@ -1369,13 +1369,12 @@ if st.session_state['stage1_data']:
         display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
         
-               # ─── Calculate MaxQty using cached margins ───
+        # ─── Calculate MaxQty using cached margins ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             symbols_tuple = tuple(display_df['Symbol'].tolist())
             margin_per_share = get_cached_margin_for_symbols(symbols_tuple)
             part_capital = st.session_state['user_capital'] / st.session_state.get('num_parts', 4)
             
-            # Simple safe conversion
             def safe_int(x):
                 try:
                     if pd.isna(x):
@@ -1473,6 +1472,8 @@ if st.session_state['stage1_data']:
         
         if 'Inside 9:15' in display_df.columns:
             display_df['Inside 9:15'] = display_df['Inside 9:15'].apply(lambda x: "✅" if x else "❌")
+        
+        # ─── Continue with rest of your code (Breakout, 200 EMA, etc.) ───
         
         # ─── Breakout Column - Show real-time status during live checking ───
         def get_breakout_display(row):
