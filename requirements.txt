@@ -17,3 +17,4 @@ joblib>=1.2.0
 google-generativeai
 tradingview-screener
 mStock-TradingApi-B
+dhanhq>=2.3.0
