@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
-# OPTIMIZED VERSION: Batch downloading + Parallel Auto-Buy
+# OPTIMIZED VERSION: Batch downloading + Parallel Auto-Buy + WebSocket Live Prices
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
+from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket
 
 warnings.filterwarnings('ignore')
 IST = pytz.timezone('Asia/Kolkata')
@@ -52,6 +53,7 @@ SESSION_DEFAULTS = {
     'prev_ema_slider': 3.0,
     'prev_checkbox': False,
     'force_table_refresh': False,
+    'ws_initialized': False,
 }
 for key, val in SESSION_DEFAULTS.items():
     if key not in st.session_state:
@@ -160,6 +162,18 @@ def safe_int(x):
         return int(float(x))
     except:
         return 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WEBSOCKET INITIALIZATION
+# ─────────────────────────────────────────────────────────────────────────────
+def init_websocket():
+    """Initialize WebSocket connection with stocks from table"""
+    if st.session_state.get('stage1_data') is not None:
+        df = st.session_state['stage1_data']['df']
+        if not df.empty:
+            symbols = df['name'].tolist()
+            start_websocket(symbols)
+            st.session_state['ws_initialized'] = True
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKEND FUNCTIONS - OPTIMIZED WITH BATCH DOWNLOADING
@@ -487,86 +501,95 @@ def load_stage1_data():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def auto_buy_status(row):
-    """Check if stock is eligible for auto-buy - Entry only between 0.15% and 0.40%"""
+    """Check if stock is eligible for auto-buy using live price"""
+    
     if row.get('current_200_ema_status') != 'ABOVE':
         return '❌ Below EMA'
     
-    # Get 9:15 High from multiple sources
+    # Get live price
+    symbol = row.get('Symbol', '')
+    live_price = get_live_price(symbol)
+    
+    if live_price:
+        cp = live_price
+    else:
+        cp = row.get('Price', 0)
+        if isinstance(cp, str):
+            try:
+                cp = float(cp.replace('₹', '').replace(',', ''))
+            except:
+                return '❌ Invalid Price'
+    
+    # Get 9:15 High
     h = row.get('9:15 High', 0)
     if h == 0 or h is None:
         h = row.get('high_9_15', 0)
     if h == 0 or h is None:
         h = row.get('9:15 HIGH', 0)
     
-    # Convert to float if string
     if isinstance(h, str):
         try:
             h = float(h.replace('₹', '').replace(',', ''))
         except:
             return '❌ Invalid 9:15 High'
     
-    cp = row.get('Price', 0)
-    if isinstance(cp, str):
-        try:
-            cp = float(cp.replace('₹', '').replace(',', ''))
-        except:
-            return '❌ Invalid Price'
-    
     if h <= 0:
         return '❌ No 9:15 High'
     if cp <= 0:
         return '❌ No Price'
     
-    # Entry range: 0.15% to 0.40% above 9:15 High
     min_price = h * 1.0015  # 0.15%
-    max_price = h * 1.008   # 0.40%
+    max_price = h * 1.005   # 0.50%
     
     if cp <= min_price:
         return f'❌ Need > {min_price:.2f}'
     elif cp >= max_price:
-        return '❌ Above 0.40% (too late)'
+        return '❌ Above 0.50% (too late)'
     else:
         return '✅ ELIGIBLE'
 
 def check_auto_buy_conditions(row):
-    """Check auto-buy conditions - Entry only between 0.15% and 0.40%"""
+    """Check auto-buy conditions using live price"""
     
-    # Try multiple sources for 9:15 High
+    # Get live price
+    symbol = row.get('Symbol', '')
+    live_price = get_live_price(symbol)
+    
+    if live_price:
+        current_price = live_price
+    else:
+        current_price = row.get('Price', 0)
+        if isinstance(current_price, str):
+            try:
+                current_price = float(current_price.replace('₹', '').replace(',', ''))
+            except:
+                current_price = 0
+    
+    # Get 9:15 High
     high_9_15 = row.get('9:15 High', 0)
     if high_9_15 == 0 or high_9_15 is None:
         high_9_15 = row.get('high_9_15', 0)
     if high_9_15 == 0 or high_9_15 is None:
         high_9_15 = row.get('9:15 HIGH', 0)
     
-    # Convert to float if string
     if isinstance(high_9_15, str):
         try:
             high_9_15 = float(high_9_15.replace('₹', '').replace(',', ''))
         except:
             return False, "Invalid 9:15 High format"
     
-    # Get current price
-    current_price = row.get('Price', 0)
-    if isinstance(current_price, str):
-        try:
-            current_price = float(current_price.replace('₹', '').replace(',', ''))
-        except:
-            return False, "Invalid Price format"
-    
-    # Validate values
     if high_9_15 is None or high_9_15 <= 0:
         return False, "No 9:15 High data"
     if current_price is None or current_price <= 0:
         return False, "No current price data"
     
-    # Entry range: 0.15% to 0.40% above 9:15 High
-    min_price = high_9_15 * 1.0015  # 0.15%
-    max_price = high_9_15 * 1.008   # 0.40%
+    min_price = high_9_15 * 1.0015
+    max_price = high_9_15 * 1.005
     
     if current_price <= min_price:
         return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({min_price:.2f})"
     elif current_price >= max_price:
-        return False, f"Price {current_price:.2f} >= 9:15 High + 0.40% ({max_price:.2f}) - Too late"
+        return False, f"Price {current_price:.2f} >= 9:15 High + 0.50% ({max_price:.2f}) - Too late"
     
     return True, "All conditions met"
 
@@ -706,6 +729,7 @@ def get_breakout_time_status():
 # ─────────────────────────────────────────────────────────────────────────────
 def render_header():
     t = datetime.now(IST)
+    ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
     st.markdown(f"""
     <div class="tradeos-header">
         <div class="header-left"><span class="logo">📊 Gap Screener</span><span class="version">v1.0</span></div>
@@ -713,6 +737,7 @@ def render_header():
             <span class="ticker-item">NIFTY 50 24,856.40 <span class="ticker-green">▲ +0.87%</span></span>
             <span class="ticker-item">SENSEX 81,234.56 <span class="ticker-green">▲ +0.92%</span></span>
             <span class="ticker-item">BANK NIFTY 52,345.67 <span class="ticker-red">▼ -0.23%</span></span>
+            <span class="ticker-item">WS: {ws_status}</span>
         </div>
         <div class="header-right">
             <div class="status-indicator"><span class="status-dot"></span><span>Live</span></div>
@@ -785,6 +810,11 @@ if st.session_state['stage1_data'] is None:
         st.session_state['stage1_loaded'] = True
         st.rerun()
 
+# ─── Initialize WebSocket after data loads ───
+if st.session_state.get('stage1_data') is not None:
+    if not st.session_state.get('ws_initialized', False):
+        init_websocket()
+
 # ─── Page Header ───
 col1, col2, col3, col4 = st.columns([3, 1.2, 0.8, 1])
 with col1:
@@ -803,18 +833,17 @@ with col3:
     )
 with col4:
     def set_refresh_flag():
-        """Set refresh flag without rerun and preserve checkbox states"""
         st.session_state['force_table_refresh'] = True
         st.session_state['stage1_data'] = None
         st.session_state['stage1_loaded'] = False
+        st.session_state['ws_initialized'] = False
     
     st.button("🔄 Refresh", key="refresh_btn", use_container_width=True,
               on_click=set_refresh_flag)
 
-# ─── Handle refresh outside callback (preserves checkbox states) ───
+# ─── Handle refresh outside callback ───
 if st.session_state.get('force_table_refresh', False):
     st.session_state['force_table_refresh'] = False
-    # Don't clear checkbox states - they stay as user set them
     st.rerun()
 
 # ─── Display Data ───
@@ -823,8 +852,33 @@ if st.session_state['stage1_data']:
     df = data['df'].copy()
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
+    
+    # ─── Update Price column with live prices ───
+    def get_live_price_display(symbol):
+        live_price = get_live_price(symbol)
+        if live_price:
+            return f"₹{live_price:.2f}"
+        return None
+    
+    df['Price'] = df['name'].apply(
+        lambda x: get_live_price_display(x) if get_live_price_display(x) else df[df['name'] == x]['close'].iloc[0] if not df[df['name'] == x].empty else "N/A"
+    )
+    
+    # Format price properly
+    if 'close' in df.columns:
+        # If live price not available, use close price
+        for idx, row in df.iterrows():
+            symbol = row['name']
+            live_price = get_live_price(symbol)
+            if live_price:
+                df.at[idx, 'Price'] = f"₹{live_price:.2f}"
+            else:
+                df.at[idx, 'Price'] = format_price(row['close'])
 
     # ─── Screener Card Header ───
+    ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
+    ws_count = st.session_state.get('ws_subscribed_count', 0)
+    
     st.markdown(f"""
     <div class="screener-card">
         <div class="screener-header">
@@ -833,6 +887,7 @@ if st.session_state['stage1_data']:
                 <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
                 <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
                 <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
+                <span class="stat-item">⚡ WS: <strong>{ws_status} {ws_count}</strong></span>
                 <span class="stat-item">⚡ Optimized: <strong class="stat-count">Batch Mode + Parallel Auto-Buy</strong></span>
             </div>
             <div class="filter-badges">
@@ -929,8 +984,18 @@ if st.session_state['stage1_data']:
     else:
         # ─── Prepare display dataframe ───
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
-        display_df['Price'] = display_df['close']
         display_df['Symbol'] = display_df['name']
+        
+        # ─── Update Price with live data ───
+        def get_live_price_display(symbol):
+            live_price = get_live_price(symbol)
+            if live_price:
+                return f"₹{live_price:.2f}"
+            return None
+        
+        display_df['Price'] = display_df['name'].apply(
+            lambda x: get_live_price_display(x) if get_live_price_display(x) else format_price(display_df[display_df['name'] == x]['close'].iloc[0] if not display_df[display_df['name'] == x].empty else 0)
+        )
 
         # ─── MaxQty Calculation ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
@@ -947,15 +1012,16 @@ if st.session_state['stage1_data']:
                 'ema_200_current', 'current_200_ema_status', 'prev_high']
         display_df = display_df[[c for c in cols if c in display_df.columns]].copy()
         display_df.rename(columns={
-            'name': 'Symbol', 'close': 'Price', 'change': 'Chg%',
+            'name': 'Symbol', 'close': 'Price_old', 'change': 'Chg%',
             'gap': 'Gap%', 'volume': 'Volume', 'relative_volume': 'Rel Vol',
             'inside_9_15': 'Inside 9:15', 'breakout_9_30_to_9_45': 'Breakout',
             'MaxQty': 'MaxQty', 'sector': 'Sector', 'high_9_15': 'high_9_15',
             'current_price': 'current_price', 'prev_high': 'Prev Day High'
         }, inplace=True)
+        
+        # Use the live Price column we already set
         display_df['9:15 High'] = display_df['high_9_15'].apply(lambda x: format_price(x) if pd.notna(x) else "N/A")
         display_df['Prev Day High'] = display_df['Prev Day High'].apply(lambda x: format_price(x) if pd.notna(x) else "N/A")
-        display_df['Price'] = display_df['Price'].apply(format_price)
         display_df['Chg%'] = display_df['Chg%'].apply(format_pct)
         display_df['Gap%'] = display_df['Gap%'].apply(format_pct)
         display_df['Volume'] = display_df['Volume'].apply(format_volume)
@@ -1081,12 +1147,14 @@ if st.session_state['stage1_data']:
         )
 
     # ─── Footer ───
+    ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
     st.markdown(f"""
     <div class="footer-bar">
         <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
         <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · <span class="highlight">{pass_count}</span> pass candle check</span>
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
         <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
+        <span>⚡ WS: {ws_status}</span>
         <span>⚡ Optimized: Batch Mode · Parallel Auto-Buy · Instant EMA Check</span>
     </div>
     """, unsafe_allow_html=True)
@@ -1096,6 +1164,6 @@ if st.session_state['stage1_data']:
 
 st.markdown("""
 <div style="text-align:center; padding:1.5rem; color:#888; font-size:0.65rem; border-top:1px solid #e9ecef; margin-top:1rem;">
-    📊 Gap Screener · Professional Trading Scanner<br>Data: TradingView · Yahoo Finance · DhanHQ · Optimized Batch Mode · Parallel Auto-Buy · Instant EMA Check
+    📊 Gap Screener · Professional Trading Scanner<br>Data: TradingView · Yahoo Finance · DhanHQ · Optimized Batch Mode · Parallel Auto-Buy · Instant EMA Check · Live WebSocket Prices
 </div>
 """, unsafe_allow_html=True)
