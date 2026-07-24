@@ -1008,19 +1008,27 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
 
-        # ─── Columns & Formatting ───
-        cols = ['name', 'close', 'change', 'gap', 'volume', 'relative_volume',
-                'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
-                'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15',
-                'ema_200_current', 'current_200_ema_status', 'prev_high']
-        display_df = display_df[[c for c in cols if c in display_df.columns]].copy()
-        display_df.rename(columns={
-            'name': 'Symbol', 'close': 'Price_old', 'change': 'Chg%',
-            'gap': 'Gap%', 'volume': 'Volume', 'relative_volume': 'Rel Vol',
-            'inside_9_15': 'Inside 9:15', 'breakout_9_30_to_9_45': 'Breakout',
-            'MaxQty': 'MaxQty', 'sector': 'Sector', 'high_9_15': 'high_9_15',
-            'current_price': 'current_price', 'prev_high': 'Prev Day High'
-        }, inplace=True)
+       # ─── Columns & Formatting ───
+cols = ['name', 'close', 'change', 'gap', 'volume', 'relative_volume',
+        'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
+        'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15',
+        'ema_200_current', 'current_200_ema_status', 'prev_high']
+display_df = display_df[[c for c in cols if c in display_df.columns]].copy()
+display_df.rename(columns={
+    'name': 'Symbol',
+    'close': 'Price',           # ← CHANGED: Price_old → Price
+    'change': 'Chg%',
+    'gap': 'Gap%',
+    'volume': 'Volume',
+    'relative_volume': 'Rel Vol',
+    'inside_9_15': 'Inside 9:15',
+    'breakout_9_30_to_9_45': 'Breakout',
+    'MaxQty': 'MaxQty',
+    'sector': 'Sector',
+    'high_9_15': 'high_9_15',
+    'current_price': 'current_price',
+    'prev_high': 'Prev Day High'
+}, inplace=True)
         
         # Use the live Price column we already set
         display_df['9:15 High'] = display_df['high_9_15'].apply(lambda x: format_price(x) if pd.notna(x) else "N/A")
