@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
-from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket
+from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket, get_ws_status
 
 warnings.filterwarnings('ignore')
 IST = pytz.timezone('Asia/Kolkata')
@@ -730,6 +730,7 @@ def get_breakout_time_status():
 def render_header():
     t = datetime.now(IST)
     ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
+    ws_count = st.session_state.get('ws_subscribed_count', 0)
     st.markdown(f"""
     <div class="tradeos-header">
         <div class="header-left"><span class="logo">📊 Gap Screener</span><span class="version">v1.0</span></div>
@@ -737,7 +738,7 @@ def render_header():
             <span class="ticker-item">NIFTY 50 24,856.40 <span class="ticker-green">▲ +0.87%</span></span>
             <span class="ticker-item">SENSEX 81,234.56 <span class="ticker-green">▲ +0.92%</span></span>
             <span class="ticker-item">BANK NIFTY 52,345.67 <span class="ticker-red">▼ -0.23%</span></span>
-            <span class="ticker-item">WS: {ws_status}</span>
+            <span class="ticker-item">WS: {ws_status} {ws_count}</span>
         </div>
         <div class="header-right">
             <div class="status-indicator"><span class="status-dot"></span><span>Live</span></div>
@@ -853,27 +854,12 @@ if st.session_state['stage1_data']:
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
     
-    # ─── Update Price column with live prices ───
+    # ─── Update Price column with live prices (FIXED) ───
     def get_live_price_display(symbol):
         live_price = get_live_price(symbol)
         if live_price:
             return f"₹{live_price:.2f}"
         return None
-    
-    df['Price'] = df['name'].apply(
-        lambda x: get_live_price_display(x) if get_live_price_display(x) else df[df['name'] == x]['close'].iloc[0] if not df[df['name'] == x].empty else "N/A"
-    )
-    
-    # Format price properly
-    if 'close' in df.columns:
-        # If live price not available, use close price
-        for idx, row in df.iterrows():
-            symbol = row['name']
-            live_price = get_live_price(symbol)
-            if live_price:
-                df.at[idx, 'Price'] = f"₹{live_price:.2f}"
-            else:
-                df.at[idx, 'Price'] = format_price(row['close'])
 
     # ─── Screener Card Header ───
     ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
@@ -986,15 +972,17 @@ if st.session_state['stage1_data']:
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['Symbol'] = display_df['name']
         
-        # ─── Update Price with live data ───
+        # ─── Update Price with live data (FIXED: fallback to close) ───
         def get_live_price_display(symbol):
             live_price = get_live_price(symbol)
             if live_price:
                 return f"₹{live_price:.2f}"
             return None
         
-        display_df['Price'] = display_df['name'].apply(
-            lambda x: get_live_price_display(x) if get_live_price_display(x) else format_price(display_df[display_df['name'] == x]['close'].iloc[0] if not display_df[display_df['name'] == x].empty else 0)
+        display_df['Price'] = display_df.apply(
+            lambda row: get_live_price_display(row['name']) if get_live_price_display(row['name']) 
+            else format_price(row['close']),
+            axis=1
         )
 
         # ─── MaxQty Calculation ───
