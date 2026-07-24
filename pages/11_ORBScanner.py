@@ -786,16 +786,19 @@ with col3:
         key="parts_input", label_visibility="collapsed"
     )
 with col4:
-    def refresh_table_only():
-        """Refresh only the table data without full page reload"""
-        if st.session_state.get('stage1_data') is not None:
-            st.session_state['stage1_data'] = None
-            st.session_state['stage1_loaded'] = False
-            st.session_state['force_table_refresh'] = True
-            st.rerun()
+    def set_refresh_flag():
+        """Set refresh flag without rerun"""
+        st.session_state['force_table_refresh'] = True
+        st.session_state['stage1_data'] = None
+        st.session_state['stage1_loaded'] = False
     
     st.button("🔄 Refresh", key="refresh_btn", use_container_width=True,
-              on_click=refresh_table_only)
+              on_click=set_refresh_flag)
+
+# ─── Handle refresh outside callback ───
+if st.session_state.get('force_table_refresh', False):
+    st.session_state['force_table_refresh'] = False
+    st.rerun()
 
 # ─── Display Data ───
 if st.session_state['stage1_data']:
