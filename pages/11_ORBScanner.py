@@ -487,7 +487,7 @@ def load_stage1_data():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def auto_buy_status(row):
-    """Check if stock is eligible for auto-buy - Entry only between 0.15% and 0.80%"""
+    """Check if stock is eligible for auto-buy - Entry only between 0.15% and 0.40%"""
     if row.get('current_200_ema_status') != 'ABOVE':
         return '❌ Below EMA'
     
@@ -517,19 +517,19 @@ def auto_buy_status(row):
     if cp <= 0:
         return '❌ No Price'
     
-    # Entry range: 0.15% to 0.80% above 9:15 High
+    # Entry range: 0.15% to 0.40% above 9:15 High
     min_price = h * 1.0015  # 0.15%
-    max_price = h * 1.008   # 0.80%
+    max_price = h * 1.008   # 0.40%
     
     if cp <= min_price:
         return f'❌ Need > {min_price:.2f}'
     elif cp >= max_price:
-        return '❌ Above 0.80% (too late)'
+        return '❌ Above 0.40% (too late)'
     else:
         return '✅ ELIGIBLE'
 
 def check_auto_buy_conditions(row):
-    """Check auto-buy conditions - Entry only between 0.15% and 0.80%"""
+    """Check auto-buy conditions - Entry only between 0.15% and 0.40%"""
     
     # Try multiple sources for 9:15 High
     high_9_15 = row.get('9:15 High', 0)
@@ -559,14 +559,14 @@ def check_auto_buy_conditions(row):
     if current_price is None or current_price <= 0:
         return False, "No current price data"
     
-    # Entry range: 0.15% to 0.80% above 9:15 High
+    # Entry range: 0.15% to 0.40% above 9:15 High
     min_price = high_9_15 * 1.0015  # 0.15%
-    max_price = high_9_15 * 1.008   # 0.80%
+    max_price = high_9_15 * 1.008   # 0.40%
     
     if current_price <= min_price:
         return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({min_price:.2f})"
     elif current_price >= max_price:
-        return False, f"Price {current_price:.2f} >= 9:15 High + 0.80% ({max_price:.2f}) - Too late"
+        return False, f"Price {current_price:.2f} >= 9:15 High + 0.40% ({max_price:.2f}) - Too late"
     
     return True, "All conditions met"
 
