@@ -13,6 +13,7 @@ Modules:
   - algomojo:     AlgoMojo API integration for order placement
   - database:     Supabase cache management
   - frontend:     UI formatting and table rendering
+  - dhan_websocket: Real-time LTP streaming via DhanHQ WebSocket
 """
 
 __version__ = "1.2.0"
@@ -46,6 +47,25 @@ from .database import (
 from .quantity_calculator import get_security_id_map, get_margin_per_share, calculate_max_quantity_column
 from .dhan_orders import place_dhan_order
 
+# ─── WebSocket imports ───
+try:
+    from .dhan_websocket import (
+        start_websocket, 
+        get_live_price, 
+        stop_websocket, 
+        get_ws_status
+    )
+except ImportError:
+    # Dummy functions if dhan_websocket.py doesn't exist
+    def start_websocket(symbols=None):
+        pass
+    def get_live_price(symbol):
+        return None
+    def stop_websocket():
+        pass
+    def get_ws_status():
+        return {'connected': False, 'subscribed_count': 0}
+
 from .frontend import (
     render_stock_table, render_market_closed_view,
     fmt_volume, fmt_relvol, fmt_poc_gap, fmt_prev_high, fmt_crossover, fmt_pct_since_signal
@@ -73,9 +93,12 @@ __all__ = [
     'get_supabase', 'supabase_get_cached_row', 'supabase_get_all_for_date',
     'supabase_save_row', 'init_session_caches', 'get_supabase_stats',
 
-    # Quantity Calculator
+    # Quantity Calculator & Orders
     'get_security_id_map', 'get_margin_per_share', 'calculate_max_quantity_column',
     'place_dhan_order',
+
+    # WebSocket
+    'start_websocket', 'get_live_price', 'stop_websocket', 'get_ws_status',
 
     # Frontend
     'render_stock_table', 'render_market_closed_view',
