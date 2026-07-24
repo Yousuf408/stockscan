@@ -51,6 +51,7 @@ SESSION_DEFAULTS = {
     'inside_pass_date': None,
     'prev_ema_slider': 3.0,
     'prev_checkbox': False,
+    'force_table_refresh': False,
 }
 for key, val in SESSION_DEFAULTS.items():
     if key not in st.session_state:
@@ -191,15 +192,10 @@ def filter_by_gap(df):
 
 # ─── OPTIMIZED: Batch download for multiple stocks ───
 def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
-    """
-    Fetch data for multiple tickers in ONE batch request.
-    This is 10x faster than individual downloads.
-    """
     try:
         if not tickers_list:
             return {}
         
-        # Ensure proper suffix
         tickers_with_suffix = []
         for t in tickers_list:
             t = t.replace('NSE:', '')
@@ -208,7 +204,6 @@ def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
             else:
                 tickers_with_suffix.append(t)
         
-        # ONE request for ALL tickers in this batch
         data = yf.download(
             tickers_with_suffix,
             period=period,
@@ -219,7 +214,6 @@ def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
             threads=True
         )
         
-        # Convert to dictionary format
         result = {}
         for ticker in tickers_with_suffix:
             if ticker in data and not data[ticker].empty:
@@ -237,22 +231,16 @@ def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
 
 # ─── OPTIMIZED: Process batch of tickers ───
 def process_candle_data_batch(tickers_batch):
-    """
-    Process a batch of tickers using batch download.
-    Returns dictionary of processed candle data.
-    """
     results = {}
     
     if not tickers_batch:
         return results
     
-    # Get batch data in ONE request
     batch_data = get_intraday_data_batch(tickers_batch, period="5d", interval="5m")
     
     if not batch_data:
         return results
     
-    # Process each ticker in the batch
     for yahoo_ticker, data in batch_data.items():
         base_ticker = yahoo_ticker.replace('.NS', '').replace('-NS', '')
         
@@ -264,7 +252,6 @@ def process_candle_data_batch(tickers_batch):
         if today_data.empty:
             continue
         
-        # Get previous day data
         daily_data = yf.download(yahoo_ticker, period='2d', progress=False)
         if daily_data.empty or len(daily_data) < 2:
             prev_close, prev_high = None, None
@@ -275,7 +262,6 @@ def process_candle_data_batch(tickers_batch):
         
         df_day = today_data
         
-        # Find 9:15 candle
         mask_first = (df_day.index.hour == 9) & (df_day.index.minute >= 10) & (df_day.index.minute <= 20)
         if mask_first.sum() == 0:
             mask_first = (df_day.index.hour == 9) & (df_day.index.minute < 30)
@@ -286,7 +272,6 @@ def process_candle_data_batch(tickers_batch):
         else:
             first_candle = df_day[mask_first].iloc[0]
         
-        # Find 9:20 candle
         mask_second = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 25)
         if mask_second.sum() == 0:
             if len(df_day) >= 2:
@@ -296,11 +281,9 @@ def process_candle_data_batch(tickers_batch):
         else:
             second_candle = df_day[mask_second].iloc[0]
         
-        # Max high up to 10:15
         mask_morning = ((df_day.index.hour == 9) & (df_day.index.minute >= 20)) | ((df_day.index.hour == 10) & (df_day.index.minute <= 15))
         max_high = float(df_day.loc[mask_morning, 'High'].max()) if mask_morning.sum() > 0 else float(second_candle['High'])
         
-        # Check if touched 9:15 low
         low_9_15 = float(first_candle['Low'])
         mask_20_to_35 = (df_day.index.hour == 9) & (df_day.index.minute >= 20) & (df_day.index.minute <= 35)
         hit_low_9_20_to_35 = False
@@ -308,7 +291,6 @@ def process_candle_data_batch(tickers_batch):
             candles = df_day.loc[mask_20_to_35]
             hit_low_9_20_to_35 = ((candles['Low'] <= low_9_15) | (candles['Close'] <= low_9_15)).any().item()
         
-        # Check breakout 9:30-9:45
         high_9_15 = float(first_candle['High'])
         mask_30_to_45 = (df_day.index.hour == 9) & (df_day.index.minute >= 30) & (df_day.index.minute <= 45)
         breakout_9_30_to_9_45 = False
@@ -316,7 +298,6 @@ def process_candle_data_batch(tickers_batch):
             candles = df_day.loc[mask_30_to_45]
             breakout_9_30_to_9_45 = (candles['High'] > high_9_15).any().item()
         
-        # Gap calculation
         if prev_close is not None and prev_close > 0:
             high_9_20 = float(second_candle['High'])
             gap_percent_fallback = ((high_9_20 - prev_close) / prev_close) * 100
@@ -324,7 +305,6 @@ def process_candle_data_batch(tickers_batch):
             gap_percent_fallback = 0.0
             prev_close = float(first_candle['Close'])
         
-        # EMA calculations
         first_candle_time = first_candle.name
         data_until_9_15 = data[data.index <= first_candle_time]
         
@@ -348,7 +328,6 @@ def process_candle_data_batch(tickers_batch):
         ema_status_9_15 = 'ABOVE' if (ema_200_9_15 is not None and open_9_15 > ema_200_9_15) else 'BELOW'
         ema_status_current = 'ABOVE' if (ema_200_current is not None and current_price > ema_200_current) else 'BELOW'
         
-        # Store results
         results[base_ticker] = {
             'high_9_15': float(first_candle['High']),
             'low_9_15': low_9_15,
@@ -378,9 +357,6 @@ def process_candle_data_batch(tickers_batch):
 # ─── OPTIMIZED: Uses batch downloads ───
 @st.cache_data(ttl=HARDCODED_SETTINGS['cache_ttl'])
 def get_cached_processed_candle_data(tickers_tuple):
-    """
-    OPTIMIZED: Uses batch downloads with parallel batches.
-    """
     if not tickers_tuple:
         return {}
     
@@ -511,47 +487,87 @@ def load_stage1_data():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def auto_buy_status(row):
-    """
-    Check if stock is eligible for auto-buy.
-    Auto-buy works independently - no Inside 9:15 requirement.
-    """
+    """Check if stock is eligible for auto-buy - Entry only between 0.15% and 0.80%"""
     if row.get('current_200_ema_status') != 'ABOVE':
         return '❌ Below EMA'
     
-    h = row.get('high_9_15')
-    cp = row.get('Price')
+    # Get 9:15 High from multiple sources
+    h = row.get('9:15 High', 0)
+    if h == 0 or h is None:
+        h = row.get('high_9_15', 0)
+    if h == 0 or h is None:
+        h = row.get('9:15 HIGH', 0)
     
+    # Convert to float if string
+    if isinstance(h, str):
+        try:
+            h = float(h.replace('₹', '').replace(',', ''))
+        except:
+            return '❌ Invalid 9:15 High'
+    
+    cp = row.get('Price', 0)
     if isinstance(cp, str):
         try:
             cp = float(cp.replace('₹', '').replace(',', ''))
         except:
             return '❌ Invalid Price'
     
-    if h is None or pd.isna(h) or h <= 0 or cp is None or pd.isna(cp) or cp <= 0:
+    if h <= 0:
+        return '❌ No 9:15 High'
+    if cp <= 0:
         return '❌ No Price'
     
-    required = h * 1.0015
+    # Entry range: 0.15% to 0.80% above 9:15 High
+    min_price = h * 1.0015  # 0.15%
+    max_price = h * 1.008   # 0.80%
     
-    if cp > required:
-        return '✅ ELIGIBLE'
+    if cp <= min_price:
+        return f'❌ Need > {min_price:.2f}'
+    elif cp >= max_price:
+        return '❌ Above 0.80% (too late)'
     else:
-        return f'❌ Need > {required:.2f}'
+        return '✅ ELIGIBLE'
 
 def check_auto_buy_conditions(row):
+    """Check auto-buy conditions - Entry only between 0.15% and 0.80%"""
+    
+    # Try multiple sources for 9:15 High
     high_9_15 = row.get('9:15 High', 0)
+    if high_9_15 == 0 or high_9_15 is None:
+        high_9_15 = row.get('high_9_15', 0)
+    if high_9_15 == 0 or high_9_15 is None:
+        high_9_15 = row.get('9:15 HIGH', 0)
+    
+    # Convert to float if string
+    if isinstance(high_9_15, str):
+        try:
+            high_9_15 = float(high_9_15.replace('₹', '').replace(',', ''))
+        except:
+            return False, "Invalid 9:15 High format"
+    
+    # Get current price
     current_price = row.get('Price', 0)
     if isinstance(current_price, str):
         try:
             current_price = float(current_price.replace('₹', '').replace(',', ''))
         except:
             return False, "Invalid Price format"
-    if high_9_15 is None or pd.isna(high_9_15) or high_9_15 <= 0:
+    
+    # Validate values
+    if high_9_15 is None or high_9_15 <= 0:
         return False, "No 9:15 High data"
-    if current_price is None or pd.isna(current_price) or current_price <= 0:
+    if current_price is None or current_price <= 0:
         return False, "No current price data"
-    required_price = high_9_15 * 1.0015
-    if current_price <= required_price:
-        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({required_price:.2f})"
+    
+    # Entry range: 0.15% to 0.80% above 9:15 High
+    min_price = high_9_15 * 1.0015  # 0.15%
+    max_price = high_9_15 * 1.008   # 0.80%
+    
+    if current_price <= min_price:
+        return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({min_price:.2f})"
+    elif current_price >= max_price:
+        return False, f"Price {current_price:.2f} >= 9:15 High + 0.80% ({max_price:.2f}) - Too late"
+    
     return True, "All conditions met"
 
 def place_single_order(symbol, max_qty, amo_mode):
@@ -786,18 +802,21 @@ with col3:
         key="parts_input", label_visibility="collapsed"
     )
 with col4:
-    def refresh_table_only():
-        """Refresh only the table display"""
+    def set_refresh_flag():
+        """Set refresh flag without rerun and preserve checkbox states"""
         st.session_state['force_table_refresh'] = True
+        st.session_state['stage1_data'] = None
+        st.session_state['stage1_loaded'] = False
     
     st.button("🔄 Refresh", key="refresh_btn", use_container_width=True,
-              on_click=refresh_table_only)
+              on_click=set_refresh_flag)
 
-# ─── Handle refresh without clearing data ───
+# ─── Handle refresh outside callback (preserves checkbox states) ───
 if st.session_state.get('force_table_refresh', False):
     st.session_state['force_table_refresh'] = False
+    # Don't clear checkbox states - they stay as user set them
     st.rerun()
-    
+
 # ─── Display Data ───
 if st.session_state['stage1_data']:
     data = st.session_state['stage1_data']
@@ -954,7 +973,7 @@ if st.session_state['stage1_data']:
             return "✅" if row.get('Breakout', False) else "❌"
         display_df['Breakout'] = display_df.apply(get_breakout_display, axis=1)
 
-        # ─── UPDATED: Uses OPEN instead of CLOSE for 200 EMA check ───
+        # ─── Uses OPEN instead of CLOSE for 200 EMA check ───
         def format_ema(row):
             ema = row.get('ema_200_9_15')
             if ema is None or pd.isna(ema) or ema <= 0:
@@ -976,7 +995,7 @@ if st.session_state['stage1_data']:
                       'Prev Day High', 'Auto-Buy Status', 'MaxQty', 'Sector']
         display_df = display_df[[c for c in final_cols if c in display_df.columns]]
 
-        # ─── Auto-Buy Execution (OPTIMIZED - Parallel) ───
+        # ─── Auto-Buy Execution (Parallel) ───
         if st.session_state.get('auto_buy_enabled', False):
             eligible = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
             
