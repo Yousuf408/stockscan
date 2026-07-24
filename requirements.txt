@@ -5,7 +5,6 @@ numpy>=1.23.0
 pytz
 plotly>=5.0.0
 dhanhq>=2.3.0
-tradingview-screener
 supabase
 pyotp
 websocket-client
@@ -14,3 +13,5 @@ pillow>=11.0.0
 scikit-learn>=1.2.0
 joblib>=1.2.0
 google-generativeai
+requests
+git+https://github.com/brian-the-dev/tradingview-screener.git
