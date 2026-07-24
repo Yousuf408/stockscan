@@ -18,7 +18,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
-from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket, get_ws_status
+# ─── WebSocket Import with Fallback ───
+try:
+    from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket, get_ws_status
+    WS_AVAILABLE = True
+except ImportError:
+    WS_AVAILABLE = False
+    # Dummy functions when WebSocket is not available
+    def start_websocket(symbols=None):
+        pass
+    def get_live_price(symbol):
+        return None
+    def stop_websocket():
+        pass
+    def get_ws_status():
+        return {'connected': False, 'subscribed_count': 0}
+    print("⚠️ WebSocket module not available")
 
 warnings.filterwarnings('ignore')
 IST = pytz.timezone('Asia/Kolkata')
