@@ -68,7 +68,6 @@ SESSION_DEFAULTS = {
     'prev_checkbox': False,
     'force_table_refresh': False,
     'ws_initialized': False,
-    'last_price_update': None,
 }
 for key, val in SESSION_DEFAULTS.items():
     if key not in st.session_state:
@@ -1159,7 +1158,7 @@ if st.session_state['stage1_data']:
             if st.session_state.get('auto_buy_enabled', False):
                 st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
 
-                st.download_button(
+        st.download_button(
             "📥 Download CSV",
             display_df.to_csv(index=False),
             f'screener_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
