@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6_OBSERVATION.PY – PROFESSIONAL SCREENER (WHITE THEME) WITH AUTO-BUY
-# OPTIMIZED VERSION: Batch downloading for 10x faster performance
+# OPTIMIZED VERSION: Batch downloading + Parallel Auto-Buy
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -189,7 +189,7 @@ def filter_by_gap(df):
     mask = df['gap'].notna() & (abs(df['gap']) <= HARDCODED_SETTINGS['gap_threshold'])
     return df[mask].copy(), df[~mask].copy()
 
-# ─── NEW OPTIMIZED FUNCTION: Batch download for multiple stocks ───
+# ─── OPTIMIZED: Batch download for multiple stocks ───
 def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
     """
     Fetch data for multiple tickers in ONE batch request.
@@ -224,7 +224,6 @@ def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
         for ticker in tickers_with_suffix:
             if ticker in data and not data[ticker].empty:
                 df = data[ticker]
-                # Ensure correct timezone
                 if df.index.tz is None:
                     df.index = df.index.tz_localize('UTC').tz_convert(IST)
                 else:
@@ -236,7 +235,7 @@ def get_intraday_data_batch(tickers_list, period="5d", interval="5m"):
         print(f"Batch download error: {e}")
         return {}
 
-# ─── NEW OPTIMIZED FUNCTION: Process batch of tickers ───
+# ─── OPTIMIZED: Process batch of tickers ───
 def process_candle_data_batch(tickers_batch):
     """
     Process a batch of tickers using batch download.
@@ -260,7 +259,6 @@ def process_candle_data_batch(tickers_batch):
         if data is None or data.empty:
             continue
         
-        # ─── ALL EXISTING LOGIC from process_candle_data_for_symbol ───
         today = datetime.now(IST).date()
         today_data = data[data.index.date == today]
         if today_data.empty:
@@ -330,7 +328,6 @@ def process_candle_data_batch(tickers_batch):
         first_candle_time = first_candle.name
         data_until_9_15 = data[data.index <= first_candle_time]
         
-        # Calculate EMA 200
         ema_200_9_15 = None
         if data_until_9_15 is not None and len(data_until_9_15) >= 200:
             try:
@@ -378,12 +375,11 @@ def process_candle_data_batch(tickers_batch):
     
     return results
 
-# ─── OPTIMIZED VERSION: Uses batch downloads ───
+# ─── OPTIMIZED: Uses batch downloads ───
 @st.cache_data(ttl=HARDCODED_SETTINGS['cache_ttl'])
 def get_cached_processed_candle_data(tickers_tuple):
     """
     OPTIMIZED: Uses batch downloads with parallel batches.
-    Instead of 20 individual threads, downloads in batches of 25.
     """
     if not tickers_tuple:
         return {}
@@ -391,21 +387,16 @@ def get_cached_processed_candle_data(tickers_tuple):
     tickers_list = list(tickers_tuple)
     results = {}
     
-    # Extract base tickers (remove NSE: prefix)
     base_tickers = [t.replace('NSE:', '') for t in tickers_list]
     
-    # Get batch size from settings
     BATCH_SIZE = HARDCODED_SETTINGS.get('batch_size', 25)
     MAX_WORKERS = HARDCODED_SETTINGS.get('max_batch_workers', 4)
     
-    # Split into batches
     batches = [base_tickers[i:i+BATCH_SIZE] for i in range(0, len(base_tickers), BATCH_SIZE)]
     
-    # Create progress placeholder
     progress_text = st.empty()
     progress_text.text(f"📦 Processing {len(base_tickers)} stocks in {len(batches)} batches...")
     
-    # Process batches in parallel
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_batch = {
             executor.submit(process_candle_data_batch, batch): idx 
@@ -419,14 +410,9 @@ def get_cached_processed_candle_data(tickers_tuple):
                 batch_results = future.result()
                 results.update(batch_results)
                 completed += 1
-                
-                # Update progress
                 progress_text.text(f"✅ Batch {completed}/{len(batches)} complete ({len(batch_results)} stocks)")
-                
-                # Small delay to avoid rate limits
                 if completed < len(batches):
                     time.sleep(0.3)
-                
             except Exception as e:
                 print(f"❌ Batch {batch_idx} failed: {e}")
                 progress_text.text(f"⚠️ Batch {batch_idx} failed, continuing...")
@@ -438,7 +424,7 @@ def get_cached_processed_candle_data(tickers_tuple):
     return results
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHECK CANDLE CONDITIONS (Uses optimized function)
+# CHECK CANDLE CONDITIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_candle_conditions(df, tickers_list):
@@ -521,16 +507,14 @@ def load_stage1_data():
                 'total_count': count, 'filtered_count': len(df), 'timestamp': datetime.now(IST)}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-BUY FUNCTIONS
+# OPTIMIZED AUTO-BUY FUNCTIONS (Parallel Execution)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─── UPDATED: Removed Inside 9:15 check ───
 def auto_buy_status(row):
     """
     Check if stock is eligible for auto-buy.
     Auto-buy works independently - no Inside 9:15 requirement.
     """
-    # Check EMA status
     if row.get('current_200_ema_status') != 'ABOVE':
         return '❌ Below EMA'
     
@@ -546,7 +530,7 @@ def auto_buy_status(row):
     if h is None or pd.isna(h) or h <= 0 or cp is None or pd.isna(cp) or cp <= 0:
         return '❌ No Price'
     
-    required = h * 1.0015  # 9:15 High + 0.15%
+    required = h * 1.0015
     
     if cp > required:
         return '✅ ELIGIBLE'
@@ -570,44 +554,117 @@ def check_auto_buy_conditions(row):
         return False, f"Price {current_price:.2f} <= 9:15 High + 0.15% ({required_price:.2f})"
     return True, "All conditions met"
 
-def execute_auto_buy(display_df):
+def place_single_order(symbol, max_qty, amo_mode):
+    """Place a single order - used for parallel execution"""
+    try:
+        result = place_dhan_order(
+            symbol,
+            quantity=int(max_qty),
+            product_type="INTRADAY",
+            after_market_order=amo_mode,
+            amo_time="OPEN"
+        )
+        return {
+            'symbol': symbol,
+            'quantity': int(max_qty),
+            'success': result.get('success', False),
+            'order_id': result.get('order_id', 'N/A'),
+            'error': result.get('error', None)
+        }
+    except Exception as e:
+        return {
+            'symbol': symbol,
+            'quantity': int(max_qty),
+            'success': False,
+            'order_id': None,
+            'error': str(e)
+        }
+
+def execute_auto_buy_parallel(display_df):
+    """
+    OPTIMIZED: Execute auto-buy orders in parallel
+    Uses ThreadPoolExecutor for simultaneous order placement
+    """
     today = datetime.now().date()
+    
     if st.session_state['auto_buy_date'] != today:
         st.session_state['auto_buy_bought_today'] = 0
         st.session_state['auto_buy_stocks_bought'] = []
         st.session_state['auto_buy_date'] = today
+    
     if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
         return [], [], f"Daily limit of {st.session_state['auto_buy_max_stocks']} stocks reached"
+    
     available = display_df[~display_df['Symbol'].isin(st.session_state['auto_buy_stocks_bought'])].copy()
     if available.empty:
         return [], [], "No new stocks available"
-    placed, failed, bought = [], [], []
+    
+    orders_to_place = []
+    amo_mode = st.session_state.get('amo_mode', False)
+    
     for _, row in available.iterrows():
         if st.session_state['auto_buy_bought_today'] >= st.session_state['auto_buy_max_stocks']:
             break
+        
         symbol = row['Symbol']
+        max_qty = row.get('MaxQty', 0)
+        
         meets, reason = check_auto_buy_conditions(row)
         if not meets:
-            failed.append({'symbol': symbol, 'reason': reason})
             continue
-        max_qty = row.get('MaxQty', 0)
+        
         if max_qty <= 0:
-            failed.append({'symbol': symbol, 'reason': 'No quantity available'})
             continue
-        current_price = row.get('Price', 0)
-        if isinstance(current_price, str):
+        
+        orders_to_place.append({
+            'symbol': symbol,
+            'max_qty': max_qty,
+            'amo_mode': amo_mode
+        })
+    
+    if not orders_to_place:
+        return [], [], "No eligible stocks found"
+    
+    placed = []
+    failed = []
+    bought_symbols = []
+    
+    with ThreadPoolExecutor(max_workers=min(len(orders_to_place), 5)) as executor:
+        future_to_order = {
+            executor.submit(place_single_order, 
+                order['symbol'], 
+                order['max_qty'], 
+                order['amo_mode']
+            ): order for order in orders_to_place
+        }
+        
+        for future in as_completed(future_to_order):
+            order = future_to_order[future]
             try:
-                current_price = float(current_price.replace('₹', '').replace(',', ''))
-            except:
-                current_price = 0
-        result = place_dhan_order(symbol, int(max_qty), "INTRADAY", st.session_state.get('amo_mode', False))
-        if result['success']:
-            placed.append({'symbol': symbol, 'quantity': int(max_qty), 'price': current_price, 'order_id': result.get('order_id', 'N/A')})
-            bought.append(symbol)
-            st.session_state['auto_buy_bought_today'] += 1
-        else:
-            failed.append({'symbol': symbol, 'quantity': int(max_qty), 'reason': result.get('error', 'Unknown error')})
-    st.session_state['auto_buy_stocks_bought'].extend(bought)
+                result = future.result()
+                if result['success']:
+                    placed.append({
+                        'symbol': result['symbol'],
+                        'quantity': result['quantity'],
+                        'order_id': result['order_id']
+                    })
+                    bought_symbols.append(result['symbol'])
+                    st.session_state['auto_buy_bought_today'] += 1
+                else:
+                    failed.append({
+                        'symbol': result['symbol'],
+                        'quantity': result['quantity'],
+                        'reason': result['error'] or 'Unknown error'
+                    })
+            except Exception as e:
+                failed.append({
+                    'symbol': order['symbol'],
+                    'quantity': order['max_qty'],
+                    'reason': str(e)
+                })
+    
+    st.session_state['auto_buy_stocks_bought'].extend(bought_symbols)
+    
     return placed, failed, None
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -748,7 +805,7 @@ if st.session_state['stage1_data']:
                 <span class="stat-item">✅ After Gap: <strong class="stat-count">{data['filtered_count']}</strong></span>
                 <span class="stat-item">🎯 Pass Candle: <strong class="stat-count">{pass_count}</strong></span>
                 <span class="stat-item">🕐 Last: <strong>{last_refresh.strftime('%H:%M:%S')}</strong></span>
-                <span class="stat-item">⚡ Optimized: <strong class="stat-count">Batch Mode</strong></span>
+                <span class="stat-item">⚡ Optimized: <strong class="stat-count">Batch Mode + Parallel Auto-Buy</strong></span>
             </div>
             <div class="filter-badges">
                 <span class="filter-badge active">💰 ₹{HARDCODED_SETTINGS['price_min']}-{HARDCODED_SETTINGS['price_max']}</span>
@@ -796,6 +853,8 @@ if st.session_state['stage1_data']:
                     <span style="color:#333;">🎯 {eligible}</span>
                     <span style="color:#888;">|</span>
                     <span style="color:#333;">📊 {rem}</span>
+                    <span style="color:#888;">|</span>
+                    <span style="color:#0066cc;">⚡ Parallel</span>
                 </div>
             ''', unsafe_allow_html=True)
         else:
@@ -891,14 +950,14 @@ if st.session_state['stage1_data']:
             ema = row.get('ema_200_9_15')
             if ema is None or pd.isna(ema) or ema <= 0:
                 return "⚪ N/A"
-            open_9_15 = row.get('open_9_15', 0)  # CHANGED: close → open
+            open_9_15 = row.get('open_9_15', 0)
             if open_9_15 > ema:
                 return f"🟢 ₹{ema:,.2f}"
             else:
                 return f"🔴 ₹{ema:,.2f}"
         display_df['200 EMA'] = display_df.apply(format_ema, axis=1)
 
-        # ─── Auto-Buy Status (Updated) ───
+        # ─── Auto-Buy Status ───
         display_df['Auto-Buy Status'] = display_df.apply(auto_buy_status, axis=1)
 
         display_df = display_df.reset_index(drop=True)
@@ -908,20 +967,14 @@ if st.session_state['stage1_data']:
                       'Prev Day High', 'Auto-Buy Status', 'MaxQty', 'Sector']
         display_df = display_df[[c for c in final_cols if c in display_df.columns]]
 
-        # ─── Auto-Buy Execution (UPDATED - Removed Inside 9:15 condition) ───
+        # ─── Auto-Buy Execution (OPTIMIZED - Parallel) ───
         if st.session_state.get('auto_buy_enabled', False):
-            # Auto-buy works independently - no Inside 9:15 requirement
             eligible = len(display_df[display_df['Auto-Buy Status'] == '✅ ELIGIBLE'])
+            
             if eligible > 0 and st.session_state['auto_buy_bought_today'] < st.session_state['auto_buy_max_stocks']:
-                with st.spinner("🤖 Auto-buy executing..."):
-                    filtered_symbols = display_df['Symbol'].tolist()
-                    auto_buy_df = df[df['name'].isin(filtered_symbols)].copy()
-                    auto_buy_df['Symbol'] = auto_buy_df['name']
-                    auto_buy_df['Price'] = auto_buy_df['close']
-                    auto_buy_df['9:15 High'] = auto_buy_df['high_9_15']
-                    maxqty_dict = display_df.set_index('Symbol')['MaxQty'].to_dict()
-                    auto_buy_df['MaxQty'] = auto_buy_df['Symbol'].map(maxqty_dict).fillna(0)
-                    placed, failed, error = execute_auto_buy(auto_buy_df)
+                with st.spinner(f"🤖 Auto-buy: {eligible} stocks eligible, placing orders in parallel..."):
+                    placed, failed, error = execute_auto_buy_parallel(display_df)
+                    
                     if error:
                         st.warning(f"⚠️ {error}")
                     else:
@@ -1006,7 +1059,7 @@ if st.session_state['stage1_data']:
         <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · <span class="highlight">{pass_count}</span> pass candle check</span>
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
         <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
-        <span>⚡ Optimized: Batch Mode · Instant EMA Check</span>
+        <span>⚡ Optimized: Batch Mode · Parallel Auto-Buy · Instant EMA Check</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1015,6 +1068,6 @@ if st.session_state['stage1_data']:
 
 st.markdown("""
 <div style="text-align:center; padding:1.5rem; color:#888; font-size:0.65rem; border-top:1px solid #e9ecef; margin-top:1rem;">
-    📊 Gap Screener · Professional Trading Scanner<br>Data: TradingView · Yahoo Finance · DhanHQ · Optimized Batch Mode · Instant EMA Check
+    📊 Gap Screener · Professional Trading Scanner<br>Data: TradingView · Yahoo Finance · DhanHQ · Optimized Batch Mode · Parallel Auto-Buy · Instant EMA Check
 </div>
 """, unsafe_allow_html=True)
