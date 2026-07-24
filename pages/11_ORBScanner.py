@@ -18,13 +18,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tv_screener.quantity_calculator import calculate_max_quantity_column, get_qty_calc_debug
 from tv_screener.dhan_orders import place_dhan_order
 from tv_screener.frontend import display_order_result
+
 # ─── WebSocket Import with Fallback ───
 try:
     from tv_screener.dhan_websocket import start_websocket, get_live_price, stop_websocket, get_ws_status
     WS_AVAILABLE = True
 except ImportError:
     WS_AVAILABLE = False
-    # Dummy functions when WebSocket is not available
     def start_websocket(symbols=None):
         pass
     def get_live_price(symbol):
@@ -33,7 +33,6 @@ except ImportError:
         pass
     def get_ws_status():
         return {'connected': False, 'subscribed_count': 0}
-    print("⚠️ WebSocket module not available")
 
 warnings.filterwarnings('ignore')
 IST = pytz.timezone('Asia/Kolkata')
@@ -868,13 +867,6 @@ if st.session_state['stage1_data']:
     df = data['df'].copy()
     last_refresh = st.session_state.get('stage1_last_refresh', datetime.now(IST))
     pass_count = len(data['valid'])
-    
-    # ─── Update Price column with live prices (FIXED) ───
-    def get_live_price_display(symbol):
-        live_price = get_live_price(symbol)
-        if live_price:
-            return f"₹{live_price:.2f}"
-        return None
 
     # ─── Screener Card Header ───
     ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
@@ -987,19 +979,6 @@ if st.session_state['stage1_data']:
         display_df['name'] = display_df['ticker'].str.replace('NSE:', '')
         display_df['Symbol'] = display_df['name']
         
-        # ─── Update Price with live data (FIXED: fallback to close) ───
-        def get_live_price_display(symbol):
-            live_price = get_live_price(symbol)
-            if live_price:
-                return f"₹{live_price:.2f}"
-            return None
-        
-        display_df['Price'] = display_df.apply(
-            lambda row: get_live_price_display(row['name']) if get_live_price_display(row['name']) 
-            else format_price(row['close']),
-            axis=1
-        )
-
         # ─── MaxQty Calculation ───
         with st.spinner("Calculating max quantity (DhanHQ margin)..."):
             display_df['MaxQty'] = calculate_max_quantity_column(
@@ -1008,29 +987,47 @@ if st.session_state['stage1_data']:
                 num_parts=st.session_state.get('num_parts', 4)
             )
 
-       # ─── Columns & Formatting ───
-cols = ['name', 'close', 'change', 'gap', 'volume', 'relative_volume',
-        'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
-        'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15',
-        'ema_200_current', 'current_200_ema_status', 'prev_high']
-display_df = display_df[[c for c in cols if c in display_df.columns]].copy()
-display_df.rename(columns={
-    'name': 'Symbol',
-    'close': 'Price',           # ← CHANGED: Price_old → Price
-    'change': 'Chg%',
-    'gap': 'Gap%',
-    'volume': 'Volume',
-    'relative_volume': 'Rel Vol',
-    'inside_9_15': 'Inside 9:15',
-    'breakout_9_30_to_9_45': 'Breakout',
-    'MaxQty': 'MaxQty',
-    'sector': 'Sector',
-    'high_9_15': 'high_9_15',
-    'current_price': 'current_price',
-    'prev_high': 'Prev Day High'
-}, inplace=True)
-        
-        # Use the live Price column we already set
+        # ─── Columns & Formatting ───
+        cols = ['name', 'close', 'change', 'gap', 'volume', 'relative_volume',
+                'inside_9_15', 'breakout_9_30_to_9_45', '200 EMA', 'MaxQty', 'sector',
+                'high_9_15', 'current_price', 'close_9_15', 'ema_200_9_15',
+                'ema_200_current', 'current_200_ema_status', 'prev_high']
+        display_df = display_df[[c for c in cols if c in display_df.columns]].copy()
+
+        # ─── Rename columns ───
+        display_df.rename(columns={
+            'name': 'Symbol',
+            'close': 'close_price',  # Temporary
+            'change': 'Chg%',
+            'gap': 'Gap%',
+            'volume': 'Volume',
+            'relative_volume': 'Rel Vol',
+            'inside_9_15': 'Inside 9:15',
+            'breakout_9_30_to_9_45': 'Breakout',
+            'MaxQty': 'MaxQty',
+            'sector': 'Sector',
+            'high_9_15': 'high_9_15',
+            'current_price': 'current_price',
+            'prev_high': 'Prev Day High'
+        }, inplace=True)
+
+        # ─── Apply live price or fallback to close ───
+        def get_live_price_display(symbol):
+            live_price = get_live_price(symbol)
+            if live_price:
+                return f"₹{live_price:.2f}"
+            return None
+
+        display_df['Price'] = display_df.apply(
+            lambda row: get_live_price_display(row['Symbol']) if get_live_price_display(row['Symbol']) 
+            else format_price(row['close_price']),
+            axis=1
+        )
+
+        # ─── Drop temporary close_price column ───
+        display_df.drop(columns=['close_price'], inplace=True)
+
+        # ─── Format remaining columns ───
         display_df['9:15 High'] = display_df['high_9_15'].apply(lambda x: format_price(x) if pd.notna(x) else "N/A")
         display_df['Prev Day High'] = display_df['Prev Day High'].apply(lambda x: format_price(x) if pd.notna(x) else "N/A")
         display_df['Chg%'] = display_df['Chg%'].apply(format_pct)
