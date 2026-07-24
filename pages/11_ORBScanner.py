@@ -1159,13 +1159,30 @@ if st.session_state['stage1_data']:
             if st.session_state.get('auto_buy_enabled', False):
                 st.caption("🔒 Manual buttons disabled when Auto-Buy is ON")
 
-        st.download_button(
+                st.download_button(
             "📥 Download CSV",
             display_df.to_csv(index=False),
             f'screener_results_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
             'text/csv',
             use_container_width=True
         )
+
+        # ─── Debug: WebSocket Status ───
+        with st.expander("🔍 WebSocket Debug"):
+            ws_status_debug = get_ws_status()
+            st.write("**Status:**", ws_status_debug)
+            st.write("**Live Prices Count:**", len(st.session_state.get('live_prices', {})))
+            st.write("**Live Prices Sample:**", dict(list(st.session_state.get('live_prices', {}).items())[:5]))
+            
+            # Show unknown securities
+            if hasattr(st.session_state, '_unknown_securities'):
+                st.write("**Unknown Security IDs:**", st.session_state['_unknown_securities'][:10])
+            
+            # Show debug messages
+            if st.session_state.get('ws_debug'):
+                st.write("**Debug Messages (last 5):**")
+                for msg in st.session_state['ws_debug'][-5:]:
+                    st.code(str(msg))
 
     # ─── Footer ───
     ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
