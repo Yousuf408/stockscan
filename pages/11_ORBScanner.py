@@ -68,6 +68,7 @@ SESSION_DEFAULTS = {
     'prev_checkbox': False,
     'force_table_refresh': False,
     'ws_initialized': False,
+    'last_price_update': None,
 }
 for key, val in SESSION_DEFAULTS.items():
     if key not in st.session_state:
@@ -1018,6 +1019,18 @@ if st.session_state['stage1_data']:
                 return f"₹{live_price:.2f}"
             return None
 
+        # Check if WebSocket is connected and returning data
+        ws_connected = st.session_state.get('ws_connected', False)
+        live_prices = st.session_state.get('live_prices', {})
+        
+        # Show live status
+        if ws_connected and live_prices:
+            st.caption(f"✅ Live prices active: {len(live_prices)} stocks updating")
+        elif ws_connected:
+            st.caption("🔄 WebSocket connected, waiting for price data...")
+        else:
+            st.caption("🔴 Using fallback prices (WebSocket disconnected)")
+
         display_df['Price'] = display_df.apply(
             lambda row: get_live_price_display(row['Symbol']) if get_live_price_display(row['Symbol']) 
             else format_price(row['close_price']),
@@ -1156,19 +1169,31 @@ if st.session_state['stage1_data']:
 
     # ─── Footer ───
     ws_status = "🟢" if st.session_state.get('ws_connected', False) else "🔴"
+    live_count = len(st.session_state.get('live_prices', {}))
     st.markdown(f"""
     <div class="footer-bar">
         <span>🔄 Stage 1 refreshes every <span class="live">1 minute</span></span>
         <span>📊 <span class="highlight">{len(display_df) if 'display_df' in locals() else 0}</span> stocks displayed · <span class="highlight">{pass_count}</span> pass candle check</span>
         <span>🕐 Last refresh: <span class="highlight">{last_refresh.strftime('%H:%M:%S')}</span></span>
         <span>🤖 Auto-Buy: {'🟢 ON' if st.session_state.get('auto_buy_enabled', False) else '⚪ OFF'} · {st.session_state.get('auto_buy_bought_today', 0)}/{st.session_state.get('auto_buy_max_stocks', 5)} today</span>
-        <span>⚡ WS: {ws_status}</span>
+        <span>⚡ WS: {ws_status} · Live Prices: {live_count}</span>
         <span>⚡ Optimized: Batch Mode · Parallel Auto-Buy · Instant EMA Check</span>
     </div>
     """, unsafe_allow_html=True)
 
     with st.expander("🔍 Debug: Max Qty Calculation"):
         st.json(get_qty_calc_debug())
+
+# ─── Auto-refresh for live price updates ───
+if st.session_state.get('ws_connected', False):
+    # Check if we have live prices
+    live_prices = st.session_state.get('live_prices', {})
+    if live_prices:
+        # Refresh every 3 seconds to show tick-by-tick updates
+        st.empty()
+        st.caption("🔄 Live prices updating...")
+        time.sleep(3)
+        st.rerun()
 
 st.markdown("""
 <div style="text-align:center; padding:1.5rem; color:#888; font-size:0.65rem; border-top:1px solid #e9ecef; margin-top:1rem;">
